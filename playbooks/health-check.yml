@@ -1,0 +1,33 @@
+- name: Proxmox basic health check
+  hosts: proxmox
+  gather_facts: no
+
+  tasks:
+    - name: Check hostname
+      command: hostname
+      register: hostname_result
+      changed_when: false
+
+    - name: Check uptime
+      command: uptime
+      register: uptime_result
+      changed_when: false
+
+    - name: Check disk usage
+      command: df -h
+      register: disk_result
+      changed_when: false
+
+    - name: Check Proxmox version
+      command: pveversion
+      register: pveversion_result
+      changed_when: false
+
+    - name: Show result
+      debug:
+        msg:
+          - "hostname: {{ hostname_result.stdout }}"
+          - "uptime: {{ uptime_result.stdout }}"
+          - "pveversion: {{ pveversion_result.stdout }}"
+          - "disk:"
+          - "{{ disk_result.stdout_lines }}"
