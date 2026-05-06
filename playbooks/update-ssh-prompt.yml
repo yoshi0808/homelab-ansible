@@ -1,0 +1,12 @@
+- name: Update SSH prompt colors for better visibility in dark mode
+  hosts: all
+  become: yes
+  gather_facts: no
+
+  tasks:
+    - name: Add custom PS1 to .bashrc for ubuntu user
+      lineinfile:
+        path: /home/ubuntu/.bashrc
+        line: 'PS1='\''\[\e]0;\u@\h: \w\a\]${debian_chroot:+($debian_chroot)}\[\033[01;32m\]\u@\h\[\033[00m\]:\[\033[01;36m\]\w\[\033[00m\]\$ '\'''
+        state: present
+        create: yes

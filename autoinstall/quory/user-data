@@ -49,6 +49,42 @@ autoinstall:
   updates: security
   shutdown: reboot
 
+write_files:
+  - path: /home/ubuntu/.bashrc
+    content: |
+      # Custom PS1 for better visibility in dark mode
+      if [ -x /usr/bin/dircolors ]; then
+        if [ -r ~/.dircolors ]; then
+          eval "$(dircolors -b ~/.dircolors)"
+        else
+          eval "$(dircolors -b)"
+        fi
+      fi
+      PS1='\[\e]0;\u@\h: \w\a\]${debian_chroot:+($debian_chroot)}\[\033[01;32m\]\u@\h\[\033[00m\]:\[\033[01;36m\]\w\[\033[00m\]\$ '
+    append: true
+
+  - path: /home/ubuntu/.dircolors
+    content: |
+      # ~/.dircolors - custom LS_COLORS for dark terminal backgrounds
+      TERM xterm
+      TERM xterm-256color
+      TERM rxvt
+      TERM screen
+      TERM screen-256color
+
+      NORMAL 00
+      FILE 00
+      DIR 01;36
+      LINK 01;35
+      FIFO 40;33;01
+      SOCK 01;32
+      DOOR 01;35
+      BLK 40;33;01
+      CHR 40;33;01
+      ORPHAN 01;05;37;41
+      MISSING 00;05;37;41
+      EXEC 01;32
+
   user-data:
     hostname: quory
     fqdn: quory.internal
