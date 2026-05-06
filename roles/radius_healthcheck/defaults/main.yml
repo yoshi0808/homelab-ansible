@@ -1,1 +1,2 @@
-# Default variables for radius_healthcheck role
+---
+radius_healthcheck_report_dir: "{{ playbook_dir }}/../reports/radius-health"

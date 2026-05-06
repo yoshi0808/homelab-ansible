@@ -1,2 +1,8 @@
-# RADIUS healthcheck playbook
-# TODO: Implement healthcheck tasks
+---
+- name: RADIUS healthcheck
+  hosts: radius_servers
+  gather_facts: true
+  become: true
+
+  roles:
+    - radius_healthcheck

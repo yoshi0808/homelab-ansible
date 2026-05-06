@@ -1,0 +1,27 @@
+{
+    "chrony": {
+        "tracking": "Reference ID    : B97DBE7A (ntp-nts-2.ps5.canonical.com)\nStratum         : 3\nRef time (UTC)  : Wed May 06 09:39:02 2026\nSystem time     : 0.001285705 seconds slow of NTP time\nLast offset     : -0.000268076 seconds\nRMS offset      : 0.000493261 seconds\nFrequency       : 7.503 ppm fast\nResidual freq   : -0.006 ppm\nSkew            : 0.072 ppm\nRoot delay      : 0.230812103 seconds\nRoot dispersion : 0.002339485 seconds\nUpdate interval : 1030.4 seconds\nLeap status     : Normal"
+    },
+    "collected_at": "2026-05-06T09:54:06Z",
+    "freeradius": {
+        "service_active": "active",
+        "version": "3.2.8\n3.2.8"
+    },
+    "host": "authy",
+    "journal": {
+        "error_count_1h": 0,
+        "errors": ""
+    },
+    "ports": {
+        "udp_1812": "no",
+        "udp_1813": "no"
+    },
+    "result": {
+        "criticals": [
+            "port 1812/udp is not listening",
+            "port 1813/udp is not listening"
+        ],
+        "status": "CRITICAL",
+        "warnings": []
+    }
+}

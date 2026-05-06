@@ -1,2 +1,92 @@
-# Main tasks for radius_healthcheck role
-# TODO: Implement healthcheck tasks
+---
+- name: Copy radius healthcheck script
+  ansible.builtin.copy:
+    src: radius-healthcheck.sh
+    dest: /usr/local/sbin/radius-healthcheck.sh
+    mode: "0750"
+    owner: root
+    group: root
+
+- name: Run radius healthcheck
+  ansible.builtin.command:
+    cmd: /usr/local/sbin/radius-healthcheck.sh
+  register: healthcheck_raw
+  changed_when: false
+
+- name: Fail if healthcheck returned no output
+  ansible.builtin.fail:
+    msg: "radius-healthcheck.sh on {{ inventory_hostname }} returned empty output (rc={{ healthcheck_raw.rc }}). Run the script manually on the host to diagnose."
+  when: healthcheck_raw.stdout | length == 0
+
+- name: Parse healthcheck JSON
+  ansible.builtin.set_fact:
+    radius_health: "{{ healthcheck_raw.stdout | from_json }}"
+
+- name: Classify criticals and warnings
+  ansible.builtin.set_fact:
+    radius_criticals: "{{ []
+      + ([] if radius_health.freeradius.service_active == 'active'
+             else ['freeradius service is not active: ' + radius_health.freeradius.service_active])
+      + ([] if radius_health.ports.udp_1812 == 'yes'
+             else ['port 1812/udp is not listening'])
+      + ([] if radius_health.ports.udp_1813 == 'yes'
+             else ['port 1813/udp is not listening'])
+      }}"
+    radius_warnings: "{{ []
+      + ([] if radius_health.journal.error_count_1h | int == 0
+             else ['journal errors in last 1h: ' + (radius_health.journal.error_count_1h | string)])
+      }}"
+
+- name: Build report
+  ansible.builtin.set_fact:
+    radius_report:
+      host: "{{ inventory_hostname }}"
+      collected_at: "{{ radius_health.collected_at }}"
+      freeradius:
+        service_active: "{{ radius_health.freeradius.service_active }}"
+        version: "{{ radius_health.freeradius.version }}"
+      ports:
+        udp_1812: "{{ radius_health.ports.udp_1812 }}"
+        udp_1813: "{{ radius_health.ports.udp_1813 }}"
+      journal:
+        error_count_1h: "{{ radius_health.journal.error_count_1h }}"
+        errors: "{{ radius_health.journal.errors }}"
+      chrony:
+        tracking: "{{ radius_health.chrony.tracking }}"
+      result:
+        status: "{{ 'CRITICAL' if radius_criticals | length > 0
+                    else ('WARNING' if radius_warnings | length > 0
+                    else 'OK') }}"
+        criticals: "{{ radius_criticals }}"
+        warnings: "{{ radius_warnings }}"
+
+- name: Ensure report directory exists
+  ansible.builtin.file:
+    path: "{{ radius_healthcheck_report_dir }}"
+    state: directory
+    mode: "0755"
+  delegate_to: localhost
+  become: false
+
+- name: Save report
+  ansible.builtin.copy:
+    content: "{{ radius_report | to_nice_json }}"
+    dest: "{{ radius_healthcheck_report_dir }}/{{ inventory_hostname }}_{{ ansible_facts['date_time']['iso8601_basic_short'] }}.json"
+  delegate_to: localhost
+  become: false
+
+- name: Print health summary
+  ansible.builtin.debug:
+    msg:
+      - "Host    : {{ inventory_hostname }}"
+      - "Status  : {{ radius_report.result.status }}"
+      - "Service : freeradius={{ radius_health.freeradius.service_active }} version={{ radius_health.freeradius.version }}"
+      - "Ports   : 1812/udp={{ radius_health.ports.udp_1812 }} 1813/udp={{ radius_health.ports.udp_1813 }}"
+      - "Journal : error_count_1h={{ radius_health.journal.error_count_1h }}"
+      - "Criticals: {{ radius_criticals }}"
+      - "Warnings : {{ radius_warnings }}"
+
+- name: Fail if critical
+  ansible.builtin.fail:
+    msg: "CRITICAL on {{ inventory_hostname }}: {{ radius_criticals | join(', ') }}"
+  when: radius_criticals | length > 0
