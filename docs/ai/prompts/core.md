@@ -1,24 +1,37 @@
 # core.md
 
-このファイルは、`homelab-ansible` リポジトリで AI 支援により Ansible Playbook / role / shell を設計・実装・レビューするための共通前提である。
+このファイルは、`homelab-ansible` リポジトリで AI に作業を依頼するときに毎回共有する共通前提である。
 
-Codex / Claude Code に依頼する際は、原則として最初にこの `core.md` を読ませる。
+`docs/ai/prompts/*-template.md` は作業種別ごとの依頼テンプレートであり、この `core.md` はそれらすべての前提として扱う。
 
 ---
 
-## 1. このリポジトリの目的
+## 1. リポジトリの目的
 
-このリポジトリは、Yoshinobu の homelab 環境を Ansible で管理するためのもの。
+このリポジトリは、homelab 環境の Ansible Playbook / role / script を管理する。
 
-主な対象は以下。
+主な目的は以下。
 
-| 名前 | 役割 |
-|---|---|
-| `ansy` | Ansible 開発環境。VS Code / Codex / Claude Code を使い、Playbook や role を作成・レビューする。Git へ commit / push する作業場。 |
-| `quory` | 本番 Ansible 実行基盤。Git から確定済みソースを取得し、Proxmox や VM に対して Ansible を実行する。 |
-| `pve1` | Proxmox メインノード。通常稼働の中心。 |
-| `pve2` | Proxmox セカンダリノード。先行検証・縮退運用・フェイルオーバー先。 |
-| Git repository | Ansible コードの正本。ansy から push し、quory が pull する。 |
+- Proxmox ノードの稼働確認
+- Proxmox ノードのハードウェア確認
+- Proxmox ノードのパッチ前確認
+- Proxmox ノードのパッチ適用
+- RADIUS / FreeRADIUS サーバーの稼働確認
+- RADIUS / FreeRADIUS サーバーのパッチ前確認
+- RADIUS / FreeRADIUS サーバーのパッチ適用
+- 将来的な Semaphore UI による GUI 実行・自動実行
+
+---
+
+## 2. 主要ノードと役割
+
+| ホスト名 | 種別 | 役割 |
+|---|---|---|
+| `ansy` | VM | Ansible 開発環境。VS Code / Codex / Claude Code を使い、実装・レビュー・commit / push を行う。 |
+| `quory` | 物理ノード | QDevice + 監視基盤。本番 Ansible 実行基盤。Git から確定済みソースを取得して実行する。 |
+| `pve1` | 物理ノード | Proxmox メインノード。通常稼働の中心。 |
+| `pve2` | 物理ノード | Proxmox セカンダリノード。先行検証・縮退運用・フェイルオーバー先。 |
+| `authy` | VM | RADIUS / FreeRADIUS サーバー。WPA3 Enterprise / EAP-TLS 認証基盤。 |
 
 基本方針は以下。
 
@@ -32,22 +45,21 @@ quory 上では原則として直接コード編集しない。
 
 ---
 
-## 2. ノード名と名前解決
+## 3. 名前解決方針
 
 Ansible inventory では、原則として IP アドレスを直接書かない。
 
-以下のような名前ベースで管理する。
+内部DNS名または `/etc/hosts` による名前解決を使う。
 
-```text
-pve1  -> pve1.internal
-pve2  -> pve2.internal
-quory -> quory.internal
-ansy  -> ansy.internal
-```
+| ホスト | 推奨名 |
+|---|---|
+| `pve1` | `pve1.internal` |
+| `pve2` | `pve2.internal` |
+| `quory` | `quory.internal` |
+| `ansy` | `ansy.internal` |
+| `authy` | `authy.internal` |
 
-名前解決は DNS または quory の `/etc/hosts` で担保する。
-
-inventory では以下のような形式を基本とする。
+inventory 例:
 
 ```yaml
 all:
@@ -68,50 +80,102 @@ all:
       hosts:
         ansy:
           ansible_host: ansy.internal
+
+    radius_servers:
+      hosts:
+        authy:
+          ansible_host: authy.internal
 ```
 
-`proxmox_healthcheck.yml` や `proxmox_hw_check.yml` は `proxmox` グループを対象にし、quory は対象に含めない。
+名前解決は DNS または quory / ansy の `/etc/hosts` で担保する。
 
-quory を対象にする playbook は専用 playbook に限定する。
+---
+
+## 4. 管理対象グループ
+
+| グループ | 対象 | 用途 |
+|---|---|---|
+| `proxmox` | `pve1`, `pve2` | Proxmox VE ノード管理 |
+| `control_nodes` | `quory` | Ansible 実行基盤 / Semaphore UI / QDevice / 監視基盤管理 |
+| `dev_nodes` | `ansy` | Ansible 開発環境管理 |
+| `radius_servers` | `authy` | FreeRADIUS / RADIUS サーバー管理 |
+
+`proxmox_healthcheck.yml` や `proxmox_hw_check.yml` は `proxmox` グループを対象にする。
+
+`radius_healthcheck.yml` や `radius_patch.yml` は `radius_servers` グループを対象にする。
+
+quory を対象にする playbook は、`quory_setup.yml` / `quory_update.yml` / `semaphore_setup.yml` のような専用 playbook に限定する。
+
+---
+
+## 5. SSH 接続と秘密鍵の扱い
+
+Ansible 実行環境 `ansy` / `quory` から管理対象ホストへ接続する場合、原則として Ansible 専用 SSH 鍵 `~/.ssh/id_ansible` を使う。
+
+秘密鍵そのもの、秘密鍵の中身、パスフレーズ、認証情報はリポジトリに保存しない。
+
+Playbook / role / inventory では、秘密鍵の中身を扱わず、必要な場合はパス参照のみ使う。
 
 例:
 
+```yaml
+ansible_ssh_private_key_file: ~/.ssh/id_ansible
+```
+
+`all.yml` や `vault.yml` など、秘密情報を含む可能性があるファイルは Git 管理しない。
+
+代わりに `all.yml.example` を Git 管理する。
+
+例:
+
+```yaml
+---
+# Copy this file to all.yml and customize locally.
+# Do not commit all.yml.
+
+ansible_user: yoshi
+ansible_ssh_private_key_file: ~/.ssh/id_ansible
+```
+
+AI への禁止事項:
+
 ```text
-quory_setup.yml
-quory_update.yml
-semaphore_setup.yml
+- 秘密鍵ファイルを生成しない
+- 秘密鍵の中身を表示しない
+- ~/.ssh/id_ansible をリポジトリ内にコピーしない
+- group_vars/all.yml を勝手に作成・コミットしない
+- vault.yml を平文で作成しない
+- authorized_keys を勝手に上書きしない
+- SSHポートやユーザーを推測して固定しない
 ```
 
 ---
 
-## 3. Ansible と shell の責務分離
+## 6. Ansible role の基本方針
 
-本リポジトリでは、Ansible と shell の責務を明確に分離する。
+人間向けには以下のように理解する。
 
-```text
-Shell:
-  収集とJSON整形のみ
+| 人間向けの理解 | 実ファイル | 役割 |
+|---|---|---|
+| playbook | `playbooks/*.yml` | 人間が実行する入口。 |
+| shell / script | `roles/*/files/*.sh` | 対象ホスト上で動く処理本体。check 系では収集と JSON 整形のみを行う。patch / reboot 系では限定的な変更操作を行う場合がある。 |
+| Ansible 配管 | `roles/*/tasks/main.yml` | shell の配置・実行・JSON 読み込み・保存・判定。 |
+| 初期設定 | `roles/*/defaults/main.yml` | role のデフォルト設定。 |
+| ホスト別設定 | `inventories/homelab/host_vars/*.yml` | ホスト固有の期待値や差分。 |
 
-Ansible:
-  配置、実行、JSON読込、期待値比較、warning/critical分類、保存、fail制御
-```
+`playbooks/` は実行入口、`roles/` は処理本体である。
 
-### shell が行うこと
+`ping.yml` のように処理が非常に小さいものは、role を作らず playbook 単独でよい。
 
-check 系 shell は対象ホスト上でコマンドを実行し、結果を JSON に整形して標準出力へ返す。
+---
 
-check 系 shell が行うのは以下。
+## 7. shell / script の責務
 
-```text
-- コマンド実行
-- raw stdout / stderr / rc の取得
-- JSONへの整形
-- 標準出力へのJSON出力
-```
+check 系 shell は、対象ホスト上でコマンドを実行し、結果を JSON に整形して標準出力へ返す。
 
-### shell が行わないこと
+check 系 shell は、原則として **収集と JSON 整形のみ**を行う。
 
-check 系 shell は判断を行わない。
+shell が行わないこと:
 
 ```text
 - 正常 / 異常の判定
@@ -124,9 +188,19 @@ check 系 shell は判断を行わない。
 
 これらは Ansible tasks 側で行う。
 
+責務分離は以下とする。
+
+```text
+Shell:
+  収集とJSON整形のみ
+
+Ansible:
+  配置、実行、JSON読込、期待値比較、warning/critical分類、保存、fail制御
+```
+
 ---
 
-## 4. shell / script の配置方針
+## 8. files と templates の使い分け
 
 check 系 shell は `roles/*/files/*.sh` に置く。
 
@@ -134,54 +208,23 @@ check 系 shell は `roles/*/files/*.sh` に置く。
 
 一時実行だけでよい role では `ansible.builtin.script` の利用も許容する。
 
-### 通常方式: copy + command
+原則:
 
-```yaml
-- name: Install healthcheck shell
-  ansible.builtin.copy:
-    src: proxmox-healthcheck.sh
-    dest: "{{ proxmox_healthcheck_script_path }}"
-    owner: root
-    group: root
-    mode: "0755"
+```text
+roles/*/files/*.sh
+  静的 shell。通常はこちらを使う。
 
-- name: Run healthcheck shell
-  ansible.builtin.command:
-    cmd: "{{ proxmox_healthcheck_script_path }}"
-  register: proxmox_healthcheck_result
-  changed_when: false
+roles/*/templates/*.j2
+  Ansible変数をファイル内に埋め込む必要がある場合のみ使う。
 ```
 
-この方式では、対象ホスト上に `/usr/local/sbin/proxmox-healthcheck` として shell が残る。
-
-障害時に Proxmox 上で直接実行できる利点がある。
-
-### 一時実行方式: script
-
-```yaml
-- name: Run healthcheck shell temporarily
-  ansible.builtin.script: proxmox-healthcheck.sh
-  register: proxmox_healthcheck_result
-  changed_when: false
-```
-
-この方式は、対象ホスト上に shell を恒久配置したくない場合に使う。
+check 系 shell は原則として `templates/*.sh.j2` には置かない。
 
 ---
 
-## 5. templates の扱い
+## 9. 変更系 playbook / shell の扱い
 
-本構成では、check 系 shell は原則として `templates/*.sh.j2` には置かない。
-
-Ansible 変数をファイル内へ埋め込む必要がある場合のみ `roles/*/templates/*.j2` を使う。
-
-静的 shell で足りる場合は `roles/*/files/*.sh` に置く。
-
----
-
-## 6. 変更系 shell の扱い
-
-`proxmox_patch` や将来の `proxmox_reboot` では、shell が更新・再起動などの変更操作を含む可能性がある。
+`proxmox_patch` / `radius_patch` / 将来の `reboot` / `migrate` などでは、shell が更新・再起動などの変更操作を含む可能性がある。
 
 ただし、変更系 shell は例外扱いとし、以下を守る。
 
@@ -195,9 +238,11 @@ Ansible 変数をファイル内へ埋め込む必要がある場合のみ `role
 
 ---
 
-## 7. playbook の分け方
+## 10. playbook 命名方針
 
 playbook は 1 ファイルにまとめず、運用目的ごとに分ける。
+
+### Proxmox 系
 
 | Playbook | 目的 | 変更有無 |
 |---|---|---|
@@ -208,37 +253,39 @@ playbook は 1 ファイルにまとめず、運用目的ごとに分ける。
 | `proxmox_patch_pve2.yml` | pve2 へのパッチ適用 | あり |
 | `proxmox_patch_pve1.yml` | pve1 へのパッチ適用 | あり |
 
-読み取り系と変更系は必ず分ける。
+### RADIUS 系
 
-特に `check` / `precheck` / `patch` / `reboot` は同じ入口に混ぜない。
+| Playbook | 目的 | 変更有無 |
+|---|---|---|
+| `radius_healthcheck.yml` | RADIUS / FreeRADIUS 稼働確認 | 原則なし |
+| `radius_patch_precheck.yml` | RADIUS サーバーのパッチ前確認 | なし |
+| `radius_patch.yml` | RADIUS サーバーのパッチ適用 | あり |
+
+role / playbook 名は、ホスト名 `authy` ではなく役割名 `radius` ベースを基本とする。
 
 ---
 
-## 8. role の基本構成
+## 11. precheck NG 時の運用
 
-代表的な role 構成は以下。
+`proxmox_patch_precheck.yml` や `radius_patch_precheck.yml` が失敗した場合、patch 系 playbook は実行しない。
+
+基本フロー:
 
 ```text
-roles/<role_name>/
-├── defaults/
-│   └── main.yml
-├── tasks/
-│   └── main.yml
-└── files/
-    └── <script>.sh
+1. precheck を実行する
+2. warnings / criticals / fail を確認する
+3. NGなら patch を中止する
+4. 原因を修正する
+5. precheck を再実行する
+6. OKなら patch へ進む
+7. patch 後に healthcheck を実行する
 ```
 
-| 人間向けの理解 | 実ファイル | 役割 |
-|---|---|---|
-| playbook | `playbooks/*.yml` | 人間が実行する入口。 |
-| shell / script | `roles/*/files/*.sh` | 対象ホスト上で動く処理本体。check 系では収集と JSON 整形のみを行う。patch / reboot 系では限定的な変更操作を行う場合がある。 |
-| Ansible 配管 | `roles/*/tasks/main.yml` | shell の配置・実行・JSON 読み込み・保存・判定。 |
-| 初期設定 | `roles/*/defaults/main.yml` | role のデフォルト設定。 |
-| ホスト別設定 | `inventories/homelab/host_vars/*.yml` | pve1 / pve2 固有の期待値。 |
+Semaphore UI 導入後は、precheck task が fail した場合に patch task へ進ませない運用に移行する。
 
 ---
 
-## 9. Git 更新運用
+## 12. Git 更新運用
 
 開発環境 `ansy` で実装・レビュー・commit・push を行う。
 
@@ -251,10 +298,10 @@ Git repository
   ↓ pull
 quory
   ↓ ansible-playbook
-pve1 / pve2 / VM
+pve1 / pve2 / authy / VM
 ```
 
-### quory での基本ルール
+quory での基本ルール:
 
 ```text
 - quory では原則として直接コード編集しない
@@ -264,23 +311,13 @@ pve1 / pve2 / VM
 - pull 前に working tree が clean であることを確認する
 ```
 
-### Ansible playbook 内で git pull しない
-
 Git pull を Ansible playbook 自身で行うことは避ける。
 
 理由は、実行中の playbook が自分自身を更新する「自己更新問題」が起きるため。
 
-```text
-Git更新:
-  quory上のAnsible外スクリプト、または将来のSemaphore UI Repository機能
-
-Ansible playbook:
-  対象ホストに対する処理だけ
-```
-
 ---
 
-## 10. 自動実行の考え方
+## 13. 自動実行方針
 
 Ansible 自体には「時間になったら自分で起動する」機能はない。
 
@@ -298,34 +335,11 @@ Semaphore UI 導入前は、quory 上で `systemd timer` が `ansible-playbook` 
 
 これにより、ansy から push したばかりの未確認コードが、翌朝に自動で本番実行される事故を避ける。
 
----
-
-## 11. RADIUS サーバーの管理対象追加
-
-本リポジトリは Proxmox ノードだけでなく、重要サービス VM も管理対象に含める。
-
-authy は RADIUS / FreeRADIUS サーバーとして扱う。
-
-Ansible グループ名は `radius_servers`。
-
-playbook / role 名は `authy_` ではなく `radius_` ベースを基本とする。
-
-RADIUS 系でも責務分離は同じ。
-
-- shell: 収集と JSON 整形のみ
-- Ansible tasks: 判定、warnings/criticals、保存、fail制御
-
-check 系 shell は `roles/*/files/*.sh` に置く。
-
-通常は copy + command で `/usr/local/sbin/` に配置して実行する。
-
-一時実行だけでよい role では ansible.builtin.script も許容する。
-
-将来的には、Semaphore UI の Repository / Task Template / Schedule 機能に移行する。
+将来的には Semaphore UI の Schedule 機能へ移行する。
 
 ---
 
-## 11. .gitignore 方針
+## 14. .gitignore 方針
 
 生成される reports や、秘密情報を含む可能性のある変数ファイルは Git 管理しない。
 
@@ -360,7 +374,7 @@ __pycache__/
 
 ---
 
-## 12. AI を使った構築・レビュー運用
+## 15. AI の役割分担
 
 AI の役割分担は以下とする。
 
@@ -375,11 +389,19 @@ AI の役割分担は以下とする。
 コミット: Yoshinobu
 ```
 
-### prompts/ の考え方
+実ファイルを直接更新するAIは原則として Claude Code / Codex に限定するが、同じタイミングで複数AIに同じファイルを更新させない。
 
-`docs/ai/prompts/` は、AI に渡す固定テンプレートを置く場所である。
+ChatGPT は設計相談、レビュー観点整理、壁打ちに使う。
 
-`core.md` は共通前提であり、その他は依頼テンプレートである。
+---
+
+## 16. prompts と reviews の使い分け
+
+`docs/ai/prompts/` は、AIに渡す固定テンプレートを置く場所である。
+
+`core.md` は共通前提。
+
+それ以外の `*-template.md` は依頼テンプレート。
 
 ```text
 docs/ai/prompts/
@@ -390,180 +412,93 @@ docs/ai/prompts/
 └── claude-code-reimplement-template.md
 ```
 
-| ファイル | 役割 |
-|---|---|
-| `core.md` | AIに毎回渡す共通前提。環境・運用ルール・禁止事項など。 |
-| `codex-design-template.md` | Codexに設計方針を作らせる依頼テンプレート。 |
-| `codex-review-template.md` | Codexに差分レビューさせる依頼テンプレート。 |
-| `claude-code-implement-template.md` | Claude Codeに初回実装させる依頼テンプレート。 |
-| `claude-code-reimplement-template.md` | Claude Codeにレビュー反映・再実装させる依頼テンプレート。 |
+`docs/ai/reviews/` は、実際の設計結果・レビュー結果・反証・確定記録を置く場所である。
+
+```text
+docs/ai/reviews/<target>/
+├── YYYY-MM-DD_001_codex_design.md
+├── YYYY-MM-DD_002_claude_implementation_note.md
+├── YYYY-MM-DD_003_codex_review.md
+├── YYYY-MM-DD_004_claude_counterargument.md
+├── YYYY-MM-DD_005_codex_review_after_fix.md
+└── YYYY-MM-DD_006_final.md
+```
+
+`decisions/` は作らない。理由や経緯は `reviews/` に残す。
 
 ---
 
-## 13. ユーザーからの playbook 作成リクエスト時の流れ
+## 17. Playbook 作成依頼から確定までの運用フロー
 
-ユーザーが作りたい playbook / role のリクエストを出したら、以下の流れで進める。
+ユーザーが作りたい playbook / role をリクエストする。
 
-### 13.1 Codex による設計
-
-ユーザーのリクエストを受けたら、Codex は以下を読む。
+以後の流れは以下。
 
 ```text
-docs/ai/prompts/core.md
-docs/ai/prompts/codex-design-template.md
+1. ユーザーが作りたい playbook / role をリクエストする
+
+2. Codex は docs/ai/prompts/core.md と
+   docs/ai/prompts/codex-design-template.md を元に設計書を作成する
+
+3. Codex は設計書を以下に保存する
+   docs/ai/reviews/<target>/YYYY-MM-DD_001_codex_design.md
+
+4. Codex は docs/ai/prompts/claude-code-implement-template.md を参考に、
+   Claude Code に渡す個別の実装依頼ファイルを作成する
+
+   例:
+   docs/ai/reviews/<target>/YYYY-MM-DD_002_claude_implement_request.md
+
+5. Codex はレビュー用の空ファイルを作成する
+
+   例:
+   docs/ai/reviews/<target>/YYYY-MM-DD_003_codex_review.md
+
+6. Codex は再実装依頼用の空ファイルを作成する
+
+   例:
+   docs/ai/reviews/<target>/YYYY-MM-DD_004_claude_reimplement_request.md
+
+7. ユーザーは Claude Code に
+   YYYY-MM-DD_002_claude_implement_request.md を渡して実装を依頼する
+
+8. Claude Code は playbooks/、roles/、inventories/ などの正本候補を実装する
+
+9. Codex は git diff を確認し、
+   YYYY-MM-DD_003_codex_review.md にレビューを書く
+
+10. 修正が必要な場合、ユーザーは Claude Code に
+    YYYY-MM-DD_004_claude_reimplement_request.md を渡して再実装を依頼する
+
+11. Claude Code が Codex レビューに反証する場合は、
+    docs/ai/reviews/<target>/ に反証ファイルを書く
+
+12. Codex が再レビューする
+
+13. 必要に応じて 9〜12 を繰り返す
+
+14. Yoshinobu が「これで確定」と判断する
+
+15. Codex が正本登録する
+
+16. Yoshinobu が commit する
 ```
 
-Codex はその内容を元に、対象 playbook / role の設計書を書き起こす。
-
-設計書は `docs/ai/reviews/<target>/` に保存する。
-
-例:
-
-```text
-docs/ai/reviews/proxmox_healthcheck/2026-05-06_001_codex_design.md
-docs/ai/reviews/proxmox_patch/2026-05-07_001_codex_design.md
-```
-
-### 13.2 Claude Code 実装依頼用ファイルの作成
-
-Codex は、設計書の内容を元に、Claude Code に渡す個別の実装依頼ファイルも作成する。
-
-このファイルは、`docs/ai/prompts/claude-code-implement-template.md` を参考にして作る。
-
-保存先は `docs/ai/reviews/<target>/` とする。
-
-例:
-
-```text
-docs/ai/reviews/proxmox_healthcheck/2026-05-06_002_claude_code_implement_request.md
-docs/ai/reviews/proxmox_patch/2026-05-07_002_claude_code_implement_request.md
-```
-
-ユーザーはこの個別の実装依頼ファイルの内容を Claude Code に渡し、playbook / role / shell の作成を指示する。
-
-### 13.3 空のレビュー用ファイルの作成
-
-Codex は、後続工程のために空のレビュー用ファイルも作成する。
-
-例:
-
-```text
-docs/ai/reviews/proxmox_healthcheck/2026-05-06_003_codex_review.md
-```
-
-このファイルは、Claude Code の実装後に Codex がレビュー結果を書き込む場所として使う。
-
-### 13.4 空の再実装依頼用ファイルの作成
-
-Codex は、レビュー後に Claude Code へ再実装を依頼するための空ファイルも作成する。
-
-このファイルは、`docs/ai/prompts/claude-code-reimplement-template.md` を参考にして後で埋める。
-
-例:
-
-```text
-docs/ai/reviews/proxmox_healthcheck/2026-05-06_004_claude_code_reimplement_request.md
-```
-
-Codex のレビューで修正が必要になった場合、ユーザーまたは Codex はこのファイルに再実装依頼内容を書き、Claude Code に渡す。
+この運用では、`prompts/` は固定テンプレートとして使い回し、対象ごとの設計・レビュー・確定記録は `reviews/<target>/` に蓄積する。
 
 ---
 
-## 14. 実装後のレビュー・再実装・確定フロー
+## 18. 禁止事項
 
-実装後は以下の流れで進める。
-
-```text
-1. Claude Code が実装する
-2. Codex が git diff を確認する
-3. Codex が docs/ai/reviews/<target>/..._codex_review.md にレビューを書く
-4. 修正が必要な場合、Claude Code 用の再実装依頼ファイルを作る
-5. Claude Code が再実装する
-   - レビューに反証がある場合は docs/ai/reviews/<target>/ に反証を書く
-6. Codex が再レビューする
-7. 必要に応じて 3〜6 を繰り返す
-8. Yoshinobu が「これで確定」と判断する
-9. Codex が正本登録する
-10. Yoshinobu が commit する
-```
-
-### final ファイル
-
-確定時には `final` ファイルを作る。
-
-例:
+AI に作業を依頼するときは、以下を禁止する。
 
 ```text
-docs/ai/reviews/proxmox_healthcheck/2026-05-06_999_final.md
+- 秘密鍵、パスワード、トークン、証明書秘密鍵を生成・表示・コミットすること
+- IPアドレスを推測して inventory に直書きすること
+- check系 shell に変更操作を入れること
+- shell側で warning / critical 判定を行うこと
+- Ansible playbook 内で Git pull すること
+- quory 上で直接開発・commit する前提にすること
+- patch / reboot / migrate を check 系 playbook に混ぜること
+- 既存ファイルを破壊的に上書きすること
 ```
-
-中身は簡潔でよい。
-
-```md
-# Final
-
-この内容で確定。
-
-確認者: Yoshinobu
-日付: 2026-05-06
-
-## 対象
-
-- proxmox_healthcheck role
-- playbooks/proxmox_healthcheck.yml
-
-## コメント
-
-レビュー指摘を反映済み。
-初期運用版として採用する。
-```
-
----
-
-## 15. 禁止事項
-
-### check 系 shell
-
-```text
-- 変更操作を入れない
-- 正常/異常判定をしない
-- warning/criticalを作らない
-- host_varsの期待値を持たせない
-- 通知しない
-- レポート保存しない
-```
-
-### Ansible playbook
-
-```text
-- Git pull を playbook 内で行わない
-- check / patch / reboot を同じ入口に混ぜない
-- 危険操作を確認なしで実行しない
-```
-
-### quory
-
-```text
-- 原則として直接コード編集しない
-- 原則として commit しない
-- 未確認コードを日次 timer で自動実行しない
-```
-
----
-
-## 16. 将来方針
-
-最初は Ansible playbook / role / shell を CLI で安定させる。
-
-Semaphore UI 導入前の日次実行は quory の systemd timer で行う。
-
-将来的には、以下を Semaphore UI に移行する。
-
-```text
-- playbook のGUI実行
-- Repository機能によるGit取得
-- Task Templateによるplaybook実行
-- Schedule機能による日次healthcheck
-```
-
-Semaphore UI に移行後は、systemd timer から Semaphore UI の Schedule へ自動実行を移す。
