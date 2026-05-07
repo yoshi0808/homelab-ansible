@@ -2,7 +2,9 @@
 
 このファイルは、`homelab-ansible` リポジトリで AI に作業を依頼するときに毎回共有する共通前提である。
 
-`docs/ai/prompts/*-template.md` は作業種別ごとの依頼テンプレートであり、この `core.md` はそれらすべての前提として扱う。
+`core.md` は、環境情報・設計方針・禁止事項・AIレビュー運用・ファイル命名ルールをまとめた正本である。
+
+Playbook / Role の要求仕様は、ユーザーと ChatGPT の会話で整理する。Codex には要求仕様の作成を任せず、主に git diff のレビューを依頼する。
 
 ---
 
@@ -19,6 +21,7 @@
 - RADIUS / FreeRADIUS サーバーの稼働確認
 - RADIUS / FreeRADIUS サーバーのパッチ前確認
 - RADIUS / FreeRADIUS サーバーのパッチ適用
+- quory 上での本番 Ansible 実行
 - 将来的な Semaphore UI による GUI 実行・自動実行
 
 ---
@@ -27,7 +30,7 @@
 
 | ホスト名 | 種別 | 役割 |
 |---|---|---|
-| `ansy` | VM | Ansible 開発環境。VS Code / Codex / Claude Code を使い、実装・レビュー・commit / push を行う。 |
+| `ansy` | VM | Ansible 開発環境。VS Code / Claude Code / Codex を使い、実装・レビュー・commit / push を行う。 |
 | `quory` | 物理ノード | QDevice + 監視基盤。本番 Ansible 実行基盤。Git から確定済みソースを取得して実行する。 |
 | `pve1` | 物理ノード | Proxmox メインノード。通常稼働の中心。 |
 | `pve2` | 物理ノード | Proxmox セカンダリノード。先行検証・縮退運用・フェイルオーバー先。 |
@@ -41,7 +44,7 @@ Git   = 正本管理
 quory = 本番取得・Ansible実行
 ```
 
-quory 上では原則として直接コード編集しない。
+quory 上では、原則として直接コード編集しない。
 
 ---
 
@@ -85,6 +88,11 @@ all:
       hosts:
         authy:
           ansible_host: authy.internal
+
+    local:
+      hosts:
+        localhost:
+          ansible_connection: local
 ```
 
 名前解決は DNS または quory / ansy の `/etc/hosts` で担保する。
@@ -99,6 +107,7 @@ all:
 | `control_nodes` | `quory` | Ansible 実行基盤 / Semaphore UI / QDevice / 監視基盤管理 |
 | `dev_nodes` | `ansy` | Ansible 開発環境管理 |
 | `radius_servers` | `authy` | FreeRADIUS / RADIUS サーバー管理 |
+| `local` | `localhost` | ansy / quory 上でのローカル処理 |
 
 `proxmox_healthcheck.yml` や `proxmox_hw_check.yml` は `proxmox` グループを対象にする。
 
@@ -108,39 +117,51 @@ quory を対象にする playbook は、`quory_setup.yml` / `quory_update.yml` /
 
 ---
 
-## 5. SSH 接続と秘密鍵の扱い
+## 5. Ansible 管理ユーザーと SSH 鍵
 
-Ansible 実行環境 `ansy` / `quory` から管理対象ホストへ接続する場合、原則として Ansible 管理用ユーザー `ann` と Ansible 管理用 SSH 鍵 `~/.ssh/id_ann` を使う。
+Ansible 管理対象ホストには、Ansible 管理用ユーザー `ann` を作成する。
 
-対象ホスト側では、`~/.ssh/id_ann.pub` を `ann` ユーザーの `authorized_keys` に登録する。
+対象ホスト:
 
-`ann` は Ansible 管理用ユーザーであり、NOPASSWD sudo 可能であることを前提とする。
+- `pve1`
+- `pve2`
+- `authy`
+- 必要に応じて将来の管理対象ホスト
+
+各対象ホストでは、`ann` の `authorized_keys` に ansy 側の公開鍵 `id_ann.pub` を登録する。
+
+```text
+/home/ann/.ssh/authorized_keys
+```
+
+`ann` は Ansible 実行時に `become` できるよう、NOPASSWD sudo を許可する。
+
+```sudoers
+ann ALL=(ALL) NOPASSWD: ALL
+```
+
+一方、Ansible 実行元である `ansy` では、通常 `yoshi` ユーザーで Ansible を実行する。  
+そのため、秘密鍵 `id_ann` は ansy 上の `yoshi` のホームディレクトリに配置する。
+
+```text
+/home/yoshi/.ssh/id_ann
+/home/yoshi/.ssh/id_ann.pub
+```
+
+Ansible inventory / group_vars では以下のように指定する。
+
+```yaml
+ansible_user: ann
+ansible_ssh_private_key_file: ~/.ssh/id_ann
+```
+
+この `~/.ssh/id_ann` は、Ansible を実行しているローカルユーザー、通常は `yoshi`、のホームディレクトリを指す。  
+接続先ホストの `/home/ann/.ssh/id_ann` を指すものではない。
+
+`ansible_user: ann` は、接続先ホスト上のユーザー名である。  
+ansy 側に `ann` ユーザーを作成する必要はない。
 
 秘密鍵そのもの、秘密鍵の中身、パスフレーズ、認証情報はリポジトリに保存しない。
-
-Playbook / role / inventory では、秘密鍵の中身を扱わず、必要な場合はパス参照のみ使う。
-
-例:
-
-```yaml
-ansible_user: ann
-ansible_ssh_private_key_file: ~/.ssh/id_ann
-```
-
-`all.yml` や `vault.yml` など、秘密情報を含む可能性があるファイルは Git 管理しない。
-
-代わりに `all.yml.example` を Git 管理する。
-
-例:
-
-```yaml
----
-# Copy this file to all.yml and customize locally.
-# Do not commit all.yml.
-
-ansible_user: ann
-ansible_ssh_private_key_file: ~/.ssh/id_ann
-```
 
 AI への禁止事項:
 
@@ -148,10 +169,9 @@ AI への禁止事項:
 - 秘密鍵ファイルを生成しない
 - 秘密鍵の中身を表示しない
 - ~/.ssh/id_ann をリポジトリ内にコピーしない
-- group_vars/all.yml を勝手に作成・コミットしない
-- vault.yml を平文で作成しない
 - authorized_keys を勝手に上書きしない
 - SSHポートやユーザーを推測して固定しない
+- vault / secret / local などの秘密情報ファイルを平文で作成しない
 ```
 
 ---
@@ -167,6 +187,7 @@ AI への禁止事項:
 | Ansible 配管 | `roles/*/tasks/main.yml` | shell の配置・実行・JSON 読み込み・保存・判定。 |
 | 初期設定 | `roles/*/defaults/main.yml` | role のデフォルト設定。 |
 | ホスト別設定 | `inventories/homelab/host_vars/*.yml` | ホスト固有の期待値や差分。 |
+| グループ別設定 | `inventories/homelab/group_vars/*.yml` | グループ共通の接続情報・期待値・設定。 |
 
 `playbooks/` は実行入口、`roles/` は処理本体である。
 
@@ -202,6 +223,12 @@ Shell:
 Ansible:
   配置、実行、JSON読込、期待値比較、warning/critical分類、保存、fail制御
 ```
+
+補足:
+
+- shell が `port_1812_listen: true/false` のような観測値を返すことは許容する。
+- shell が `status: critical` や `warnings: [...]` を生成することは許容しない。
+- shell は health 判定の主体ではなく、対象ホスト上の情報収集センサーとして扱う。
 
 ---
 
@@ -262,67 +289,47 @@ playbook は 1 ファイルにまとめず、運用目的ごとに分ける。
 
 | Playbook | 目的 | 変更有無 |
 |---|---|---|
-| `radius_healthcheck.yml` | RADIUS / FreeRADIUS 稼働確認 | 原則なし |
+| `radius_healthcheck.yml` | FreeRADIUS 稼働確認 | 原則なし |
 | `radius_patch_precheck.yml` | RADIUS サーバーのパッチ前確認 | なし |
 | `radius_patch.yml` | RADIUS サーバーのパッチ適用 | あり |
 
-role / playbook 名は、ホスト名 `authy` ではなく役割名 `radius` ベースを基本とする。
-
 ---
 
-## 11. precheck NG 時の運用
+## 11. Git / quory 反映方針
 
-`proxmox_patch_precheck.yml` や `radius_patch_precheck.yml` が失敗した場合、patch 系 playbook は実行しない。
-
-基本フロー:
+Git を正本とする。
 
 ```text
-1. precheck を実行する
-2. warnings / criticals / fail を確認する
-3. NGなら patch を中止する
-4. 原因を修正する
-5. precheck を再実行する
-6. OKなら patch へ進む
-7. patch 後に healthcheck を実行する
+ansy:
+  開発、レビュー、commit、push
+
+quory:
+  pull、実行
 ```
 
-Semaphore UI 導入後は、precheck task が fail した場合に patch task へ進ませない運用に移行する。
+quory 上では原則として commit しない。
 
----
+quory は Git から pull して実行する。pull は `--ff-only` を使う。
 
-## 12. Git 更新運用
+pull 前に working tree が clean であることを確認する。
 
-開発環境 `ansy` で実装・レビュー・commit・push を行う。
-
-本番実行基盤 `quory` は Git から確定済みソースを取得して実行する。
-
-```text
-ansy
-  ↓ commit / push
-Git repository
-  ↓ pull
-quory
-  ↓ ansible-playbook
-pve1 / pve2 / authy / VM
-```
-
-quory での基本ルール:
-
-```text
-- quory では原則として直接コード編集しない
-- quory では原則として commit しない
-- quory は Git から pull して実行する
-- pull は --ff-only を使う
-- pull 前に working tree が clean であることを確認する
-```
+### Ansible playbook 内で git pull しない
 
 Git pull を Ansible playbook 自身で行うことは避ける。
 
 理由は、実行中の playbook が自分自身を更新する「自己更新問題」が起きるため。
 
+```text
+Git更新:
+  quory上のAnsible外スクリプト、または将来のSemaphore UI Repository機能
+
+Ansible playbook:
+  対象ホストに対する処理だけ
+```
+
 ---
 
-## 13. 自動実行方針
+## 12. 自動実行の考え方
 
 Ansible 自体には「時間になったら自分で起動する」機能はない。
 
@@ -340,28 +347,42 @@ Semaphore UI 導入前は、quory 上で `systemd timer` が `ansible-playbook` 
 
 これにより、ansy から push したばかりの未確認コードが、翌朝に自動で本番実行される事故を避ける。
 
-将来的には Semaphore UI の Schedule 機能へ移行する。
+将来的には、Semaphore UI の Repository / Task Template / Schedule 機能に移行する。
 
 ---
 
-## 14. .gitignore 方針
+## 13. .gitignore 方針
 
-生成される reports や、秘密情報を含む可能性のある変数ファイルは Git 管理しない。
+このリポジトリは将来的に public GitHub で管理する可能性があるため、秘密情報をリポジトリに含めない。
+
+通常の inventory / group_vars / host_vars は Git 管理する。  
+ただし、実行時生成物、ローカル専用設定、秘密情報を含むファイルは Git 管理しない。
+
+Ansible 接続設定では、秘密鍵そのものではなく、秘密鍵へのパス参照のみを記載する。
 
 例:
 
+```yaml
+ansible_user: ann
+ansible_ssh_private_key_file: ~/.ssh/id_ann
+```
+
+これは秘密鍵本体ではないため Git 管理してよい。
+
+`.gitignore` では主に以下を除外する。
+
 ```gitignore
-# Ansible runtime output
+# Runtime reports
 reports/**/*.json
 reports/**/*.log
 
-# Local secrets / private variables
-inventories/homelab/group_vars/all.yml
-inventories/homelab/group_vars/vault.yml
-inventories/homelab/host_vars/*/vault.yml
-
-# Retry files
+# Ansible retry files
 *.retry
+
+# Local-only overrides / secrets
+*.local.yml
+*.secret.yml
+*vault*.yml
 
 # Python / tooling
 __pycache__/
@@ -375,135 +396,338 @@ __pycache__/
 *.tmp
 ```
 
-`all.yml` を除外する場合は、代わりに `all.yml.example` を Git 管理する。
+秘密情報を将来追加する場合は、`vault` / `secret` / `local` を含むファイル名にし、Git 管理対象にしない。
+
+`all.yml.example` は、実際に `all.yml` をローカル専用設定として使う運用になった場合のみ作成する。使わない場合は置かない。
 
 ---
 
-## 15. AI の役割分担
+## 14. AI を使った構築・レビュー運用
 
 AI の役割分担は以下とする。
 
 ```text
-設計方針: Codex
+要求仕様整理: ChatGPT
 実装: Claude Code
 レビュー: Codex
-再実装: Claude Code
+追加実装: Claude Code
 再レビュー: Codex
 決定: Yoshinobu
-正本登録: Codex
 コミット: Yoshinobu
 ```
 
-実ファイルを直接更新するAIは原則として Claude Code / Codex に限定するが、同じタイミングで複数AIに同じファイルを更新させない。
+### prompts/ の考え方
 
-ChatGPT は設計相談、レビュー観点整理、壁打ちに使う。
+`docs/ai/prompts/` は、AI に毎回渡す共通前提を置く場所である。
 
----
+設計用テンプレート、Claude Code 実装テンプレート、Codex レビューテンプレートは、原則として置かない。
 
-## 16. prompts と reviews の使い分け
+要求仕様は、ユーザーと ChatGPT の会話で整理する。
 
-`docs/ai/prompts/` は、AIに渡す固定テンプレートを置く場所である。
+Codex レビューの観点も `core.md` にまとめる。レビューで不足が出た場合は、別テンプレートを増やすのではなく、まず `core.md` を改善する。
 
-`core.md` は共通前提。
-
-それ以外の `*-template.md` は依頼テンプレート。
+推奨構成:
 
 ```text
 docs/ai/prompts/
-├── core.md
-├── codex-design-template.md
-├── codex-review-template.md
-├── claude-code-implement-template.md
-└── claude-code-reimplement-template.md
+└── core.md
 ```
 
-`docs/ai/reviews/` は、実際の設計結果・レビュー結果・反証・確定記録を置く場所である。
-
-```text
-docs/ai/reviews/<target>/
-├── YYYY-MM-DD_001_codex_design.md
-├── YYYY-MM-DD_002_claude_implementation_note.md
-├── YYYY-MM-DD_003_codex_review.md
-├── YYYY-MM-DD_004_claude_counterargument.md
-├── YYYY-MM-DD_005_codex_review_after_fix.md
-└── YYYY-MM-DD_006_final.md
-```
-
-`decisions/` は作らない。理由や経緯は `reviews/` に残す。
+| ファイル | 役割 |
+|---|---|
+| `core.md` | AIに毎回渡す共通前提。環境・運用ルール・禁止事項・要求仕様化の方針・レビュー観点など。 |
 
 ---
 
-## 17. Playbook 作成依頼から確定までの運用フロー
+## 15. Playbook 作成依頼から確定までの運用フロー
 
-ユーザーが作りたい playbook / role をリクエストする。
+Playbook / Role を作成する場合、まずユーザーが ChatGPT と会話しながら、作りたい内容を整理する。
 
-以後の流れは以下。
+ChatGPT は、ユーザーとの会話を通じて、目的・対象・確認項目・制約・初回除外範囲を整理し、Claude Code に渡せる要求仕様としてまとめる。
+
+要求仕様は、詳細な実装方法ではなく、以下を中心にまとめる。
+
+- 目的
+- 対象ホスト / 対象グループ
+- 作成・更新対象ファイル
+- 確認項目または実施項目
+- 制約
+- 初回実装で含める範囲
+- 初回実装では除外する範囲
+- shell と Ansible tasks の責務分離
+- 秘密情報を扱わないこと
+- read-only / 変更系の区別
+
+要求仕様には、原則として具体的な実装方法論を書きすぎない。
+
+避けるもの:
+
+- awk / sed / grep の詳細
+- JSON 生成ロジックの細部
+- Ansible task の詳細実装例
+- コマンドの細かい組み立て
+- 不要に細かい閾値
+
+### ファイル命名ルール
+
+`docs/ai/reviews/<target>/` 配下には、工程ごとに以下のようなファイルを保存する。
 
 ```text
-1. ユーザーが作りたい playbook / role をリクエストする
-
-2. Codex は docs/ai/prompts/core.md と
-   docs/ai/prompts/codex-design-template.md を元に設計書を作成する
-
-3. Codex は設計書を以下に保存する
-   docs/ai/reviews/<target>/YYYY-MM-DD_001_codex_design.md
-
-4. Codex は docs/ai/prompts/claude-code-implement-template.md を参考に、
-   Claude Code に渡す個別の実装依頼ファイルを作成する
-
-   例:
-   docs/ai/reviews/<target>/YYYY-MM-DD_002_claude_implement_request.md
-
-5. Codex はレビュー用の空ファイルを作成する
-
-   例:
-   docs/ai/reviews/<target>/YYYY-MM-DD_003_codex_review.md
-
-6. Codex は再実装依頼用の空ファイルを作成する
-
-   例:
-   docs/ai/reviews/<target>/YYYY-MM-DD_004_claude_reimplement_request.md
-
-7. ユーザーは Claude Code に
-   YYYY-MM-DD_002_claude_implement_request.md を渡して実装を依頼する
-
-8. Claude Code は playbooks/、roles/、inventories/ などの正本候補を実装する
-
-9. Codex は git diff を確認し、
-   YYYY-MM-DD_003_codex_review.md にレビューを書く
-
-10. 修正が必要な場合、ユーザーは Claude Code に
-    YYYY-MM-DD_004_claude_reimplement_request.md を渡して再実装を依頼する
-
-11. Claude Code が Codex レビューに反証する場合は、
-    docs/ai/reviews/<target>/ に反証ファイルを書く
-
-12. Codex が再レビューする
-
-13. 必要に応じて 9〜12 を繰り返す
-
-14. Yoshinobu が「これで確定」と判断する
-
-15. Codex が正本登録する
-
-16. Yoshinobu が commit する
+YYYY-MM-DD_001_requirement.md
+YYYY-MM-DD_002_implement.md
+YYYY-MM-DD_003_review.md
+YYYY-MM-DD_004_implement.md
+YYYY-MM-DD_005_review.md
+YYYY-MM-DD_006_final.md
 ```
 
-この運用では、`prompts/` は固定テンプレートとして使い回し、対象ごとの設計・レビュー・確定記録は `reviews/<target>/` に蓄積する。
+ファイル名には、原則として `codex` や `claude` などの AI 名を入れない。
+
+重要なのは、誰が作成したかではなく、そのファイルの役割である。
+
+- `requirement`: 要求仕様
+- `implement`: 実装内容、またはレビュー後の追加実装内容
+- `review`: レビュー結果
+- `final`: 最終確認
+
+レビュー・実装・final 用の空ファイルは事前に作らない。  
+必要になった工程のファイルだけ、その時点で作成する。
+
+### 基本フロー
+
+```text
+1. ユーザーが作りたい Playbook / Role を ChatGPT に相談する
+
+2. ChatGPT が会話を通じて要求仕様を整理する
+
+3. ユーザーが要求仕様を確認する
+
+4. ユーザーが Claude Code に要求仕様を渡す
+
+5. Claude Code は、ユーザーから受け取った要求仕様を以下に保存する
+
+   docs/ai/reviews/<target>/YYYY-MM-DD_001_requirement.md
+
+6. Claude Code が playbook / role / shell を実装する
+
+7. Claude Code は、実装完了後に作成・更新した内容を以下に保存する
+
+   docs/ai/reviews/<target>/YYYY-MM-DD_002_implement.md
+
+   implement には以下を含める。
+
+   - 実装概要
+   - 作成・更新したファイル一覧
+   - 変更内容の要約
+   - 実行した確認コマンド
+   - 実行結果
+   - 未対応事項
+   - 注意点
+
+8. Codex が git diff、requirement、implement をもとにレビューする
+
+   保存先例:
+
+   docs/ai/reviews/<target>/YYYY-MM-DD_003_review.md
+
+9. 修正が必要な場合、ユーザーが Claude Code に review ファイルを渡して追加実装を依頼する
+
+10. Claude Code は、追加実装後の内容を次の implement として保存する
+
+    保存先例:
+
+    docs/ai/reviews/<target>/YYYY-MM-DD_004_implement.md
+
+11. Codex が再レビューする
+
+    保存先例:
+
+    docs/ai/reviews/<target>/YYYY-MM-DD_005_review.md
+
+12. ユーザーが最終判断する
+
+13. 問題なければ commit する
+```
+
+### レビュー依頼時の注意
+
+Codex にレビューを依頼する場合は、対象となる requirement / implement / review のファイル名を明示する。
+
+例:
+
+```text
+以下を読んで、現在の git diff をレビューしてください。
+
+- docs/ai/reviews/radius_healthcheck/2026-05-06_001_requirement.md
+- docs/ai/reviews/radius_healthcheck/2026-05-06_002_implement.md
+
+レビュー結果は以下に保存してください。
+
+- docs/ai/reviews/radius_healthcheck/2026-05-06_003_review.md
+```
+
+再レビューの場合も同様に、直前の review と最新の implement を明示する。
+
+例:
+
+```text
+以下を読んで、現在の git diff を再レビューしてください。
+
+- docs/ai/reviews/radius_healthcheck/2026-05-06_001_requirement.md
+- docs/ai/reviews/radius_healthcheck/2026-05-06_003_review.md
+- docs/ai/reviews/radius_healthcheck/2026-05-06_004_implement.md
+
+レビュー結果は以下に保存してください。
+
+- docs/ai/reviews/radius_healthcheck/2026-05-06_005_review.md
+```
+
+### 次工程ファイルの明示
+
+各工程が完了したら、その工程を担当した AI は、出力の最後に次工程で参照すべきファイル名を明記する。
+
+誰が何を保存し、何を次に渡すかを明確にする。
+
+| 工程 | 担当 | 保存するファイル | 次に参照する主なファイル |
+|---|---|---|---|
+| 要求仕様の整理 | ChatGPT | 直接ファイル保存はしない。ユーザーに Claude Code へ渡す要求仕様を提示する。 | ChatGPT が提示した要求仕様本文 |
+| requirement 保存 | Claude Code | `YYYY-MM-DD_001_requirement.md` | `YYYY-MM-DD_001_requirement.md` |
+| 初回実装 | Claude Code | `YYYY-MM-DD_002_implement.md` | `YYYY-MM-DD_001_requirement.md`, `YYYY-MM-DD_002_implement.md` |
+| レビュー | Codex | `YYYY-MM-DD_003_review.md` | `YYYY-MM-DD_001_requirement.md`, `YYYY-MM-DD_002_implement.md`, `YYYY-MM-DD_003_review.md` |
+| 追加実装 | Claude Code | `YYYY-MM-DD_004_implement.md` | `YYYY-MM-DD_001_requirement.md`, `YYYY-MM-DD_003_review.md`, `YYYY-MM-DD_004_implement.md` |
+| 再レビュー | Codex | `YYYY-MM-DD_005_review.md` | `YYYY-MM-DD_001_requirement.md`, `YYYY-MM-DD_004_implement.md`, `YYYY-MM-DD_005_review.md` |
+
+Claude Code は、ユーザーから受け取った要求仕様を `requirement` ファイルとして保存する。
+ユーザーが手作業で requirement ファイルを作る運用ではない。
+
+Claude Code は、実装完了後に実装内容・作成/更新ファイル・確認結果を `implement` ファイルとして保存する。
+Codex は、レビュー完了後にレビュー内容を `review` ファイルとして保存する。
+
+各工程の出力末尾には、次のように `Next step files` を明記する。
+
+例:
+
+```text
+Next step files:
+- docs/ai/reviews/radius_healthcheck/2026-05-06_001_requirement.md
+- docs/ai/reviews/radius_healthcheck/2026-05-06_002_implement.md
+```
+
+ユーザーは、この一覧をそのまま次の Claude Code / Codex への依頼に含める。
+
+
+### Codex レビュー観点
+
+Codex にレビューを依頼する場合は、主に以下を確認する。
+
+- `core.md` の方針に反していないか
+- shell / script が収集と JSON 整形に留まっているか
+- warning / critical / fail 制御が Ansible tasks 側にあるか
+- read-only playbook に変更操作が混入していないか
+- patch / reboot / restart / reload などの変更系処理が専用 playbook に分離されているか
+- 秘密鍵、認証情報、証明書秘密鍵などを読んでいないか
+- inventory / group_vars / host_vars が名前ベース方針に沿っているか
+- 生成物や runtime report を commit 対象に混ぜていないか
+- 要求仕様に対して実装が過不足ないか
+- 変更内容をこのまま commit してよいか
 
 ---
 
-## 18. 禁止事項
+## 16. 実装後のレビュー・確定フロー
 
-AI に作業を依頼するときは、以下を禁止する。
+実装後は以下の流れで進める。
 
 ```text
-- 秘密鍵、パスワード、トークン、証明書秘密鍵を生成・表示・コミットすること
-- IPアドレスを推測して inventory に直書きすること
-- check系 shell に変更操作を入れること
-- shell側で warning / critical 判定を行うこと
-- Ansible playbook 内で Git pull すること
-- quory 上で直接開発・commit する前提にすること
-- patch / reboot / migrate を check 系 playbook に混ぜること
-- 既存ファイルを破壊的に上書きすること
+1. Claude Code が実装する
+2. Claude Code が implement ファイルに実装内容を記録する
+3. Codex が git diff / requirement / implement を確認する
+4. Codex が review ファイルにレビューを書く
+5. 修正が必要な場合、Claude Code が追加実装する
+6. Claude Code が次の implement ファイルに追加実装内容を記録する
+7. Codex が再レビューする
+8. 必要に応じて 3〜7 を繰り返す
+9. Yoshinobu が「これで確定」と判断する
+10. 必要に応じて final ファイルを作る
+11. Yoshinobu が commit する
 ```
+
+### final ファイル
+
+確定時には、必要に応じて `final` ファイルを作る。
+
+例:
+
+```text
+docs/ai/reviews/proxmox_healthcheck/2026-05-06_006_final.md
+```
+
+中身は簡潔でよい。
+
+```md
+# Final
+
+この内容で確定。
+
+確認者: Yoshinobu
+日付: 2026-05-06
+
+## 対象
+
+- proxmox_healthcheck role
+- playbooks/proxmox_healthcheck.yml
+
+## コメント
+
+レビュー指摘を反映済み。
+初期運用版として採用する。
+```
+
+---
+
+## 17. 禁止事項
+
+### check 系 shell
+
+```text
+- 変更操作を入れない
+- 正常/異常判定をしない
+- warning/criticalを作らない
+- host_varsの期待値を持たせない
+- 通知しない
+- レポート保存しない
+```
+
+### Ansible playbook
+
+```text
+- Git pull を playbook 内で行わない
+- check / patch / reboot を同じ入口に混ぜない
+- 危険操作を確認なしで実行しない
+```
+
+### quory
+
+```text
+- 原則として直接コード編集しない
+- 原則として commit しない
+- 未確認コードを日次 timer で自動実行しない
+```
+
+---
+
+## 18. 将来方針
+
+最初は Ansible playbook / role / shell を CLI で安定させる。
+
+Semaphore UI 導入前の日次実行は quory の systemd timer で行う。
+
+将来的には、以下を Semaphore UI に移行する。
+
+```text
+- playbook のGUI実行
+- Repository機能によるGit取得
+- Task Templateによるplaybook実行
+- Schedule機能による日次healthcheck
+```
+
+Semaphore UI に移行後は、systemd timer から Semaphore UI の Schedule へ自動実行を移す。

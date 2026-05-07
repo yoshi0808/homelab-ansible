@@ -1,10 +1,22 @@
-# Ansible temporary files
+# Ansible runtime output
+reports/**/*.json
+reports/**/*.log
+
+# Ansible retry files
 *.retry
 
-# Python cache
+# Local-only overrides / secrets
+*.local.yml
+*.secret.yml
+*vault*.yml
+
+# Python / tooling
 __pycache__/
 *.pyc
 
-# OS files
+# Editor / OS
+.vscode/
 .DS_Store
-Thumbs.db
+
+# Temporary files
+*.tmp
