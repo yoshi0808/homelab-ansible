@@ -1,0 +1,98 @@
+---
+- name: Copy proxmox hw check script
+  ansible.builtin.copy:
+    src: proxmox-hw-check.sh
+    dest: /usr/local/sbin/proxmox-hw-check.sh
+    mode: "0750"
+    owner: root
+    group: root
+
+- name: Run proxmox hw check
+  ansible.builtin.command:
+    cmd: /usr/local/sbin/proxmox-hw-check.sh
+  register: hwcheck_raw
+  changed_when: false
+
+- name: Fail if hw check returned no output
+  ansible.builtin.fail:
+    msg: "proxmox-hw-check.sh on {{ inventory_hostname }} returned empty output (rc={{ hwcheck_raw.rc }}). Run the script manually on the host to diagnose."
+  when: hwcheck_raw.stdout | length == 0
+
+- name: Parse hw check JSON
+  ansible.builtin.set_fact:
+    proxmox_hw: "{{ hwcheck_raw.stdout | from_json }}"
+
+- name: Find collection failures
+  ansible.builtin.set_fact:
+    _collection_failures: "{{ []
+      + ([] if proxmox_hw.collection_status.nics else ['NIC collection failed: ip -s link show returned unavailable'])
+      + ([] if proxmox_hw.collection_status.zfs_pools else ['ZFS pool collection failed: zpool list returned unavailable'])
+      + ([] if proxmox_hw.collection_status.zfs_scrub else ['ZFS scrub collection failed: zpool status returned unavailable'])
+      + ([] if proxmox_hw.collection_status.disk else ['Disk collection failed: df returned unavailable'])
+      }}"
+
+- name: Find NICs in DOWN state
+  ansible.builtin.set_fact:
+    _nics_down: "{{ proxmox_hw.nics | selectattr('state', 'equalto', 'DOWN') | map(attribute='name') | list }}"
+
+- name: Find NICs with high error counts
+  ansible.builtin.set_fact:
+    _nics_errors: "{{ proxmox_hw.nics |
+      selectattr('total_errors', 'gt', proxmox_hw_check_nic_errors_warning_threshold | int) |
+      map(attribute='name') | list }}"
+    _nics_dropped: "{{ proxmox_hw.nics |
+      selectattr('total_dropped', 'gt', proxmox_hw_check_nic_dropped_warning_threshold | int) |
+      map(attribute='name') | list }}"
+
+- name: Classify warnings
+  ansible.builtin.set_fact:
+    proxmox_hw_warnings: "{{ []
+      + _collection_failures
+      + (_nics_down | map('regex_replace', '^(.*)$', 'NIC \\1 is DOWN') | list)
+      + (_nics_errors | map('regex_replace', '^(.*)$', 'NIC \\1 error count exceeds threshold') | list)
+      + (_nics_dropped | map('regex_replace', '^(.*)$', 'NIC \\1 dropped count exceeds threshold') | list)
+      }}"
+
+- name: Build report
+  ansible.builtin.set_fact:
+    proxmox_hw_report:
+      host: "{{ inventory_hostname }}"
+      collected_at: "{{ proxmox_hw.collected_at }}"
+      collection_status: "{{ proxmox_hw.collection_status }}"
+      cpu: "{{ proxmox_hw.cpu }}"
+      memory: "{{ proxmox_hw.memory }}"
+      zfs:
+        pools: "{{ proxmox_hw.zfs.pools }}"
+        scrub: "{{ proxmox_hw.zfs.scrub }}"
+      disk:
+        filesystems: "{{ proxmox_hw.disk.filesystems }}"
+      nics: "{{ proxmox_hw.nics }}"
+      result:
+        status: "{{ 'WARNING' if proxmox_hw_warnings | length > 0 else 'OK' }}"
+        warnings: "{{ proxmox_hw_warnings }}"
+
+- name: Ensure report directory exists
+  ansible.builtin.file:
+    path: "{{ proxmox_hw_check_report_dir }}"
+    state: directory
+    mode: "0755"
+  delegate_to: localhost
+  become: false
+
+- name: Save report
+  ansible.builtin.copy:
+    content: "{{ proxmox_hw_report | to_nice_json }}"
+    dest: "{{ proxmox_hw_check_report_dir }}/{{ inventory_hostname }}_{{ ansible_facts['date_time']['iso8601_basic_short'] }}.json"
+  delegate_to: localhost
+  become: false
+
+- name: Print hw summary
+  ansible.builtin.debug:
+    msg:
+      - "Host     : {{ inventory_hostname }}"
+      - "Status   : {{ proxmox_hw_report.result.status }}"
+      - "CPU      : {{ proxmox_hw.cpu.model }} ({{ proxmox_hw.cpu.total_cpus }} CPUs, {{ proxmox_hw.cpu.sockets }}s x {{ proxmox_hw.cpu.cores_per_socket }}c x {{ proxmox_hw.cpu.threads_per_core }}t)"
+      - "Memory   : {{ proxmox_hw.memory.total_mb }} MB"
+      - "ZFS pools: {{ proxmox_hw.zfs.pools | map(attribute='name') | zip(proxmox_hw.zfs.pools | map(attribute='health')) | map('join', '=') | list }}"
+      - "NICs     : {{ proxmox_hw.nics | map(attribute='name') | zip(proxmox_hw.nics | map(attribute='state')) | map('join', '=') | list }}"
+      - "Warnings : {{ proxmox_hw_warnings }}"

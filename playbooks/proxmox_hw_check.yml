@@ -1,0 +1,8 @@
+---
+- name: Proxmox hardware check
+  hosts: proxmox
+  gather_facts: true
+  become: true
+
+  roles:
+    - proxmox_hw_check
