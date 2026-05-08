@@ -31,27 +31,60 @@ pve1 / pve2（Proxmox）
 homelab-ansible/
 ├── README.md
 ├── ansible.cfg
-├── inventory/
-│   ├── lab.ini
-│   └── prod.ini
+├── inventories/
+│   ├── homelab/
+│   │   ├── hosts.yml
+│   │   ├── group_vars/
+│   │   └── host_vars/
+│   └── vars/
 ├── playbooks/
-│   ├── health-check.yml
-│   ├── ubuntu-unattended-upgrades.yml
-│   └── proxmox-check.yml
+│   └── radius_healthcheck.yml
 ├── roles/
+│   └── radius_healthcheck/
+│       ├── defaults/
+│       ├── files/
+│       └── tasks/
+├── scripts/
+├── reports/
+│   └── radius-health/
 ├── cloudinit/
-├── autoinstall/
 └── docs/
+    └── ai/
+        ├── prompts/
+        └── reviews/
 ```
 
 ---
 
 ## inventory
 
-```
-[proxmox]
-pve1.internal ansible_user=root ansible_ssh_private_key_file=~/.ssh/id_ansible
-pve2.internal ansible_user=root ansible_ssh_private_key_file=~/.ssh/id_ansible
+Inventory は `inventories/homelab/hosts.yml` を正とする。
+
+```yaml
+all:
+  children:
+    proxmox:
+      hosts:
+        pve1:
+          ansible_host: pve1.internal
+        pve2:
+          ansible_host: pve2.internal
+    radius_servers:
+      hosts:
+        authy:
+          ansible_host: authy.internal
+    control_nodes:
+      hosts:
+        quory:
+          ansible_host: quory.internal
+    dev_nodes:
+      hosts:
+        ansy:
+          ansible_host: ansy.internal
+    local:
+      hosts:
+        localhost:
+          ansible_connection: local
 ```
 
 ---
@@ -60,9 +93,11 @@ pve2.internal ansible_user=root ansible_ssh_private_key_file=~/.ssh/id_ansible
 
 ```
 [defaults]
-inventory = ./inventory/lab.ini
+inventory = inventories/homelab/hosts.yml
+roles_path = roles
 host_key_checking = True
 interpreter_python = /usr/bin/python3
+retry_files_enabled = False
 ```
 
 ---
@@ -71,6 +106,8 @@ interpreter_python = /usr/bin/python3
 
 ```
 ansible proxmox -m ping
+ansible-inventory --graph
+ansible-playbook playbooks/radius_healthcheck.yml --check
 ```
 
 ---
@@ -94,7 +131,7 @@ ansible proxmox -m ping
 
 ### Phase 2
 
-- health-check playbook
+- healthcheck playbook
 - Ubuntu共通設定
 
 ### Phase 3
@@ -124,4 +161,3 @@ ansible proxmox -m ping
 - Cloud-initは初期構成のみ使用
 - 本格的な設定はAnsibleで管理
 - すべて再構築可能な状態を維持する
-
