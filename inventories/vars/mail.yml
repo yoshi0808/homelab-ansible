@@ -1,0 +1,6 @@
+# inventories/homelab/vars/mail.yml（git管理しない）
+smtp_host: smtp.gmail.com
+smtp_port: 587
+smtp_user: y.abe0808@gmail.com
+smtp_password: "<revoked-smtp-app-password>"  # アプリパスワード
+mail_to: y.abe0808@gmail.com
