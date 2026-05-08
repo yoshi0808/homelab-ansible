@@ -1,0 +1,153 @@
+---
+- name: Copy proxmox healthcheck script
+  ansible.builtin.copy:
+    src: proxmox-healthcheck.sh
+    dest: /usr/local/sbin/proxmox-healthcheck.sh
+    mode: "0750"
+    owner: root
+    group: root
+
+- name: Run proxmox healthcheck
+  ansible.builtin.command:
+    cmd: /usr/local/sbin/proxmox-healthcheck.sh
+  register: healthcheck_raw
+  changed_when: false
+
+- name: Fail if healthcheck returned no output
+  ansible.builtin.fail:
+    msg: "proxmox-healthcheck.sh on {{ inventory_hostname }} returned empty output (rc={{ healthcheck_raw.rc }}). Run the script manually on the host to diagnose."
+  when: healthcheck_raw.stdout | length == 0
+
+- name: Parse healthcheck JSON
+  ansible.builtin.set_fact:
+    proxmox_health: "{{ healthcheck_raw.stdout | from_json }}"
+
+- name: Compute replication thresholds (epoch)
+  ansible.builtin.set_fact:
+    _thresh_repl_critical: "{{ (ansible_facts['date_time']['epoch'] | int) - (proxmox_healthcheck_repl_critical_hours | int * 3600) }}"
+    _thresh_repl_warning: "{{ (ansible_facts['date_time']['epoch'] | int) - (proxmox_healthcheck_repl_warning_hours | int * 3600) }}"
+
+- name: Find stale replication jobs
+  ansible.builtin.set_fact:
+    _repl_critical_jobs: "{{ proxmox_health.replication.entries |
+      selectattr('last_sync_epoch', 'lt', _thresh_repl_critical | int) |
+      map(attribute='job_id') | list }}"
+    _repl_warning_jobs: "{{ proxmox_health.replication.entries |
+      rejectattr('last_sync_epoch', 'lt', _thresh_repl_critical | int) |
+      selectattr('last_sync_epoch', 'lt', _thresh_repl_warning | int) |
+      map(attribute='job_id') | list }}"
+
+- name: Find degraded or faulted ZFS pools
+  ansible.builtin.set_fact:
+    _zfs_bad_pools: "{{ (proxmox_health.zfs.pools | selectattr('state', 'equalto', 'DEGRADED') | list) +
+                        (proxmox_health.zfs.pools | selectattr('state', 'equalto', 'FAULTED') | list) }}"
+
+- name: Classify criticals and warnings
+  ansible.builtin.set_fact:
+    proxmox_criticals: "{{ []
+      + ([] if proxmox_health.cluster.quorate == 'Yes'
+             else ['cluster has no quorum (quorate=' + proxmox_health.cluster.quorate + ')'])
+      + ([] if proxmox_health.zfs.collection_ok
+             else ['zpool status collection failed - ZFS state unknown'])
+      + (_zfs_bad_pools | map(attribute='name') | map('regex_replace', '^(.*)$', 'ZFS pool degraded/faulted: \\1') | list)
+      + ([] if proxmox_health.apt.check_ok
+             else ['apt/dpkg broken: ' + (proxmox_health.apt.check_output | trim)])
+      + ([] if proxmox_health.services.pve_cluster == 'active'
+             else ['service pve-cluster is not active: ' + proxmox_health.services.pve_cluster])
+      + ([] if proxmox_health.services.corosync == 'active'
+             else ['service corosync is not active: ' + proxmox_health.services.corosync])
+      + ([] if proxmox_health.services.pvedaemon == 'active'
+             else ['service pvedaemon is not active: ' + proxmox_health.services.pvedaemon])
+      + ([] if proxmox_health.services.pveproxy == 'active'
+             else ['service pveproxy is not active: ' + proxmox_health.services.pveproxy])
+      + ([] if proxmox_health.systemd.failed_count == 0
+             else ['systemd failed units (' + (proxmox_health.systemd.failed_count | string) + '): ' +
+                   (proxmox_health.systemd.failed_units | join(', '))])
+      + ([] if proxmox_health.filesystem.root_used_pct | int >= 0
+             else ['root filesystem usage collection failed (df returned -1)'])
+      + ([] if proxmox_health.filesystem.root_used_pct | int < 0 or
+               proxmox_health.filesystem.root_used_pct | int < proxmox_healthcheck_root_fs_critical_pct | int
+             else ['root filesystem ' + (proxmox_health.filesystem.root_used_pct | string) + '% used (threshold=' +
+                   (proxmox_healthcheck_root_fs_critical_pct | string) + '%)'])
+      + (_repl_critical_jobs | map('regex_replace', '^(.*)$', 'replication stale (>24h): \\1') | list)
+      }}"
+    proxmox_warnings: "{{ []
+      + (_repl_warning_jobs | map('regex_replace', '^(.*)$', 'replication stale (>2h): \\1') | list)
+      + ([] if not proxmox_health.reboot_required
+             else ['reboot-required flag is set'])
+      + ([] if (proxmox_health.filesystem.root_used_pct | int < 0 or
+                proxmox_health.filesystem.root_used_pct | int < proxmox_healthcheck_root_fs_warning_pct | int or
+                proxmox_health.filesystem.root_used_pct | int >= proxmox_healthcheck_root_fs_critical_pct | int)
+             else ['root filesystem ' + (proxmox_health.filesystem.root_used_pct | string) + '% used (threshold=' +
+                   (proxmox_healthcheck_root_fs_warning_pct | string) + '%)'])
+      }}"
+
+- name: Build report
+  ansible.builtin.set_fact:
+    proxmox_report:
+      host: "{{ inventory_hostname }}"
+      collected_at: "{{ proxmox_health.collected_at }}"
+      pve_version: "{{ proxmox_health.pve_version }}"
+      cluster:
+        quorate: "{{ proxmox_health.cluster.quorate }}"
+      zfs:
+        pools: "{{ proxmox_health.zfs.pools }}"
+      replication:
+        entries: "{{ proxmox_health.replication.entries }}"
+      systemd:
+        failed_count: "{{ proxmox_health.systemd.failed_count }}"
+        failed_units: "{{ proxmox_health.systemd.failed_units }}"
+      services: "{{ proxmox_health.services }}"
+      filesystem:
+        root_used_pct: "{{ proxmox_health.filesystem.root_used_pct }}"
+      apt:
+        check_ok: "{{ proxmox_health.apt.check_ok }}"
+      reboot_required: "{{ proxmox_health.reboot_required }}"
+      vms:
+        list: "{{ proxmox_health.vms.list }}"
+      cts:
+        list: "{{ proxmox_health.cts.list }}"
+      chrony:
+        tracking: "{{ proxmox_health.chrony.tracking }}"
+      result:
+        status: "{{ 'CRITICAL' if proxmox_criticals | length > 0
+                    else ('WARNING' if proxmox_warnings | length > 0
+                    else 'OK') }}"
+        criticals: "{{ proxmox_criticals }}"
+        warnings: "{{ proxmox_warnings }}"
+
+- name: Ensure report directory exists
+  ansible.builtin.file:
+    path: "{{ proxmox_healthcheck_report_dir }}"
+    state: directory
+    mode: "0755"
+  delegate_to: localhost
+  become: false
+
+- name: Save report
+  ansible.builtin.copy:
+    content: "{{ proxmox_report | to_nice_json }}"
+    dest: "{{ proxmox_healthcheck_report_dir }}/{{ inventory_hostname }}_{{ ansible_facts['date_time']['iso8601_basic_short'] }}.json"
+  delegate_to: localhost
+  become: false
+
+- name: Print health summary
+  ansible.builtin.debug:
+    msg:
+      - "Host       : {{ inventory_hostname }}"
+      - "Status     : {{ proxmox_report.result.status }}"
+      - "PVE        : {{ proxmox_health.pve_version }}"
+      - "Quorate    : {{ proxmox_health.cluster.quorate }}"
+      - "ZFS pools  : {{ proxmox_health.zfs.pools | map(attribute='name') | zip(proxmox_health.zfs.pools | map(attribute='state')) | map('join', '=') | list }}"
+      - "Services   : pve-cluster={{ proxmox_health.services.pve_cluster }} corosync={{ proxmox_health.services.corosync }} pvedaemon={{ proxmox_health.services.pvedaemon }} pveproxy={{ proxmox_health.services.pveproxy }}"
+      - "Root FS    : {{ proxmox_health.filesystem.root_used_pct }}%"
+      - "Repl jobs  : {{ proxmox_health.replication.entries | length }}"
+      - "Systemd    : failed={{ proxmox_health.systemd.failed_count }}"
+      - "Reboot req : {{ proxmox_health.reboot_required }}"
+      - "Criticals  : {{ proxmox_criticals }}"
+      - "Warnings   : {{ proxmox_warnings }}"
+
+- name: Fail if critical
+  ansible.builtin.fail:
+    msg: "CRITICAL on {{ inventory_hostname }}: {{ proxmox_criticals | join(' | ') }}"
+  when: proxmox_criticals | length > 0

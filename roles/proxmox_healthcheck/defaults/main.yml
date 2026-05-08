@@ -1,0 +1,6 @@
+---
+proxmox_healthcheck_report_dir: "{{ playbook_dir }}/../reports/proxmox-health"
+proxmox_healthcheck_root_fs_critical_pct: 90
+proxmox_healthcheck_root_fs_warning_pct: 80
+proxmox_healthcheck_repl_critical_hours: 24
+proxmox_healthcheck_repl_warning_hours: 2
