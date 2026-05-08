@@ -1,7 +1,7 @@
-# Proxmox Patch Policy Draft v1.5
+# Proxmox Patch Policy v1.7
 
 作成日: 2026-05-08  
-版: Draft v1.5  
+版: v1.7  
 対象: pve1 / pve2 / 将来の Sophos Firewall VM 移行前提
 
 ---
@@ -100,7 +100,35 @@ Urgency は自動適用の許可条件ではない。
 | `LOW` | 軽微な通常更新 |
 | `NORMAL` | 一般的な更新 |
 | `HIGH` | セキュリティ関連、または早めの対応が望ましい更新 |
-| `URGENT` | 既知悪用、RCE、認証回避、VM escape など重大リスク |
+| `URGENT` | 前提条件なしに重大な被害が起きるリスク。即対応。 |
+
+### URGENT 判断基準
+
+以下の条件に該当する場合は `URGENT` とし、即対応とする。
+
+| 条件 | 判断 |
+|---|---|
+| 認証なし RCE | 即対応 |
+| 管理画面 RCE | 即対応 |
+| exploit 公開済み | 即対応 |
+| ransomware 利用中 | 即対応 |
+| VM escape | 即対応 |
+| 認証バイパス | 即対応 |
+| root 権限取得可能（LPE） | 即対応 |
+| backup / token / secret 漏えい | 即対応 |
+
+### HIGH 判断基準
+
+以下の条件に該当する場合は `HIGH` とし、早めの対応が望ましい。
+
+| 条件 | 判断 |
+|---|---|
+| ローカルユーザー必須 | 中〜高（LPE なら URGENT を検討） |
+| 特定機能を有効化している場合のみ | 使用有無を確認 |
+| DoS のみ | 可用性次第 |
+| XSS のみ | 管理画面なら中〜高 |
+| 物理アクセス必須 | 家庭環境なら低め |
+| 特定 CPU / デバイスのみ | 該当性確認 |
 
 例:
 
@@ -108,8 +136,7 @@ Urgency は自動適用の許可条件ではない。
 |---|---|---|
 | tzdata / vim 等の通常更新 | `PATCH_READY` | `LOW` |
 | OpenSSL / OpenSSH のセキュリティ更新 | `PATCH_READY` | `HIGH` |
-| kernel 更新 | `MAINTENANCE_REQUIRED` | `NORMAL` または `HIGH` |
-| qemu / kernel の重大脆弱性修正 | `MAINTENANCE_REQUIRED` | `HIGH` または `URGENT` |
+| kernel LPE 修正 | `MAINTENANCE_REQUIRED` | `URGENT` |
 | 重要コンポーネント remove かつ置換先不明 | `BLOCKED` | `HIGH` |
 | Proxmox major upgrade 疑い | `MAJOR_UPGRADE_DETECTED` | `NORMAL` |
 
@@ -1510,14 +1537,17 @@ Codex は実行エンジンではない。
 
 Codex CLI に渡す入力:
 
-- dry-run JSON
-- `apt-get -s dist-upgrade` の全文または要約
-- upgradable package 一覧
-- removed / newly installed / upgraded / kept back package 一覧
-- 対象パッケージの `apt changelog`
-- `docs/ops/proxmox_patch_policy.md`
-- 重要コンポーネント一覧
-- urgency 判定ルール
+- dry-run JSON（Ansible が生成。important_component / security_repo / is_new 等のフラグ含む）
+- 更新対象パッケージの changelog 差分（現在インストール済みバージョン以降のエントリのみ）
+- 新規インストールパッケージの場合は最新エントリ1件のみ
+- `docs/ops/proxmox_patch_policy.md`（URGENT / HIGH 判断基準テーブルを含む）
+
+Ansible 側で事前に付与するフラグ:
+
+- `important_component`: 重要コンポーネントリストとの照合結果
+- `security_repo`: セキュリティリポジトリ出身かどうか（awk による判定結果）
+- `is_new`: 新規インストールかどうか
+- `has_remove`: remove を伴うかどうか
 
 ### 16.3 Codex CLI の出力
 
@@ -1531,7 +1561,7 @@ Codex CLI は、最低限以下を JSON で出力する。
     "replacement_suspected": false,
     "major_upgrade_suspected": false,
     "security_sensitive_updates": [],
-    "urgency": "NORMAL"
+    "urgency_candidate": "NORMAL"
   },
   "package_classifications": [
     {
@@ -1540,20 +1570,26 @@ Codex CLI は、最低限以下を JSON で出力する。
       "remove_action": false,
       "replacement_suspected": false,
       "security_sensitive": false,
-      "urgency": "LOW",
+      "cve_types_detected": [],
+      "urgency_candidate": "LOW",
+      "urgency_reasoning": "",
       "evidence": [],
       "confidence": "medium"
     }
   ],
-  "mail_summary": {
-    "summary": "",
-    "reasons": [],
-    "recommended_action": ""
-  }
+  "mail_subject": "",
+  "mail_body": "",
+  "report_md": ""
 }
 ```
 
-Ansible tasks はこの JSON を読み、最終 status を判定する。
+`cve_types_detected` には changelog から識別された脆弱性タイプを入れる。
+
+例: `["LPE"]`, `["RCE"]`, `["DoS"]`, `["XSS"]`
+
+`urgency_candidate` は Codex の識別結果に基づく候補であり、最終判定は Ansible tasks が行う。
+
+Ansible tasks はこの JSON を読み、patch policy の URGENT / HIGH 判断基準テーブルと照合して最終 status / urgency を確定する。
 
 ### 16.4 Codex CLI にやらせないこと
 
@@ -1578,13 +1614,17 @@ Codex CLI に以下はさせない。
 |---|---|
 | apt simulation 実行 | Ansible / shell |
 | package list 収集 | Ansible / shell |
-| changelog 取得 | Ansible / shell |
-| changelog 分類 | Codex CLI |
+| changelog 差分取得 | Ansible / shell |
+| important_component 判定 | Ansible tasks（パッケージ名リストと照合） |
+| security_repo 判定 | Ansible / shell（awk によるリポジトリ名判定） |
+| changelog 内の CVE タイプ識別 | Codex CLI（LPE / RCE / DoS 等） |
 | urgency 候補生成 | Codex CLI |
-| 最終 status 判定 | Ansible tasks |
+| URGENT / HIGH 条件への照合 | Ansible tasks（patch policy テーブルと照合） |
+| 最終 status / urgency 判定 | Ansible tasks |
+| 日本語メール本文生成 | Codex CLI |
+| 日本語レポート MD 生成 | Codex CLI |
 | patch apply | Ansible |
 | apply 可否制御 | Ansible tasks |
-| メール本文生成 | Codex CLI |
 
 ### 16.6 実行場所
 
