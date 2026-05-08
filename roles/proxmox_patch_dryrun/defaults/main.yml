@@ -1,0 +1,25 @@
+---
+proxmox_patch_dryrun_report_dir: "{{ playbook_dir }}/../reports/proxmox-dryrun"
+
+# Important component exact names (policy section 7)
+proxmox_patch_dryrun_important_components:
+  - proxmox-ve
+  - pve-manager
+  - pve-cluster
+  - pve-ha-manager
+  - qemu-server
+  - pve-container
+  - corosync
+  - zfsutils-linux
+  - zfs-zed
+  - ifupdown2
+  - intel-microcode
+  - amd64-microcode
+  - systemd
+  - udev
+
+# Important component name prefixes (wildcard match)
+proxmox_patch_dryrun_important_component_prefixes:
+  - proxmox-kernel-
+  - libpve-
+  - firmware-

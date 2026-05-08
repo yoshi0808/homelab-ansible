@@ -1,0 +1,360 @@
+---
+# =============================================================================
+# Phase 1: Collect dry-run data on each proxmox host (pve1, pve2 in parallel)
+# =============================================================================
+
+- name: Copy dryrun collect script
+  ansible.builtin.copy:
+    src: proxmox-dryrun-collect.sh
+    dest: /usr/local/sbin/proxmox-dryrun-collect.sh
+    mode: "0750"
+    owner: root
+    group: root
+
+- name: Run dryrun collect
+  ansible.builtin.command:
+    cmd: /usr/local/sbin/proxmox-dryrun-collect.sh
+  register: dryrun_raw
+  changed_when: false
+
+- name: Fail if collect returned no output
+  ansible.builtin.fail:
+    msg: "proxmox-dryrun-collect.sh on {{ inventory_hostname }} returned empty output."
+  when: dryrun_raw.stdout | length == 0
+
+- name: Parse dryrun JSON
+  ansible.builtin.set_fact:
+    node_dryrun: "{{ dryrun_raw.stdout | from_json }}"
+
+# =============================================================================
+# Phase 2: Merge on localhost
+# =============================================================================
+
+- name: Record run timestamp
+  ansible.builtin.set_fact:
+    dryrun_timestamp: "{{ lookup('pipe', 'date +%Y%m%dT%H%M%S') }}"
+  run_once: true
+  delegate_to: localhost
+  become: false
+
+- name: Ensure report directory exists
+  ansible.builtin.file:
+    path: "{{ proxmox_patch_dryrun_report_dir }}"
+    state: directory
+    mode: "0755"
+  run_once: true
+  delegate_to: localhost
+  become: false
+
+- name: Save node dryrun data to temp file for merging
+  ansible.builtin.copy:
+    content: "{{ [hostvars['pve1'].node_dryrun, hostvars['pve2'].node_dryrun] | to_json }}"
+    dest: "/tmp/proxmox_dryrun_nodes_{{ dryrun_timestamp }}.json"
+  run_once: true
+  delegate_to: localhost
+  become: false
+
+- name: Merge node data into unified dryrun JSON
+  ansible.builtin.command:
+    cmd: >-
+      python3 {{ role_path }}/files/proxmox-dryrun-merge.py
+      /tmp/proxmox_dryrun_nodes_{{ dryrun_timestamp }}.json
+      {{ proxmox_patch_dryrun_report_dir }}/{{ dryrun_timestamp }}_unified_dryrun.json
+  environment:
+    IMPORTANT_COMPONENTS: "{{ proxmox_patch_dryrun_important_components | to_json }}"
+    IMPORTANT_COMPONENT_PREFIXES: "{{ proxmox_patch_dryrun_important_component_prefixes | to_json }}"
+  register: merge_result
+  run_once: true
+  delegate_to: localhost
+  become: false
+  changed_when: true
+
+- name: Load unified dryrun JSON
+  ansible.builtin.set_fact:
+    unified_dryrun: "{{ lookup('file', proxmox_patch_dryrun_report_dir + '/' + dryrun_timestamp + '_unified_dryrun.json') | from_json }}"
+  run_once: true
+  delegate_to: localhost
+  become: false
+
+# Pre-determine cluster status before Codex (mechanical checks)
+- name: Determine pre-Codex cluster status
+  ansible.builtin.set_fact:
+    _pre_status: >-
+      {%- if not (unified_dryrun.node_summaries['pve1'].sim_ok | bool) or
+             not (unified_dryrun.node_summaries['pve2'].sim_ok | bool) -%}
+      BLOCKED
+      {%- elif unified_dryrun.cluster_summary.total_unique_updates == 0 and
+               unified_dryrun.cluster_summary.total_unique_removes == 0 -%}
+      NO_UPDATES
+      {%- else -%}
+      NEEDS_CLASSIFICATION
+      {%- endif -%}
+  run_once: true
+  delegate_to: localhost
+  become: false
+
+- name: Show pre-status
+  ansible.builtin.debug:
+    msg: "Pre-Codex cluster status: {{ _pre_status }}"
+  run_once: true
+  delegate_to: localhost
+  become: false
+
+# =============================================================================
+# Phase 3: Codex CLI classification (only when there are updates to classify)
+# =============================================================================
+
+- name: Call codex-classify.sh
+  ansible.builtin.command:
+    cmd: >-
+      {{ playbook_dir }}/../scripts/codex-classify.sh
+      {{ proxmox_patch_dryrun_report_dir }}/{{ dryrun_timestamp }}_unified_dryrun.json
+      {{ proxmox_patch_dryrun_report_dir }}/{{ dryrun_timestamp }}_codex_output.json
+  register: codex_result
+  run_once: true
+  delegate_to: localhost
+  become: false
+  changed_when: true
+  when: _pre_status == 'NEEDS_CLASSIFICATION'
+
+- name: Load Codex output
+  ansible.builtin.set_fact:
+    codex_output: "{{ lookup('file', proxmox_patch_dryrun_report_dir + '/' + dryrun_timestamp + '_codex_output.json') | from_json }}"
+  run_once: true
+  delegate_to: localhost
+  become: false
+  when: _pre_status == 'NEEDS_CLASSIFICATION'
+
+# =============================================================================
+# Phase 4: Final Status/Urgency determination (Ansible tasks)
+# =============================================================================
+
+# --- Mechanical Status from unified data ---
+- name: Determine mechanical status from package flags
+  ansible.builtin.set_fact:
+    _has_important_component: "{{ unified_dryrun.updates | selectattr('important_component', 'equalto', true) | list | length > 0 }}"
+    _has_removes: "{{ unified_dryrun.removes | length > 0 }}"
+  run_once: true
+  delegate_to: localhost
+  become: false
+  when: _pre_status == 'NEEDS_CLASSIFICATION'
+
+# URGENT conditions from policy (cve_types_detected and urgency_candidate)
+- name: Determine final cluster status and urgency
+  ansible.builtin.set_fact:
+    _urgent_cve_types: ["RCE", "LPE", "VM escape", "認証バイパス", "auth bypass", "exploit公開", "ransomware"]
+    _cve_types_all: >-
+      {{ codex_output.package_classifications
+         | map(attribute='cve_types_detected') | flatten | unique | list }}
+    _urgency_candidates_all: >-
+      {{ codex_output.package_classifications
+         | map(attribute='urgency_candidate') | list }}
+  run_once: true
+  delegate_to: localhost
+  become: false
+  when: _pre_status == 'NEEDS_CLASSIFICATION'
+
+- name: Compute final status
+  ansible.builtin.set_fact:
+    _final_status: >-
+      {%- if _pre_status != 'NEEDS_CLASSIFICATION' -%}
+      {{ _pre_status }}
+      {%- elif codex_output.status_inputs.major_upgrade_suspected | bool -%}
+      MAJOR_UPGRADE_DETECTED
+      {%- elif _has_important_component | bool or _has_removes | bool -%}
+      MAINTENANCE_REQUIRED
+      {%- else -%}
+      PATCH_READY
+      {%- endif -%}
+    _final_urgency: >-
+      {%- if _pre_status != 'NEEDS_CLASSIFICATION' -%}
+      NORMAL
+      {%- elif (_cve_types_all | intersect(_urgent_cve_types)) | length > 0 -%}
+      URGENT
+      {%- elif 'URGENT' in _urgency_candidates_all -%}
+      URGENT
+      {%- elif 'HIGH' in _urgency_candidates_all -%}
+      HIGH
+      {%- elif _pre_status == 'NEEDS_CLASSIFICATION' and
+               (unified_dryrun.updates | selectattr('security_repo', 'equalto', true) | list | length > 0) -%}
+      HIGH
+      {%- elif 'NORMAL' in _urgency_candidates_all -%}
+      NORMAL
+      {%- else -%}
+      LOW
+      {%- endif -%}
+  run_once: true
+  delegate_to: localhost
+  become: false
+
+- name: Show final determination
+  ansible.builtin.debug:
+    msg:
+      - "Final Status  : {{ _final_status }}"
+      - "Final Urgency : {{ _final_urgency }}"
+  run_once: true
+  delegate_to: localhost
+  become: false
+
+# =============================================================================
+# Phase 5: Save reports
+# =============================================================================
+
+- name: Build final report JSON
+  ansible.builtin.set_fact:
+    _final_report:
+      run_timestamp: "{{ dryrun_timestamp }}"
+      cluster_status: "{{ _final_status }}"
+      cluster_urgency: "{{ _final_urgency }}"
+      node_summaries: "{{ unified_dryrun.node_summaries }}"
+      classification: "{{ unified_dryrun.classification }}"
+      update_count: "{{ unified_dryrun.cluster_summary.total_unique_updates }}"
+      remove_count: "{{ unified_dryrun.cluster_summary.total_unique_removes }}"
+      reboot_required_pve1: "{{ hostvars['pve1'].node_dryrun.reboot_required }}"
+      reboot_required_pve2: "{{ hostvars['pve2'].node_dryrun.reboot_required }}"
+  run_once: true
+  delegate_to: localhost
+  become: false
+
+- name: Save final report JSON
+  ansible.builtin.copy:
+    content: "{{ _final_report | to_nice_json }}"
+    dest: "{{ proxmox_patch_dryrun_report_dir }}/{{ dryrun_timestamp }}_final.json"
+  run_once: true
+  delegate_to: localhost
+  become: false
+
+# Build MD report for NEEDS_CLASSIFICATION cases (Codex generates report_md)
+- name: Save Codex MD report
+  ansible.builtin.copy:
+    content: "{{ codex_output.report_md }}"
+    dest: "{{ proxmox_patch_dryrun_report_dir }}/{{ dryrun_timestamp }}_report.md"
+  run_once: true
+  delegate_to: localhost
+  become: false
+  when: _pre_status == 'NEEDS_CLASSIFICATION'
+
+# Minimal MD report for NO_UPDATES / BLOCKED
+- name: Save minimal MD report for NO_UPDATES or BLOCKED
+  ansible.builtin.copy:
+    content: |
+      # Proxmox Patch Dry-run レポート
+
+      実行日時: {{ dryrun_timestamp }}
+      クラスター Status: {{ _final_status }}
+
+      {% if _final_status == 'NO_UPDATES' %}
+      pve1/pve2 ともに更新候補なし。
+      {% elif _final_status == 'BLOCKED' %}
+      apt シミュレーションが失敗しました。手動確認が必要です。
+
+      ## ノード状態
+
+      {% for node_name, summary in unified_dryrun.node_summaries.items() %}
+      - {{ node_name }}: sim_ok={{ summary.sim_ok }}
+      {% endfor %}
+      {% endif %}
+    dest: "{{ proxmox_patch_dryrun_report_dir }}/{{ dryrun_timestamp }}_report.md"
+  run_once: true
+  delegate_to: localhost
+  become: false
+  when: _pre_status != 'NEEDS_CLASSIFICATION'
+
+# =============================================================================
+# Phase 6: Send email
+# =============================================================================
+
+- name: Load mail variables
+  ansible.builtin.include_vars:
+    file: "{{ inventory_dir }}/../vars/mail.yml"
+  run_once: true
+  delegate_to: localhost
+  become: false
+
+- name: Set email content for Codex-classified results
+  ansible.builtin.set_fact:
+    _mail_subject: "{{ codex_output.mail_subject }}"
+    _mail_body: "{{ codex_output.mail_body }}"
+    _mail_attach: true
+  run_once: true
+  delegate_to: localhost
+  become: false
+  when: _pre_status == 'NEEDS_CLASSIFICATION'
+
+- name: Set email content for NO_UPDATES
+  ansible.builtin.set_fact:
+    _mail_subject: "[Proxmox Patch Dry-run] NO_UPDATES - {{ groups['proxmox'] | join(', ') }} 更新候補なし"
+    _mail_body: |
+      Proxmox Patch Dry-run を実行しました。
+
+      実行日時: {{ dryrun_timestamp }}
+      対象ノード: {{ groups['proxmox'] | join(', ') }}
+
+      pve1/pve2 ともに更新候補がありません。パッチ適用は不要です。
+    _mail_attach: false
+  run_once: true
+  delegate_to: localhost
+  become: false
+  when: _final_status == 'NO_UPDATES'
+
+- name: Set email content for BLOCKED
+  ansible.builtin.set_fact:
+    _mail_subject: "[Proxmox Patch Dry-run][BLOCKED] apt シミュレーション失敗 - 手動確認が必要"
+    _mail_body: |
+      Proxmox Patch Dry-run で apt シミュレーションが失敗しました。
+
+      実行日時: {{ dryrun_timestamp }}
+      対象ノード: {{ groups['proxmox'] | join(', ') }}
+
+      Status: BLOCKED
+      自動パッチ適用は停止します。手動で apt の状態を確認してください。
+
+      ノード状態:
+      {% for node_name, summary in unified_dryrun.node_summaries.items() %}
+      - {{ node_name }}: sim_ok={{ summary.sim_ok }}
+      {% endfor %}
+    _mail_attach: false
+  run_once: true
+  delegate_to: localhost
+  become: false
+  when: _final_status == 'BLOCKED'
+
+- name: Send email with MD report attachment
+  community.general.mail:
+    host: "{{ smtp_host }}"
+    port: "{{ smtp_port }}"
+    username: "{{ smtp_user }}"
+    password: "{{ smtp_password }}"
+    to: "{{ mail_to }}"
+    subject: "{{ _mail_subject }}"
+    body: "{{ _mail_body }}"
+    attach:
+      - "{{ proxmox_patch_dryrun_report_dir }}/{{ dryrun_timestamp }}_report.md"
+    secure: starttls
+  run_once: true
+  delegate_to: localhost
+  become: false
+  when: _mail_attach | bool
+
+- name: Send email without attachment
+  community.general.mail:
+    host: "{{ smtp_host }}"
+    port: "{{ smtp_port }}"
+    username: "{{ smtp_user }}"
+    password: "{{ smtp_password }}"
+    to: "{{ mail_to }}"
+    subject: "{{ _mail_subject }}"
+    body: "{{ _mail_body }}"
+    secure: starttls
+  run_once: true
+  delegate_to: localhost
+  become: false
+  when: not (_mail_attach | bool)
+
+- name: Cleanup temp nodes file
+  ansible.builtin.file:
+    path: "/tmp/proxmox_dryrun_nodes_{{ dryrun_timestamp }}.json"
+    state: absent
+  run_once: true
+  delegate_to: localhost
+  become: false

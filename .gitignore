@@ -1,6 +1,7 @@
 # Ansible runtime output
 reports/**/*.json
 reports/**/*.log
+reports/**/*.md
 
 # Ansible retry files
 *.retry
@@ -23,3 +24,4 @@ __pycache__/
 
 # local mail variables
 inventories/homelab/vars/mail.yml
+inventories/vars/mail.yml

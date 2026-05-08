@@ -64,7 +64,9 @@ PVESR_RAW="$pvesr_raw" \
 CHRONY_RAW="$chrony_raw" \
 PVE_VERSION="$pve_version" \
 python3 - << 'PYEOF'
-import json, os, datetime, re
+import json, os, re
+from datetime import datetime, timezone, timedelta
+JST = timezone(timedelta(hours=9))
 
 
 def parse_zpool_states(raw):
@@ -130,7 +132,7 @@ def parse_pvesr_status(raw):
         if m:
             last_sync_str = m.group(1).strip()
             try:
-                dt = datetime.datetime.strptime(last_sync_str, "%Y-%m-%d %H:%M:%S")
+                dt = datetime.strptime(last_sync_str, "%Y-%m-%d %H:%M:%S")
                 last_sync_epoch = int(dt.timestamp())
             except ValueError:
                 last_sync_epoch = -1
@@ -152,7 +154,7 @@ failed_units = parse_failed_units(os.environ["SYSTEMD_FAILED_RAW"])
 repl_entries = parse_pvesr_status(os.environ["PVESR_RAW"])
 
 print(json.dumps({
-    "collected_at": datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
+    "collected_at": datetime.now(JST).strftime("%Y-%m-%dT%H:%M:%S%z"),
     "pve_version": os.environ["PVE_VERSION"],
     "cluster": {
         "quorate": os.environ["QUORATE"],

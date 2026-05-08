@@ -42,10 +42,12 @@ JOURNAL_ERROR_COUNT="$journal_error_count" \
 JOURNAL_ERRORS="${journal_errors_raw}" \
 CHRONY_TRACKING="$chrony_tracking" \
 python3 - << 'PYEOF'
-import json, os, datetime
+import json, os
+from datetime import datetime, timezone, timedelta
+JST = timezone(timedelta(hours=9))
 
 print(json.dumps({
-    "collected_at": datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
+    "collected_at": datetime.now(JST).strftime("%Y-%m-%dT%H:%M:%S%z"),
     "freeradius": {
         "service_active": os.environ["FREERADIUS_SERVICE_ACTIVE"],
         "version": os.environ["FREERADIUS_VERSION"]

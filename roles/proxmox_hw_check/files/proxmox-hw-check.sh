@@ -44,7 +44,9 @@ ZPOOL_STATUS_RAW="$zpool_status_raw" \
 DF_RAW="$df_raw" \
 IP_LINK_RAW="$ip_link_raw" \
 python3 - << 'PYEOF'
-import json, os, datetime, re
+import json, os, re
+from datetime import datetime, timezone, timedelta
+JST = timezone(timedelta(hours=9))
 
 
 def safe_int(val, default=0):
@@ -216,7 +218,7 @@ collection_status = {
 }
 
 print(json.dumps({
-    "collected_at": datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
+    "collected_at": datetime.now(JST).strftime("%Y-%m-%dT%H:%M:%S%z"),
     "collection_status": collection_status,
     "cpu": {
         "model": os.environ['CPU_MODEL'].strip(),
