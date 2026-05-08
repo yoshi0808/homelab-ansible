@@ -152,8 +152,8 @@ def parse_nics(raw):
             current_nic = {
                 "name": name,
                 "state": state_m.group(1) if state_m else 'UNKNOWN',
-                "rx_errors": 0, "rx_dropped": 0,
-                "tx_errors": 0, "tx_dropped": 0
+                "rx_packets": 0, "rx_errors": 0, "rx_dropped": 0,
+                "tx_packets": 0, "tx_errors": 0, "tx_dropped": 0
             }
             rx_header_seen = tx_header_seen = False
             continue
@@ -173,6 +173,7 @@ def parse_nics(raw):
         if rx_header_seen:
             vals = stripped.split()
             if len(vals) >= 4:
+                current_nic['rx_packets'] = safe_int(vals[1])
                 current_nic['rx_errors'] = safe_int(vals[2])
                 current_nic['rx_dropped'] = safe_int(vals[3])
             rx_header_seen = False
@@ -180,6 +181,7 @@ def parse_nics(raw):
         if tx_header_seen:
             vals = stripped.split()
             if len(vals) >= 4:
+                current_nic['tx_packets'] = safe_int(vals[1])
                 current_nic['tx_errors'] = safe_int(vals[2])
                 current_nic['tx_dropped'] = safe_int(vals[3])
             tx_header_seen = False
@@ -189,6 +191,7 @@ def parse_nics(raw):
         nics.append(current_nic)
 
     for nic in nics:
+        nic['total_packets'] = nic['rx_packets'] + nic['tx_packets']
         nic['total_errors'] = nic['rx_errors'] + nic['tx_errors']
         nic['total_dropped'] = nic['rx_dropped'] + nic['tx_dropped']
 

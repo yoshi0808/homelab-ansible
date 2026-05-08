@@ -35,22 +35,38 @@
   ansible.builtin.set_fact:
     _nics_down: "{{ proxmox_hw.nics | selectattr('state', 'equalto', 'DOWN') | map(attribute='name') | list }}"
 
-- name: Find NICs with high error counts
+- name: Initialize NIC rate check results
   ansible.builtin.set_fact:
-    _nics_errors: "{{ proxmox_hw.nics |
-      selectattr('total_errors', 'gt', proxmox_hw_check_nic_errors_warning_threshold | int) |
-      map(attribute='name') | list }}"
-    _nics_dropped: "{{ proxmox_hw.nics |
-      selectattr('total_dropped', 'gt', proxmox_hw_check_nic_dropped_warning_threshold | int) |
-      map(attribute='name') | list }}"
+    _nics_errors: []
+    _nics_dropped: []
+
+- name: Check NIC error rates
+  ansible.builtin.set_fact:
+    _nics_errors: >-
+      {{ _nics_errors + ([item.name] if
+         (item.total_packets | int > 0) and
+         ((item.total_errors | float / (item.total_packets | int + 1) * 100)
+         > (proxmox_hw_check_nic_errors_warning_pct | float))
+         else []) }}
+  loop: "{{ proxmox_hw.nics | default([]) }}"
+
+- name: Check NIC drop rates
+  ansible.builtin.set_fact:
+    _nics_dropped: >-
+      {{ _nics_dropped + ([item.name] if
+         (item.total_packets | int > 0) and
+         ((item.total_dropped | float / (item.total_packets | int + 1) * 100)
+         > (proxmox_hw_check_nic_dropped_warning_pct | float))
+         else []) }}
+  loop: "{{ proxmox_hw.nics | default([]) }}"
 
 - name: Classify warnings
   ansible.builtin.set_fact:
     proxmox_hw_warnings: "{{ []
       + _collection_failures
       + (_nics_down | map('regex_replace', '^(.*)$', 'NIC \\1 is DOWN') | list)
-      + (_nics_errors | map('regex_replace', '^(.*)$', 'NIC \\1 error count exceeds threshold') | list)
-      + (_nics_dropped | map('regex_replace', '^(.*)$', 'NIC \\1 dropped count exceeds threshold') | list)
+      + (_nics_errors | map('regex_replace', '^(.*)$', 'NIC \\1 error rate exceeds threshold') | list)
+      + (_nics_dropped | map('regex_replace', '^(.*)$', 'NIC \\1 drop rate exceeds threshold') | list)
       }}"
 
 - name: Build report
