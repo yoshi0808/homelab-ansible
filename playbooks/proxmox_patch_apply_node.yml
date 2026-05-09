@@ -1,0 +1,33 @@
+---
+# Proxmox single-node patch apply
+# Usage:
+#   # PATCH_READY apply (default)
+#   ansible-playbook -i inventories/homelab/hosts.yml playbooks/proxmox_patch_apply_node.yml \
+#     -e target_node=pve2
+#
+#   # MAINTENANCE_REQUIRED manual apply (policy deviation — use with care)
+#   ansible-playbook -i inventories/homelab/hosts.yml playbooks/proxmox_patch_apply_node.yml \
+#     -e target_node=pve2 \
+#     -e proxmox_patch_apply_mode=manual \
+#     -e proxmox_patch_apply_manual_confirm=MAINTENANCE_REQUIRED
+#
+# target_node: pve1 or pve2 (required)
+# Assumes: VM/CT evacuation has already been done before running this playbook.
+
+- name: Validate target_node before main play
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Assert target_node is pve1 or pve2
+      ansible.builtin.assert:
+        that:
+          - target_node is defined
+          - target_node in ['pve1', 'pve2']
+        fail_msg: "target_node must be 'pve1' or 'pve2', got: '{{ target_node | default('undefined') }}'"
+
+- name: Proxmox patch apply (single node)
+  hosts: "{{ target_node | default('__invalid_target__') }}"
+  gather_facts: true
+  become: true
+  roles:
+    - proxmox_patch_apply_node

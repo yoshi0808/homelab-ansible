@@ -1,0 +1,45 @@
+---
+proxmox_patch_apply_report_dir: "{{ playbook_dir }}/../reports/proxmox-patch"
+proxmox_patch_dryrun_report_dir: "{{ playbook_dir }}/../reports/proxmox-dryrun"
+
+# Hostname of the control node VM to detect on target_node
+proxmox_patch_apply_control_node_name: "ansy"
+
+# Reboot wait timeout in seconds (15 minutes)
+proxmox_patch_apply_reboot_timeout: 900
+
+# Apply mode: controls behavior when MAINTENANCE_REQUIRED is detected in re-dry-run
+# auto:   abort with email (default, for automated PATCH_READY apply)
+# manual: require explicit confirmation then continue (policy deviation — use with care)
+proxmox_patch_apply_mode: "auto"
+
+# Explicit confirmation required when apply_mode=manual and MAINTENANCE_REQUIRED is detected.
+# Must be set to exactly "MAINTENANCE_REQUIRED" to proceed.
+# Usage: -e proxmox_patch_apply_mode=manual -e proxmox_patch_apply_manual_confirm=MAINTENANCE_REQUIRED
+proxmox_patch_apply_manual_confirm: ""
+
+# Package count threshold for major upgrade suspicion
+proxmox_patch_apply_major_upgrade_threshold: 50
+
+# Important component exact names (mirrors policy section 7)
+proxmox_patch_apply_important_components:
+  - proxmox-ve
+  - pve-manager
+  - pve-cluster
+  - pve-ha-manager
+  - qemu-server
+  - pve-container
+  - corosync
+  - zfsutils-linux
+  - zfs-zed
+  - ifupdown2
+  - intel-microcode
+  - amd64-microcode
+  - systemd
+  - udev
+
+# Important component name prefixes
+proxmox_patch_apply_important_component_prefixes:
+  - proxmox-kernel-
+  - libpve-
+  - firmware-
