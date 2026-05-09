@@ -8,6 +8,9 @@ set -uo pipefail
 collected_at=$(date +"%Y-%m-%dT%H:%M:%SZ")
 node_name=$(hostname -s)
 
+# apt-get update (refresh package lists only, no package installation)
+apt_update_output=$(apt-get update -qq 2>&1) && apt_update_ok="true" || apt_update_ok="false"
+
 # apt-get check (dpkg/apt consistency check)
 apt_check_output=$(apt-get check 2>&1) && apt_check_ok="true" || apt_check_ok="false"
 
@@ -21,6 +24,8 @@ else
   reboot_required="false"
 fi
 
+APT_UPDATE_OK="$apt_update_ok" \
+APT_UPDATE_OUTPUT="${apt_update_output:-}" \
 APT_CHECK_OK="$apt_check_ok" \
 APT_CHECK_OUTPUT="${apt_check_output:-}" \
 SIM_OK="$sim_ok" \
@@ -31,6 +36,8 @@ COLLECTED_AT="$collected_at" \
 python3 - << 'PYEOF'
 import json, os, re, subprocess
 
+apt_update_ok = os.environ["APT_UPDATE_OK"] == "true"
+apt_update_output = os.environ["APT_UPDATE_OUTPUT"]
 apt_check_ok = os.environ["APT_CHECK_OK"] == "true"
 apt_check_output = os.environ["APT_CHECK_OUTPUT"]
 sim_ok = os.environ["SIM_OK"] == "true"
@@ -115,6 +122,8 @@ for u in updates:
 print(json.dumps({
     "collected_at": collected_at,
     "node": node_name,
+    "apt_update_ok": apt_update_ok,
+    "apt_update_output": apt_update_output,
     "apt_check_ok": apt_check_ok,
     "apt_check_output": apt_check_output,
     "sim_ok": sim_ok,

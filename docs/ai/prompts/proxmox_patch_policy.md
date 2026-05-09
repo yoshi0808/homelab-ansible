@@ -423,31 +423,32 @@ read-only
 
 ```text
 semi-safe
-変更操作なし（apt-get -s のみ）
+apt-get update あり（パッケージリストの更新のみ、パッケージ本体は変更しない）
 実パッチ適用なし
 ```
 
 #### 処理概要
 
 1. 対象ノードの healthcheck が OK であることを確認する
-2. `apt-get check` を実行し、apt / dpkg の整合性を確認する（`apt-get update` は変更操作にあたるため実行しない）
-3. `apt-get -s dist-upgrade` を実行する
-4. simulation の成功/失敗を収集する
-5. `Inst` / `Remv` / `Conf` / kept back などを抽出する
-6. 更新対象パッケージ一覧を作成する
-7. remove 予定パッケージ一覧を作成する
-8. newly installed package 一覧を作成する
-9. 重要コンポーネント該当候補を抽出する
-10. Debian security repository 由来候補を抽出する
-11. 対象パッケージの `apt changelog` を取得する
-12. changelog 全文を report ディレクトリに保存する
-13. dry-run report JSON を生成する
-14. Codex CLI に dry-run report / changelog / policy を渡す
-15. Codex CLI から構造化分類 JSON を受け取る
-16. Ansible tasks が最終 Status / Urgency を判定する
-17. メール本文を生成する
-18. 必要に応じて通知する
-19. apply は行わない
+2. `apt-get update` を実行し、パッケージリストを最新化する
+3. `apt-get check` を実行し、apt / dpkg の整合性を確認する
+4. `apt-get -s dist-upgrade` を実行する
+5. simulation の成功/失敗を収集する
+6. `Inst` / `Remv` / `Conf` / kept back などを抽出する
+7. 更新対象パッケージ一覧を作成する
+8. remove 予定パッケージ一覧を作成する
+9. newly installed package 一覧を作成する
+10. 重要コンポーネント該当候補を抽出する
+11. Debian security repository 由来候補を抽出する
+12. 対象パッケージの `apt changelog` を取得する
+13. changelog 全文を report ディレクトリに保存する
+14. dry-run report JSON を生成する
+15. Codex CLI に dry-run report / changelog / policy を渡す
+16. Codex CLI から構造化分類 JSON を受け取る
+17. Ansible tasks が最終 Status / Urgency を判定する
+18. メール本文を生成する
+19. 必要に応じて通知する
+20. apply は行わない
 
 #### Codex CLI の役割
 

@@ -89,7 +89,9 @@
 - name: Determine pre-Codex cluster status
   ansible.builtin.set_fact:
     _pre_status: >-
-      {%- if not (unified_dryrun.node_summaries['pve1'].apt_check_ok | bool) or
+      {%- if not (unified_dryrun.node_summaries['pve1'].apt_update_ok | bool) or
+             not (unified_dryrun.node_summaries['pve2'].apt_update_ok | bool) or
+             not (unified_dryrun.node_summaries['pve1'].apt_check_ok | bool) or
              not (unified_dryrun.node_summaries['pve2'].apt_check_ok | bool) or
              not (unified_dryrun.node_summaries['pve1'].sim_ok | bool) or
              not (unified_dryrun.node_summaries['pve2'].sim_ok | bool) -%}
@@ -262,7 +264,7 @@
       ## ノード状態
 
       {% for node_name, summary in unified_dryrun.node_summaries.items() %}
-      - {{ node_name }}: sim_ok={{ summary.sim_ok }}
+      - {{ node_name }}: apt_update_ok={{ summary.apt_update_ok }}, apt_check_ok={{ summary.apt_check_ok }}, sim_ok={{ summary.sim_ok }}
       {% endfor %}
       {% endif %}
     dest: "{{ proxmox_patch_dryrun_report_dir }}/{{ dryrun_timestamp }}_report.md"
@@ -322,7 +324,7 @@
 
       ノード状態:
       {% for node_name, summary in unified_dryrun.node_summaries.items() %}
-      - {{ node_name }}: sim_ok={{ summary.sim_ok }}
+      - {{ node_name }}: apt_update_ok={{ summary.apt_update_ok }}, apt_check_ok={{ summary.apt_check_ok }}, sim_ok={{ summary.sim_ok }}
       {% endfor %}
     _mail_attach: false
   run_once: true
