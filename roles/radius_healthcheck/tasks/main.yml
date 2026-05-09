@@ -1,4 +1,10 @@
 ---
+- name: Load mail variables
+  ansible.builtin.include_vars:
+    file: "{{ inventory_dir }}/../vars/mail.yml"
+  delegate_to: localhost
+  become: false
+
 - name: Copy radius healthcheck script
   ansible.builtin.copy:
     src: radius-healthcheck.sh
@@ -85,6 +91,36 @@
       - "Journal : error_count_1h={{ radius_health.journal.error_count_1h }}"
       - "Criticals: {{ radius_criticals }}"
       - "Warnings : {{ radius_warnings }}"
+
+- name: Send healthcheck notification
+  community.general.mail:
+    host: "{{ smtp_host }}"
+    port: "{{ smtp_port }}"
+    username: "{{ smtp_user }}"
+    password: "{{ smtp_password }}"
+    to: "{{ mail_to }}"
+    subject: "[RADIUS Healthcheck] {{ radius_report.result.status }} - {{ inventory_hostname }}"
+    body: |
+      Host    : {{ inventory_hostname }}
+      Status  : {{ radius_report.result.status }}
+
+      Criticals:
+      {% for item in radius_criticals %}
+      - {{ item }}
+      {% else %}
+      (none)
+      {% endfor %}
+      Warnings:
+      {% for item in radius_warnings %}
+      - {{ item }}
+      {% else %}
+      (none)
+      {% endfor %}
+    secure: starttls
+  delegate_to: localhost
+  become: false
+  ignore_errors: true
+  when: radius_criticals | length > 0 or radius_warnings | length > 0
 
 - name: Fail if critical
   ansible.builtin.fail:

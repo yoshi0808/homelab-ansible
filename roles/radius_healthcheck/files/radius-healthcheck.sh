@@ -5,7 +5,7 @@
 
 set -uo pipefail
 
-freeradius_service_active=$(systemctl is-active freeradius 2>/dev/null || echo "inactive")
+freeradius_service_active=$(systemctl is-active freeradius 2>/dev/null) || freeradius_service_active="inactive"
 
 if ss -H -lun 2>/dev/null | awk '{print $4}' | grep -qE ':1812$'; then
   port_1812="yes"
