@@ -8,6 +8,9 @@ set -uo pipefail
 collected_at=$(date +"%Y-%m-%dT%H:%M:%SZ")
 node_name=$(hostname -s)
 
+# apt-get check (dpkg/apt consistency check)
+apt_check_output=$(apt-get check 2>&1) && apt_check_ok="true" || apt_check_ok="false"
+
 # apt-get -s dist-upgrade simulation (no changes)
 sim_output=$(LC_ALL=C apt-get -s dist-upgrade 2>&1) && sim_ok="true" || sim_ok="false"
 
@@ -18,6 +21,8 @@ else
   reboot_required="false"
 fi
 
+APT_CHECK_OK="$apt_check_ok" \
+APT_CHECK_OUTPUT="${apt_check_output:-}" \
 SIM_OK="$sim_ok" \
 SIM_OUTPUT="$sim_output" \
 REBOOT_REQUIRED="$reboot_required" \
@@ -26,6 +31,8 @@ COLLECTED_AT="$collected_at" \
 python3 - << 'PYEOF'
 import json, os, re, subprocess
 
+apt_check_ok = os.environ["APT_CHECK_OK"] == "true"
+apt_check_output = os.environ["APT_CHECK_OUTPUT"]
 sim_ok = os.environ["SIM_OK"] == "true"
 sim_output = os.environ["SIM_OUTPUT"]
 reboot_required = os.environ["REBOOT_REQUIRED"] == "true"
@@ -108,6 +115,8 @@ for u in updates:
 print(json.dumps({
     "collected_at": collected_at,
     "node": node_name,
+    "apt_check_ok": apt_check_ok,
+    "apt_check_output": apt_check_output,
     "sim_ok": sim_ok,
     "reboot_required": reboot_required,
     "updates": updates,

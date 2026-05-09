@@ -71,6 +71,7 @@ for u in updates_list:
 node_summaries = {}
 for nd in nodes:
     node_summaries[nd["node"]] = {
+        "apt_check_ok": nd["apt_check_ok"],
         "sim_ok": nd["sim_ok"],
         "reboot_required": nd["reboot_required"],
         "collected_at": nd["collected_at"],

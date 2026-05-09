@@ -417,21 +417,20 @@ read-only
 
 - pve1
 - pve2
-- 原則 pve2 を主対象にする
-- `--limit` による単一ノード実行も可
+- pve1 / pve2 の固定ペアで実行する（単一ノード実行は非対応）
 
 #### 安全度
 
 ```text
 semi-safe
-apt update あり
+変更操作なし（apt-get -s のみ）
 実パッチ適用なし
 ```
 
 #### 処理概要
 
 1. 対象ノードの healthcheck が OK であることを確認する
-2. `apt-get update` を実行する
+2. `apt-get check` を実行し、apt / dpkg の整合性を確認する（`apt-get update` は変更操作にあたるため実行しない）
 3. `apt-get -s dist-upgrade` を実行する
 4. simulation の成功/失敗を収集する
 5. `Inst` / `Remv` / `Conf` / kept back などを抽出する
@@ -463,10 +462,10 @@ Codex CLI は最終 Status を直接決定しない。
 
 #### 出力
 
-- dry-run JSON report
-- changelog text files
+- dry-run JSON report（unified JSON。changelog diff を含む）
 - Codex classification JSON
-- mail body draft
+- final report JSON
+- 日本語 MD report（changelog 差分の全文と分析結果を含む）
 - final Status / Urgency
 
 #### Status 判定
@@ -804,9 +803,9 @@ udev
 
 行動:
 
-- 通知しない
+- メールで通知する（件名に `NO_UPDATES` を明示する）
 - パッチ適用しない
-- report のみ保存してもよい
+- report を保存する
 
 ---
 
@@ -1442,7 +1441,7 @@ https://security-tracker.debian.org/
 
 | Status | メール |
 |---|---|
-| `NO_UPDATES` | 原則送らない |
+| `NO_UPDATES` | 送る（件名に明示） |
 | `PATCH_READY` 自動適用成功 | 送る |
 | `PATCH_READY` pve2 で停止 | 強めに送る |
 | `MAINTENANCE_REQUIRED` | 送る |

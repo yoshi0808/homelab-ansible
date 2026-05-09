@@ -1,5 +1,14 @@
 ---
 # =============================================================================
+# Healthcheck gate: abort if either node is not OK
+# =============================================================================
+
+- name: Fail if healthcheck is not OK
+  ansible.builtin.fail:
+    msg: "Healthcheck is {{ proxmox_report.result.status }} on {{ inventory_hostname }}, dryrun aborted."
+  when: proxmox_report.result.status != 'OK'
+
+# =============================================================================
 # Phase 1: Collect dry-run data on each proxmox host (pve1, pve2 in parallel)
 # =============================================================================
 
@@ -80,7 +89,9 @@
 - name: Determine pre-Codex cluster status
   ansible.builtin.set_fact:
     _pre_status: >-
-      {%- if not (unified_dryrun.node_summaries['pve1'].sim_ok | bool) or
+      {%- if not (unified_dryrun.node_summaries['pve1'].apt_check_ok | bool) or
+             not (unified_dryrun.node_summaries['pve2'].apt_check_ok | bool) or
+             not (unified_dryrun.node_summaries['pve1'].sim_ok | bool) or
              not (unified_dryrun.node_summaries['pve2'].sim_ok | bool) -%}
       BLOCKED
       {%- elif unified_dryrun.cluster_summary.total_unique_updates == 0 and
