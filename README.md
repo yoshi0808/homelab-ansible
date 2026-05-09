@@ -35,17 +35,51 @@ homelab-ansible/
 │   ├── homelab/
 │   │   ├── hosts.yml
 │   │   ├── group_vars/
+│   │   │   ├── control_nodes.yml
+│   │   │   ├── dev_nodes.yml
+│   │   │   ├── proxmox.yml
+│   │   │   └── radius_servers.yml
 │   │   └── host_vars/
+│   │       ├── pve1.yml
+│   │       ├── pve2.yml
+│   │       └── quory.yml
 │   └── vars/
+│       ├── mail.yml
+│       └── proxmox_vm_home_nodes.yml
 ├── playbooks/
+│   ├── proxmox_healthcheck.yml
+│   ├── proxmox_hw_check.yml
+│   ├── proxmox_patch_apply_node.yml
+│   ├── proxmox_patch_dryrun.yml
 │   └── radius_healthcheck.yml
 ├── roles/
+│   ├── proxmox_healthcheck/
+│   │   ├── defaults/
+│   │   ├── files/
+│   │   └── tasks/
+│   ├── proxmox_hw_check/
+│   │   ├── defaults/
+│   │   ├── files/
+│   │   └── tasks/
+│   ├── proxmox_patch_apply_node/
+│   │   ├── defaults/
+│   │   ├── files/
+│   │   └── tasks/
+│   ├── proxmox_patch_dryrun/
+│   │   ├── defaults/
+│   │   ├── files/
+│   │   └── tasks/
 │   └── radius_healthcheck/
 │       ├── defaults/
 │       ├── files/
 │       └── tasks/
 ├── scripts/
+│   └── codex-classify.sh
 ├── reports/
+│   ├── proxmox-dryrun/
+│   ├── proxmox-hardware/
+│   ├── proxmox-health/
+│   ├── proxmox-patch/
 │   └── radius-health/
 ├── cloudinit/
 └── docs/
@@ -87,6 +121,16 @@ all:
           ansible_connection: local
 ```
 
+### group_vars
+
+SSHの接続情報を記載（公開鍵認証）
+
+---
+
+### vars/proxmox_vm_home_nodes.yml
+
+VMが本来どのProxmoxノードに存在しているべきかを示すもの
+
 ---
 
 ## ansible.cfg
@@ -102,62 +146,16 @@ retry_files_enabled = False
 
 ---
 
-## 動作確認
+## vars/mail.yml (.gitignore)
 
 ```
-ansible proxmox -m ping
-ansible-inventory --graph
-ansible-playbook playbooks/radius_healthcheck.yml --check
+# inventories/homelab/vars/mail.yml（git管理しない）
+smtp_host: smtp.gmail.com
+smtp_port: 587
+smtp_user: username@gmail.com
+smtp_password: "xxxx xxxxgp xxxx xxxx"  # アプリパスワード
+mail_to: username@gmail.com
 ```
 
 ---
 
-## 運用方針
-
-- 変更前に必ず dry-run / check を実施
-- 初期は read-only（状態確認）中心
-- 破壊的変更は playbook を分離
-- 設定はコードとして管理（Git）
-
----
-
-## フェーズ
-
-### Phase 1（現在）
-
-- ansy構築
-- Ansible疎通確認
-- 基本構成作成
-
-### Phase 2
-
-- healthcheck playbook
-- Ubuntu共通設定
-
-### Phase 3
-
-- quory（監視・quorum）構築
-- Autoinstall導入
-
-### Phase 4
-
-- qdevice構成
-- 監視通知
-
----
-
-## セキュリティ
-
-- SSH鍵は用途ごとに分離
-  - id_ansible（インフラ用）
-  - id_ed25519（GitHub用）
-- ansyは内部ネットワーク限定
-- Ubuntu Pro + unattended-upgrades適用
-
----
-
-## 備考
-
-- Cloud-initは初期構成のみ使用
-- 本格的な設定はAnsibleで管理
-- すべて再構築可能な状態を維持する
