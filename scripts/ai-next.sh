@@ -181,7 +181,7 @@ EOF
     echo "作成: $(rel "$save")"
     echo "VSCodeで開きます..."
     echo ""
-    code "$save"
+    code "$save" 2>/dev/null || echo "  → VSCodeで開いてください: $(rel "$save")"
 }
 
 # =============================================================
