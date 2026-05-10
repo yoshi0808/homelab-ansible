@@ -222,10 +222,7 @@ Unattended-Upgrade::Automatic-Reboot "false";
 
 ## 9. 今後の実装順序
 
-1. `radius-healthcheck.sh` に `reboot_required` を追加（`/var/run/reboot-required` 確認）
-2. `radius_healthcheck` role の tasks に `reboot_required` の fact 化と通知条件への組み込み
-3. `radius_healthcheck.yml` に通知 task を追加（WARNING / CRITICAL / reboot_required 時）
-4. `ubuntu_nightly.yml` と対応 role を新規作成
-5. ansy で手動実行テスト
-6. quory 到着後に systemd timer 化
-7. Semaphore UI 導入後に Schedule へ移行
+1. `ubuntu_nightly.yml` と対応 role を新規作成
+2. ansy で手動実行テスト
+3. quory 到着後に systemd timer 化
+4. Semaphore UI 導入後に Schedule へ移行
