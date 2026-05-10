@@ -45,7 +45,7 @@
       ansible.builtin.set_fact:
         nightly_report:
           host: "{{ inventory_hostname }}"
-          executed_at: "{{ ansible_facts['date_time']['iso8601'] }}"
+          executed_at: "{{ lookup('pipe', 'date +%Y-%m-%dT%H:%M:%S+09:00') }}"
           reboot_required: false
           rebooted: false
           result: "SKIPPED"
@@ -141,7 +141,7 @@
       ansible.builtin.set_fact:
         nightly_report:
           host: "{{ inventory_hostname }}"
-          executed_at: "{{ ansible_facts['date_time']['iso8601'] }}"
+          executed_at: "{{ lookup('pipe', 'date +%Y-%m-%dT%H:%M:%S+09:00') }}"
           reboot_required: true
           rebooted: true
           freeradius: "{{ freeradius_active.stdout.strip() }}"
