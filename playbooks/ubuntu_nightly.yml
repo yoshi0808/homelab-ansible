@@ -1,0 +1,192 @@
+---
+- name: Ubuntu nightly - conditional reboot and service check
+  hosts: radius_servers
+  gather_facts: true
+  become: true
+
+  vars:
+    nightly_report_dir: "{{ playbook_dir }}/../reports/ubuntu-nightly"
+
+  tasks:
+    - name: Check reboot-required flag
+      ansible.builtin.stat:
+        path: /var/run/reboot-required
+      register: reboot_flag
+
+    - name: Check if needrestart is available
+      ansible.builtin.stat:
+        path: /usr/sbin/needrestart
+      register: needrestart_bin
+
+    - name: Run needrestart in batch mode
+      ansible.builtin.command:
+        cmd: /usr/sbin/needrestart -b
+      register: needrestart_output
+      changed_when: false
+      failed_when: false
+      when: needrestart_bin.stat.exists
+
+    - name: Evaluate reboot requirement
+      ansible.builtin.set_fact:
+        reboot_required: >-
+          {{ reboot_flag.stat.exists
+             or (needrestart_bin.stat.exists
+                 and 'NEEDRESTART-KSTA: 3' in (needrestart_output.stdout | default(''))) }}
+
+    - name: Ensure report directory exists
+      ansible.builtin.file:
+        path: "{{ nightly_report_dir }}"
+        state: directory
+        mode: "0755"
+      delegate_to: localhost
+      become: false
+
+    - name: Build skipped report
+      ansible.builtin.set_fact:
+        nightly_report:
+          host: "{{ inventory_hostname }}"
+          executed_at: "{{ ansible_facts['date_time']['iso8601'] }}"
+          reboot_required: false
+          rebooted: false
+          result: "SKIPPED"
+      when: not reboot_required
+
+    - name: Save skipped report
+      ansible.builtin.copy:
+        content: "{{ nightly_report | to_nice_json }}"
+        dest: "{{ nightly_report_dir }}/{{ inventory_hostname }}_{{ ansible_facts['date_time']['iso8601_basic_short'] }}.json"
+      delegate_to: localhost
+      become: false
+      when: not reboot_required
+
+    - name: End play if reboot is not required
+      ansible.builtin.meta: end_host
+      when: not reboot_required
+
+    - name: Load mail variables
+      ansible.builtin.include_vars:
+        file: "{{ inventory_dir }}/../vars/mail.yml"
+      delegate_to: localhost
+      become: false
+
+    - name: Send reboot start notification
+      community.general.mail:
+        host: "{{ smtp_host }}"
+        port: "{{ smtp_port }}"
+        username: "{{ smtp_user }}"
+        password: "{{ smtp_password }}"
+        to: "{{ mail_to }}"
+        subject: "[ubuntu_nightly] Reboot started - {{ inventory_hostname }}"
+        body: |
+          Host: {{ inventory_hostname }}
+          Action: Reboot started
+          Time: {{ ansible_facts["date_time"]["iso8601"] }}
+        secure: starttls
+      delegate_to: localhost
+      become: false
+      ignore_errors: true
+
+    - name: Reboot host
+      ansible.builtin.reboot:
+        reboot_timeout: 300
+
+    - name: Check freeradius service status
+      ansible.builtin.command:
+        cmd: systemctl is-active freeradius
+      register: freeradius_active
+      changed_when: false
+      failed_when: false
+
+    - name: Check 1812/udp listening
+      ansible.builtin.shell:
+        cmd: ss -ulnH 'sport = :1812'
+      register: port_1812_output
+      changed_when: false
+      failed_when: false
+
+    - name: Check 1813/udp listening
+      ansible.builtin.shell:
+        cmd: ss -ulnH 'sport = :1813'
+      register: port_1813_output
+      changed_when: false
+      failed_when: false
+
+    - name: Evaluate service and port results
+      ansible.builtin.set_fact:
+        nightly_criticals: "{{ []
+          + ([] if freeradius_active.stdout.strip() == 'active'
+                 else ['freeradius service is not active: ' + freeradius_active.stdout.strip()])
+          + ([] if port_1812_output.stdout | length > 0
+                 else ['port 1812/udp is not listening'])
+          + ([] if port_1813_output.stdout | length > 0
+                 else ['port 1813/udp is not listening'])
+          }}"
+
+    - name: Gather facts after reboot
+      ansible.builtin.setup:
+        gather_subset:
+          - date_time
+
+    - name: Print post-reboot result
+      ansible.builtin.debug:
+        msg:
+          - "Host      : {{ inventory_hostname }}"
+          - "Result    : {{ 'CRITICAL' if nightly_criticals | length > 0 else 'OK' }}"
+          - "freeradius: {{ freeradius_active.stdout.strip() }}"
+          - "1812/udp  : {{ 'listening' if port_1812_output.stdout | length > 0 else 'not listening' }}"
+          - "1813/udp  : {{ 'listening' if port_1813_output.stdout | length > 0 else 'not listening' }}"
+          - "Criticals : {{ nightly_criticals }}"
+
+    - name: Build result report
+      ansible.builtin.set_fact:
+        nightly_report:
+          host: "{{ inventory_hostname }}"
+          executed_at: "{{ ansible_facts['date_time']['iso8601'] }}"
+          reboot_required: true
+          rebooted: true
+          freeradius: "{{ freeradius_active.stdout.strip() }}"
+          port_1812: "{{ 'listening' if port_1812_output.stdout | length > 0 else 'not listening' }}"
+          port_1813: "{{ 'listening' if port_1813_output.stdout | length > 0 else 'not listening' }}"
+          criticals: "{{ nightly_criticals }}"
+          result: "{{ 'CRITICAL' if nightly_criticals | length > 0 else 'OK' }}"
+
+    - name: Save result report
+      ansible.builtin.copy:
+        content: "{{ nightly_report | to_nice_json }}"
+        dest: "{{ nightly_report_dir }}/{{ inventory_hostname }}_{{ ansible_facts['date_time']['iso8601_basic_short'] }}.json"
+      delegate_to: localhost
+      become: false
+
+    - name: Send result notification
+      community.general.mail:
+        host: "{{ smtp_host }}"
+        port: "{{ smtp_port }}"
+        username: "{{ smtp_user }}"
+        password: "{{ smtp_password }}"
+        to: "{{ mail_to }}"
+        subject: "[ubuntu_nightly] {{ 'CRITICAL' if nightly_criticals | length > 0 else 'OK' }} - {{ inventory_hostname }}"
+        body: |
+          Host: {{ inventory_hostname }}
+          Result: {{ 'CRITICAL' if nightly_criticals | length > 0 else 'OK' }}
+          Time: {{ ansible_facts["date_time"]["iso8601"] }}
+
+          Service:
+            freeradius: {{ freeradius_active.stdout.strip() }}
+            1812/udp: {{ 'listening' if port_1812_output.stdout | length > 0 else 'not listening' }}
+            1813/udp: {{ 'listening' if port_1813_output.stdout | length > 0 else 'not listening' }}
+
+          Criticals:
+          {% for item in nightly_criticals %}
+          - {{ item }}
+          {% else %}
+          (none)
+          {% endfor %}
+        secure: starttls
+      delegate_to: localhost
+      become: false
+      ignore_errors: true
+
+    - name: Fail if critical
+      ansible.builtin.fail:
+        msg: "CRITICAL on {{ inventory_hostname }}: {{ nightly_criticals | join(', ') }}"
+      when: nightly_criticals | length > 0

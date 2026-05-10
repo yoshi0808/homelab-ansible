@@ -19,7 +19,6 @@ CORE_MD="$PROMPTS_DIR/core.md"
 # ユーティリティ
 # =============================================================
 
-# targetに対応するpolicy fileパスを返す（ファイルがなければ空）
 detect_policy() {
     local target="$1"
     local policy_file=""
@@ -33,7 +32,6 @@ detect_policy() {
     [ -f "$policy_file" ] && echo "$policy_file" || echo ""
 }
 
-# 最新ファイルの種類からnext stepを判定
 detect_step() {
     local dir="$1"
     local latest=""
@@ -47,8 +45,6 @@ detect_step() {
     esac
 }
 
-# 次のファイル連番（3桁）を返す
-# ファイル名形式: YYYY-MM-DD_NNN_type.md → _ で分割して2番目を取る
 next_num() {
     local dir="$1"
     local last_num="000"
@@ -61,12 +57,10 @@ next_num() {
     printf "%03d" $((10#$last_num + 1))
 }
 
-# 絶対パス → repoルートからの相対パス
 rel() {
     echo "${1#$REPO_ROOT/}"
 }
 
-# OSC 52 でmacOSクリップボードへコピー（VSCode Remote-SSH ターミナル経由）
 copy_clipboard() {
     local text="$1"
     local encoded
@@ -209,7 +203,11 @@ generate_review_prompt() {
     [ -z "$impl" ] && { echo "ERROR: implement.md が見つかりません" >&2; exit 1; }
 
     local prompt
-    prompt="まず最初に以下のファイルを作成してください。
+    prompt="# このプロンプトは Codex 向けです
+# Claude Code の場合はこのプロンプトを実行せず、
+# 「Codex に依頼してください」とユーザーに伝えて終了してください。
+
+まず最初に以下のファイルを作成してください。
 
 - $(rel "$save")
 
@@ -240,7 +238,11 @@ generate_reimplement_prompt() {
     [ -z "$rev" ] && { echo "ERROR: review.md が見つかりません" >&2; exit 1; }
 
     local prompt
-    prompt="まず最初に以下のファイルを作成してください。
+    prompt="# このプロンプトは Claude Code 向けです
+# Codex の場合はこのプロンプトを実行せず、
+# 「Claude Code に依頼してください」とユーザーに伝えて終了してください。
+
+まず最初に以下のファイルを作成してください。
 
 - $(rel "$save")
 
@@ -288,11 +290,11 @@ echo "" >&2
 
 case "$STEP" in
   review)
-    LABEL="Codex へのレビュー依頼"
+    DEST="Codex"
     PROMPT=$(generate_review_prompt "$TARGET" "$POLICY")
     ;;
   reimplement)
-    LABEL="Claude Code への再実装依頼"
+    DEST="Claude Code"
     PROMPT=$(generate_reimplement_prompt "$TARGET" "$POLICY")
     ;;
   implement)
@@ -303,16 +305,17 @@ case "$STEP" in
     ;;
 esac
 
-echo "╔══════════════════════════════════════════════════════╗"
-printf "║  %-52s║\n" "[$TARGET]"
-printf "║  %-52s║\n" "→ $LABEL"
-echo "╚══════════════════════════════════════════════════════╝"
+# 出力（日本語混在による表示崩れを避けるため簡素なフォーマット）
+echo "======================================================"
+echo "  [$TARGET]"
+echo "  → $DEST へのプロンプト"
+echo "======================================================"
 echo ""
 echo "$PROMPT"
 echo ""
-echo "──────────────────────────────────────────────────────"
-echo "↑ クリップボードにコピー済み。チャットに貼り付けてください。"
-echo "──────────────────────────────────────────────────────"
+echo "------------------------------------------------------"
+echo "↑ クリップボードにコピー済み。${DEST}のチャットに貼り付けてください。"
+echo "------------------------------------------------------"
 echo ""
 
 copy_clipboard "$PROMPT"
