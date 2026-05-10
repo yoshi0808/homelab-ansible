@@ -402,6 +402,19 @@ __pycache__/
 
 ## 14. AI を使った構築・レビュー運用
 
+### AI 運用方針
+
+このリポジトリでは、AI を「自動決定主体」ではなく、実装・レビュー・論点整理支援として利用する。
+
+これは AI による完全自動運用ではなく、AI-assisted operations である。
+
+最終的な運用判断、本番実行判断、commit 判断は必ず Yoshinobu が行う。
+
+AI が patch / reboot / migration / inventory 変更などの危険操作を、自律的に本番実行する構成は採用しない。
+
+将来的に GitHub Actions や AI loop を導入する場合も、AI は実装案・レビュー結果・差分・論点を提示する支援役とする。  
+本番反映、危険操作の実行、運用上の採否判断は Yoshinobu の明示判断を必要とする。
+
 AI の役割分担は以下とする。
 
 ```text
@@ -410,7 +423,9 @@ AI の役割分担は以下とする。
 レビュー: Codex
 追加実装: Claude Code
 再レビュー: Codex
-決定: Yoshinobu
+運用判断: Yoshinobu
+本番実行判断: Yoshinobu
+確定判断: Yoshinobu
 コミット: Yoshinobu
 ```
 
