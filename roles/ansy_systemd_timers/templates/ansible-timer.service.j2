@@ -1,0 +1,10 @@
+[Unit]
+Description={{ timer.description }}
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User={{ ansy_systemd_timers_run_user }}
+WorkingDirectory={{ ansy_systemd_timers_working_dir }}
+ExecStart=/usr/bin/flock -n /run/lock/ansible-{{ timer.name }}.lock {{ ansy_systemd_timers_playbook_bin }} {{ timer.playbook }}

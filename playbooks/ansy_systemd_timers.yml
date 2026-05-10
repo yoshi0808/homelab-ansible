@@ -1,0 +1,9 @@
+---
+- name: Configure Ansible systemd timers on ansy
+  hosts: dev_nodes
+  gather_facts: false
+  become: true
+  connection: local
+
+  roles:
+    - ansy_systemd_timers

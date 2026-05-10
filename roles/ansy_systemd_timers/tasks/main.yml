@@ -1,0 +1,38 @@
+---
+- name: Deploy systemd service units
+  ansible.builtin.template:
+    src: ansible-timer.service.j2
+    dest: /etc/systemd/system/ansible-{{ timer.name }}.service
+    owner: root
+    group: root
+    mode: "0644"
+  loop: "{{ systemd_ansible_timers }}"
+  loop_control:
+    loop_var: timer
+    label: "{{ timer.name }}"
+
+- name: Deploy systemd timer units
+  ansible.builtin.template:
+    src: ansible-timer.timer.j2
+    dest: /etc/systemd/system/ansible-{{ timer.name }}.timer
+    owner: root
+    group: root
+    mode: "0644"
+  loop: "{{ systemd_ansible_timers }}"
+  loop_control:
+    loop_var: timer
+    label: "{{ timer.name }}"
+
+- name: Reload systemd daemon
+  ansible.builtin.systemd:
+    daemon_reload: true
+
+- name: Enable and start timers
+  ansible.builtin.systemd:
+    name: "ansible-{{ timer.name }}.timer"
+    enabled: true
+    state: started
+  loop: "{{ systemd_ansible_timers }}"
+  loop_control:
+    loop_var: timer
+    label: "{{ timer.name }}"
