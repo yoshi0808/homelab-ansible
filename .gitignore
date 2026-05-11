@@ -22,5 +22,9 @@ __pycache__/
 # Temporary files
 *.tmp
 
-# local mail variables
-inventories/vars/mail.yml
+# vault
+*.bak
+*.plain
+*.decrypted
+.vault_pass
+homelab_vault_pass
