@@ -23,5 +23,4 @@ __pycache__/
 *.tmp
 
 # local mail variables
-inventories/homelab/vars/mail.yml
 inventories/vars/mail.yml
