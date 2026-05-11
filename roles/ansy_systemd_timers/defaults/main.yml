@@ -24,3 +24,8 @@ systemd_ansible_timers:
     schedule: "*-*-* 03:30:00"
     playbook: playbooks/ubuntu_nightly.yml
     persistent: false
+  - name: proxmox-hw-check
+    description: Run Proxmox hardware check
+    schedule: "*-*-* 05:45:00"
+    playbook: playbooks/proxmox_hw_check.yml
+    persistent: true
