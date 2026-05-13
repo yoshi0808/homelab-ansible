@@ -73,9 +73,14 @@ cat > "$PROMPT_FILE" << 'PROMPT_EOF'
    - 空の JSON やテンプレートをそのまま返すことは禁止です。
 2. 各パッケージの changelog_diff を読み、CVEタイプを識別する（LPE / RCE / DoS / XSS / 認証バイパス / VM escape 等）
 3. パッチポリシーの URGENT / HIGH 判断基準テーブルと照合し、urgency_candidate を決定する
-4. 日本語で mail_subject および mail_body を生成する（mail_body は 1000 文字程度）
-5. 日本語で report_md を生成する（changelog 差分の全文と分析結果を含む）
-6. JSON 形式のみ出力する（前後の説明文不要）
+4. 以下の条件で reboot_expected を判定する：
+   - updates にパッケージ名に "kernel" を含むものがある → true
+   - changelog を読んで reboot が必要と判断した → true
+   - それ以外 → false
+   reboot_expected が true の場合、mail_body に「⚠️ kernel 系パッケージが含まれるため、apply 後に reboot が必要になる可能性があります。」を含めること。
+5. 日本語で mail_subject および mail_body を生成する（mail_body は 1000 文字程度）
+6. 日本語で report_md を生成する（changelog 差分の全文と分析結果を含む）
+7. JSON 形式のみ出力する（前後の説明文不要）
 
 ## パッチポリシー（Section 3: 判断軸）
 
@@ -105,7 +110,9 @@ cat >> "$PROMPT_FILE" << 'PROMPT_EOF'
     "replacement_suspected": false,
     "major_upgrade_suspected": false,
     "security_sensitive_updates": [],
-    "urgency_candidate": "NORMAL"
+    "urgency_candidate": "NORMAL",
+    "reboot_expected": false,
+    "reboot_expected_reason": "<reboot が必要と判断した理由。不要な場合は空文字>"
   },
   "package_classifications": [
     {
@@ -226,6 +233,14 @@ if status_missing:
     print(f'Error: Missing required status_inputs keys: {status_missing}', file=sys.stderr)
     sys.exit(1)
 
+if 'reboot_expected' in status_inputs and not isinstance(status_inputs['reboot_expected'], bool):
+    print('Error: status_inputs.reboot_expected must be a boolean', file=sys.stderr)
+    sys.exit(1)
+
+if 'reboot_expected_reason' in status_inputs and not isinstance(status_inputs['reboot_expected_reason'], str):
+    print('Error: status_inputs.reboot_expected_reason must be a string', file=sys.stderr)
+    sys.exit(1)
+
 classifications = data['package_classifications']
 if not isinstance(classifications, list):
     print('Error: package_classifications must be a list', file=sys.stderr)
@@ -267,6 +282,13 @@ for index, item in enumerate(classifications):
     if 'evidence' not in item:
         print(f'Error: package_classifications[{index}] missing required key: evidence', file=sys.stderr)
         sys.exit(1)
+
+# kernel パッケージ検出による reboot_expected 強制補正
+kernel_pkgs = [u.get('name', '') for u in updates if 'kernel' in u.get('name', '')]
+if kernel_pkgs:
+    status_inputs['reboot_expected'] = True
+    if not status_inputs.get('reboot_expected_reason'):
+        status_inputs['reboot_expected_reason'] = 'kernel packages included: ' + ', '.join(kernel_pkgs)
 
 with open(output_json_path, 'w', encoding='utf-8') as f:
     json.dump(data, f, ensure_ascii=False, indent=2)
