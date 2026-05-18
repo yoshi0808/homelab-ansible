@@ -1,0 +1,16 @@
+---
+# This playbook must be run FROM the host you want to configure.
+# target_hosts selects the inventory group, but connection: local means tasks
+# always execute on the Ansible controller itself — not via SSH to the inventory host.
+#
+# Typical usage:
+#   quory: ansible-playbook playbooks/systemd_timers.yml
+#   ansy:  ansible-playbook playbooks/systemd_timers.yml -e "target_hosts=dev_nodes"
+- name: Configure Ansible systemd timers
+  hosts: "{{ target_hosts | default('control_nodes') }}"
+  gather_facts: false
+  become: true
+  connection: local
+
+  roles:
+    - systemd_timers

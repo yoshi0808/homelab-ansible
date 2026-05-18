@@ -1,7 +1,7 @@
 ---
-ansy_systemd_timers_working_dir: /home/yoshi/homelab-ansible
-ansy_systemd_timers_run_user: yoshi
-ansy_systemd_timers_playbook_bin: /usr/bin/ansible-playbook
+systemd_timers_working_dir: /home/yoshi/homelab-ansible
+systemd_timers_run_user: yoshi
+systemd_timers_playbook_bin: /usr/bin/ansible-playbook
 
 systemd_ansible_timers:
   - name: authy-healthcheck
