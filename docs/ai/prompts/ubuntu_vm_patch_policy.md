@@ -1,43 +1,45 @@
-# Ubuntu VM Patch Policy v1.0
+# Ubuntu ノード Patch Policy v1.1
 
 作成日: 2026-05-09
-版: v1.0
-対象: homelab 環境の Ubuntu VM 全般
+更新日: 2026-05-18
+版: v1.1
+対象: homelab 環境の Ubuntu ノード全般（VM・物理ノード）
 
 ---
 
 ## 1. 目的
 
-この文書は、homelab 環境における Ubuntu VM のパッチ運用方針を定義する。
+この文書は、homelab 環境における Ubuntu ノードのパッチ運用方針を定義する。
 
-Proxmox ホストとは異なり、Ubuntu VM は Ubuntu Pro による自動パッチ適用を基本とする。
+Proxmox ホストとは異なり、Ubuntu ノードは Ubuntu Pro による自動パッチ適用を基本とする。
 
 Ansible の役割は、パッチ適用そのものではなく以下に限定する。
 
-- VM の特性に応じた reboot タイミングの制御
+- ノードの特性に応じた reboot タイミングの制御
 - センシティブな VM における reboot 後のサービス疎通確認
 - センシティブな VM の日次 healthcheck
 - 異常・reboot 実行時の通知
 
 ---
 
-## 2. 対象 VM と特性
+## 2. 対象ノードと特性
 
 ### 2.1 基本的な考え方
 
-VM の特性に応じて、以下の 2 つの方針を使い分ける。
+ノードの特性に応じて、以下の 2 つの方針を使い分ける。
 
 1. Wi-Fi 認証や管理系サービスなどダウンすると困るサービスを保有する VM については、深夜の計画的 reboot を Ansible で管理する。
-2. 開発環境・バックアップ機能・検証環境等の VM は自動 reboot とする。
+2. 開発環境・バックアップ機能・検証環境・インフラ管理ノード等は自動 reboot とする。
 
-### 2.2 VM 一覧
+### 2.2 ノード一覧
 
-| VM | 役割 | reboot 方針 | healthcheck | 理由 |
-|---|---|---|---|---|
-| `authy` | FreeRADIUS / WPA3 Enterprise / EAP-TLS 認証基盤 | 深夜に計画的 reboot（Ansible 管理） | あり | サービス停止が家庭内 Wi-Fi 認証断につながる |
-| `ansy` | Ansible 開発環境 | 自動 reboot（unattended-upgrades 任せ） | なし | 開発 VM で再構築可能。コードは GitHub、VM は Proxmox バックアップで保護済み |
+| ノード | 役割 | 種別 | reboot 方針 | reboot 時刻 | healthcheck | 理由 |
+|---|---|---|---|---|---|---|
+| `authy` | FreeRADIUS / WPA3 Enterprise / EAP-TLS 認証基盤 | VM | 深夜に計画的 reboot（Ansible 管理） | 03:30（reboot_required時のみ） | あり | サービス停止が家庭内 Wi-Fi 認証断につながる |
+| `ansy` | Ansible 開発環境 | VM | 自動 reboot（unattended-upgrades 任せ） | 不定 | なし | 開発 VM で再構築可能。コードは GitHub、VM は Proxmox バックアップで保護済み |
+| `quory` | Ansible 実行基盤 / Proxmox QDevice | 物理ノード | 自動 reboot（時刻固定） | 03:00 | なし | 自身が Ansible 実行基盤のため ubuntu_nightly.yml による管理不可 |
 
-将来 Ubuntu VM が追加された場合は、本表に追記し、どちらの方針を採用するかを明記する。
+将来 Ubuntu ノードが追加された場合は、本表に追記し、どちらの方針を採用するかを明記する。
 
 ---
 
@@ -79,13 +81,13 @@ Ansible はパッケージ更新を行わない。
 
 reboot のタイミングは Ansible が制御する。
 
-深夜（02:00 頃）に `ubuntu_nightly.yml` が reboot_required を確認し、必要な場合のみ reboot する。
+深夜に `ubuntu_nightly.yml` が reboot_required を確認し、必要な場合のみ reboot する。
 
 reboot 後、対象 VM のサービス状態と疎通を確認する。
 
 例: authy の場合は freeradius の状態と 1812/udp・1813/udp の Listen を確認する。
 
-### 4.2 自動 reboot（方針2のVM）
+### 4.2 自動 reboot（方針2のノード）
 
 `Unattended-Upgrade::Automatic-Reboot "true"` に設定する。
 
@@ -93,7 +95,10 @@ unattended-upgrades が reboot_required を検出した場合、自動で reboot
 
 Ansible による管理・監視・healthcheck は行わない。
 
-例: ansy の場合は Ansible コードが GitHub に、VM 自体が Proxmox バックアップで保護されているため、自動 reboot で問題ない。
+例:
+
+- ansy: Ansible コードが GitHub に、VM 自体が Proxmox バックアップで保護されているため、自動 reboot で問題ない。
+- quory: 自身が Ansible 実行基盤のため ubuntu_nightly.yml による管理ができない。`Automatic-Reboot-Time "03:00"` で時刻を固定する。
 
 ### 4.3 reboot 判定（方針1のVMのみ）
 
@@ -106,12 +111,12 @@ Ansible による管理・監視・healthcheck は行わない。
 
 ## 5. Playbook 構成
 
-方針1のVM（authy など）のみを対象とする。方針2のVM（ansy など）は Ansible 管理対象としない。
+方針1のVM（authy など）のみを対象とする。方針2のノード（ansy・quory など）は Ansible 管理対象としない。
 
 | Playbook | 目的 | 実行タイミング | 変更有無 |
 |---|---|---|---|
-| `radius_healthcheck.yml` | FreeRADIUS 稼働確認・日次レポート | 朝（06:00 頃） | なし |
-| `ubuntu_nightly.yml` | reboot_required 確認 → 条件付き reboot → サービス確認 → 通知 | 深夜（02:00 頃） | あり（reboot） |
+| `radius_healthcheck.yml` | FreeRADIUS 稼働確認・日次レポート | 朝（05:30） | なし |
+| `ubuntu_nightly.yml` | reboot_required 確認 → 条件付き reboot → サービス確認 → 通知 | 深夜（03:30） | あり（reboot） |
 
 healthcheck は VM が提供するサービスに応じた専用 playbook を用意する。
 
@@ -182,33 +187,31 @@ Proxmox パッチ通知と同じ仕組みを使う。
 
 ## 7. systemd timer 設定方針
 
-Semaphore UI 導入前は、quory（到着後）または ansy 上の systemd timer で実行する。
+systemd timer は quory 上で実行する。
 
 | timer | 実行対象 | 実行時刻 |
 |---|---|---|
-| `ubuntu-nightly.timer` | `ubuntu_nightly.yml` | 毎日 02:00 |
-| `radius-healthcheck.timer` | `radius_healthcheck.yml` | 毎日 06:00 |
-
-`RandomizedDelaySec` を設定し、実行時刻を若干ばらつかせる。
+| `ansible-authy-reboot-if-required.timer` | `ubuntu_nightly.yml` | 毎日 03:30 |
+| `ansible-authy-healthcheck.timer` | `radius_healthcheck.yml` | 毎日 05:30 |
 
 Semaphore UI 導入後は、systemd timer から Semaphore UI の Schedule へ移行する。
 
 ---
 
-## 8. 現在の設定確認（2026-05-09 時点）
+## 8. 深夜リブートスケジュール全体（参考）
+
+| 時刻 | 対象 | 備考 |
+|---|---|---|
+| 01:00 | UniFi Console | UniFi コントローラー reboot |
+| 02:00 | UniFi Device | AP・スイッチ reboot |
+| 03:00 | quory | unattended-upgrades 自動 reboot（reboot_required 時のみ） |
+| 03:30 | authy | ubuntu_nightly.yml による計画的 reboot（reboot_required 時のみ） |
+
+---
+
+## 9. 現在の設定確認（2026-05-18 時点）
 
 ### authy
-
-`needrestart` 実行結果:
-
-```
-Running kernel seems to be up-to-date.
-No services need to be restarted.
-No containers need to be restarted.
-No user sessions are running outdated binaries.
-```
-
-Ubuntu Pro の自動パッチが正常に機能しており、reboot 不要・サービス再起動不要の状態を確認済み。
 
 `50unattended-upgrades` の重要設定:
 
@@ -218,11 +221,11 @@ Unattended-Upgrade::Automatic-Reboot "false";
 
 この設定を維持する。変更する場合は本文書を更新すること。
 
----
+### quory
 
-## 9. 今後の実装順序
+`/etc/apt/apt.conf.d/52unattended-upgrades-local`:
 
-1. `ubuntu_nightly.yml` と対応 role を新規作成
-2. ansy で手動実行テスト
-3. quory 到着後に systemd timer 化
-4. Semaphore UI 導入後に Schedule へ移行
+```
+Unattended-Upgrade::Automatic-Reboot "true";
+Unattended-Upgrade::Automatic-Reboot-Time "03:00";
+```
