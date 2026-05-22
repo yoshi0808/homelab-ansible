@@ -136,7 +136,7 @@ PROMPT_EOF
 
 # --- 4. codex exec でCodex CLIを呼び出す ---
 cd "$REPO_ROOT"
-if ! codex exec "$(cat "$PROMPT_FILE")" > "$CODEX_OUTPUT" 2>&1; then
+if ! codex exec < "$PROMPT_FILE" > "$CODEX_OUTPUT" 2>&1; then
     echo "Error: codex exec failed" >&2
     sed -n '1,200p' "$CODEX_OUTPUT" >&2
     exit 1
