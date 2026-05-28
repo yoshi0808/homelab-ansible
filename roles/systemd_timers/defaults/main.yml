@@ -29,3 +29,8 @@ systemd_ansible_timers:
     schedule: "*-*-* 05:45:00"
     playbook: playbooks/proxmox_hw_check.yml
     persistent: true
+  - name: monitoring-healthcheck
+    description: Run monitoring healthcheck
+    schedule: "*-*-* 05:35:00"
+    playbook: playbooks/monitoring_healthcheck.yml
+    persistent: true

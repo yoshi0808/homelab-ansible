@@ -1,0 +1,129 @@
+---
+- name: Load mail variables
+  ansible.builtin.include_vars:
+    file: "{{ inventory_dir }}/../vars/mail.yml"
+  delegate_to: localhost
+  become: false
+
+- name: Copy monitoring healthcheck script
+  ansible.builtin.copy:
+    src: monitoring-healthcheck.sh
+    dest: /usr/local/sbin/monitoring-healthcheck.sh
+    mode: "0750"
+    owner: root
+    group: root
+
+- name: Run monitoring healthcheck
+  ansible.builtin.command:
+    cmd: /usr/local/sbin/monitoring-healthcheck.sh
+  register: healthcheck_raw
+  changed_when: false
+
+- name: Fail if healthcheck returned no output
+  ansible.builtin.fail:
+    msg: "monitoring-healthcheck.sh on {{ inventory_hostname }} returned empty output (rc={{ healthcheck_raw.rc }}). Run the script manually on the host to diagnose."
+  when: healthcheck_raw.stdout | length == 0
+
+- name: Parse healthcheck JSON
+  ansible.builtin.set_fact:
+    monitoring_health: "{{ healthcheck_raw.stdout | from_json }}"
+
+- name: Classify criticals and warnings
+  ansible.builtin.set_fact:
+    monitoring_criticals: "{{ []
+      + ([] if monitoring_health.services.prometheus == 'active'
+             else ['prometheus service is not active: ' + monitoring_health.services.prometheus])
+      + ([] if monitoring_health.services.grafana == 'active'
+             else ['grafana-server service is not active: ' + monitoring_health.services.grafana])
+      + ([] if monitoring_health.services.loki == 'active'
+             else ['loki service is not active: ' + monitoring_health.services.loki])
+      + ([] if monitoring_health.ports.tcp_9090 == 'yes'
+             else ['port 9090/tcp is not listening'])
+      + ([] if monitoring_health.ports.tcp_3000 == 'yes'
+             else ['port 3000/tcp is not listening'])
+      + ([] if monitoring_health.ports.tcp_3100 == 'yes'
+             else ['port 3100/tcp is not listening'])
+      }}"
+    monitoring_warnings: "{{ [] }}"
+
+- name: Build report
+  ansible.builtin.set_fact:
+    monitoring_report:
+      host: "{{ inventory_hostname }}"
+      collected_at: "{{ monitoring_health.collected_at }}"
+      services:
+        prometheus: "{{ monitoring_health.services.prometheus }}"
+        grafana: "{{ monitoring_health.services.grafana }}"
+        loki: "{{ monitoring_health.services.loki }}"
+      ports:
+        tcp_9090: "{{ monitoring_health.ports.tcp_9090 }}"
+        tcp_3000: "{{ monitoring_health.ports.tcp_3000 }}"
+        tcp_3100: "{{ monitoring_health.ports.tcp_3100 }}"
+      result:
+        status: "{{ 'CRITICAL' if monitoring_criticals | length > 0
+                    else ('WARNING' if monitoring_warnings | length > 0
+                    else 'OK') }}"
+        criticals: "{{ monitoring_criticals }}"
+        warnings: "{{ monitoring_warnings }}"
+
+- name: Ensure report directory exists
+  ansible.builtin.file:
+    path: "{{ monitoring_healthcheck_report_dir }}"
+    state: directory
+    mode: "0755"
+  delegate_to: localhost
+  become: false
+
+- name: Save report
+  ansible.builtin.copy:
+    content: "{{ monitoring_report | to_nice_json }}"
+    dest: "{{ monitoring_healthcheck_report_dir }}/{{ inventory_hostname }}_{{ ansible_facts['date_time']['iso8601_basic_short'] }}.json"
+  delegate_to: localhost
+  become: false
+
+- name: Print health summary
+  ansible.builtin.debug:
+    msg:
+      - "Host      : {{ inventory_hostname }}"
+      - "Status    : {{ monitoring_report.result.status }}"
+      - "prometheus: {{ monitoring_health.services.prometheus }}"
+      - "grafana   : {{ monitoring_health.services.grafana }}"
+      - "loki      : {{ monitoring_health.services.loki }}"
+      - "Ports     : 9090/tcp={{ monitoring_health.ports.tcp_9090 }} 3000/tcp={{ monitoring_health.ports.tcp_3000 }} 3100/tcp={{ monitoring_health.ports.tcp_3100 }}"
+      - "Criticals : {{ monitoring_criticals }}"
+      - "Warnings  : {{ monitoring_warnings }}"
+
+- name: Send healthcheck notification
+  community.general.mail:
+    host: "{{ smtp_host }}"
+    port: "{{ smtp_port }}"
+    username: "{{ smtp_user }}"
+    password: "{{ smtp_password }}"
+    to: "{{ mail_to }}"
+    subject: "[Monitoring Healthcheck] {{ monitoring_report.result.status }} - {{ inventory_hostname }}"
+    body: |
+      Host    : {{ inventory_hostname }}
+      Status  : {{ monitoring_report.result.status }}
+
+      Criticals:
+      {% for item in monitoring_criticals %}
+      - {{ item }}
+      {% else %}
+      (none)
+      {% endfor %}
+      Warnings:
+      {% for item in monitoring_warnings %}
+      - {{ item }}
+      {% else %}
+      (none)
+      {% endfor %}
+    secure: starttls
+  delegate_to: localhost
+  become: false
+  ignore_errors: true
+  when: monitoring_criticals | length > 0 or monitoring_warnings | length > 0
+
+- name: Fail if critical
+  ansible.builtin.fail:
+    msg: "CRITICAL on {{ inventory_hostname }}: {{ monitoring_criticals | join(', ') }}"
+  when: monitoring_criticals | length > 0
