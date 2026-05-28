@@ -29,6 +29,7 @@
     _new_vs_dryrun: []
     _unchanged_vs_dryrun: []
     _apply_stdout: ""
+    _apply_collect: {}
     _reboot_required_before: false
     _apply_reboot_done: false
     _post_hc_status: "UNKNOWN"
@@ -144,6 +145,14 @@
       ansible.builtin.copy:
         src: proxmox-patch-predryrun-collect.sh
         dest: /usr/local/sbin/proxmox-patch-predryrun-collect.sh
+        mode: "0750"
+        owner: root
+        group: root
+
+    - name: Copy post-apply collect script
+      ansible.builtin.copy:
+        src: proxmox-patch-apply-collect.sh
+        dest: /usr/local/sbin/proxmox-patch-apply-collect.sh
         mode: "0750"
         owner: root
         group: root
@@ -291,14 +300,19 @@
         _apply_stdout: "{{ _apply_raw.stdout | default('') }}"
         _apply_abort_type: "none"
 
-    - name: Check reboot-required after apply
-      ansible.builtin.stat:
-        path: /var/run/reboot-required
-      register: _reboot_stat
+    - name: Run post-apply collect
+      ansible.builtin.command:
+        cmd: /usr/local/sbin/proxmox-patch-apply-collect.sh
+      register: _apply_collect_raw
+      changed_when: false
+
+    - name: Parse post-apply collect JSON
+      ansible.builtin.set_fact:
+        _apply_collect: "{{ _apply_collect_raw.stdout | from_json }}"
 
     - name: Record reboot-required state
       ansible.builtin.set_fact:
-        _reboot_required_before: "{{ _reboot_stat.stat.exists }}"
+        _reboot_required_before: "{{ _apply_collect.reboot_required | bool }}"
 
     # =========================================================================
     # Phase 3: Reboot
@@ -379,6 +393,8 @@
             'removes': _sim_removes,
             'apply_output': _apply_stdout | truncate(3000),
             'reboot_done': _apply_reboot_done,
+            'reboot_trigger': _apply_collect.reboot_trigger | default(''),
+            'running_kernel': _apply_collect.running_kernel | default(''),
             'post_healthcheck_status': _post_hc_status
           } | to_nice_json }}"
         dest: "{{ proxmox_patch_apply_report_dir }}/{{ _apply_run_ts }}_{{ inventory_hostname }}_apply.json"
@@ -466,6 +482,7 @@
           {% if not (_apply_abort_type in ['control_node', 'healthcheck', 'vms_not_evacuated', 'apt_update', 'apt_check', 'sim_failed', 'maintenance_required', 'manual_not_confirmed']) %}
           適用パッケージ数: {{ _sim_updates | length }}
           reboot 実施   : {{ _apply_reboot_done }}
+          reboot trigger: {{ _apply_collect.reboot_trigger | default('') }}
           {% if _apply_abort_type in ['apply_failed', 'reboot_timeout'] %}
           エラー: {{ _apply_error_msg }}
           {% endif %}
