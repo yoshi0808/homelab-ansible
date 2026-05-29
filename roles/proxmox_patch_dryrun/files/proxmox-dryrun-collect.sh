@@ -100,7 +100,31 @@ def get_changelog_diff(pkg_name, installed_version, is_new):
                 entry.append(line)
         return "\n".join(entry)
 
-    # Entries newer than installed_version
+    # Entries newer than installed_version.
+    # Source-derived packages (e.g. libtalloc2 from samba source) have changelog
+    # entry versions in the source package's version space, not the binary version
+    # space.  Comparing a samba source version like 2:4.17.x+dfsg against a
+    # libtalloc2 binary version like 2:2.4.2-1 always yields "> 0", so the break
+    # never fires and the entire decades-long changelog is returned.
+    # Fix: when the first changelog entry names a different package, use the
+    # installed binary's source version (dpkg source:Version) for comparison.
+    cmp_version = installed_version
+    for line in lines:
+        m = re.match(r'^(\S+)\s+\(', line)
+        if m:
+            if m.group(1) != pkg_name:
+                try:
+                    r = subprocess.run(
+                        ["dpkg-query", "-W", "--showformat=${source:Version}", pkg_name],
+                        capture_output=True, text=True, timeout=10
+                    )
+                    sv = r.stdout.strip()
+                    if sv:
+                        cmp_version = sv
+                except Exception:
+                    pass
+            break
+
     try:
         import apt_pkg
         apt_pkg.init()
@@ -108,7 +132,7 @@ def get_changelog_diff(pkg_name, installed_version, is_new):
         for line in lines:
             m = re.match(r'^\S+\s+\(([^)]+)\)', line)
             if m:
-                if apt_pkg.version_compare(m.group(1), installed_version) <= 0:
+                if apt_pkg.version_compare(m.group(1), cmp_version) <= 0:
                     break
             result_lines.append(line)
         return "\n".join(result_lines)
