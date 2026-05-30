@@ -614,6 +614,76 @@ reboot 要否は以下を組み合わせて判定する:
 - 現在動作中の kernel バージョン（uname -r）と
   インストール済み kernel パッケージのバージョンの比較
 
+#### post-healthcheck リトライ設定
+
+reboot 直後の post-healthcheck が CRITICAL または UNKNOWN になる場合がある。
+サービスが起動しきる前にチェックが走ること、またはスクリプト自体が一時的に失敗することが原因であることが多い。
+
+この問題に対応するため、**「reboot実施済み かつ CRITICAL または UNKNOWN」の場合に**、
+一定時間待機してから post-healthcheck をリトライする仕組みがある。
+
+- CRITICAL: JSON は取得できたが health 判定が NG
+- UNKNOWN: healthcheck スクリプト自体が失敗した（コマンドエラー・不正JSON など）
+
+reboot を伴わない CRITICAL / UNKNOWN はリトライしない（本物の障害として扱う）。
+
+設定変数（`roles/proxmox_patch_apply_node/defaults/main.yml`）:
+
+| 変数 | デフォルト | 意味 |
+|---|---|---|
+| `proxmox_patch_apply_hc_retry_count` | `2` | リトライの最大試行回数。内部で `range(N+1)` 回ループし、各試行の冒頭に待機する |
+| `proxmox_patch_apply_hc_retry_delay` | `60` | 各リトライ試行の冒頭で待機する秒数 |
+
+計算式:
+
+```text
+リトライ最大試行回数 = retry_count + 1
+最大待機時間        = (retry_count + 1) × retry_delay 秒
+  （各試行の先頭で delay 秒待機するため、試行回数分の待機が発生する）
+```
+
+デフォルト設定（retry_count=2、retry_delay=60）での動作例:
+
+```text
+reboot完了
+→ post-healthcheck 1回目: CRITICAL   （初回）
+→ 60秒待機                            （リトライ試行1の冒頭 pause）
+→ post-healthcheck 2回目: CRITICAL   （リトライ試行1）
+→ 60秒待機                            （リトライ試行2の冒頭 pause）
+→ post-healthcheck 3回目: OK         （リトライ試行2）
+→ SUCCESS として扱う
+```
+
+最大待機時間 = (2+1) × 60 = 180秒
+
+リトライ後に OK になった場合はSUCCESSとして扱い、summary mail の件名も `[SUCCESS]` になる。
+すべての試行でCRITICALのままだった場合は CRITICALとして報告する。
+
+チューニング例:
+
+```text
+サービスの起動が遅い環境:
+  proxmox_patch_apply_hc_retry_count: 3
+  proxmox_patch_apply_hc_retry_delay: 90
+  → リトライタスク最大4回試行、最大待機 (3+1)×90 = 360秒
+
+素早く判断したい場合:
+  proxmox_patch_apply_hc_retry_count: 1
+  proxmox_patch_apply_hc_retry_delay: 30
+  → リトライタスク最大2回試行、最大待機 (1+1)×30 = 60秒
+```
+
+変更方法:
+
+```bash
+# 実行時に一時的に変更
+ansible-playbook proxmox_patch_apply_node.yml \
+  -e proxmox_patch_apply_hc_retry_count=3 \
+  -e proxmox_patch_apply_hc_retry_delay=90
+
+# または defaults/main.yml を直接編集して恒久変更
+```
+
 #### やらないこと
 
 - VM / CT の退避は行わない

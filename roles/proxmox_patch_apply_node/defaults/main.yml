@@ -43,3 +43,11 @@ proxmox_patch_apply_important_component_prefixes:
   - proxmox-kernel-
   - libpve-
   - firmware-
+
+# Post-healthcheck retry on CRITICAL/UNKNOWN after reboot.
+# Retried only when status is CRITICAL or UNKNOWN and reboot was performed.
+# retry_count: maximum retry attempts; loop runs range(N+1) times (each preceded by retry_delay pause).
+# retry_delay: seconds to wait before each retry attempt (including the first).
+# max wait = (retry_count + 1) * retry_delay seconds.
+proxmox_patch_apply_hc_retry_count: 2
+proxmox_patch_apply_hc_retry_delay: 60

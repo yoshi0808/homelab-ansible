@@ -1,0 +1,48 @@
+---
+# Called per retry attempt via include_tasks with loop.
+# Guard block: when _post_hc_retry_status is already 'OK', the entire block is skipped.
+# This stops pause/run/parse from executing on iterations after OK is found.
+# The reset inside the block ensures no stale values persist into the determine task.
+
+- block:
+    - name: Reset facts for this retry attempt
+      ansible.builtin.set_fact:
+        _post_hc_retry_status: "CRITICAL"
+        _post_hc_retry_json: {}
+
+    - name: Wait before retry attempt
+      ansible.builtin.pause:
+        seconds: "{{ proxmox_patch_apply_hc_retry_delay }}"
+
+    - name: Run healthcheck for retry attempt
+      ansible.builtin.command:
+        cmd: /usr/local/sbin/proxmox-healthcheck.sh
+      register: _post_hc_retry_raw
+      changed_when: false
+      ignore_errors: true
+
+    - name: Parse healthcheck JSON for retry
+      ansible.builtin.set_fact:
+        _post_hc_retry_json: "{{ _post_hc_retry_raw.stdout | from_json }}"
+      ignore_errors: true
+      when:
+        - not (_post_hc_retry_raw.failed | default(false) | bool)
+        - (_post_hc_retry_raw.stdout | default('') | length) > 0
+
+    - name: Determine status for retry attempt
+      ansible.builtin.set_fact:
+        _post_hc_retry_status: >-
+          {%- if (_post_hc_retry_raw.failed | default(false) | bool) or
+                 not _post_hc_retry_json -%}
+          CRITICAL
+          {%- elif (_post_hc_retry_json.cluster.quorate | default('')) != 'Yes' or
+                  not (_post_hc_retry_json.apt.check_ok | default(false) | bool) or
+                  (_post_hc_retry_json.services.pve_cluster | default('')) != 'active' or
+                  (_post_hc_retry_json.services.corosync | default('')) != 'active' or
+                  (_post_hc_retry_json.services.pvedaemon | default('')) != 'active' -%}
+          CRITICAL
+          {%- else -%}
+          OK
+          {%- endif -%}
+      ignore_errors: true
+  when: _post_hc_retry_status != 'OK'
