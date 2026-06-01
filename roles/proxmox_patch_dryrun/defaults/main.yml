@@ -1,5 +1,5 @@
 ---
-proxmox_patch_dryrun_report_dir: "{{ playbook_dir }}/../reports/proxmox-dryrun"
+proxmox_patch_dryrun_report_dir: "{{ reports_base_dir }}/proxmox-dryrun"
 
 # Important component exact names (policy section 7)
 proxmox_patch_dryrun_important_components:

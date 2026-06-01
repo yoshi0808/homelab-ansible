@@ -1,4 +1,4 @@
 ---
-proxmox_hw_check_report_dir: "{{ playbook_dir }}/../reports/proxmox-hardware"
+proxmox_hw_check_report_dir: "{{ reports_base_dir }}/proxmox-hardware"
 proxmox_hw_check_nic_errors_warning_pct: 0.1
 proxmox_hw_check_nic_dropped_warning_pct: 0.5

@@ -1,2 +1,2 @@
 ---
-radius_healthcheck_report_dir: "{{ playbook_dir }}/../reports/radius-health"
+radius_healthcheck_report_dir: "{{ reports_base_dir }}/radius-health"

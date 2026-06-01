@@ -5,7 +5,7 @@
   become: true
 
   vars:
-    nightly_report_dir: "{{ playbook_dir }}/../reports/ubuntu-nightly"
+    nightly_report_dir: "{{ reports_base_dir }}/ubuntu-nightly"
 
   tasks:
     - name: Check reboot-required flag
@@ -197,7 +197,7 @@
   become: true
 
   vars:
-    nightly_report_dir: "{{ playbook_dir }}/../reports/ubuntu-nightly"
+    nightly_report_dir: "{{ reports_base_dir }}/ubuntu-nightly"
 
   tasks:
     - name: Check reboot-required flag

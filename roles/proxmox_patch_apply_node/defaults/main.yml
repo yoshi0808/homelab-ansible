@@ -1,6 +1,6 @@
 ---
-proxmox_patch_apply_report_dir: "{{ playbook_dir }}/../reports/proxmox-patch"
-proxmox_patch_dryrun_report_dir: "{{ playbook_dir }}/../reports/proxmox-dryrun"
+proxmox_patch_apply_report_dir: "{{ reports_base_dir }}/proxmox-patch"
+proxmox_patch_dryrun_report_dir: "{{ reports_base_dir }}/proxmox-dryrun"
 
 # Hostname of the control node VM to detect on target_node
 proxmox_patch_apply_control_node_name: "ansy"

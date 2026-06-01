@@ -1,2 +1,2 @@
 ---
-monitoring_healthcheck_report_dir: "{{ playbook_dir }}/../reports/monitoring-health"
+monitoring_healthcheck_report_dir: "{{ reports_base_dir }}/monitoring-health"
