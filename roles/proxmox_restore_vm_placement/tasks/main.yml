@@ -85,6 +85,7 @@
       loop: "{{ _vms_to_restore | selectattr('type', 'equalto', 'qemu') | list }}"
       loop_control:
         label: "QEMU {{ item.vmid }} {{ item.name | default('') }} from {{ item.node }} [{{ item.status }}]"
+      delegate_to: "{{ item.node }}"
       changed_when: true
 
     - name: Migrate non-HA LXC containers back to target_node
@@ -95,6 +96,7 @@
       loop: "{{ _vms_to_restore | selectattr('type', 'equalto', 'lxc') | list }}"
       loop_control:
         label: "LXC {{ item.vmid }} {{ item.name | default('') }} from {{ item.node }} [{{ item.status }}]"
+      delegate_to: "{{ item.node }}"
       changed_when: true
 
     - name: Record migrated VM IDs
