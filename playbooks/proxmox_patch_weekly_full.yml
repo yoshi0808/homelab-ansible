@@ -1,0 +1,211 @@
+---
+# =============================================================================
+# proxmox_patch_weekly_full.yml
+# Rolling patch apply: pve2 → pve1
+#
+# Run from quory (control node, outside Proxmox cluster):
+#   ansible-playbook -i inventories/homelab/hosts.yml \
+#     playbooks/proxmox_patch_weekly_full.yml
+#
+# Flow:
+#   0.  preflight: control node not on cluster
+#   1.  healthcheck pve1 + pve2  (stop if not both OK)
+#   2.  dry-run                  (stop if not PATCH_READY)
+#   3.  evacuate pve2
+#   4.  patch apply pve2
+#   5.  post-patch healthcheck pve2
+#   6.  restore pve2
+#   7.  evacuate pve1
+#   8.  patch apply pve1
+#   9.  post-patch healthcheck pve1
+#   10. restore pve1
+#   11. summary mail
+#
+# unsafe: applies OS patches
+# =============================================================================
+
+# ---------------------------------------------------------------------------
+# Step 0: Preflight - Verify control node is not on the Proxmox cluster
+#
+# If ansy (Ansible dev VM) is running on pve1/pve2, evacuate would migrate it
+# mid-run, breaking this playbook. Must be run from quory instead.
+# ---------------------------------------------------------------------------
+- name: Preflight - Verify control node is not on Proxmox cluster
+  hosts: "{{ groups['proxmox'][0] }}"
+  gather_facts: false
+  become: true
+  tasks:
+    - name: Get cluster resources
+      ansible.builtin.command:
+        cmd: pvesh get /cluster/resources --output-format json
+      register: _preflight_pvesh_raw
+      changed_when: false
+
+    - name: Detect control node on cluster
+      ansible.builtin.set_fact:
+        _control_node_on_cluster: >-
+          {{ _preflight_pvesh_raw.stdout | from_json |
+             selectattr('type', 'defined') |
+             selectattr('type', 'equalto', 'qemu') |
+             selectattr('name', 'defined') |
+             selectattr('name', 'search', proxmox_patch_apply_control_node_name) |
+             list }}
+
+    - name: Abort if control node is on cluster
+      ansible.builtin.fail:
+        msg: >-
+          Control node '{{ proxmox_patch_apply_control_node_name }}' is running on
+          the Proxmox cluster
+          ({{ _control_node_on_cluster | map(attribute='node') | list | join(', ') }}).
+          proxmox_patch_weekly_full must be run from quory (external control node),
+          not from a VM on the cluster.
+      when: _control_node_on_cluster | length > 0
+
+# ---------------------------------------------------------------------------
+# Step 1a: Healthcheck both nodes
+# ---------------------------------------------------------------------------
+- import_playbook: proxmox_healthcheck.yml
+
+# Step 1b: Stop if either node is not OK
+- name: Abort if either node healthcheck is not OK
+  hosts: proxmox
+  gather_facts: false
+  any_errors_fatal: true
+  tasks:
+    - name: Fail if healthcheck is not OK
+      ansible.builtin.fail:
+        msg: >-
+          {{ inventory_hostname }} healthcheck is {{ proxmox_report.result.status }}.
+          Both nodes must be OK before proceeding with weekly full patch.
+      when: proxmox_report.result.status != 'OK'
+
+# ---------------------------------------------------------------------------
+# Step 2a: Dry-run (produces _final_status on groups['proxmox'][0])
+#
+# proxmox_patch_dryrun role sets _final_status with run_once + delegate_to:
+# localhost but without delegate_facts: true, so the fact is stored on the
+# run_once source host (groups['proxmox'][0]), not on localhost.
+# ---------------------------------------------------------------------------
+- import_playbook: proxmox_patch_dryrun.yml
+
+# Step 2b: Stop if not PATCH_READY
+- name: Abort if dry-run status is not PATCH_READY
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Fail if not PATCH_READY
+      ansible.builtin.fail:
+        msg: >-
+          Dry-run status is
+          {{ hostvars[groups['proxmox'][0]]['_final_status'] | default('UNKNOWN') }}.
+          Weekly full patch apply requires PATCH_READY. Stopping.
+      when: hostvars[groups['proxmox'][0]]['_final_status'] | default('') != 'PATCH_READY'
+
+# ---------------------------------------------------------------------------
+# Step 3: Evacuate pve2
+# ---------------------------------------------------------------------------
+- import_playbook: proxmox_evacuate_node.yml
+  vars:
+    target_node: pve2
+
+# ---------------------------------------------------------------------------
+# Step 4: Patch apply pve2
+# ---------------------------------------------------------------------------
+- import_playbook: proxmox_patch_apply_node.yml
+  vars:
+    target_node: pve2
+
+# ---------------------------------------------------------------------------
+# Step 5: Post-patch healthcheck pve2
+# ---------------------------------------------------------------------------
+- name: pve2 post-patch healthcheck
+  hosts: pve2
+  gather_facts: true
+  become: true
+  tasks:
+    - name: Run healthcheck on pve2
+      ansible.builtin.include_role:
+        name: proxmox_healthcheck
+
+    - name: Abort if pve2 post-patch healthcheck is not OK
+      ansible.builtin.fail:
+        msg: >-
+          pve2 post-patch healthcheck is {{ proxmox_report.result.status }}.
+          Not proceeding to restore or pve1 patch.
+      when: proxmox_report.result.status != 'OK'
+
+# ---------------------------------------------------------------------------
+# Step 6: Restore pve2
+# ---------------------------------------------------------------------------
+- import_playbook: proxmox_restore_vm_placement.yml
+  vars:
+    target_node: pve2
+
+# ---------------------------------------------------------------------------
+# Step 7: Evacuate pve1
+# ---------------------------------------------------------------------------
+- import_playbook: proxmox_evacuate_node.yml
+  vars:
+    target_node: pve1
+
+# ---------------------------------------------------------------------------
+# Step 8: Patch apply pve1
+# ---------------------------------------------------------------------------
+- import_playbook: proxmox_patch_apply_node.yml
+  vars:
+    target_node: pve1
+
+# ---------------------------------------------------------------------------
+# Step 9: Post-patch healthcheck pve1
+# ---------------------------------------------------------------------------
+- name: pve1 post-patch healthcheck
+  hosts: pve1
+  gather_facts: true
+  become: true
+  tasks:
+    - name: Run healthcheck on pve1
+      ansible.builtin.include_role:
+        name: proxmox_healthcheck
+
+    - name: Abort if pve1 post-patch healthcheck is not OK
+      ansible.builtin.fail:
+        msg: >-
+          pve1 post-patch healthcheck is {{ proxmox_report.result.status }}.
+          Restore may still be needed manually.
+      when: proxmox_report.result.status != 'OK'
+
+# ---------------------------------------------------------------------------
+# Step 10: Restore pve1
+# ---------------------------------------------------------------------------
+- import_playbook: proxmox_restore_vm_placement.yml
+  vars:
+    target_node: pve1
+
+# ---------------------------------------------------------------------------
+# Step 11: Summary mail
+# ---------------------------------------------------------------------------
+- name: Send weekly full patch complete notification
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Load mail variables
+      ansible.builtin.include_vars:
+        file: "{{ inventory_dir }}/../vars/mail.yml"
+
+    - name: Send completion notification
+      community.general.mail:
+        host: "{{ smtp_host }}"
+        port: "{{ smtp_port }}"
+        username: "{{ smtp_user }}"
+        password: "{{ smtp_password }}"
+        to: "{{ mail_to }}"
+        subject: "[Proxmox Patch] Weekly Full Patch Complete - pve2/pve1"
+        body: |
+          Proxmox weekly full patch apply が完了しました。
+
+          実行日時: {{ lookup('pipe', 'date "+%Y-%m-%d %H:%M:%S"') }}
+          対象ノード: pve2 → pve1（順番に適用）
+
+          pve2: 退避 → パッチ適用 → 復帰 完了
+          pve1: 退避 → パッチ適用 → 復帰 完了
+        secure: starttls

@@ -6,3 +6,8 @@ ansible_ssh_private_key_file: ~/.ssh/id_ann
 # --with-local-disks is required for live migration; approved for this environment.
 proxmox_evacuate_allow_local_disk_migration: true
 proxmox_restore_allow_local_disk_migration: true
+
+# Control node VM name on the Proxmox cluster.
+# Used by proxmox_patch_apply_node role and weekly_full preflight check.
+# weekly_full must NOT be run from this VM (run from quory instead).
+proxmox_patch_apply_control_node_name: "ansy"
