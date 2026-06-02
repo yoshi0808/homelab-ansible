@@ -6,3 +6,10 @@ proxmox_evacuate_ha_timeout: 300
 
 # Poll interval in seconds while waiting for HA evacuation
 proxmox_evacuate_ha_poll_interval: 10
+
+# Allow live-migrating QEMU VMs that have local (non-shared) disks.
+# Per proxmox_patch_policy.md (5.6), local-only storage VMs are NOT auto-migrated
+# by default; the evacuation must stop so a human can decide. Set to true only
+# when local disk storage migration is explicitly approved for this run; this
+# appends --with-local-disks to qm migrate.
+proxmox_evacuate_allow_local_disk_migration: false
