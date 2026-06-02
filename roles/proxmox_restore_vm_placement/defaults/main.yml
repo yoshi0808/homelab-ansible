@@ -15,3 +15,10 @@ proxmox_restore_ha_poll_interval: 10
 
 # Seconds to wait after starting a stopped VM before checking running state
 proxmox_restore_vm_start_delay: 10
+
+# Allow live-migrating QEMU VMs that have local (non-shared) disks.
+# When true, --with-local-disks is appended to qm migrate.
+# Default is false per proxmox_patch_policy.md (5.6); override to true in
+# group_vars or playbook vars for environments where local-disk migration is
+# explicitly approved (e.g. local-zfs homelabs).
+proxmox_restore_allow_local_disk_migration: false

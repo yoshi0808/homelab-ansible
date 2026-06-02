@@ -81,6 +81,7 @@
         cmd: >-
           qm migrate {{ item.vmid }} {{ inventory_hostname }}
           {{ '--online 1' if item.status == 'running' else '' }}
+          {{ '--with-local-disks' if (proxmox_restore_allow_local_disk_migration | bool) else '' }}
       loop: "{{ _vms_to_restore | selectattr('type', 'equalto', 'qemu') | list }}"
       loop_control:
         label: "QEMU {{ item.vmid }} {{ item.name | default('') }} from {{ item.node }} [{{ item.status }}]"
