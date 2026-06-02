@@ -1,0 +1,11 @@
+---
+proxmox_restore_report_dir: "{{ reports_base_dir }}/proxmox-restore"
+
+# Seconds to wait for HA to return VMs to home node after maintenance mode disabled
+proxmox_restore_ha_timeout: 300
+
+# Poll interval in seconds while waiting for HA to restore VMs
+proxmox_restore_ha_poll_interval: 10
+
+# Seconds to wait after starting a stopped VM before checking running state
+proxmox_restore_vm_start_delay: 10

@@ -1,0 +1,8 @@
+---
+proxmox_evacuate_report_dir: "{{ reports_base_dir }}/proxmox-evacuate"
+
+# Seconds to wait for HA to evacuate VMs after maintenance mode is enabled
+proxmox_evacuate_ha_timeout: 300
+
+# Poll interval in seconds while waiting for HA evacuation
+proxmox_evacuate_ha_poll_interval: 10

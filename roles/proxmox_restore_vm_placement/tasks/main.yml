@@ -1,0 +1,253 @@
+---
+# =============================================================================
+# Validate inputs
+# =============================================================================
+
+- name: Validate target_node
+  ansible.builtin.assert:
+    that:
+      - target_node is defined
+      - target_node in ['pve1', 'pve2']
+    fail_msg: "target_node must be 'pve1' or 'pve2', got: '{{ target_node | default('undefined') }}'"
+  delegate_to: localhost
+  become: false
+
+# =============================================================================
+# Initialize result facts
+# =============================================================================
+
+- name: Set run timestamp and initialize result facts
+  ansible.builtin.set_fact:
+    _restore_run_ts: "{{ lookup('pipe', 'date +%Y%m%dT%H%M%S') }}"
+    _restore_failed: false
+    _restore_error_msg: ""
+    _vms_to_restore: []
+    _restore_vms_migrated: []
+    _restore_vms_started: []
+    _restore_post_hc_status: "UNKNOWN"
+    _restore_maintenance_disabled: false
+
+- name: Ensure report directory exists
+  ansible.builtin.file:
+    path: "{{ proxmox_restore_report_dir }}"
+    state: directory
+    mode: "0755"
+  delegate_to: localhost
+  become: false
+
+# =============================================================================
+# Main block
+# =============================================================================
+
+- block:
+
+    # =========================================================================
+    # Phase 1: Migrate non-HA VMs back to target_node (home node)
+    # =========================================================================
+
+    - name: Get cluster resources
+      ansible.builtin.command:
+        cmd: pvesh get /cluster/resources --output-format json
+      register: _restore_pvesh_raw
+      changed_when: false
+
+    - name: Parse cluster resources
+      ansible.builtin.set_fact:
+        _restore_all_resources: "{{ _restore_pvesh_raw.stdout | from_json }}"
+
+    # VMs that prefer target_node (preferpve<n> tag), are not HA-managed,
+    # and are currently NOT on target_node
+    - name: Find non-HA VMs that belong on target_node but are elsewhere
+      ansible.builtin.set_fact:
+        _vms_to_restore: >-
+          {{ _restore_all_resources |
+             selectattr('type', 'defined') |
+             selectattr('type', 'in', ['qemu', 'lxc']) |
+             selectattr('tags', 'defined') |
+             rejectattr('tags', 'search', '(^|;)hacritical(;|$)') |
+             selectattr('tags', 'search', '(^|;)prefer' ~ inventory_hostname ~ '(;|$)') |
+             rejectattr('node', 'equalto', inventory_hostname) |
+             list }}
+
+    - name: Show restore plan
+      ansible.builtin.debug:
+        msg: |
+          Restore plan for {{ inventory_hostname }}:
+            VMs to migrate back: {{ _vms_to_restore | length }}
+            {{ _vms_to_restore | map(attribute='name') | list | join(', ') | default('none') }}
+
+    - name: Migrate non-HA QEMU VMs back to target_node
+      ansible.builtin.command:
+        cmd: >-
+          qm migrate {{ item.vmid }} {{ inventory_hostname }}
+          {{ '--online 1' if item.status == 'running' else '' }}
+      loop: "{{ _vms_to_restore | selectattr('type', 'equalto', 'qemu') | list }}"
+      loop_control:
+        label: "QEMU {{ item.vmid }} {{ item.name | default('') }} from {{ item.node }} [{{ item.status }}]"
+      changed_when: true
+
+    - name: Migrate non-HA LXC containers back to target_node
+      ansible.builtin.command:
+        cmd: >-
+          pct migrate {{ item.vmid }} {{ inventory_hostname }}
+          {{ '--restart 1' if item.status == 'running' else '' }}
+      loop: "{{ _vms_to_restore | selectattr('type', 'equalto', 'lxc') | list }}"
+      loop_control:
+        label: "LXC {{ item.vmid }} {{ item.name | default('') }} from {{ item.node }} [{{ item.status }}]"
+      changed_when: true
+
+    - name: Record migrated VM IDs
+      ansible.builtin.set_fact:
+        _restore_vms_migrated: "{{ _vms_to_restore | map(attribute='vmid') | list }}"
+
+    # =========================================================================
+    # Phase 2: Verify migrated VMs are running; start if stopped
+    # =========================================================================
+
+    - name: Wait briefly for migrations to settle
+      ansible.builtin.pause:
+        seconds: "{{ proxmox_restore_vm_start_delay }}"
+      when: _vms_to_restore | length > 0
+
+    - name: Get cluster resources after migration
+      ansible.builtin.command:
+        cmd: pvesh get /cluster/resources --output-format json
+      register: _restore_post_migrate_raw
+      changed_when: false
+      when: _vms_to_restore | length > 0
+
+    - name: Find migrated VMs that are stopped on target_node
+      ansible.builtin.set_fact:
+        _stopped_after_migrate: >-
+          {{ _restore_post_migrate_raw.stdout | from_json |
+             selectattr('type', 'defined') |
+             selectattr('type', 'in', ['qemu', 'lxc']) |
+             selectattr('node', 'defined') |
+             selectattr('node', 'equalto', inventory_hostname) |
+             selectattr('vmid', 'defined') |
+             selectattr('vmid', 'in', _restore_vms_migrated) |
+             selectattr('status', 'defined') |
+             rejectattr('status', 'equalto', 'running') |
+             list }}
+      when: _vms_to_restore | length > 0
+
+    - name: Start stopped QEMU VMs on target_node
+      ansible.builtin.command:
+        cmd: qm start {{ item.vmid }}
+      loop: "{{ _stopped_after_migrate | default([]) | selectattr('type', 'equalto', 'qemu') | list }}"
+      loop_control:
+        label: "QEMU {{ item.vmid }} {{ item.name | default('') }}"
+      changed_when: true
+
+    - name: Start stopped LXC containers on target_node
+      ansible.builtin.command:
+        cmd: pct start {{ item.vmid }}
+      loop: "{{ _stopped_after_migrate | default([]) | selectattr('type', 'equalto', 'lxc') | list }}"
+      loop_control:
+        label: "LXC {{ item.vmid }} {{ item.name | default('') }}"
+      changed_when: true
+
+    - name: Record started VM IDs
+      ansible.builtin.set_fact:
+        _restore_vms_started: "{{ _stopped_after_migrate | default([]) | map(attribute='vmid') | list }}"
+
+    # =========================================================================
+    # Phase 3: Disable maintenance mode (triggers HA restore)
+    # =========================================================================
+
+    - name: Disable maintenance mode on target node
+      ansible.builtin.command:
+        cmd: pvecm node-maintenance disable {{ inventory_hostname }}
+      changed_when: true
+
+    - name: Record maintenance mode disabled
+      ansible.builtin.set_fact:
+        _restore_maintenance_disabled: true
+
+    # Wait for HA VMs that prefer target_node to return home
+    - name: Get HA VMs that prefer target_node
+      ansible.builtin.set_fact:
+        _ha_prefer_target: >-
+          {{ _restore_all_resources |
+             selectattr('type', 'defined') |
+             selectattr('type', 'in', ['qemu', 'lxc']) |
+             selectattr('tags', 'defined') |
+             selectattr('tags', 'search', '(^|;)hacritical(;|$)') |
+             selectattr('tags', 'search', '(^|;)prefer' ~ inventory_hostname ~ '(;|$)') |
+             list }}
+
+    - name: Wait for HA-managed VMs to return to target node
+      ansible.builtin.command:
+        cmd: pvesh get /cluster/resources --output-format json
+      register: _restore_ha_poll
+      changed_when: false
+      retries: "{{ (proxmox_restore_ha_timeout | int) // (proxmox_restore_ha_poll_interval | int) }}"
+      delay: "{{ proxmox_restore_ha_poll_interval }}"
+      until: >-
+        ((_restore_ha_poll.stdout | from_json |
+          selectattr('type', 'defined') |
+          selectattr('type', 'in', ['qemu', 'lxc']) |
+          selectattr('tags', 'defined') |
+          selectattr('tags', 'search', '(^|;)hacritical(;|$)') |
+          selectattr('tags', 'search', '(^|;)prefer' ~ inventory_hostname ~ '(;|$)') |
+          rejectattr('node', 'equalto', inventory_hostname) |
+          list | length) == 0) and
+        ((_restore_ha_poll.stdout | from_json |
+          selectattr('type', 'defined') |
+          selectattr('type', 'in', ['qemu', 'lxc']) |
+          selectattr('tags', 'defined') |
+          selectattr('tags', 'search', '(^|;)hacritical(;|$)') |
+          selectattr('tags', 'search', '(^|;)prefer' ~ inventory_hostname ~ '(;|$)') |
+          selectattr('node', 'equalto', inventory_hostname) |
+          rejectattr('status', 'equalto', 'running') |
+          list | length) == 0)
+      when: _ha_prefer_target | length > 0
+
+    # =========================================================================
+    # Phase 4: Healthcheck on target node
+    # =========================================================================
+
+    - name: Run post-restore healthcheck on target node
+      ansible.builtin.include_role:
+        name: proxmox_healthcheck
+
+    - name: Record post-restore healthcheck status
+      ansible.builtin.set_fact:
+        _restore_post_hc_status: "{{ proxmox_report.result.status }}"
+
+    - name: Abort if post-restore healthcheck is not OK
+      ansible.builtin.fail:
+        msg: >-
+          Post-restore healthcheck on {{ inventory_hostname }} is
+          {{ proxmox_report.result.status }}:
+          {{ (proxmox_report.result.criticals + proxmox_report.result.warnings) | join(' | ') }}
+      when: proxmox_report.result.status != 'OK'
+
+  rescue:
+    - name: Capture failure info
+      ansible.builtin.set_fact:
+        _restore_failed: true
+        _restore_error_msg: "{{ ansible_failed_result.msg | default('Unknown error during restore') }}"
+
+  always:
+    - name: Save restore report
+      ansible.builtin.copy:
+        content: "{{ {
+            'run_timestamp': _restore_run_ts,
+            'target_node': inventory_hostname,
+            'result': 'FAILED' if (_restore_failed | bool) else 'SUCCESS',
+            'error_msg': _restore_error_msg,
+            'maintenance_disabled': _restore_maintenance_disabled,
+            'vms_migrated_back': _restore_vms_migrated,
+            'vms_started': _restore_vms_started,
+            'post_healthcheck_status': _restore_post_hc_status
+          } | to_nice_json }}"
+        dest: "{{ proxmox_restore_report_dir }}/{{ _restore_run_ts }}_{{ inventory_hostname }}_restore.json"
+      delegate_to: localhost
+      become: false
+      ignore_errors: true
+
+    - name: Re-raise failure
+      ansible.builtin.fail:
+        msg: "proxmox_restore_vm_placement failed: {{ _restore_error_msg }}"
+      when: _restore_failed | bool

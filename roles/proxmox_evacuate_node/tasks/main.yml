@@ -1,0 +1,269 @@
+---
+# =============================================================================
+# Validate inputs
+# =============================================================================
+
+- name: Validate target_node and destination_node
+  ansible.builtin.assert:
+    that:
+      - target_node is defined
+      - target_node in ['pve1', 'pve2']
+      - destination_node is defined
+      - destination_node in ['pve1', 'pve2']
+      - target_node != destination_node
+    fail_msg: >-
+      target_node and destination_node must be pve1 or pve2 and must differ.
+      Got target_node={{ target_node | default('undefined') }},
+      destination_node={{ destination_node | default('undefined') }}
+  delegate_to: localhost
+  become: false
+
+# =============================================================================
+# Initialize result facts
+# =============================================================================
+
+- name: Set run timestamp and initialize result facts
+  ansible.builtin.set_fact:
+    _evac_run_ts: "{{ lookup('pipe', 'date +%Y%m%dT%H%M%S') }}"
+    _evac_failed: false
+    _evac_error_msg: ""
+    _vms_to_migrate: []
+    _vms_ha: []
+    _remaining_running: []
+    _evac_vms_migrated: []
+    _evac_vms_force_stopped: []
+    _evac_pre_hc_status: "UNKNOWN"
+    _evac_maintenance_enabled: false
+
+- name: Ensure report directory exists
+  ansible.builtin.file:
+    path: "{{ proxmox_evacuate_report_dir }}"
+    state: directory
+    mode: "0755"
+  delegate_to: localhost
+  become: false
+
+# =============================================================================
+# Main block
+# =============================================================================
+
+- block:
+
+    # =========================================================================
+    # Phase 1: Healthcheck on target node
+    # =========================================================================
+
+    - name: Run healthcheck on target node
+      ansible.builtin.include_role:
+        name: proxmox_healthcheck
+
+    - name: Record target healthcheck status
+      ansible.builtin.set_fact:
+        _evac_pre_hc_status: "{{ proxmox_report.result.status }}"
+
+    - name: Abort if target healthcheck is not OK
+      ansible.builtin.fail:
+        msg: >-
+          Target node {{ inventory_hostname }} healthcheck {{ proxmox_report.result.status }}.
+          Cannot evacuate from an unhealthy node.
+      when: proxmox_report.result.status != 'OK'
+
+    # =========================================================================
+    # Phase 2: Identify VMs/CTs on target node
+    # =========================================================================
+
+    - name: Get cluster resources
+      ansible.builtin.command:
+        cmd: pvesh get /cluster/resources --output-format json
+      register: _evac_pvesh_raw
+      changed_when: false
+
+    - name: Parse cluster resources
+      ansible.builtin.set_fact:
+        _evac_all_resources: "{{ _evac_pvesh_raw.stdout | from_json }}"
+
+    - name: Filter VM/CT resources on target node
+      ansible.builtin.set_fact:
+        _target_vms: >-
+          {{ _evac_all_resources |
+             selectattr('type', 'defined') |
+             selectattr('type', 'in', ['qemu', 'lxc']) |
+             selectattr('node', 'defined') |
+             selectattr('node', 'equalto', inventory_hostname) |
+             list }}
+
+    # Migrate: has preferpve tag, no hacritical tag
+    # Skip: no tags (templates etc.) or only hacritical
+    - name: Classify VMs for evacuation
+      ansible.builtin.set_fact:
+        _vms_to_migrate: >-
+          {{ _target_vms |
+             selectattr('tags', 'defined') |
+             rejectattr('tags', 'search', '(^|;)hacritical(;|$)') |
+             selectattr('tags', 'search', '(^|;)preferpve') |
+             list }}
+        _vms_ha: >-
+          {{ _target_vms |
+             selectattr('tags', 'defined') |
+             selectattr('tags', 'search', '(^|;)hacritical(;|$)') |
+             list }}
+
+    - name: Show evacuation plan
+      ansible.builtin.debug:
+        msg: |
+          Evacuation plan for {{ inventory_hostname }}:
+            Total VMs/CTs on node : {{ _target_vms | length }}
+            To migrate (non-HA)   : {{ _vms_to_migrate | length }}
+              {{ _vms_to_migrate | map(attribute='name') | list | join(', ') | default('none') }}
+            HA-managed (hacritical): {{ _vms_ha | length }}
+              {{ _vms_ha | map(attribute='name') | list | join(', ') | default('none') }}
+            Destination node      : {{ destination_node }}
+
+    # =========================================================================
+    # Phase 3: Migrate non-HA VMs/CTs to destination_node
+    # =========================================================================
+
+    - name: Migrate non-HA QEMU VMs to destination_node
+      ansible.builtin.command:
+        cmd: >-
+          qm migrate {{ item.vmid }} {{ destination_node }}
+          {{ '--online 1' if item.status == 'running' else '' }}
+      loop: "{{ _vms_to_migrate | selectattr('type', 'equalto', 'qemu') | list }}"
+      loop_control:
+        label: "QEMU {{ item.vmid }} {{ item.name | default('') }} [{{ item.status }}]"
+      changed_when: true
+
+    - name: Migrate non-HA LXC containers to destination_node
+      ansible.builtin.command:
+        cmd: >-
+          pct migrate {{ item.vmid }} {{ destination_node }}
+          {{ '--restart 1' if item.status == 'running' else '' }}
+      loop: "{{ _vms_to_migrate | selectattr('type', 'equalto', 'lxc') | list }}"
+      loop_control:
+        label: "LXC {{ item.vmid }} {{ item.name | default('') }} [{{ item.status }}]"
+      changed_when: true
+
+    - name: Record migrated VM IDs
+      ansible.builtin.set_fact:
+        _evac_vms_migrated: "{{ _vms_to_migrate | map(attribute='vmid') | list }}"
+
+    # =========================================================================
+    # Phase 4: Enable maintenance mode (triggers HA evacuation)
+    # =========================================================================
+
+    - name: Enable maintenance mode on target node
+      ansible.builtin.command:
+        cmd: pvecm node-maintenance enable {{ inventory_hostname }}
+      changed_when: true
+
+    - name: Record maintenance mode enabled
+      ansible.builtin.set_fact:
+        _evac_maintenance_enabled: true
+
+    # =========================================================================
+    # Phase 5: Wait for HA to evacuate managed VMs
+    # =========================================================================
+
+    - name: Wait for HA-managed VMs to leave target node
+      ansible.builtin.command:
+        cmd: pvesh get /cluster/resources --output-format json
+      register: _evac_ha_poll
+      changed_when: false
+      retries: "{{ (proxmox_evacuate_ha_timeout | int) // (proxmox_evacuate_ha_poll_interval | int) }}"
+      delay: "{{ proxmox_evacuate_ha_poll_interval }}"
+      until: >-
+        (_evac_ha_poll.stdout | from_json |
+         selectattr('type', 'defined') |
+         selectattr('type', 'in', ['qemu', 'lxc']) |
+         selectattr('node', 'defined') |
+         selectattr('node', 'equalto', inventory_hostname) |
+         selectattr('tags', 'defined') |
+         selectattr('tags', 'search', '(^|;)hacritical(;|$)') |
+         selectattr('status', 'defined') |
+         selectattr('status', 'equalto', 'running') |
+         list | length) == 0
+      when: _vms_ha | length > 0
+
+    # =========================================================================
+    # Phase 6: Verify and stop any remaining running VMs/CTs
+    # =========================================================================
+
+    - name: Get final cluster resources on target node
+      ansible.builtin.command:
+        cmd: pvesh get /cluster/resources --output-format json
+      register: _evac_post_raw
+      changed_when: false
+
+    - name: Find remaining running VMs/CTs on target node
+      ansible.builtin.set_fact:
+        _remaining_running: >-
+          {{ _evac_post_raw.stdout | from_json |
+             selectattr('type', 'defined') |
+             selectattr('type', 'in', ['qemu', 'lxc']) |
+             selectattr('node', 'defined') |
+             selectattr('node', 'equalto', inventory_hostname) |
+             selectattr('status', 'defined') |
+             selectattr('status', 'equalto', 'running') |
+             list }}
+
+    - name: Warn if running VMs/CTs remain after evacuation
+      ansible.builtin.debug:
+        msg: >-
+          WARNING: {{ _remaining_running | length }} VMs/CTs still running on
+          {{ inventory_hostname }} after evacuation. Force-stopping:
+          {{ _remaining_running | map(attribute='name') | list | join(', ') }}
+      when: _remaining_running | length > 0
+
+    - name: Force-stop remaining QEMU VMs on target node
+      ansible.builtin.command:
+        cmd: qm stop {{ item.vmid }}
+      loop: "{{ _remaining_running | selectattr('type', 'equalto', 'qemu') | list }}"
+      loop_control:
+        label: "QEMU {{ item.vmid }} {{ item.name | default('') }}"
+      changed_when: true
+      when: _remaining_running | length > 0
+
+    - name: Force-stop remaining LXC containers on target node
+      ansible.builtin.command:
+        cmd: pct stop {{ item.vmid }}
+      loop: "{{ _remaining_running | selectattr('type', 'equalto', 'lxc') | list }}"
+      loop_control:
+        label: "LXC {{ item.vmid }} {{ item.name | default('') }}"
+      changed_when: true
+      when: _remaining_running | length > 0
+
+    - name: Record force-stopped VM IDs
+      ansible.builtin.set_fact:
+        _evac_vms_force_stopped: "{{ _remaining_running | map(attribute='vmid') | list }}"
+
+  rescue:
+    - name: Capture failure info
+      ansible.builtin.set_fact:
+        _evac_failed: true
+        _evac_error_msg: "{{ ansible_failed_result.msg | default('Unknown error during evacuation') }}"
+
+  always:
+    - name: Save evacuation report
+      ansible.builtin.copy:
+        content: "{{ {
+            'run_timestamp': _evac_run_ts,
+            'target_node': inventory_hostname,
+            'destination_node': destination_node,
+            'result': 'FAILED' if (_evac_failed | bool) else 'SUCCESS',
+            'error_msg': _evac_error_msg,
+            'pre_healthcheck_status': _evac_pre_hc_status,
+            'maintenance_enabled': _evac_maintenance_enabled,
+            'vms_migrated': _evac_vms_migrated,
+            'vms_force_stopped': _evac_vms_force_stopped,
+            'ha_vms_count': (_vms_ha | length),
+            'total_vms_on_node': (_target_vms | default([]) | length)
+          } | to_nice_json }}"
+        dest: "{{ proxmox_evacuate_report_dir }}/{{ _evac_run_ts }}_{{ inventory_hostname }}_evacuate.json"
+      delegate_to: localhost
+      become: false
+      ignore_errors: true
+
+    - name: Re-raise failure
+      ansible.builtin.fail:
+        msg: "proxmox_evacuate_node failed: {{ _evac_error_msg }}"
+      when: _evac_failed | bool

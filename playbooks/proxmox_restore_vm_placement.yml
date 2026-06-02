@@ -1,0 +1,34 @@
+---
+# Restore VM/CT placement to home node after patch apply completes.
+#
+# Usage:
+#   ansible-playbook -i inventories/homelab/hosts.yml playbooks/proxmox_restore_vm_placement.yml \
+#     -e target_node=pve2
+#
+# target_node: pve1 or pve2 (required) — the node that was just patched
+#
+# Steps:
+#   1. Validate target_node
+#   2. Migrate non-HA VMs with prefer<target_node> tag back to target_node
+#   3. Start any stopped VMs after migration
+#   4. Disable maintenance mode (HA restores hacritical VMs automatically)
+#   5. Wait for HA VMs to return to target_node
+#   6. Run healthcheck on target_node
+
+- name: Validate target_node
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Assert target_node is pve1 or pve2
+      ansible.builtin.assert:
+        that:
+          - target_node is defined
+          - target_node in ['pve1', 'pve2']
+        fail_msg: "target_node must be 'pve1' or 'pve2', got: '{{ target_node | default('undefined') }}'"
+
+- name: Restore VM placement to target_node
+  hosts: "{{ target_node }}"
+  gather_facts: true
+  become: true
+  roles:
+    - proxmox_restore_vm_placement
