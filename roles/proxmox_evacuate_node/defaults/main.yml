@@ -8,8 +8,9 @@ proxmox_evacuate_ha_timeout: 300
 proxmox_evacuate_ha_poll_interval: 10
 
 # Allow live-migrating QEMU VMs that have local (non-shared) disks.
-# Per proxmox_patch_policy.md (5.6), local-only storage VMs are NOT auto-migrated
-# by default; the evacuation must stop so a human can decide. Set to true only
-# when local disk storage migration is explicitly approved for this run; this
-# appends --with-local-disks to qm migrate.
+# When true, --with-local-disks is appended to qm migrate.
+# Default is false per proxmox_patch_policy.md (5.6): evacuations must stop
+# when a VM uses local-only storage so a human can decide.
+# Override to true in group_vars or playbook vars for environments where
+# local-disk live migration is explicitly approved (e.g. local-zfs homelabs).
 proxmox_evacuate_allow_local_disk_migration: false

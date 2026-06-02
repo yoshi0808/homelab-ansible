@@ -1,3 +1,7 @@
 ---
 ansible_user: ann
 ansible_ssh_private_key_file: ~/.ssh/id_ann
+
+# All VMs in this homelab use local-zfs (local-only storage).
+# --with-local-disks is required for live migration; approved for this environment.
+proxmox_evacuate_allow_local_disk_migration: true
