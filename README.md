@@ -44,8 +44,7 @@ homelab-ansible/
 │   │       ├── pve2.yml
 │   │       └── quory.yml
 │   └── vars/
-│       ├── mail.yml
-│       └── proxmox_vm_home_nodes.yml
+│       └── mail.yml
 ├── playbooks/
 │   ├── proxmox_healthcheck.yml
 │   ├── proxmox_hw_check.yml
@@ -124,12 +123,6 @@ all:
 ### group_vars
 
 SSHの接続情報を記載（公開鍵認証）
-
----
-
-### vars/proxmox_vm_home_nodes.yml
-
-VMが本来どのProxmoxノードに存在しているべきかを示すもの
 
 ---
 
