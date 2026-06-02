@@ -1,6 +1,12 @@
 ---
 proxmox_evacuate_report_dir: "{{ reports_base_dir }}/proxmox-evacuate"
 
+# Seconds to wait for maintenance mode to become active (lrm <node>: maintenance mode)
+proxmox_evacuate_maintenance_timeout: 120
+
+# Poll interval in seconds while waiting for maintenance mode activation
+proxmox_evacuate_maintenance_poll_interval: 5
+
 # Seconds to wait for HA to evacuate VMs after maintenance mode is enabled
 proxmox_evacuate_ha_timeout: 300
 

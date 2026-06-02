@@ -1,6 +1,12 @@
 ---
 proxmox_restore_report_dir: "{{ reports_base_dir }}/proxmox-restore"
 
+# Seconds to wait for maintenance mode to become inactive (lrm <node>: idle)
+proxmox_restore_maintenance_timeout: 120
+
+# Poll interval in seconds while waiting for maintenance mode deactivation
+proxmox_restore_maintenance_poll_interval: 5
+
 # Seconds to wait for HA to return VMs to home node after maintenance mode disabled
 proxmox_restore_ha_timeout: 300
 

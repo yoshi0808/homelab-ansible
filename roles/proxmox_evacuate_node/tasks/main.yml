@@ -154,8 +154,20 @@
 
     - name: Enable maintenance mode on target node
       ansible.builtin.command:
-        cmd: pvecm node-maintenance enable {{ inventory_hostname }}
+        cmd: ha-manager crm-command node-maintenance enable {{ inventory_hostname }}
       changed_when: true
+
+    - name: Wait for maintenance mode to become active
+      ansible.builtin.command:
+        cmd: ha-manager status
+      register: _evac_maint_poll
+      changed_when: false
+      retries: "{{ (proxmox_evacuate_maintenance_timeout | int) // (proxmox_evacuate_maintenance_poll_interval | int) }}"
+      delay: "{{ proxmox_evacuate_maintenance_poll_interval }}"
+      until: >-
+        _evac_maint_poll.stdout_lines |
+        select('match', '^lrm ' ~ inventory_hostname ~ ' \\(.*maintenance mode') |
+        list | length > 0
 
     - name: Record maintenance mode enabled
       ansible.builtin.set_fact:
