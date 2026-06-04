@@ -6,23 +6,59 @@
 # CA秘密鍵はquory上 /run/semaphore-ca/ (tmpfs) にのみ展開する
 # 実行後、CA秘密鍵は必ず削除される
 #
+# このPlaybookはquoryからのみ実行すること。
+# quory上の処理はすべてlocal connectionで実行し、SSH経由の自己接続を避ける。
 # serial: 1 により1ホストずつ処理する。CA署名処理の .srl 競合を防ぐため。
+
+- name: cert_renew - verify execution host
+  hosts: localhost
+  gather_facts: true
+  connection: local
+  tasks:
+    - name: Ensure this playbook is running on quory
+      ansible.builtin.assert:
+        that:
+          - ansible_hostname == 'quory'
+        fail_msg: >-
+          cert_renew.yml must be run on quory only
+          (current host: {{ ansible_hostname }}).
+          CA private key must never be placed on {{ ansible_hostname }}.
 
 - name: cert_renew - prepare CA key on quory
   hosts: quory
   gather_facts: false
   become: true
+  connection: local
   tasks:
     - name: Run prepare_ca tasks
       ansible.builtin.import_role:
         name: homelab_cert_renew
         tasks_from: prepare_ca
 
-- name: cert_renew - issue and deploy semaphore certs
-  hosts: semaphore_servers
+- name: cert_renew - issue and deploy ansy cert
+  hosts: ansy
   gather_facts: false
   become: true
-  serial: 1
+  vars:
+    cert_renew_ca_host: localhost
+  tasks:
+    - name: Run issue tasks
+      ansible.builtin.import_role:
+        name: homelab_cert_renew
+        tasks_from: issue
+
+    - name: Run deploy_semaphore tasks
+      ansible.builtin.import_role:
+        name: homelab_cert_renew
+        tasks_from: deploy_semaphore
+
+- name: cert_renew - issue and deploy quory cert (local)
+  hosts: quory
+  gather_facts: false
+  become: true
+  connection: local
+  vars:
+    cert_renew_ca_host: localhost
   tasks:
     - name: Run issue tasks
       ansible.builtin.import_role:
@@ -39,6 +75,8 @@
   gather_facts: false
   become: true
   serial: 1
+  vars:
+    cert_renew_ca_host: localhost
   tasks:
     - name: Run issue tasks
       ansible.builtin.import_role:
@@ -54,6 +92,8 @@
   hosts: localhost
   gather_facts: false
   become: false
+  vars:
+    cert_renew_ca_host: localhost
   tasks:
     - name: Run cleanup tasks
       ansible.builtin.import_role:
@@ -64,6 +104,8 @@
   hosts: localhost
   gather_facts: false
   become: false
+  vars:
+    cert_renew_ca_host: localhost
   tasks:
     - name: Load mail variables
       ansible.builtin.include_vars:
