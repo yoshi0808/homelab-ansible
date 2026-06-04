@@ -21,13 +21,13 @@
 
 - name: Write CA certificate
   ansible.builtin.copy:
-    content: "{{ lookup('env', 'homelab-ca-crt') }}"
+    content: "{{ lookup('env', 'homelab-ca-crt') | replace('\\n', '\n') }}"
     dest: "{{ cert_renew_ca_dir }}/ca.crt"
     mode: "0644"
 
 - name: Write CA private key
   ansible.builtin.copy:
-    content: "{{ lookup('env', 'homelab-ca-key') }}"
+    content: "{{ lookup('env', 'homelab-ca-key') | replace('\\n', '\n') }}"
     dest: "{{ cert_renew_ca_dir }}/ca.key"
     mode: "0600"
   no_log: true
