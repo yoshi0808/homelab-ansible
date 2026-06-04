@@ -19,17 +19,15 @@
     - "{{ cert_renew_ca_dir }}"
     - "{{ cert_renew_ca_dir }}/certs"
 
+- name: Copy PEM fix script
+  ansible.builtin.copy:
+    src: fix_pem.py
+    dest: /tmp/fix_pem.py
+    mode: "0755"
+
 - name: Write CA certificate
   ansible.builtin.shell:
-    cmd: |
-      python3 -c "
-import os, re
-val = os.environ.get('HOMELAB_CA_CRT', '')
-pem = re.sub(r'(-----(?:BEGIN|END) [A-Z ]+-----)', lambda m: '\n' + m.group(0) + '\n', val)
-pem = re.sub(r' ', '\n', pem)
-pem = re.sub(r'\n+', '\n', pem).strip()
-print(pem)
-" > {{ cert_renew_ca_dir }}/ca.crt
+    cmd: python3 /tmp/fix_pem.py HOMELAB_CA_CRT > {{ cert_renew_ca_dir }}/ca.crt
     executable: /bin/bash
   environment:
     HOMELAB_CA_CRT: "{{ lookup('env', 'homelab-ca-crt') }}"
@@ -37,15 +35,7 @@ print(pem)
 
 - name: Write CA private key
   ansible.builtin.shell:
-    cmd: |
-      python3 -c "
-import os, re
-val = os.environ.get('HOMELAB_CA_KEY', '')
-pem = re.sub(r'(-----(?:BEGIN|END) [A-Z ]+-----)', lambda m: '\n' + m.group(0) + '\n', val)
-pem = re.sub(r' ', '\n', pem)
-pem = re.sub(r'\n+', '\n', pem).strip()
-print(pem)
-" > {{ cert_renew_ca_dir }}/ca.key
+    cmd: python3 /tmp/fix_pem.py HOMELAB_CA_KEY > {{ cert_renew_ca_dir }}/ca.key
     executable: /bin/bash
   environment:
     HOMELAB_CA_KEY: "{{ lookup('env', 'homelab-ca-key') }}"
