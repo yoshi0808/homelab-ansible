@@ -2,12 +2,13 @@
 # cert_renew.yml - TLS certificate renewal for homelab management UIs
 # 変更系: 証明書配置・サービス再起動あり
 #
-# 対象: ansy (semaphore), quory (semaphore), pve1 (pveproxy), pve2 (pveproxy)
+# 対象: ansy (semaphore), pve1 (pveproxy), pve2 (pveproxy)
+# quoryのsemaphore証明書はcert_renew_quory.ymlで管理する（semaphore再起動を含むため）
+# monnie (grafana) はPhase2。deploy_grafana.yml実装後に追加する。
 # CA秘密鍵はquory上 /run/semaphore-ca/ (tmpfs) にのみ展開する
 # 実行後、CA秘密鍵は必ず削除される
 #
-# このPlaybookはquoryからのみ実行すること。
-# quory上の処理はすべてlocal connectionで実行し、SSH経由の自己接続を避ける。
+# このPlaybookはquoryからのみ実行すること（Semaphoreから実行）。
 # serial: 1 により1ホストずつ処理する。CA署名処理の .srl 競合を防ぐため。
 
 - name: cert_renew - verify execution host
@@ -39,24 +40,6 @@
   hosts: ansy
   gather_facts: false
   become: true
-  vars:
-    cert_renew_ca_host: localhost
-  tasks:
-    - name: Run issue tasks
-      ansible.builtin.import_role:
-        name: homelab_cert_renew
-        tasks_from: issue
-
-    - name: Run deploy_semaphore tasks
-      ansible.builtin.import_role:
-        name: homelab_cert_renew
-        tasks_from: deploy_semaphore
-
-- name: cert_renew - issue and deploy quory cert (local)
-  hosts: quory
-  gather_facts: false
-  become: true
-  connection: local
   vars:
     cert_renew_ca_host: localhost
   tasks:
@@ -114,7 +97,7 @@
     - name: Build renewal summary
       ansible.builtin.set_fact:
         cert_renew_summary: |
-          {% for h in ['ansy', 'quory', 'pve1', 'pve2'] %}
+          {% for h in ['ansy', 'pve1', 'pve2'] %}
           {% if hostvars[h].cert_needs_renewal is not defined %}
           {{ h }}: check FAILED
           {% else %}

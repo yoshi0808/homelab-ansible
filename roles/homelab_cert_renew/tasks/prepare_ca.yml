@@ -1,13 +1,30 @@
 ---
-- name: Verify homelab-ca-crt env var is set
-  ansible.builtin.fail:
-    msg: "Environment variable homelab-ca-crt is not set"
-  when: lookup('env', 'homelab-ca-crt') | length == 0
+- name: Stat CA certificate source
+  ansible.builtin.stat:
+    path: "{{ cert_renew_ca_src_crt }}"
+  register: ca_crt_stat
 
-- name: Verify homelab-ca-key env var is set
+- name: Fail if CA certificate source not found
   ansible.builtin.fail:
-    msg: "Environment variable homelab-ca-key is not set"
-  when: lookup('env', 'homelab-ca-key') | length == 0
+    msg: "CA certificate not found: {{ cert_renew_ca_src_crt }}"
+  when: not ca_crt_stat.stat.exists
+
+- name: Stat CA private key source
+  ansible.builtin.stat:
+    path: "{{ cert_renew_ca_src_key }}"
+  register: ca_key_stat
+  no_log: true
+
+- name: Fail if CA private key source not found
+  ansible.builtin.fail:
+    msg: "CA private key not found: {{ cert_renew_ca_src_key }}"
+  when: not ca_key_stat.stat.exists
+  no_log: true
+
+- name: Fail if CA private key permissions are too open
+  ansible.builtin.fail:
+    msg: "CA private key {{ cert_renew_ca_src_key }} must be mode 0600, got {{ ca_key_stat.stat.mode }}"
+  when: ca_key_stat.stat.mode != '0600'
   no_log: true
 
 - name: Create CA staging directories on tmpfs
@@ -19,25 +36,17 @@
     - "{{ cert_renew_ca_dir }}"
     - "{{ cert_renew_ca_dir }}/certs"
 
-- name: Copy PEM fix script
+- name: Copy CA certificate to tmpfs
   ansible.builtin.copy:
-    src: fix_pem.py
-    dest: /tmp/fix_pem.py
-    mode: "0755"
+    src: "{{ cert_renew_ca_src_crt }}"
+    dest: "{{ cert_renew_ca_dir }}/ca.crt"
+    mode: "0600"
+    remote_src: true
 
-- name: Write CA certificate
-  ansible.builtin.shell:
-    cmd: python3 /tmp/fix_pem.py HOMELAB_CA_CRT > {{ cert_renew_ca_dir }}/ca.crt
-    executable: /bin/bash
-  environment:
-    HOMELAB_CA_CRT: "{{ lookup('env', 'homelab-ca-crt') }}"
-  changed_when: true
-
-- name: Write CA private key
-  ansible.builtin.shell:
-    cmd: python3 /tmp/fix_pem.py HOMELAB_CA_KEY > {{ cert_renew_ca_dir }}/ca.key
-    executable: /bin/bash
-  environment:
-    HOMELAB_CA_KEY: "{{ lookup('env', 'homelab-ca-key') }}"
-  changed_when: true
+- name: Copy CA private key to tmpfs
+  ansible.builtin.copy:
+    src: "{{ cert_renew_ca_src_key }}"
+    dest: "{{ cert_renew_ca_dir }}/ca.key"
+    mode: "0600"
+    remote_src: true
   no_log: true

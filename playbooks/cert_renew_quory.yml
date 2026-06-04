@@ -1,0 +1,70 @@
+---
+# cert_renew_quory.yml - TLS certificate renewal for quory semaphore
+# 変更系: 証明書配置・semaphore再起動あり
+#
+# 対象: quory (semaphore)
+# systemd timerから実行する。semaphore再起動を含むためsemaphoreからは実行しない。
+# すべてlocal connectionで実行する。
+#
+# 通知: このPlaybookはメール通知を行わない。
+# 失敗検知はsystemdのExitCode / OnFailure= または journalctl で行う。
+# cleanup失敗時はPlaybook自体がfailするため、systemd unitのstateで検知できる。
+
+- name: cert_renew_quory - verify execution host
+  hosts: localhost
+  gather_facts: true
+  connection: local
+  tasks:
+    - name: Ensure this playbook is running on quory
+      ansible.builtin.assert:
+        that:
+          - ansible_hostname == 'quory'
+        fail_msg: >-
+          cert_renew_quory.yml must be run on quory only
+          (current host: {{ ansible_hostname }}).
+
+- name: cert_renew_quory - prepare CA key on quory
+  hosts: quory
+  gather_facts: false
+  become: true
+  connection: local
+  tasks:
+    - name: Run prepare_ca tasks
+      ansible.builtin.import_role:
+        name: homelab_cert_renew
+        tasks_from: prepare_ca
+
+- name: cert_renew_quory - issue and deploy quory cert
+  hosts: quory
+  gather_facts: false
+  become: true
+  connection: local
+  vars:
+    cert_renew_ca_host: localhost
+  tasks:
+    - name: Run issue tasks
+      ansible.builtin.import_role:
+        name: homelab_cert_renew
+        tasks_from: issue
+
+    - name: Run deploy_semaphore tasks
+      ansible.builtin.import_role:
+        name: homelab_cert_renew
+        tasks_from: deploy_semaphore
+
+- name: cert_renew_quory - cleanup CA key from quory
+  hosts: localhost
+  gather_facts: false
+  become: false
+  vars:
+    cert_renew_ca_host: localhost
+  tasks:
+    - name: Run cleanup tasks
+      ansible.builtin.import_role:
+        name: homelab_cert_renew
+        tasks_from: cleanup
+
+    - name: Fail if CA cleanup was not successful
+      ansible.builtin.fail:
+        msg: "CA cleanup {{ cert_cleanup_status }}: /run/semaphore-ca/ may still exist"
+      when: cert_cleanup_status is defined

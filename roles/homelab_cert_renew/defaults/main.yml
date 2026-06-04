@@ -5,6 +5,9 @@ cert_renew_valid_days: 45
 cert_renew_renew_threshold: 15
 force_renew: false
 
+cert_renew_ca_src_crt: /home/yoshi/.cert/radius_ca.crt
+cert_renew_ca_src_key: /home/yoshi/.cert/radius_ca.key
+
 cert_renew_hosts_config:
   ansy:
     cert_path: /etc/semaphore/tls/ansy.internal.crt
@@ -46,3 +49,13 @@ cert_renew_hosts_config:
     san_ip:
       - pve2.internal
     deploy_type: proxmox
+  monnie:
+    cert_path: /etc/grafana/tls/monnie.internal.crt
+    key_path: /etc/grafana/tls/monnie.internal.key
+    cert_check_path: /etc/grafana/tls/monnie.internal.crt
+    cn: monnie.internal
+    san_dns:
+      - monnie.internal
+      - monnie
+    san_ip: []
+    deploy_type: grafana
