@@ -1,0 +1,22 @@
+---
+- name: Remove CA staging directory from tmpfs
+  ansible.builtin.file:
+    path: "{{ cert_renew_ca_dir }}"
+    state: absent
+  delegate_to: "{{ cert_renew_ca_host }}"
+  become: true
+  register: cleanup_result
+  ignore_errors: true
+  ignore_unreachable: true
+
+- name: Record cleanup unreachable
+  ansible.builtin.set_fact:
+    cert_cleanup_status: UNREACHABLE
+  when: cleanup_result.unreachable | default(false) | bool
+
+- name: Record cleanup failure
+  ansible.builtin.set_fact:
+    cert_cleanup_status: FAILED
+  when:
+    - not (cleanup_result.unreachable | default(false) | bool)
+    - cleanup_result is failed

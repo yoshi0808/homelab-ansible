@@ -1,0 +1,48 @@
+---
+cert_renew_ca_dir: /run/semaphore-ca
+cert_renew_ca_host: quory
+cert_renew_valid_days: 45
+cert_renew_renew_threshold: 15
+force_renew: false
+
+cert_renew_hosts_config:
+  ansy:
+    cert_path: /etc/semaphore/tls/ansy.internal.crt
+    key_path: /etc/semaphore/tls/ansy.internal.key
+    cert_check_path: /etc/semaphore/tls/ansy.internal.crt
+    cn: ansy.internal
+    san_dns:
+      - ansy.internal
+      - ansy
+    san_ip:
+      - ansy.internal
+    deploy_type: semaphore
+  quory:
+    cert_path: /etc/semaphore/tls/quory.internal.crt
+    key_path: /etc/semaphore/tls/quory.internal.key
+    cert_check_path: /etc/semaphore/tls/quory.internal.crt
+    cn: quory.internal
+    san_dns:
+      - quory.internal
+      - quory
+    san_ip:
+      - quory.internal
+    deploy_type: semaphore
+  pve1:
+    cert_check_path: /etc/pve/local/pveproxy-ssl.pem
+    cn: pve1.internal
+    san_dns:
+      - pve1.internal
+      - pve1
+    san_ip:
+      - pve1.internal
+    deploy_type: proxmox
+  pve2:
+    cert_check_path: /etc/pve/local/pveproxy-ssl.pem
+    cn: pve2.internal
+    san_dns:
+      - pve2.internal
+      - pve2
+    san_ip:
+      - pve2.internal
+    deploy_type: proxmox

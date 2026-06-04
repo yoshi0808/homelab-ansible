@@ -1,0 +1,12 @@
+---
+# Entry point for per-host cert issuance and deployment.
+# Primary entry point is playbooks/cert_renew.yml which uses tasks_from
+# to target specific host groups with separate plays.
+
+- ansible.builtin.import_tasks: issue.yml
+
+- ansible.builtin.include_tasks: deploy_semaphore.yml
+  when: cert_host_config.deploy_type == 'semaphore'
+
+- ansible.builtin.include_tasks: deploy_proxmox.yml
+  when: cert_host_config.deploy_type == 'proxmox'

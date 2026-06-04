@@ -1,0 +1,54 @@
+---
+- name: Read certificate from CA host
+  ansible.builtin.slurp:
+    src: "{{ cert_renew_ca_dir }}/certs/{{ inventory_hostname }}.crt"
+  register: slurp_crt
+  delegate_to: "{{ cert_renew_ca_host }}"
+  when: cert_needs_renewal
+
+- name: Read private key from CA host
+  ansible.builtin.slurp:
+    src: "{{ cert_renew_ca_dir }}/certs/{{ inventory_hostname }}.key"
+  register: slurp_key
+  delegate_to: "{{ cert_renew_ca_host }}"
+  when: cert_needs_renewal
+  no_log: true
+
+- name: Ensure semaphore TLS directory exists
+  ansible.builtin.file:
+    path: "{{ cert_host_config.cert_path | dirname }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0750"
+  when: cert_needs_renewal
+
+- name: Deploy certificate
+  ansible.builtin.copy:
+    content: "{{ slurp_crt.content | b64decode }}"
+    dest: "{{ cert_host_config.cert_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+  when: cert_needs_renewal
+
+- name: Deploy private key
+  ansible.builtin.copy:
+    content: "{{ slurp_key.content | b64decode }}"
+    dest: "{{ cert_host_config.key_path }}"
+    owner: root
+    group: root
+    mode: "0600"
+  when: cert_needs_renewal
+  no_log: true
+
+- name: Restart semaphore
+  ansible.builtin.systemd:
+    name: semaphore
+    state: restarted
+  when: cert_needs_renewal
+
+- name: Record deploy success
+  ansible.builtin.set_fact:
+    cert_deployed: true
+  when: cert_needs_renewal

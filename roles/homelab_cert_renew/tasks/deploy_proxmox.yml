@@ -1,0 +1,83 @@
+---
+- name: Deploy certificate to PVE node
+  block:
+    - name: Read certificate from CA host
+      ansible.builtin.slurp:
+        src: "{{ cert_renew_ca_dir }}/certs/{{ inventory_hostname }}.crt"
+      register: slurp_crt
+      delegate_to: "{{ cert_renew_ca_host }}"
+      when: cert_needs_renewal
+
+    - name: Read private key from CA host
+      ansible.builtin.slurp:
+        src: "{{ cert_renew_ca_dir }}/certs/{{ inventory_hostname }}.key"
+      register: slurp_key
+      delegate_to: "{{ cert_renew_ca_host }}"
+      when: cert_needs_renewal
+      no_log: true
+
+    - name: Write certificate to PVE node
+      ansible.builtin.copy:
+        content: "{{ slurp_crt.content | b64decode }}"
+        dest: "/tmp/pve_cert_{{ inventory_hostname }}.pem"
+        owner: root
+        mode: "0644"
+      when: cert_needs_renewal
+
+    - name: Write private key to PVE node
+      ansible.builtin.copy:
+        content: "{{ slurp_key.content | b64decode }}"
+        dest: "/tmp/pve_key_{{ inventory_hostname }}.pem"
+        owner: root
+        mode: "0600"
+      when: cert_needs_renewal
+      no_log: true
+
+    - name: Convert key to PKCS8
+      ansible.builtin.command:
+        cmd: >
+          openssl pkcs8 -topk8 -nocrypt
+          -in /tmp/pve_key_{{ inventory_hostname }}.pem
+          -out /tmp/pve_key_pkcs8_{{ inventory_hostname }}.pem
+      when: cert_needs_renewal
+      changed_when: true
+      no_log: true
+
+    - name: Set PKCS8 key permissions
+      ansible.builtin.file:
+        path: "/tmp/pve_key_pkcs8_{{ inventory_hostname }}.pem"
+        owner: root
+        mode: "0600"
+      when: cert_needs_renewal
+
+    - name: Apply certificate with pvenode
+      ansible.builtin.command:
+        cmd: >
+          pvenode cert set
+          /tmp/pve_cert_{{ inventory_hostname }}.pem
+          /tmp/pve_key_pkcs8_{{ inventory_hostname }}.pem
+          --force
+      when: cert_needs_renewal
+      changed_when: true
+
+    - name: Restart pveproxy
+      ansible.builtin.systemd:
+        name: pveproxy
+        state: restarted
+      when: cert_needs_renewal
+
+    - name: Record deploy success
+      ansible.builtin.set_fact:
+        cert_deployed: true
+      when: cert_needs_renewal
+
+  always:
+    - name: Remove temporary cert files from PVE node
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - "/tmp/pve_cert_{{ inventory_hostname }}.pem"
+        - "/tmp/pve_key_{{ inventory_hostname }}.pem"
+        - "/tmp/pve_key_pkcs8_{{ inventory_hostname }}.pem"
+      failed_when: false

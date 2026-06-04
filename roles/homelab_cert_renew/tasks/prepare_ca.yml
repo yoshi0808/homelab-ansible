@@ -1,0 +1,33 @@
+---
+- name: Verify homelab-ca-crt env var is set
+  ansible.builtin.fail:
+    msg: "Environment variable homelab-ca-crt is not set"
+  when: lookup('env', 'homelab-ca-crt') | length == 0
+
+- name: Verify homelab-ca-key env var is set
+  ansible.builtin.fail:
+    msg: "Environment variable homelab-ca-key is not set"
+  when: lookup('env', 'homelab-ca-key') | length == 0
+  no_log: true
+
+- name: Create CA staging directories on tmpfs
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0700"
+  loop:
+    - "{{ cert_renew_ca_dir }}"
+    - "{{ cert_renew_ca_dir }}/certs"
+
+- name: Write CA certificate
+  ansible.builtin.copy:
+    content: "{{ lookup('env', 'homelab-ca-crt') }}"
+    dest: "{{ cert_renew_ca_dir }}/ca.crt"
+    mode: "0644"
+
+- name: Write CA private key
+  ansible.builtin.copy:
+    content: "{{ lookup('env', 'homelab-ca-key') }}"
+    dest: "{{ cert_renew_ca_dir }}/ca.key"
+    mode: "0600"
+  no_log: true

@@ -1,0 +1,12 @@
+---
+- name: restart semaphore
+  ansible.builtin.systemd:
+    name: semaphore
+    state: restarted
+  become: true
+
+- name: restart pveproxy
+  ansible.builtin.systemd:
+    name: pveproxy
+    state: restarted
+  become: true

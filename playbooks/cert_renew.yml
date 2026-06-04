@@ -1,0 +1,115 @@
+---
+# cert_renew.yml - TLS certificate renewal for homelab management UIs
+# 変更系: 証明書配置・サービス再起動あり
+#
+# 対象: ansy (semaphore), quory (semaphore), pve1 (pveproxy), pve2 (pveproxy)
+# CA秘密鍵はquory上 /run/semaphore-ca/ (tmpfs) にのみ展開する
+# 実行後、CA秘密鍵は必ず削除される
+#
+# serial: 1 により1ホストずつ処理する。CA署名処理の .srl 競合を防ぐため。
+
+- name: cert_renew - prepare CA key on quory
+  hosts: quory
+  gather_facts: false
+  become: true
+  tasks:
+    - name: Run prepare_ca tasks
+      ansible.builtin.import_role:
+        name: homelab_cert_renew
+        tasks_from: prepare_ca
+
+- name: cert_renew - issue and deploy semaphore certs
+  hosts: semaphore_servers
+  gather_facts: false
+  become: true
+  serial: 1
+  tasks:
+    - name: Run issue tasks
+      ansible.builtin.import_role:
+        name: homelab_cert_renew
+        tasks_from: issue
+
+    - name: Run deploy_semaphore tasks
+      ansible.builtin.import_role:
+        name: homelab_cert_renew
+        tasks_from: deploy_semaphore
+
+- name: cert_renew - issue and deploy proxmox certs
+  hosts: proxmox
+  gather_facts: false
+  become: true
+  serial: 1
+  tasks:
+    - name: Run issue tasks
+      ansible.builtin.import_role:
+        name: homelab_cert_renew
+        tasks_from: issue
+
+    - name: Run deploy_proxmox tasks
+      ansible.builtin.import_role:
+        name: homelab_cert_renew
+        tasks_from: deploy_proxmox
+
+- name: cert_renew - cleanup CA key from quory
+  hosts: localhost
+  gather_facts: false
+  become: false
+  tasks:
+    - name: Run cleanup tasks
+      ansible.builtin.import_role:
+        name: homelab_cert_renew
+        tasks_from: cleanup
+
+- name: cert_renew - send completion notification
+  hosts: localhost
+  gather_facts: false
+  become: false
+  tasks:
+    - name: Load mail variables
+      ansible.builtin.include_vars:
+        file: "{{ inventory_dir }}/../vars/mail.yml"
+
+    - name: Build renewal summary
+      ansible.builtin.set_fact:
+        cert_renew_summary: |
+          {% for h in ['ansy', 'quory', 'pve1', 'pve2'] %}
+          {% if hostvars[h].cert_needs_renewal is not defined %}
+          {{ h }}: check FAILED
+          {% else %}
+          {% set needs_renewal = hostvars[h].cert_needs_renewal | bool %}
+          {% set renewed = hostvars[h].cert_renewed | default(false) | bool %}
+          {% set deployed = hostvars[h].cert_deployed | default(false) | bool %}
+          {% if not needs_renewal %}
+          {{ h }}: skipped
+          {% elif not renewed %}
+          {{ h }}: issue FAILED
+          {% elif deployed %}
+          {{ h }}: renewed and deployed
+          {% else %}
+          {{ h }}: renewed but deploy FAILED
+          {% endif %}
+          {% endif %}
+          {% endfor %}
+          CA cleanup: {{ cert_cleanup_status | default('OK') }}
+
+    - name: Send completion notification
+      community.general.mail:
+        host: "{{ smtp_host }}"
+        port: "{{ smtp_port }}"
+        username: "{{ smtp_user }}"
+        password: "{{ smtp_password }}"
+        to: "{{ mail_to }}"
+        subject: "[cert_renew] Certificate renewal completed"
+        body: |
+          TLS certificate renewal run completed.
+
+          Results:
+          {{ cert_renew_summary }}
+          Executed at: {{ lookup('pipe', 'date +%Y-%m-%dT%H:%M:%S+09:00') }}
+        secure: starttls
+      ignore_errors: true
+
+    - name: Fail if CA cleanup was not successful
+      ansible.builtin.fail:
+        msg: "CA cleanup {{ cert_cleanup_status }}: /run/semaphore-ca/ may still exist on {{ cert_renew_ca_host }}"
+      when: cert_cleanup_status is defined

@@ -28,3 +28,9 @@ __pycache__/
 *.decrypted
 .vault_pass
 homelab_vault_pass
+
+# TLS certificates, keys, and CSRs
+*.crt
+*.key
+*.csr
+*.pem
