@@ -22,7 +22,14 @@
 - name: Write CA certificate
   ansible.builtin.shell:
     cmd: |
-      echo "$HOMELAB_CA_CRT" | tr ' ' '\n' > {{ cert_renew_ca_dir }}/ca.crt
+      python3 -c "
+import os, re
+val = os.environ.get('HOMELAB_CA_CRT', '')
+pem = re.sub(r'(-----(?:BEGIN|END) [A-Z ]+-----)', lambda m: '\n' + m.group(0) + '\n', val)
+pem = re.sub(r' ', '\n', pem)
+pem = re.sub(r'\n+', '\n', pem).strip()
+print(pem)
+" > {{ cert_renew_ca_dir }}/ca.crt
     executable: /bin/bash
   environment:
     HOMELAB_CA_CRT: "{{ lookup('env', 'homelab-ca-crt') }}"
@@ -31,7 +38,14 @@
 - name: Write CA private key
   ansible.builtin.shell:
     cmd: |
-      echo "$HOMELAB_CA_KEY" | tr ' ' '\n' > {{ cert_renew_ca_dir }}/ca.key
+      python3 -c "
+import os, re
+val = os.environ.get('HOMELAB_CA_KEY', '')
+pem = re.sub(r'(-----(?:BEGIN|END) [A-Z ]+-----)', lambda m: '\n' + m.group(0) + '\n', val)
+pem = re.sub(r' ', '\n', pem)
+pem = re.sub(r'\n+', '\n', pem).strip()
+print(pem)
+" > {{ cert_renew_ca_dir }}/ca.key
     executable: /bin/bash
   environment:
     HOMELAB_CA_KEY: "{{ lookup('env', 'homelab-ca-key') }}"
