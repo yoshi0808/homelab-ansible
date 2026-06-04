@@ -1,0 +1,8 @@
+# playbooks/test_ca_env.yml
+- name: Test CA env vars
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Check CA_Info env vars
+      ansible.builtin.debug:
+        msg: "homelab-ca-crt length: {{ lookup('env', 'homelab-ca-crt') | length }}"
