@@ -33,6 +33,20 @@
       days_left={{ cert_days_left.stdout | default('N/A') | trim }},
       needs_renewal={{ cert_needs_renewal }}
 
+- name: Resolve hostname IPv4 address from CA host
+  ansible.builtin.command:
+    cmd: getent ahostsv4 {{ cert_host_config.cn }}
+  register: cert_hostname_resolve
+  delegate_to: "{{ cert_renew_ca_host }}"
+  changed_when: false
+  when: cert_needs_renewal
+  failed_when: cert_hostname_resolve.rc != 0
+
+- name: Set resolved IPv4 fact
+  ansible.builtin.set_fact:
+    cert_resolved_san_ip: "{{ cert_hostname_resolve.stdout.split()[0] }}"
+  when: cert_needs_renewal
+
 - name: Template OpenSSL config on quory
   ansible.builtin.template:
     src: openssl-san.cnf.j2

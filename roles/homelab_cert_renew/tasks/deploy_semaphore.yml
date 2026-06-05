@@ -18,17 +18,17 @@
   ansible.builtin.file:
     path: "{{ cert_host_config.cert_path | dirname }}"
     state: directory
-    owner: root
-    group: root
-    mode: "0750"
+    owner: yoshi
+    group: yoshi
+    mode: "0755"
   when: cert_needs_renewal
 
 - name: Deploy certificate
   ansible.builtin.copy:
     content: "{{ slurp_crt.content | b64decode }}"
     dest: "{{ cert_host_config.cert_path }}"
-    owner: root
-    group: root
+    owner: yoshi
+    group: yoshi
     mode: "0644"
   when: cert_needs_renewal
 
@@ -36,8 +36,8 @@
   ansible.builtin.copy:
     content: "{{ slurp_key.content | b64decode }}"
     dest: "{{ cert_host_config.key_path }}"
-    owner: root
-    group: root
+    owner: yoshi
+    group: yoshi
     mode: "0600"
   when: cert_needs_renewal
   no_log: true

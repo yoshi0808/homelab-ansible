@@ -2,9 +2,8 @@
 # cert_renew.yml - TLS certificate renewal for homelab management UIs
 # 変更系: 証明書配置・サービス再起動あり
 #
-# 対象: ansy (semaphore), pve1 (pveproxy), pve2 (pveproxy)
+# 対象: ansy (semaphore), pve1 (pveproxy), pve2 (pveproxy), monnie (grafana)
 # quoryのsemaphore証明書はcert_renew_quory.ymlで管理する（semaphore再起動を含むため）
-# monnie (grafana) はPhase2。deploy_grafana.yml実装後に追加する。
 # CA秘密鍵はquory上 /run/semaphore-ca/ (tmpfs) にのみ展開する
 # 実行後、CA秘密鍵は必ず削除される
 #
@@ -71,6 +70,23 @@
         name: homelab_cert_renew
         tasks_from: deploy_proxmox
 
+- name: cert_renew - issue and deploy monnie cert
+  hosts: monnie
+  gather_facts: false
+  become: true
+  vars:
+    cert_renew_ca_host: localhost
+  tasks:
+    - name: Run issue tasks
+      ansible.builtin.import_role:
+        name: homelab_cert_renew
+        tasks_from: issue
+
+    - name: Run deploy_grafana tasks
+      ansible.builtin.import_role:
+        name: homelab_cert_renew
+        tasks_from: deploy_grafana
+
 - name: cert_renew - cleanup CA key from quory
   hosts: localhost
   gather_facts: false
@@ -97,7 +113,7 @@
     - name: Build renewal summary
       ansible.builtin.set_fact:
         cert_renew_summary: |
-          {% for h in ['ansy', 'pve1', 'pve2'] %}
+          {% for h in ['ansy', 'pve1', 'pve2', 'monnie'] %}
           {% if hostvars[h].cert_needs_renewal is not defined %}
           {{ h }}: check FAILED
           {% else %}

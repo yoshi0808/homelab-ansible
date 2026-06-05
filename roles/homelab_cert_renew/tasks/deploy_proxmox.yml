@@ -21,6 +21,7 @@
         content: "{{ slurp_crt.content | b64decode }}"
         dest: "/tmp/pve_cert_{{ inventory_hostname }}.pem"
         owner: root
+        group: root
         mode: "0644"
       when: cert_needs_renewal
 
@@ -29,6 +30,7 @@
         content: "{{ slurp_key.content | b64decode }}"
         dest: "/tmp/pve_key_{{ inventory_hostname }}.pem"
         owner: root
+        group: root
         mode: "0600"
       when: cert_needs_renewal
       no_log: true

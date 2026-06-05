@@ -20,6 +20,6 @@ extendedKeyUsage = serverAuth
 {% for dns in cert_host_config.san_dns %}
 DNS.{{ loop.index }} = {{ dns }}
 {% endfor %}
-{% for ip in cert_host_config.san_ip %}
+{% for ip in (cert_host_config.san_ip | default([])) + ([cert_resolved_san_ip] if cert_resolved_san_ip is defined else []) %}
 IP.{{ loop.index }} = {{ ip }}
 {% endfor %}

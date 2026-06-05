@@ -1,0 +1,86 @@
+---
+- name: Read certificate from CA host
+  ansible.builtin.slurp:
+    src: "{{ cert_renew_ca_dir }}/certs/{{ inventory_hostname }}.crt"
+  register: slurp_crt
+  delegate_to: "{{ cert_renew_ca_host }}"
+  when: cert_needs_renewal
+
+- name: Read private key from CA host
+  ansible.builtin.slurp:
+    src: "{{ cert_renew_ca_dir }}/certs/{{ inventory_hostname }}.key"
+  register: slurp_key
+  delegate_to: "{{ cert_renew_ca_host }}"
+  when: cert_needs_renewal
+  no_log: true
+
+- name: Ensure grafana certs directory exists
+  ansible.builtin.file:
+    path: "{{ cert_host_config.cert_path | dirname }}"
+    state: directory
+    owner: grafana
+    group: grafana
+    mode: "0750"
+  when: cert_needs_renewal
+
+- name: Deploy certificate
+  ansible.builtin.copy:
+    content: "{{ slurp_crt.content | b64decode }}"
+    dest: "{{ cert_host_config.cert_path }}"
+    owner: grafana
+    group: grafana
+    mode: "0644"
+  when: cert_needs_renewal
+
+- name: Deploy private key
+  ansible.builtin.copy:
+    content: "{{ slurp_key.content | b64decode }}"
+    dest: "{{ cert_host_config.key_path }}"
+    owner: grafana
+    group: grafana
+    mode: "0600"
+  when: cert_needs_renewal
+  no_log: true
+
+- name: Configure Grafana TLS settings in grafana.ini
+  ansible.builtin.lineinfile:
+    path: /etc/grafana/grafana.ini
+    regexp: "{{ item.regexp }}"
+    line: "{{ item.line }}"
+    insertafter: '^\[server\]'
+  loop:
+    - regexp: '^\s*;?\s*protocol\s*='
+      line: "protocol = https"
+    - regexp: '^\s*;?\s*cert_file\s*='
+      line: "cert_file = {{ cert_host_config.cert_path }}"
+    - regexp: '^\s*;?\s*cert_key\s*='
+      line: "cert_key = {{ cert_host_config.key_path }}"
+  when: cert_needs_renewal
+
+- name: Restart grafana-server
+  ansible.builtin.systemd:
+    name: grafana-server
+    state: restarted
+  when: cert_needs_renewal
+
+- name: Wait for Grafana to become available on port 3000
+  ansible.builtin.wait_for:
+    port: 3000
+    host: localhost
+    timeout: 30
+  when: cert_needs_renewal
+
+- name: Verify Grafana TLS certificate SAN contains expected hostname and IP
+  ansible.builtin.shell:
+    cmd: "echo | openssl s_client -connect localhost:3000 -servername {{ cert_host_config.cn }} 2>/dev/null | openssl x509 -noout -ext subjectAltName 2>/dev/null"
+  register: grafana_cert_check
+  changed_when: false
+  failed_when: >-
+    cert_host_config.cn not in grafana_cert_check.stdout or
+    (cert_resolved_san_ip is defined and ('IP Address:' + cert_resolved_san_ip) not in grafana_cert_check.stdout)
+  when: cert_needs_renewal
+
+- name: Record deploy success
+  ansible.builtin.set_fact:
+    cert_deployed: true
+  when: cert_needs_renewal

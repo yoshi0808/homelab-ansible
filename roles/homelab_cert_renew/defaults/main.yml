@@ -17,8 +17,7 @@ cert_renew_hosts_config:
     san_dns:
       - ansy.internal
       - ansy
-    san_ip:
-      - ansy.internal
+    san_ip: []
     deploy_type: semaphore
   quory:
     cert_path: /etc/semaphore/tls/quory.internal.crt
@@ -28,8 +27,7 @@ cert_renew_hosts_config:
     san_dns:
       - quory.internal
       - quory
-    san_ip:
-      - quory.internal
+    san_ip: []
     deploy_type: semaphore
   pve1:
     cert_check_path: /etc/pve/local/pveproxy-ssl.pem
@@ -37,8 +35,7 @@ cert_renew_hosts_config:
     san_dns:
       - pve1.internal
       - pve1
-    san_ip:
-      - pve1.internal
+    san_ip: []
     deploy_type: proxmox
   pve2:
     cert_check_path: /etc/pve/local/pveproxy-ssl.pem
@@ -46,13 +43,12 @@ cert_renew_hosts_config:
     san_dns:
       - pve2.internal
       - pve2
-    san_ip:
-      - pve2.internal
+    san_ip: []
     deploy_type: proxmox
   monnie:
-    cert_path: /etc/grafana/tls/monnie.internal.crt
-    key_path: /etc/grafana/tls/monnie.internal.key
-    cert_check_path: /etc/grafana/tls/monnie.internal.crt
+    cert_path: /etc/grafana/certs/monnie.crt
+    key_path: /etc/grafana/certs/monnie.key
+    cert_check_path: /etc/grafana/certs/monnie.crt
     cn: monnie.internal
     san_dns:
       - monnie.internal
