@@ -65,7 +65,7 @@ copy_clipboard() {
     local text="$1"
     local encoded
     encoded=$(printf '%s' "$text" | base64 | tr -d '\n')
-    printf '\033]52;c;%s\033\\' "$encoded"
+    printf '\033]52;c;%s\a' "$encoded" > /dev/tty
 }
 
 # =============================================================
