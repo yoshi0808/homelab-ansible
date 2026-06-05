@@ -111,23 +111,43 @@
 # ---------------------------------------------------------------------------
 - import_playbook: proxmox_patch_dryrun.yml
 
-# Step 2b: Stop if not PATCH_READY
-- name: Abort if dry-run status is not PATCH_READY
+# Step 2b: Handle dry-run status
+#
+# PATCH_READY           → continue to evacuate/patch/restore flow
+# NO_UPDATES            → dry-run role has already notified; set skip flag and end cleanly
+# MAINTENANCE_REQUIRED  → fail (manual action required)
+# BLOCKED               → fail (apt/dpkg broken, patch ops halted)
+# MAJOR_UPGRADE_DETECTED → fail (major upgrade suspected, manual action required)
+# UNKNOWN               → fail (unexpected state)
+- name: Handle dry-run status - set NO_UPDATES flag or abort on error
   hosts: localhost
   gather_facts: false
+  vars:
+    _status: "{{ hostvars[groups['proxmox'][0]]['_final_status'] | default('UNKNOWN') }}"
   tasks:
-    - name: Fail if not PATCH_READY
+    - name: Set NO_UPDATES skip flag and end play cleanly
+      when: _status == 'NO_UPDATES'
+      block:
+        - name: Set NO_UPDATES skip flag for subsequent plays
+          ansible.builtin.set_fact:
+            _weekly_full_no_updates: true
+
+        - name: End this play (NO_UPDATES - normal exit, notification sent by dry-run role)
+          ansible.builtin.meta: end_play
+
+    - name: Fail if dry-run status requires manual action or is unexpected
       ansible.builtin.fail:
         msg: >-
-          Dry-run status is
-          {{ hostvars[groups['proxmox'][0]]['_final_status'] | default('UNKNOWN') }}.
+          Dry-run status is {{ _status }}.
           Weekly full patch apply requires PATCH_READY. Stopping.
-      when: hostvars[groups['proxmox'][0]]['_final_status'] | default('') != 'PATCH_READY'
+          (MAINTENANCE_REQUIRED/BLOCKED/MAJOR_UPGRADE_DETECTED requires manual action.)
+      when: _status != 'PATCH_READY'
 
 # ---------------------------------------------------------------------------
 # Step 3: Evacuate pve2
 # ---------------------------------------------------------------------------
 - import_playbook: proxmox_evacuate_node.yml
+  when: not (hostvars['localhost']['_weekly_full_no_updates'] | default(false))
   vars:
     target_node: pve2
 
@@ -135,6 +155,7 @@
 # Step 4: Patch apply pve2
 # ---------------------------------------------------------------------------
 - import_playbook: proxmox_patch_apply_node.yml
+  when: not (hostvars['localhost']['_weekly_full_no_updates'] | default(false))
   vars:
     target_node: pve2
 
@@ -143,9 +164,16 @@
 # ---------------------------------------------------------------------------
 - name: pve2 post-patch healthcheck
   hosts: pve2
-  gather_facts: true
+  gather_facts: false
   become: true
   tasks:
+    - name: Skip if NO_UPDATES
+      ansible.builtin.meta: end_play
+      when: hostvars['localhost']['_weekly_full_no_updates'] | default(false)
+
+    - name: Gather facts for healthcheck role
+      ansible.builtin.setup:
+
     - name: Run healthcheck on pve2
       ansible.builtin.include_role:
         name: proxmox_healthcheck
@@ -161,6 +189,7 @@
 # Step 6: Restore pve2
 # ---------------------------------------------------------------------------
 - import_playbook: proxmox_restore_vm_placement.yml
+  when: not (hostvars['localhost']['_weekly_full_no_updates'] | default(false))
   vars:
     target_node: pve2
 
@@ -168,6 +197,7 @@
 # Step 7: Evacuate pve1
 # ---------------------------------------------------------------------------
 - import_playbook: proxmox_evacuate_node.yml
+  when: not (hostvars['localhost']['_weekly_full_no_updates'] | default(false))
   vars:
     target_node: pve1
 
@@ -175,6 +205,7 @@
 # Step 8: Patch apply pve1
 # ---------------------------------------------------------------------------
 - import_playbook: proxmox_patch_apply_node.yml
+  when: not (hostvars['localhost']['_weekly_full_no_updates'] | default(false))
   vars:
     target_node: pve1
 
@@ -183,9 +214,16 @@
 # ---------------------------------------------------------------------------
 - name: pve1 post-patch healthcheck
   hosts: pve1
-  gather_facts: true
+  gather_facts: false
   become: true
   tasks:
+    - name: Skip if NO_UPDATES
+      ansible.builtin.meta: end_play
+      when: hostvars['localhost']['_weekly_full_no_updates'] | default(false)
+
+    - name: Gather facts for healthcheck role
+      ansible.builtin.setup:
+
     - name: Run healthcheck on pve1
       ansible.builtin.include_role:
         name: proxmox_healthcheck
@@ -201,6 +239,7 @@
 # Step 10: Restore pve1
 # ---------------------------------------------------------------------------
 - import_playbook: proxmox_restore_vm_placement.yml
+  when: not (hostvars['localhost']['_weekly_full_no_updates'] | default(false))
   vars:
     target_node: pve1
 
@@ -211,6 +250,10 @@
   hosts: localhost
   gather_facts: false
   tasks:
+    - name: Skip if NO_UPDATES (notification already sent by dry-run role)
+      ansible.builtin.meta: end_play
+      when: _weekly_full_no_updates | default(false)
+
     - name: Load mail variables
       ansible.builtin.include_vars:
         file: "{{ inventory_dir }}/../vars/mail.yml"
