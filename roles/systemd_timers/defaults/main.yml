@@ -4,33 +4,39 @@ systemd_timers_run_user: yoshi
 systemd_timers_playbook_bin: /usr/bin/ansible-playbook
 
 systemd_ansible_timers:
-  - name: authy-healthcheck
-    description: Run authy healthcheck
-    schedule: "*-*-* 05:30:00"
-    playbook: playbooks/radius_healthcheck.yml
-    persistent: true
-  - name: proxmox-healthcheck
-    description: Run Proxmox healthcheck
-    schedule: "*-*-* 05:40:00"
-    playbook: playbooks/proxmox_healthcheck.yml
-    persistent: true
-  - name: proxmox-patch-dryrun
-    description: Run Proxmox patch dry-run
-    schedule: "Fri *-*-* 17:30:00"
-    playbook: playbooks/proxmox_patch_dryrun.yml
-    persistent: true
-  - name: authy-reboot-if-required
-    description: Reboot authy if required
-    schedule: "*-*-* 03:30:00"
-    playbook: playbooks/ubuntu_nightly.yml
+  # 以下のエントリは Semaphore UI スケジュールに移行済み
+  # - name: authy-healthcheck
+  #   description: Run authy healthcheck
+  #   schedule: "*-*-* 05:30:00"
+  #   playbook: playbooks/radius_healthcheck.yml
+  #   persistent: true
+  # - name: proxmox-healthcheck
+  #   description: Run Proxmox healthcheck
+  #   schedule: "*-*-* 05:40:00"
+  #   playbook: playbooks/proxmox_healthcheck.yml
+  #   persistent: true
+  # - name: proxmox-patch-dryrun
+  #   description: Run Proxmox patch dry-run
+  #   schedule: "Fri *-*-* 17:30:00"
+  #   playbook: playbooks/proxmox_patch_dryrun.yml
+  #   persistent: true
+  # - name: authy-reboot-if-required
+  #   description: Reboot authy if required
+  #   schedule: "*-*-* 03:30:00"
+  #   playbook: playbooks/ubuntu_nightly.yml
+  #   persistent: false
+  # - name: proxmox-hw-check
+  #   description: Run Proxmox hardware check
+  #   schedule: "*-*-* 05:45:00"
+  #   playbook: playbooks/proxmox_hw_check.yml
+  #   persistent: true
+  # - name: monitoring-healthcheck
+  #   description: Run monitoring healthcheck
+  #   schedule: "*-*-* 05:35:00"
+  #   playbook: playbooks/monitoring_healthcheck.yml
+  #   persistent: true
+  - name: cert-renew-quory
+    description: Renew quory semaphore TLS certificate
+    schedule: "Sat *-*-01..07 00:35:00"
+    playbook: playbooks/cert_renew_quory.yml
     persistent: false
-  - name: proxmox-hw-check
-    description: Run Proxmox hardware check
-    schedule: "*-*-* 05:45:00"
-    playbook: playbooks/proxmox_hw_check.yml
-    persistent: true
-  - name: monitoring-healthcheck
-    description: Run monitoring healthcheck
-    schedule: "*-*-* 05:35:00"
-    playbook: playbooks/monitoring_healthcheck.yml
-    persistent: true
