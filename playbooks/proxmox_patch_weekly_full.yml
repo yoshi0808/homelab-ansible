@@ -269,7 +269,7 @@
         body: |
           Proxmox weekly full patch apply が完了しました。
 
-          実行日時: {{ lookup('pipe', 'date "+%Y-%m-%d %H:%M:%S"') }}
+          実行日時: {{ lookup('pipe', 'date "+%Y-%m-%d %H:%M:%S %Z"') }}
           対象ノード: pve2 → pve1（順番に適用）
 
           pve2: 退避 → パッチ適用 → 復帰 完了
