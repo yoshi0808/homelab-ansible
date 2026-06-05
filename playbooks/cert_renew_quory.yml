@@ -41,6 +41,7 @@
   connection: local
   vars:
     cert_renew_ca_host: localhost
+    force_renew: true
   tasks:
     - name: Run issue tasks
       ansible.builtin.import_role:
