@@ -27,13 +27,18 @@
 # ---------------------------------------------------------------------------
 # Step 0: Preflight - Verify control node is not on the Proxmox cluster
 #
-# If ansy (Ansible dev VM) is running on pve1/pve2, evacuate would migrate it
-# mid-run, breaking this playbook. Must be run from quory instead.
+# If the Ansible controller (ansible_hostname) is a VM running on pve1/pve2,
+# evacuate would migrate it mid-run, breaking this playbook.
+# Must be run from quory (external, non-cluster host) instead.
+# ansy may be on the cluster without issue when running from quory.
 # ---------------------------------------------------------------------------
 - name: Preflight - Verify control node is not on Proxmox cluster
   hosts: "{{ groups['proxmox'][0] }}"
   gather_facts: false
   become: true
+  vars:
+    proxmox_patch_weekly_full_allowed_controllers:
+      - quory
   tasks:
     - name: Get cluster resources
       ansible.builtin.command:
@@ -41,25 +46,43 @@
       register: _preflight_pvesh_raw
       changed_when: false
 
-    - name: Detect control node on cluster
+    - name: Build cluster VM name list and controller hostname
       ansible.builtin.set_fact:
-        _control_node_on_cluster: >-
+        _controller_hostname: "{{ lookup('pipe', 'hostname -s') }}"
+        _cluster_vm_names: >-
           {{ _preflight_pvesh_raw.stdout | from_json |
              selectattr('type', 'defined') |
              selectattr('type', 'equalto', 'qemu') |
              selectattr('name', 'defined') |
-             selectattr('name', 'search', proxmox_patch_apply_control_node_name) |
+             map(attribute='name') |
              list }}
 
-    - name: Abort if control node is on cluster
+    - name: Abort if executing host is on cluster
       ansible.builtin.fail:
         msg: >-
-          Control node '{{ proxmox_patch_apply_control_node_name }}' is running on
-          the Proxmox cluster
-          ({{ _control_node_on_cluster | map(attribute='node') | list | join(', ') }}).
-          proxmox_patch_weekly_full must be run from quory (external control node),
-          not from a VM on the cluster.
-      when: _control_node_on_cluster | length > 0
+          Executing host '{{ _controller_hostname }}' is running as a VM on the
+          Proxmox cluster. proxmox_patch_weekly_full must be run from an external
+          control node (e.g. quory), not from a VM on the cluster.
+      when: _controller_hostname in _cluster_vm_names
+
+    - name: Abort if executing host is a Proxmox node
+      ansible.builtin.fail:
+        msg: >-
+          Executing host '{{ _controller_hostname }}' is a Proxmox node
+          (inventory: {{ groups['proxmox'] | join(', ') }}).
+          proxmox_patch_weekly_full must be run from an external control node
+          (e.g. quory), not from pve1 or pve2 themselves.
+      when: _controller_hostname in groups['proxmox']
+
+    - name: Abort if executing host is not an allowed controller
+      ansible.builtin.fail:
+        msg: >-
+          Executing host '{{ _controller_hostname }}' is not in the allowed
+          controllers list ({{ proxmox_patch_weekly_full_allowed_controllers | join(', ') }}).
+          proxmox_patch_weekly_full must be run from an allowed external control
+          node. To override, use extra vars (JSON format to ensure list type):
+          -e '{"proxmox_patch_weekly_full_allowed_controllers":["<hostname>"]}'
+      when: _controller_hostname not in proxmox_patch_weekly_full_allowed_controllers
 
 # ---------------------------------------------------------------------------
 # Step 1a: Healthcheck both nodes
