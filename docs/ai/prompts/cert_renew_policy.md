@@ -104,10 +104,16 @@ cleanup失敗は `cert_cleanup_status` ファクトで記録し、最終的にPl
 | Playbook | 失敗検知方法 |
 |---|---|
 | `cert_renew.yml` | 完了メールを送る（メール送信失敗は `ignore_errors: true` で無視）。cleanup失敗などPlaybook本体の失敗は fail タスクで検知する。 |
-| `cert_renew_quory.yml` | systemd unitのexitコード（journalctl / OnFailure=で検知） |
+| `cert_renew_quory.yml` | 完了メールを送る（`cert_renew.yml` と同様）。cleanup失敗はメール送信後に fail する。メール送信失敗は `ignore_errors: true` で無視する。加えて systemd unitのexitコードでも検知できる（journalctl / OnFailure=）。 |
 
-`cert_renew_quory.yml` はSemaphoreの外から実行するためメール通知を持たない。
-systemd timer 設定時に `OnFailure=` を追加し、失敗を検知できる体制を整える。
+### 6.1 cert_renew_quory.yml の通知実行環境要件
+
+`cert_renew_quory.yml` は systemd timer から実行するため、以下が実行環境に必要になる。
+
+- `ansible.cfg` の `vault_password_file` が設定されていること（`inventories/vars/mail.yml` は Vault 暗号化済み）
+- `inventories/vars/mail.yml` が読み取れること
+
+これらが欠けている場合、notification play の `Load mail variables` タスクで fail する。
 
 ---
 

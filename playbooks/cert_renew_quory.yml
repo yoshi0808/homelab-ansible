@@ -6,9 +6,8 @@
 # systemd timerから実行する。semaphore再起動を含むためsemaphoreからは実行しない。
 # すべてlocal connectionで実行する。
 #
-# 通知: このPlaybookはメール通知を行わない。
-# 失敗検知はsystemdのExitCode / OnFailure= または journalctl で行う。
-# cleanup失敗時はPlaybook自体がfailするため、systemd unitのstateで検知できる。
+# 通知: 証明書更新結果をメールで通知する（renewed/skipped/failed）。
+# cleanup失敗時もメール通知後にPlaybook自体がfailするため、systemd unitのstateで検知できる。
 
 - name: cert_renew_quory - verify execution host
   hosts: localhost
@@ -64,6 +63,55 @@
       ansible.builtin.import_role:
         name: homelab_cert_renew
         tasks_from: cleanup
+
+- name: cert_renew_quory - send completion notification
+  hosts: localhost
+  gather_facts: false
+  become: false
+  vars:
+    cert_renew_ca_host: localhost
+  tasks:
+    - name: Load mail variables
+      ansible.builtin.include_vars:
+        file: "{{ inventory_dir }}/../vars/mail.yml"
+
+    - name: Build renewal summary
+      ansible.builtin.set_fact:
+        cert_renew_summary: |
+          {% if hostvars['quory'].cert_needs_renewal is not defined %}
+          quory: check FAILED
+          {% else %}
+          {% set needs_renewal = hostvars['quory'].cert_needs_renewal | bool %}
+          {% set renewed = hostvars['quory'].cert_renewed | default(false) | bool %}
+          {% set deployed = hostvars['quory'].cert_deployed | default(false) | bool %}
+          {% if not needs_renewal %}
+          quory: skipped
+          {% elif not renewed %}
+          quory: issue FAILED
+          {% elif deployed %}
+          quory: renewed and deployed
+          {% else %}
+          quory: renewed but deploy FAILED
+          {% endif %}
+          {% endif %}
+          CA cleanup: {{ cert_cleanup_status | default('OK') }}
+
+    - name: Send completion notification
+      community.general.mail:
+        host: "{{ smtp_host }}"
+        port: "{{ smtp_port }}"
+        username: "{{ smtp_user }}"
+        password: "{{ smtp_password }}"
+        to: "{{ mail_to }}"
+        subject: "[cert_renew_quory] Certificate renewal completed"
+        body: |
+          TLS certificate renewal run (quory) completed.
+
+          Results:
+          {{ cert_renew_summary }}
+          Executed at: {{ lookup('pipe', 'date +%Y-%m-%dT%H:%M:%S+09:00') }}
+        secure: starttls
+      ignore_errors: true
 
     - name: Fail if CA cleanup was not successful
       ansible.builtin.fail:
