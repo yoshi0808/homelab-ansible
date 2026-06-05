@@ -28,7 +28,16 @@
 
 - name: Restore VM placement to target_node
   hosts: "{{ target_node }}"
-  gather_facts: true
+  gather_facts: false
   become: true
-  roles:
-    - proxmox_restore_vm_placement
+  tasks:
+    - name: Skip if called from weekly-full and no updates available
+      ansible.builtin.meta: end_play
+      when: hostvars['localhost']['_weekly_full_no_updates'] | default(false)
+
+    - name: Gather facts
+      ansible.builtin.setup:
+
+    - name: Run restore VM placement role
+      ansible.builtin.include_role:
+        name: proxmox_restore_vm_placement
