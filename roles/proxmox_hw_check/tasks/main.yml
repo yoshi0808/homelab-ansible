@@ -102,13 +102,105 @@
   delegate_to: localhost
   become: false
 
-- name: Print hw summary
+- name: Build Semaphore hw summary
+  ansible.builtin.set_fact:
+    semaphore_hw_summary_text: |-
+      {% set summary = namespace(result='OK', parts=[], warnings=[]) -%}
+      {% for host in ansible_play_hosts -%}
+      {% set report = hostvars[host].proxmox_hw_report -%}
+      {% if report.result.status == 'WARNING' -%}
+      {% set summary.result = 'WARNING' -%}
+      {% endif -%}
+      {% for warning in report.result.warnings -%}
+      {% set _ = summary.warnings.append(host ~ ': ' ~ warning) -%}
+      {% endfor -%}
+      {% endfor -%}
+      {% set _ = summary.parts.append('SUMMARY proxmox_hw_check') -%}
+      {% set _ = summary.parts.append('Result=' ~ summary.result) -%}
+      {% if summary.result == 'WARNING' -%}
+      {% set _ = summary.parts.append('Next=review hardware warnings before patch') -%}
+      {% else -%}
+      {% set _ = summary.parts.append('Next=none') -%}
+      {% endif -%}
+      {% for host in ansible_play_hosts -%}
+      {% set report = hostvars[host].proxmox_hw_report -%}
+      {% set zfs = namespace(items=[]) -%}
+      {% for pool in report.zfs.pools -%}
+      {% set _ = zfs.items.append(pool.name ~ ':' ~ pool.health) -%}
+      {% endfor -%}
+      {% set nic_names = report.nics | map(attribute='name') | list -%}
+      {% set nics_down = hostvars[host]._nics_down | default([]) -%}
+      {% set nic_errors = hostvars[host]._nics_errors | default([]) -%}
+      {% set nic_dropped = hostvars[host]._nics_dropped | default([]) -%}
+      {% set nic_totals = namespace(packets=0, errors=0, dropped=0) -%}
+      {% set physical_nic_totals = namespace(packets=0, dropped=0) -%}
+      {% set vmbr_nic_totals = namespace(packets=0, dropped=0) -%}
+      {% for nic in report.nics -%}
+      {% set nic_totals.packets = nic_totals.packets + (nic.total_packets | int) -%}
+      {% set nic_totals.errors = nic_totals.errors + (nic.total_errors | int) -%}
+      {% set nic_totals.dropped = nic_totals.dropped + (nic.total_dropped | int) -%}
+      {% if nic.name.startswith('vmbr') -%}
+      {% set vmbr_nic_totals.packets = vmbr_nic_totals.packets + (nic.total_packets | int) -%}
+      {% set vmbr_nic_totals.dropped = vmbr_nic_totals.dropped + (nic.total_dropped | int) -%}
+      {% else -%}
+      {% set physical_nic_totals.packets = physical_nic_totals.packets + (nic.total_packets | int) -%}
+      {% set physical_nic_totals.dropped = physical_nic_totals.dropped + (nic.total_dropped | int) -%}
+      {% endif -%}
+      {% endfor -%}
+      {% set error_rate = 0 if nic_totals.packets == 0 else ((nic_totals.errors | float / nic_totals.packets | float) * 100) -%}
+      {% set drop_rate = 0 if nic_totals.packets == 0 else ((nic_totals.dropped | float / nic_totals.packets | float) * 100) -%}
+      {% set physical_drop_rate = 0 if physical_nic_totals.packets == 0 else ((physical_nic_totals.dropped | float / physical_nic_totals.packets | float) * 100) -%}
+      {% set vmbr_drop_rate = 0 if vmbr_nic_totals.packets == 0 else ((vmbr_nic_totals.dropped | float / vmbr_nic_totals.packets | float) * 100) -%}
+      {% set error_threshold = proxmox_hw_check_nic_errors_warning_pct | float -%}
+      {% set drop_threshold = proxmox_hw_check_nic_dropped_warning_pct | float -%}
+      {% set collection_failures = namespace(items=[]) -%}
+      {% if not report.collection_status.nics -%}
+      {% set _ = collection_failures.items.append('nics=false') -%}
+      {% endif -%}
+      {% if not report.collection_status.zfs_pools -%}
+      {% set _ = collection_failures.items.append('zfs_pools=false') -%}
+      {% endif -%}
+      {% if not report.collection_status.zfs_scrub -%}
+      {% set _ = collection_failures.items.append('zfs_scrub=false') -%}
+      {% endif -%}
+      {% if not report.collection_status.disk -%}
+      {% set _ = collection_failures.items.append('disk=false') -%}
+      {% endif -%}
+      {% set nic_state = 'OK[' ~ (nic_names | join(',')) ~ ']' if nics_down | length == 0 else 'NG[' ~ ((nics_down | map('regex_replace', '^(.*)$', '\\1=DOWN') | list) | join(',')) ~ ']' -%}
+      {% set nic_error_state = ('OK' if nic_errors | length == 0 else 'WARNING') ~
+          '[total=' ~ (nic_totals.errors | string) ~
+          ',rate=' ~ ('%g' | format(error_rate | round(4))) ~ '%' ~
+          ',threshold=' ~ ('%g' | format(error_threshold | round(4))) ~ '%' ~
+          ('' if nic_errors | length == 0 else ',nics=' ~ (nic_errors | join(','))) ~ ']' -%}
+      {% set nic_drop_state = ('OK' if nic_dropped | length == 0 else 'WARNING') ~
+          '[total=' ~ (nic_totals.dropped | string) ~
+          ',rate=' ~ ('%g' | format(drop_rate | round(4))) ~ '%' ~
+          ',physical_total=' ~ (physical_nic_totals.dropped | string) ~
+          ',physical_rate=' ~ ('%g' | format(physical_drop_rate | round(4))) ~ '%' ~
+          ',vmbr_total=' ~ (vmbr_nic_totals.dropped | string) ~
+          ',vmbr_rate=' ~ ('%g' | format(vmbr_drop_rate | round(4))) ~ '%' ~
+          ',threshold=' ~ ('%g' | format(drop_threshold | round(4))) ~ '%' ~
+          ('' if nic_dropped | length == 0 else ',nics=' ~ (nic_dropped | join(','))) ~ ']' -%}
+      {% set collection_state = 'OK' if collection_failures.items | length == 0 else 'NG[' ~ (collection_failures.items | join(',')) ~ ']' -%}
+      {% set _ = summary.parts.append(host ~ '=' ~ report.result.status ~
+          '(cpu_total=' ~ (report.cpu.total_cpus | string) ~
+          ',memory_total=' ~ (report.memory.total_mb | string) ~ 'MB' ~
+          ',zfs=' ~ (zfs.items | join(',') if zfs.items | length > 0 else 'none') ~
+          ',nic_state=' ~ nic_state ~
+          ',nic_errors=' ~ nic_error_state ~
+          ',nic_drops=' ~ nic_drop_state ~
+          ',collection=' ~ collection_state ~ ')') -%}
+      {% endfor -%}
+      {% if summary.warnings | length == 0 -%}
+      {% set _ = summary.parts.append('Warnings=none') -%}
+      {% else -%}
+      {% set _ = summary.parts.append('Warnings=' ~ (summary.warnings | join('; '))) -%}
+      {% endif -%}
+      {% set _ = summary.parts.append('Checked=cpu,memory,zfs-pools,zfs-scrub,disk-filesystems,nic-state,nic-error-rate,nic-drop-rate,collection-status') -%}
+      {{ summary.parts | join(' | ') }}
+  run_once: true
+
+- name: Print Semaphore hw summary
   ansible.builtin.debug:
-    msg:
-      - "Host     : {{ inventory_hostname }}"
-      - "Status   : {{ proxmox_hw_report.result.status }}"
-      - "CPU      : {{ proxmox_hw.cpu.model }} ({{ proxmox_hw.cpu.total_cpus }} CPUs, {{ proxmox_hw.cpu.sockets }}s x {{ proxmox_hw.cpu.cores_per_socket }}c x {{ proxmox_hw.cpu.threads_per_core }}t)"
-      - "Memory   : {{ proxmox_hw.memory.total_mb }} MB"
-      - "ZFS pools: {{ proxmox_hw.zfs.pools | map(attribute='name') | zip(proxmox_hw.zfs.pools | map(attribute='health')) | map('join', '=') | list }}"
-      - "NICs     : {{ proxmox_hw.nics | map(attribute='name') | zip(proxmox_hw.nics | map(attribute='state')) | map('join', '=') | list }}"
-      - "Warnings : {{ proxmox_hw_warnings }}"
+    msg: "{{ semaphore_hw_summary_text }}"
+  run_once: true
