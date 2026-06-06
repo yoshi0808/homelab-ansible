@@ -133,22 +133,8 @@
 
 - name: Build Semaphore health summary
   ansible.builtin.set_fact:
-    _proxmox_health_summary_overall: >-
-      {%- set summary = namespace(overall='OK') -%}
-      {%- for host in ansible_play_hosts -%}
-      {%- set status = hostvars[host].proxmox_report.result.status -%}
-      {%- if status == 'CRITICAL' -%}
-      {%- set summary.overall = 'CRITICAL' -%}
-      {%- elif status == 'WARNING' and summary.overall != 'CRITICAL' -%}
-      {%- set summary.overall = 'WARNING' -%}
-      {%- endif -%}
-      {%- endfor -%}
-      {{ summary.overall }}
-    _proxmox_health_summary_text: |-
-      ============================================================
-      SUMMARY proxmox_healthcheck
-      ============================================================
-      {% set summary = namespace(overall='OK', warnings=[], criticals=[]) -%}
+    semaphore_health_summary: >-
+      {% set summary = namespace(overall='OK', lines=[], warnings=[], criticals=[]) -%}
       {% for host in ansible_play_hosts -%}
       {% set report = hostvars[host].proxmox_report -%}
       {% if report.result.status == 'CRITICAL' -%}
@@ -162,67 +148,84 @@
       {% for critical in report.result.criticals -%}
       {% set _ = summary.criticals.append(host ~ ': ' ~ critical) -%}
       {% endfor -%}
-      {% endfor %}
-      Overall: {{ summary.overall }}
-
-      Checked:
-        - Cluster quorum
-        - ZFS pool state
-        - Proxmox services
-        - systemd failed units
-        - root filesystem usage
-        - apt/dpkg health
-        - reboot-required flag
-        - replication freshness
-
-      Hosts:
-      {% for host in ansible_play_hosts %}
-      {% set report = hostvars[host].proxmox_report %}
+      {% endfor -%}
+      {% set _ = summary.lines.append('============================================================') -%}
+      {% set _ = summary.lines.append('SUMMARY proxmox_healthcheck') -%}
+      {% set _ = summary.lines.append('============================================================') -%}
+      {% set _ = summary.lines.append('Overall: ' ~ summary.overall) -%}
+      {% set _ = summary.lines.append('') -%}
+      {% set _ = summary.lines.append('Checked:') -%}
+      {% set _ = summary.lines.append('  - Cluster quorum') -%}
+      {% set _ = summary.lines.append('  - ZFS pool state') -%}
+      {% set _ = summary.lines.append('  - Proxmox services') -%}
+      {% set _ = summary.lines.append('  - systemd failed units') -%}
+      {% set _ = summary.lines.append('  - root filesystem usage') -%}
+      {% set _ = summary.lines.append('  - apt/dpkg health') -%}
+      {% set _ = summary.lines.append('  - reboot-required flag') -%}
+      {% set _ = summary.lines.append('  - replication freshness') -%}
+      {% set _ = summary.lines.append('') -%}
+      {% set _ = summary.lines.append('Hosts:') -%}
+      {% for host in ansible_play_hosts -%}
+      {% set report = hostvars[host].proxmox_report -%}
       {% set services_ok = (
           report.services.pve_cluster == 'active' and
           report.services.corosync == 'active' and
           report.services.pvedaemon == 'active' and
-          report.services.pveproxy == 'active') %}
-      {% set zfs = namespace(items=[]) %}
-      {% for pool in report.zfs.pools %}
-      {% set _ = zfs.items.append(pool.name ~ ':' ~ pool.state) %}
-      {% endfor %}
-        {{ host }}: {{ report.result.status }} | quorum={{ report.cluster.quorate }} | zfs={{ zfs.items | join(',') if zfs.items | length > 0 else 'none' }} | root={{ report.filesystem.root_used_pct }}% | services={{ 'OK' if services_ok else 'NOT_OK' }} | failed_units={{ report.systemd.failed_count }} | reboot={{ report.reboot_required | string | lower }}
-      {% endfor %}
+          report.services.pveproxy == 'active') -%}
+      {% set zfs = namespace(items=[]) -%}
+      {% for pool in report.zfs.pools -%}
+      {% set _ = zfs.items.append(pool.name ~ ':' ~ pool.state) -%}
+      {% endfor -%}
+      {% set _ = summary.lines.append('  ' ~ host ~ ': ' ~ report.result.status ~
+          ' | quorum=' ~ report.cluster.quorate ~
+          ' | zfs=' ~ (zfs.items | join(',') if zfs.items | length > 0 else 'none') ~
+          ' | root=' ~ (report.filesystem.root_used_pct | string) ~ '%' ~
+          ' | services=' ~ ('OK' if services_ok else 'NOT_OK') ~
+          ' | failed_units=' ~ (report.systemd.failed_count | string) ~
+          ' | reboot=' ~ (report.reboot_required | string | lower)) -%}
+      {% endfor -%}
+      {% set _ = summary.lines.append('') -%}
+      {% set _ = summary.lines.append('Warnings:') -%}
+      {% if summary.warnings | length == 0 -%}
+      {% set _ = summary.lines.append('  none') -%}
+      {% else -%}
+      {% for warning in summary.warnings -%}
+      {% set _ = summary.lines.append('  - ' ~ warning) -%}
+      {% endfor -%}
+      {% endif -%}
+      {% set _ = summary.lines.append('') -%}
+      {% set _ = summary.lines.append('Criticals:') -%}
+      {% if summary.criticals | length == 0 -%}
+      {% set _ = summary.lines.append('  none') -%}
+      {% else -%}
+      {% for critical in summary.criticals -%}
+      {% set _ = summary.lines.append('  - ' ~ critical) -%}
+      {% endfor -%}
+      {% endif -%}
+      {% set _ = summary.lines.append('') -%}
+      {% set _ = summary.lines.append('Next:') -%}
+      {% if summary.overall == 'CRITICAL' -%}
+      {% set _ = summary.lines.append('  fix criticals; patch must not proceed') -%}
+      {% elif summary.overall == 'WARNING' -%}
+      {% set _ = summary.lines.append('  review warnings before patch') -%}
+      {% else -%}
+      {% set _ = summary.lines.append('  none') -%}
+      {% endif -%}
+      {% set _ = summary.lines.append('============================================================') -%}
+      {{ {'overall': summary.overall, 'lines': summary.lines} }}
+  run_once: true
 
-      Warnings:
-      {% if summary.warnings | length == 0 %}
-        none
-      {% else %}
-      {% for warning in summary.warnings %}
-        - {{ warning }}
-      {% endfor %}
-      {% endif %}
-
-      Criticals:
-      {% if summary.criticals | length == 0 %}
-        none
-      {% else %}
-      {% for critical in summary.criticals %}
-        - {{ critical }}
-      {% endfor %}
-      {% endif %}
-
-      Next:
-      {% if summary.overall == 'CRITICAL' %}
-        fix criticals; patch must not proceed
-      {% elif summary.overall == 'WARNING' %}
-        review warnings before patch
-      {% else %}
-        none
-      {% endif %}
-      ============================================================
+- name: Set Semaphore health summary lines
+  ansible.builtin.set_fact:
+    semaphore_health_summary_overall: "{{ semaphore_health_summary.overall }}"
+    semaphore_health_summary_lines: "{{ semaphore_health_summary.lines }}"
   run_once: true
 
 - name: Print Semaphore health summary before critical fail
   ansible.builtin.debug:
-    msg: "{{ _proxmox_health_summary_text }}"
-  when: _proxmox_health_summary_overall == 'CRITICAL'
+    msg: "{{ item }}"
+  loop: "{{ semaphore_health_summary_lines }}"
+  when: semaphore_health_summary_overall == 'CRITICAL'
   run_once: true
 
 - name: Fail if critical
@@ -232,6 +235,7 @@
 
 - name: Print Semaphore health summary
   ansible.builtin.debug:
-    msg: "{{ _proxmox_health_summary_text }}"
-  when: _proxmox_health_summary_overall != 'CRITICAL'
+    msg: "{{ item }}"
+  loop: "{{ semaphore_health_summary_lines }}"
+  when: semaphore_health_summary_overall != 'CRITICAL'
   run_once: true
