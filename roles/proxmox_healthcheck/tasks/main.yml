@@ -134,7 +134,7 @@
 - name: Build Semaphore health summary
   ansible.builtin.set_fact:
     semaphore_health_summary_text: |-
-      {% set summary = namespace(result='OK', lines=[], warnings=[], criticals=[]) -%}
+      {% set summary = namespace(result='OK', parts=[], warnings=[], criticals=[]) -%}
       {% for host in ansible_play_hosts -%}
       {% set report = hostvars[host].proxmox_report -%}
       {% if report.result.status == 'CRITICAL' -%}
@@ -149,17 +149,15 @@
       {% set _ = summary.criticals.append(host ~ ': ' ~ critical) -%}
       {% endfor -%}
       {% endfor -%}
-      {% set _ = summary.lines.append('SUMMARY proxmox_healthcheck') -%}
-      {% set _ = summary.lines.append('Result: ' ~ summary.result) -%}
+      {% set _ = summary.parts.append('SUMMARY proxmox_healthcheck') -%}
+      {% set _ = summary.parts.append('Result=' ~ summary.result) -%}
       {% if summary.result == 'CRITICAL' -%}
-      {% set _ = summary.lines.append('Next: fix criticals; patch must not proceed') -%}
+      {% set _ = summary.parts.append('Next=fix criticals; patch must not proceed') -%}
       {% elif summary.result == 'WARNING' -%}
-      {% set _ = summary.lines.append('Next: review warnings before patch') -%}
+      {% set _ = summary.parts.append('Next=review warnings before patch') -%}
       {% else -%}
-      {% set _ = summary.lines.append('Next: none') -%}
+      {% set _ = summary.parts.append('Next=none') -%}
       {% endif -%}
-      {% set _ = summary.lines.append('') -%}
-      {% set _ = summary.lines.append('Hosts:') -%}
       {% for host in ansible_play_hosts -%}
       {% set report = hostvars[host].proxmox_report -%}
       {% set bad_services = namespace(items=[]) -%}
@@ -179,36 +177,41 @@
       {% for pool in report.zfs.pools -%}
       {% set _ = zfs.items.append(pool.name ~ ':' ~ pool.state) -%}
       {% endfor -%}
-      {% set _ = summary.lines.append('- ' ~ host ~ ': ' ~ report.result.status ~
-          ' | quorum=' ~ report.cluster.quorate ~
-          ' | zfs=' ~ (zfs.items | join(',') if zfs.items | length > 0 else 'none') ~
-          ' | root=' ~ (report.filesystem.root_used_pct | string) ~ '%' ~
-          ' | services=' ~ ('OK' if bad_services.items | length == 0 else 'NG(' ~ (bad_services.items | join(', ')) ~ ')') ~
-          ' | failed_units=' ~ (report.systemd.failed_count | string) ~
-          ' | reboot=' ~ (report.reboot_required | string | lower)) -%}
+      {% set replication = namespace(status='OK') -%}
+      {% for critical in report.result.criticals -%}
+      {% if 'replication' in (critical | lower) -%}
+      {% set replication.status = 'CRITICAL' -%}
+      {% endif -%}
       {% endfor -%}
-      {% set _ = summary.lines.append('') -%}
-      {% set _ = summary.lines.append('Warnings:') -%}
+      {% if replication.status != 'CRITICAL' -%}
+      {% for warning in report.result.warnings -%}
+      {% if 'replication' in (warning | lower) -%}
+      {% set replication.status = 'WARNING' -%}
+      {% endif -%}
+      {% endfor -%}
+      {% endif -%}
+      {% set pve_services = 'OK[pve-cluster,corosync,pvedaemon,pveproxy]' if bad_services.items | length == 0 else 'NG[' ~ (bad_services.items | join(',')) ~ ']' -%}
+      {% set _ = summary.parts.append(host ~ '=' ~ report.result.status ~
+          '(quorum=' ~ report.cluster.quorate ~
+          ',zfs=' ~ (zfs.items | join(',') if zfs.items | length > 0 else 'none') ~
+          ',root_fs_used=' ~ (report.filesystem.root_used_pct | string) ~ '%' ~
+          ',pve_services=' ~ pve_services ~
+          ',systemd_failed_units=' ~ (report.systemd.failed_count | string) ~
+          ',reboot_required=' ~ (report.reboot_required | string | lower) ~
+          ',replication=' ~ replication.status ~ ')') -%}
+      {% endfor -%}
       {% if summary.warnings | length == 0 -%}
-      {% set _ = summary.lines.append('  none') -%}
+      {% set _ = summary.parts.append('Warnings=none') -%}
       {% else -%}
-      {% for warning in summary.warnings -%}
-      {% set _ = summary.lines.append('  - ' ~ warning) -%}
-      {% endfor -%}
+      {% set _ = summary.parts.append('Warnings=' ~ (summary.warnings | join('; '))) -%}
       {% endif -%}
-      {% set _ = summary.lines.append('') -%}
-      {% set _ = summary.lines.append('Criticals:') -%}
       {% if summary.criticals | length == 0 -%}
-      {% set _ = summary.lines.append('  none') -%}
+      {% set _ = summary.parts.append('Criticals=none') -%}
       {% else -%}
-      {% for critical in summary.criticals -%}
-      {% set _ = summary.lines.append('  - ' ~ critical) -%}
-      {% endfor -%}
+      {% set _ = summary.parts.append('Criticals=' ~ (summary.criticals | join('; '))) -%}
       {% endif -%}
-      {% set _ = summary.lines.append('') -%}
-      {% set _ = summary.lines.append('Checked:') -%}
-      {% set _ = summary.lines.append('- quorum / zfs / services / failed units / root fs / apt / reboot flag / replication freshness') -%}
-      {{ summary.lines | join('\n') }}
+      {% set _ = summary.parts.append('Checked=quorum,zfs,pve-services,systemd-failed-units,root-filesystem,apt-dpkg,reboot-required,replication-staleness') -%}
+      {{ summary.parts | join(' | ') }}
   run_once: true
 
 - name: Print Semaphore health summary
