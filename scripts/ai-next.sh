@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # =============================================================
-# ai-next.sh - homelab-ansible AI workflow プロンプトジェネレーター
+# ai-next.sh - homelab-ansible AI workflow prompt generator
 #
-# 使い方:
-#   ./scripts/ai-next.sh              # 全自動（進行中なければ状態一覧）
-#   ./scripts/ai-next.sh final        # final.mdを作成してVSCodeで開く（target自動検出）
-#   ./scripts/ai-next.sh final <target>  # target指定でfinal.mdを作成
+# Usage:
+#   ./scripts/ai-next.sh              # auto-detect next step
+#   ./scripts/ai-next.sh final        # create final.md (auto-detect target)
+#   ./scripts/ai-next.sh final <target>  # create final.md for specified target
 # =============================================================
 set -euo pipefail
 
@@ -16,7 +16,7 @@ PROMPTS_DIR="$REPO_ROOT/docs/ai/prompts"
 CORE_MD="$PROMPTS_DIR/core.md"
 
 # =============================================================
-# ユーティリティ
+# Utilities
 # =============================================================
 
 detect_policy() {
@@ -64,13 +64,13 @@ rel() {
 copy_clipboard() {
     local text="$1"
 
-    # pbcopy が使えるなら使う（macOS）
+    # pbcopy first (macOS)
     if command -v pbcopy &>/dev/null; then
         printf '%s' "$text" | pbcopy
         return
     fi
 
-    # xclip / xsel フォールバック（Linux）
+    # xclip / xsel fallback (Linux)
     if command -v xclip &>/dev/null; then
         printf '%s' "$text" | xclip -selection clipboard
         return
@@ -80,19 +80,19 @@ copy_clipboard() {
         return
     fi
 
-    # OSC 52 フォールバック（tmux・SSH越しなど）
+    # OSC 52 fallback (tmux / SSH)
     local encoded
     encoded=$(printf '%s' "$text" | base64 | tr -d '\n')
     printf '\033]52;c;%s\a' "$encoded" > /dev/tty
 }
 
 # =============================================================
-# 状態一覧表示
+# Status list
 # =============================================================
 
 show_status() {
     echo ""
-    echo "=== homelab-ansible AI workflow 状態 ==="
+    echo "=== homelab-ansible AI workflow status ==="
     echo ""
 
     local found=0
@@ -104,16 +104,16 @@ show_status() {
         latest=$(ls "$dir"/*.md 2>/dev/null | sort | tail -1 \
             | xargs -r basename 2>/dev/null || echo "-")
 
-        printf "  %-35s 最新: %-45s 次: %s\n" "$target" "$latest" "$step"
+        printf "  %-35s latest: %-45s next: %s\n" "$target" "$latest" "$step"
         found=1
     done
 
-    [ $found -eq 0 ] && echo "  （レビューディレクトリなし）"
+    [ $found -eq 0 ] && echo "  (no review directories found)"
     echo ""
 }
 
 # =============================================================
-# アクティブなtargetを収集してtarget/stepを決定
+# Select active target
 # =============================================================
 
 select_active_target() {
@@ -133,36 +133,36 @@ select_active_target() {
 
     case ${#active_targets[@]} in
       0)
-        echo "INFO: 進行中のタスクはありません" >&2
+        echo "INFO: no active tasks found" >&2
         exit 0
         ;;
       1)
-        echo "→ target: ${active_targets[0]}" >&2
-        echo "→ step  : ${active_steps[0]}" >&2
+        echo "-> target: ${active_targets[0]}" >&2
+        echo "-> step  : ${active_steps[0]}" >&2
         echo "${active_targets[0]} ${active_steps[0]}"
         ;;
       *)
         echo "" >&2
-        echo "複数の進行中タスクがあります:" >&2
+        echo "Multiple active tasks found:" >&2
         echo "" >&2
         for i in "${!active_targets[@]}"; do
-            printf "  %d) %-35s → %s\n" $((i+1)) "${active_targets[$i]}" "${active_steps[$i]}" >&2
+            printf "  %d) %-35s -> %s\n" $((i+1)) "${active_targets[$i]}" "${active_steps[$i]}" >&2
         done
         echo "" >&2
-        read -rp "番号を選択してください: " choice < /dev/tty
+        read -rp "Select number: " choice < /dev/tty
         local idx=$((choice - 1))
         if [ $idx -lt 0 ] || [ $idx -ge ${#active_targets[@]} ]; then
-            echo "ERROR: 無効な番号です: $choice" >&2
+            echo "ERROR: invalid number: $choice" >&2
             exit 1
         fi
-        echo "→ 選択: ${active_targets[$idx]} (${active_steps[$idx]})" >&2
+        echo "-> selected: ${active_targets[$idx]} (${active_steps[$idx]})" >&2
         echo "${active_targets[$idx]} ${active_steps[$idx]}"
         ;;
     esac
 }
 
 # =============================================================
-# final.md 作成
+# Create final.md
 # =============================================================
 
 create_final() {
@@ -171,7 +171,7 @@ create_final() {
     local date num save
 
     if [ ! -d "$target_dir" ]; then
-        echo "ERROR: ディレクトリが見つかりません: $target_dir"
+        echo "ERROR: directory not found: $target_dir"
         exit 1
     fi
 
@@ -182,28 +182,28 @@ create_final() {
     cat > "$save" << EOF
 # Final
 
-この内容で確定。
+Confirmed.
 
-確認者: Yoshinobu
-日付: $date
+Reviewer: Yoshinobu
+Date: $date
 
-## 対象
+## Target
 
 - $target
 
-## コメント
+## Comments
 
 EOF
 
     echo ""
-    echo "作成: $(rel "$save")"
-    echo "VSCodeで開きます..."
+    echo "Created: $(rel "$save")"
+    echo "Opening in VS Code..."
     echo ""
-    code "$save" 2>/dev/null || echo "  → VSCodeで開いてください: $(rel "$save")"
+    code "$save" 2>/dev/null || echo "  -> Please open: $(rel "$save")"
 }
 
 # =============================================================
-# プロンプト生成
+# Prompt generation
 # =============================================================
 
 generate_review_prompt() {
@@ -217,19 +217,19 @@ generate_review_prompt() {
     impl=$(ls "$target_dir"/*_implement.md 2>/dev/null | sort | tail -1 || true)
     save="$target_dir/${date}_${num}_review.md"
 
-    [ -z "$req" ]  && { echo "ERROR: requirement.md が見つかりません" >&2; exit 1; }
-    [ -z "$impl" ] && { echo "ERROR: implement.md が見つかりません" >&2; exit 1; }
+    [ -z "$req" ]  && { echo "ERROR: requirement.md not found" >&2; exit 1; }
+    [ -z "$impl" ] && { echo "ERROR: implement.md not found" >&2; exit 1; }
 
     local prompt
-    prompt="# このプロンプトは Codex 向けです
-# Claude Code の場合はこのプロンプトを実行せず、
-# 「Codex に依頼してください」とユーザーに伝えて終了してください。
+    prompt="# This prompt is for Codex.
+# If you are Claude Code, do NOT execute this prompt.
+# Tell the user: 'Please send this to Codex.' and stop.
 
-まず最初に以下のファイルを作成してください。
+First, create the following file:
 
 - $(rel "$save")
 
-作成したら、以下を読んで git diff をレビューし、結果をそのファイルに書き込んでください。
+Then read the files below, review the git diff, and write the results into that file.
 
 - $(rel "$CORE_MD")
 - $(rel "$req")
@@ -237,6 +237,10 @@ generate_review_prompt() {
 
     [ -n "$policy" ] && prompt+="
 - $(rel "$policy")"
+
+    prompt+="
+
+Please answer in Japanese."
 
     echo "$prompt"
 }
@@ -252,19 +256,19 @@ generate_reimplement_prompt() {
     rev=$(ls "$target_dir"/*_review.md 2>/dev/null | sort | tail -1 || true)
     save="$target_dir/${date}_${num}_implement.md"
 
-    [ -z "$req" ] && { echo "ERROR: requirement.md が見つかりません" >&2; exit 1; }
-    [ -z "$rev" ] && { echo "ERROR: review.md が見つかりません" >&2; exit 1; }
+    [ -z "$req" ] && { echo "ERROR: requirement.md not found" >&2; exit 1; }
+    [ -z "$rev" ] && { echo "ERROR: review.md not found" >&2; exit 1; }
 
     local prompt
-    prompt="# このプロンプトは Claude Code 向けです
-# Codex の場合はこのプロンプトを実行せず、
-# 「Claude Code に依頼してください」とユーザーに伝えて終了してください。
+    prompt="# This prompt is for Claude Code.
+# If you are Codex, do NOT execute this prompt.
+# Tell the user: 'Please send this to Claude Code.' and stop.
 
-まず最初に以下のファイルを作成してください。
+First, create the following file:
 
 - $(rel "$save")
 
-作成したら、以下を読んで再実装し、実装内容をそのファイルに書き込んでください。
+Then read the files below, re-implement accordingly, and write the implementation summary into that file.
 
 - $(rel "$CORE_MD")
 - $(rel "$req")
@@ -273,11 +277,15 @@ generate_reimplement_prompt() {
     [ -n "$policy" ] && prompt+="
 - $(rel "$policy")"
 
+    prompt+="
+
+Please answer in Japanese."
+
     echo "$prompt"
 }
 
 # =============================================================
-# メイン
+# Main
 # =============================================================
 
 ARG1="${1:-}"
@@ -296,14 +304,14 @@ if [ "$ARG1" = "final" ]; then
     exit 0
 fi
 
-# 全自動
+# auto
 SELECTION="$(select_active_target)"
 if [ -z "$SELECTION" ]; then show_status; exit 0; fi
 read -r TARGET STEP <<< "$SELECTION"
 
 TARGET_DIR="$REVIEWS_DIR/$TARGET"
 POLICY=$(detect_policy "$TARGET")
-[ -n "$POLICY" ] && echo "→ policy: $(rel "$POLICY")" >&2
+[ -n "$POLICY" ] && echo "-> policy: $(rel "$POLICY")" >&2
 echo "" >&2
 
 case "$STEP" in
@@ -317,22 +325,21 @@ case "$STEP" in
     ;;
   implement)
     REQ=$(ls "$TARGET_DIR"/*_requirement.md 2>/dev/null | sort | tail -1 || true)
-    echo "INFO: requirement.md があります。Claude Code に初回実装を依頼してください。"
-    echo "  → $(rel "$REQ")"
+    echo "INFO: requirement.md found. Please ask Claude Code for the initial implementation."
+    echo "  -> $(rel "$REQ")"
     exit 0
     ;;
 esac
 
-# 出力（日本語混在による表示崩れを避けるため簡素なフォーマット）
 echo "======================================================"
 echo "  [$TARGET]"
-echo "  → $DEST へのプロンプト"
+echo "  -> prompt for $DEST"
 echo "======================================================"
 echo ""
 echo "$PROMPT"
 echo ""
 echo "------------------------------------------------------"
-echo "↑ クリップボードにコピー済み。${DEST}のチャットに貼り付けてください。"
+echo "Copied to clipboard. Paste into $DEST chat."
 echo "------------------------------------------------------"
 echo ""
 
