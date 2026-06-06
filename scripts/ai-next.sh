@@ -63,6 +63,24 @@ rel() {
 
 copy_clipboard() {
     local text="$1"
+
+    # pbcopy が使えるなら使う（macOS）
+    if command -v pbcopy &>/dev/null; then
+        printf '%s' "$text" | pbcopy
+        return
+    fi
+
+    # xclip / xsel フォールバック（Linux）
+    if command -v xclip &>/dev/null; then
+        printf '%s' "$text" | xclip -selection clipboard
+        return
+    fi
+    if command -v xsel &>/dev/null; then
+        printf '%s' "$text" | xsel --clipboard --input
+        return
+    fi
+
+    # OSC 52 フォールバック（tmux・SSH越しなど）
     local encoded
     encoded=$(printf '%s' "$text" | base64 | tr -d '\n')
     printf '\033]52;c;%s\a' "$encoded" > /dev/tty
