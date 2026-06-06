@@ -219,12 +219,16 @@
   ansible.builtin.set_fact:
     semaphore_health_summary_overall: "{{ semaphore_health_summary.overall }}"
     semaphore_health_summary_lines: "{{ semaphore_health_summary.lines }}"
+    semaphore_health_summary_text: "{{ semaphore_health_summary.lines | join('\n') }}"
   run_once: true
 
 - name: Print Semaphore health summary before critical fail
-  ansible.builtin.debug:
-    msg: "{{ item }}"
-  loop: "{{ semaphore_health_summary_lines }}"
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/printf
+      - "%s\n"
+      - "{{ semaphore_health_summary_text }}"
+  changed_when: false
   when: semaphore_health_summary_overall == 'CRITICAL'
   run_once: true
 
@@ -234,8 +238,11 @@
   when: proxmox_criticals | length > 0
 
 - name: Print Semaphore health summary
-  ansible.builtin.debug:
-    msg: "{{ item }}"
-  loop: "{{ semaphore_health_summary_lines }}"
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/printf
+      - "%s\n"
+      - "{{ semaphore_health_summary_text }}"
+  changed_when: false
   when: semaphore_health_summary_overall != 'CRITICAL'
   run_once: true
