@@ -131,23 +131,107 @@
   delegate_to: localhost
   become: false
 
-- name: Print health summary
+- name: Build Semaphore health summary
+  ansible.builtin.set_fact:
+    _proxmox_health_summary_overall: >-
+      {%- set summary = namespace(overall='OK') -%}
+      {%- for host in ansible_play_hosts -%}
+      {%- set status = hostvars[host].proxmox_report.result.status -%}
+      {%- if status == 'CRITICAL' -%}
+      {%- set summary.overall = 'CRITICAL' -%}
+      {%- elif status == 'WARNING' and summary.overall != 'CRITICAL' -%}
+      {%- set summary.overall = 'WARNING' -%}
+      {%- endif -%}
+      {%- endfor -%}
+      {{ summary.overall }}
+    _proxmox_health_summary_text: |-
+      ============================================================
+      SUMMARY proxmox_healthcheck
+      ============================================================
+      {% set summary = namespace(overall='OK', warnings=[], criticals=[]) -%}
+      {% for host in ansible_play_hosts -%}
+      {% set report = hostvars[host].proxmox_report -%}
+      {% if report.result.status == 'CRITICAL' -%}
+      {% set summary.overall = 'CRITICAL' -%}
+      {% elif report.result.status == 'WARNING' and summary.overall != 'CRITICAL' -%}
+      {% set summary.overall = 'WARNING' -%}
+      {% endif -%}
+      {% for warning in report.result.warnings -%}
+      {% set _ = summary.warnings.append(host ~ ': ' ~ warning) -%}
+      {% endfor -%}
+      {% for critical in report.result.criticals -%}
+      {% set _ = summary.criticals.append(host ~ ': ' ~ critical) -%}
+      {% endfor -%}
+      {% endfor %}
+      Overall: {{ summary.overall }}
+
+      Checked:
+        - Cluster quorum
+        - ZFS pool state
+        - Proxmox services
+        - systemd failed units
+        - root filesystem usage
+        - apt/dpkg health
+        - reboot-required flag
+        - replication freshness
+
+      Hosts:
+      {% for host in ansible_play_hosts %}
+      {% set report = hostvars[host].proxmox_report %}
+      {% set services_ok = (
+          report.services.pve_cluster == 'active' and
+          report.services.corosync == 'active' and
+          report.services.pvedaemon == 'active' and
+          report.services.pveproxy == 'active') %}
+      {% set zfs = namespace(items=[]) %}
+      {% for pool in report.zfs.pools %}
+      {% set _ = zfs.items.append(pool.name ~ ':' ~ pool.state) %}
+      {% endfor %}
+        {{ host }}: {{ report.result.status }} | quorum={{ report.cluster.quorate }} | zfs={{ zfs.items | join(',') if zfs.items | length > 0 else 'none' }} | root={{ report.filesystem.root_used_pct }}% | services={{ 'OK' if services_ok else 'NOT_OK' }} | failed_units={{ report.systemd.failed_count }} | reboot={{ report.reboot_required | string | lower }}
+      {% endfor %}
+
+      Warnings:
+      {% if summary.warnings | length == 0 %}
+        none
+      {% else %}
+      {% for warning in summary.warnings %}
+        - {{ warning }}
+      {% endfor %}
+      {% endif %}
+
+      Criticals:
+      {% if summary.criticals | length == 0 %}
+        none
+      {% else %}
+      {% for critical in summary.criticals %}
+        - {{ critical }}
+      {% endfor %}
+      {% endif %}
+
+      Next:
+      {% if summary.overall == 'CRITICAL' %}
+        fix criticals; patch must not proceed
+      {% elif summary.overall == 'WARNING' %}
+        review warnings before patch
+      {% else %}
+        none
+      {% endif %}
+      ============================================================
+  run_once: true
+
+- name: Print Semaphore health summary before critical fail
   ansible.builtin.debug:
-    msg:
-      - "Host       : {{ inventory_hostname }}"
-      - "Status     : {{ proxmox_report.result.status }}"
-      - "PVE        : {{ proxmox_health.pve_version }}"
-      - "Quorate    : {{ proxmox_health.cluster.quorate }}"
-      - "ZFS pools  : {{ proxmox_health.zfs.pools | map(attribute='name') | zip(proxmox_health.zfs.pools | map(attribute='state')) | map('join', '=') | list }}"
-      - "Services   : pve-cluster={{ proxmox_health.services.pve_cluster }} corosync={{ proxmox_health.services.corosync }} pvedaemon={{ proxmox_health.services.pvedaemon }} pveproxy={{ proxmox_health.services.pveproxy }}"
-      - "Root FS    : {{ proxmox_health.filesystem.root_used_pct }}%"
-      - "Repl jobs  : {{ proxmox_health.replication.entries | length }}"
-      - "Systemd    : failed={{ proxmox_health.systemd.failed_count }}"
-      - "Reboot req : {{ proxmox_health.reboot_required }}"
-      - "Criticals  : {{ proxmox_criticals }}"
-      - "Warnings   : {{ proxmox_warnings }}"
+    msg: "{{ _proxmox_health_summary_text }}"
+  when: _proxmox_health_summary_overall == 'CRITICAL'
+  run_once: true
 
 - name: Fail if critical
   ansible.builtin.fail:
     msg: "CRITICAL on {{ inventory_hostname }}: {{ proxmox_criticals | join(' | ') }}"
   when: proxmox_criticals | length > 0
+
+- name: Print Semaphore health summary
+  ansible.builtin.debug:
+    msg: "{{ _proxmox_health_summary_text }}"
+  when: _proxmox_health_summary_overall != 'CRITICAL'
+  run_once: true
