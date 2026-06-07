@@ -1,0 +1,70 @@
+---
+- name: Load mail variables
+  ansible.builtin.include_vars:
+    file: "{{ inventory_dir }}/../vars/mail.yml"
+  delegate_to: localhost
+
+- name: Run SSD trim via interactive SSH
+  ansible.builtin.expect:
+    command: >-
+      ssh
+      -i {{ ansible_ssh_private_key_file | replace('~', lookup('env', 'HOME')) }}
+      -o StrictHostKeyChecking=accept-new
+      {{ ansible_user }}@{{ ansible_host }}
+    responses:
+      'Select Menu Number \[0-7\]:':
+        - "5"
+        - "0"
+      'Select Menu Number \[0-4\]:':
+        - "3"
+        - "0"
+      '# ':
+        - "fstrim -v /var; echo __SOPHOS_TRIM_VAR_RC__:$?"
+        - "fstrim -v /content; echo __SOPHOS_TRIM_CONTENT_RC__:$?"
+        - "exit"
+    timeout: "{{ sophos_trim_timeout }}"
+    echo: true
+  delegate_to: localhost
+  register: trim_result
+  ignore_errors: true
+
+- name: Log fstrim output
+  ansible.builtin.debug:
+    msg: "{{ trim_result.stdout_lines | default([]) }}"
+
+- name: Set trim status
+  ansible.builtin.set_fact:
+    trim_status: >-
+      {{
+        'SUCCESS'
+        if (
+          trim_result.rc is defined
+          and trim_result.rc == 0
+          and '__SOPHOS_TRIM_VAR_RC__:0' in (trim_result.stdout | default(''))
+          and '__SOPHOS_TRIM_CONTENT_RC__:0' in (trim_result.stdout | default(''))
+        )
+        else 'FAILED'
+      }}
+
+- name: Send trim notification
+  community.general.mail:
+    host: "{{ smtp_host }}"
+    port: "{{ smtp_port }}"
+    username: "{{ smtp_user }}"
+    password: "{{ smtp_password }}"
+    to: "{{ mail_to }}"
+    subject: "[Sophos Trim] {{ trim_status }} - {{ inventory_hostname }}"
+    body: |
+      Host: {{ inventory_hostname }}
+      Status: {{ trim_status }}
+
+      Output:
+      {{ trim_result.stdout | default('(no output)') }}
+    secure: starttls
+  delegate_to: localhost
+  ignore_errors: true
+
+- name: Fail if trim failed
+  ansible.builtin.fail:
+    msg: "SSD Trim failed on {{ inventory_hostname }}: rc={{ trim_result.rc | default('N/A') }}"
+  when: trim_status == 'FAILED'

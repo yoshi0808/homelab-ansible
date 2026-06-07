@@ -1,0 +1,8 @@
+---
+- name: Sophos Firewall SSD Trim
+  hosts: sophos
+  gather_facts: false
+  become: false
+
+  roles:
+    - sophos_trim
