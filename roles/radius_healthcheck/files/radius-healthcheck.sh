@@ -34,6 +34,28 @@ fi
 
 chrony_tracking=$(chronyc tracking 2>/dev/null || echo "unavailable")
 
+if mem_line=$(free -b 2>/dev/null | awk '/^Mem:/{print $2, $3, $7}') && [ -n "$mem_line" ]; then
+  mem_total_bytes=$(echo "$mem_line" | cut -d' ' -f1)
+  mem_used_bytes=$(echo "$mem_line" | cut -d' ' -f2)
+  mem_available_bytes=$(echo "$mem_line" | cut -d' ' -f3)
+  if [[ "$mem_total_bytes" =~ ^[0-9]+$ ]] && \
+     [[ "$mem_used_bytes" =~ ^[0-9]+$ ]] && \
+     [[ "$mem_available_bytes" =~ ^[0-9]+$ ]] && \
+     [ "$mem_total_bytes" -gt 0 ]; then
+    mem_collection_ok="true"
+  else
+    mem_collection_ok="false"
+    mem_total_bytes=0
+    mem_used_bytes=0
+    mem_available_bytes=0
+  fi
+else
+  mem_collection_ok="false"
+  mem_total_bytes=0
+  mem_used_bytes=0
+  mem_available_bytes=0
+fi
+
 FREERADIUS_SERVICE_ACTIVE="$freeradius_service_active" \
 FREERADIUS_VERSION="$freeradius_version" \
 PORT_1812="$port_1812" \
@@ -41,10 +63,20 @@ PORT_1813="$port_1813" \
 JOURNAL_ERROR_COUNT="$journal_error_count" \
 JOURNAL_ERRORS="${journal_errors_raw}" \
 CHRONY_TRACKING="$chrony_tracking" \
+MEM_COLLECTION_OK="$mem_collection_ok" \
+MEM_TOTAL_BYTES="$mem_total_bytes" \
+MEM_USED_BYTES="$mem_used_bytes" \
+MEM_AVAILABLE_BYTES="$mem_available_bytes" \
 python3 - << 'PYEOF'
 import json, os
 from datetime import datetime, timezone, timedelta
 JST = timezone(timedelta(hours=9))
+
+mem_collection_ok = os.environ.get("MEM_COLLECTION_OK", "false") == "true"
+mem_total = int(os.environ.get("MEM_TOTAL_BYTES", 0))
+mem_used = int(os.environ.get("MEM_USED_BYTES", 0))
+mem_available = int(os.environ.get("MEM_AVAILABLE_BYTES", 0))
+mem_used_percent = round(mem_used / mem_total * 100) if mem_total > 0 else 0
 
 print(json.dumps({
     "collected_at": datetime.now(JST).strftime("%Y-%m-%dT%H:%M:%S%z"),
@@ -62,6 +94,13 @@ print(json.dumps({
     },
     "chrony": {
         "tracking": os.environ["CHRONY_TRACKING"]
+    },
+    "memory": {
+        "collection_ok": mem_collection_ok,
+        "total_mb": round(mem_total / 1048576),
+        "used_mb": round(mem_used / 1048576),
+        "available_mb": round(mem_available / 1048576),
+        "used_percent": mem_used_percent
     }
 }))
 PYEOF

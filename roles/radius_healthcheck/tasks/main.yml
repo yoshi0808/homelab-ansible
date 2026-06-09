@@ -31,10 +31,16 @@
              else ['port 1812/udp is not listening'])
       + ([] if radius_health.ports.udp_1813 == 'yes'
              else ['port 1813/udp is not listening'])
+      + ([] if radius_health.memory.collection_ok
+             else ['memory collection failed (free -b returned no data)'])
+      + ([] if radius_health.memory.used_percent | int < 90
+             else ['memory used_percent is ' + (radius_health.memory.used_percent | string) + '%'])
       }}"
     radius_warnings: "{{ []
       + ([] if radius_health.journal.error_count_1h | int == 0
              else ['journal errors in last 1h: ' + (radius_health.journal.error_count_1h | string)])
+      + ([] if radius_health.memory.used_percent | int < 80 or radius_health.memory.used_percent | int >= 90
+             else ['memory used_percent is ' + (radius_health.memory.used_percent | string) + '%'])
       }}"
 
 - name: Build report
@@ -53,6 +59,12 @@
         errors: "{{ radius_health.journal.errors }}"
       chrony:
         tracking: "{{ radius_health.chrony.tracking }}"
+      memory:
+        collection_ok: "{{ radius_health.memory.collection_ok }}"
+        total_mb: "{{ radius_health.memory.total_mb }}"
+        used_mb: "{{ radius_health.memory.used_mb }}"
+        available_mb: "{{ radius_health.memory.available_mb }}"
+        used_percent: "{{ radius_health.memory.used_percent }}"
       result:
         status: "{{ 'CRITICAL' if radius_criticals | length > 0
                     else ('WARNING' if radius_warnings | length > 0
@@ -83,6 +95,7 @@
       - "Service : freeradius={{ radius_health.freeradius.service_active }} version={{ radius_health.freeradius.version }}"
       - "Ports   : 1812/udp={{ radius_health.ports.udp_1812 }} 1813/udp={{ radius_health.ports.udp_1813 }}"
       - "Journal : error_count_1h={{ radius_health.journal.error_count_1h }}"
+      - "Memory  : collection_ok={{ radius_health.memory.collection_ok }} total={{ radius_health.memory.total_mb }}MB used={{ radius_health.memory.used_mb }}MB available={{ radius_health.memory.available_mb }}MB used_percent={{ radius_health.memory.used_percent }}%"
       - "Criticals: {{ radius_criticals }}"
       - "Warnings : {{ radius_warnings }}"
 
