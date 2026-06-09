@@ -254,19 +254,13 @@
       ansible.builtin.meta: end_play
       when: _weekly_full_no_updates | default(false)
 
-    - name: Load mail variables
-      ansible.builtin.include_vars:
-        file: "{{ inventory_dir }}/../vars/mail.yml"
-
-    - name: Send completion notification
-      community.general.mail:
-        host: "{{ smtp_host }}"
-        port: "{{ smtp_port }}"
-        username: "{{ smtp_user }}"
-        password: "{{ smtp_password }}"
-        to: "{{ mail_to }}"
-        subject: "[Proxmox Patch] Weekly Full Patch Complete - pve2/pve1"
-        body: |
+    - name: Send Slack notification
+      ansible.builtin.include_tasks: "{{ playbook_dir }}/../roles/common_slack/tasks/notify.yml"
+      vars:
+        slack_channel: "patches"
+        slack_status: "ok"
+        slack_title: "[Proxmox Patch] Weekly Full Patch Complete - pve2/pve1"
+        slack_message: |
           Proxmox weekly full patch apply が完了しました。
 
           実行日時: {{ lookup('pipe', 'date "+%Y-%m-%d %H:%M:%S %Z"') }}
@@ -274,4 +268,3 @@
 
           pve2: 退避 → パッチ適用 → 復帰 完了
           pve1: 退避 → パッチ適用 → 復帰 完了
-        secure: starttls

@@ -274,46 +274,37 @@
   when: _pre_status != 'NEEDS_CLASSIFICATION'
 
 # =============================================================================
-# Phase 6: Send email
+# Phase 6: Send Slack notification
 # =============================================================================
 
-- name: Load mail variables
-  ansible.builtin.include_vars:
-    file: "{{ inventory_dir }}/../vars/mail.yml"
-  run_once: true
-  delegate_to: localhost
-  become: false
-
-- name: Set email content for Codex-classified results
+- name: Set notification content for Codex-classified results
   ansible.builtin.set_fact:
-    _mail_subject: "{{ codex_output.mail_subject }}"
-    _mail_body: "{{ codex_output.mail_body }}"
-    _mail_attach: true
+    _notify_subject: "{{ codex_output.mail_subject }}"
+    _notify_body: "{{ codex_output.mail_body }}"
   run_once: true
   delegate_to: localhost
   become: false
   when: _pre_status == 'NEEDS_CLASSIFICATION'
 
-- name: Set email content for NO_UPDATES
+- name: Set notification content for NO_UPDATES
   ansible.builtin.set_fact:
-    _mail_subject: "[Proxmox Patch Dry-run] NO_UPDATES - {{ groups['proxmox'] | join(', ') }} 更新候補なし"
-    _mail_body: |
+    _notify_subject: "[Proxmox Patch Dry-run] NO_UPDATES - {{ groups['proxmox'] | join(', ') }} 更新候補なし"
+    _notify_body: |
       Proxmox Patch Dry-run を実行しました。
 
       実行日時: {{ dryrun_timestamp }}
       対象ノード: {{ groups['proxmox'] | join(', ') }}
 
       pve1/pve2 ともに更新候補がありません。パッチ適用は不要です。
-    _mail_attach: false
   run_once: true
   delegate_to: localhost
   become: false
   when: _final_status == 'NO_UPDATES'
 
-- name: Set email content for BLOCKED
+- name: Set notification content for BLOCKED
   ansible.builtin.set_fact:
-    _mail_subject: "[Proxmox Patch Dry-run][BLOCKED] apt シミュレーション失敗 - 手動確認が必要"
-    _mail_body: |
+    _notify_subject: "[Proxmox Patch Dry-run][BLOCKED] apt シミュレーション失敗 - 手動確認が必要"
+    _notify_body: |
       Proxmox Patch Dry-run で apt シミュレーションが失敗しました。
 
       実行日時: {{ dryrun_timestamp }}
@@ -326,43 +317,36 @@
       {% for node_name, summary in unified_dryrun.node_summaries.items() %}
       - {{ node_name }}: apt_update_ok={{ summary.apt_update_ok }}, apt_check_ok={{ summary.apt_check_ok }}, sim_ok={{ summary.sim_ok }}
       {% endfor %}
-    _mail_attach: false
   run_once: true
   delegate_to: localhost
   become: false
   when: _final_status == 'BLOCKED'
 
-- name: Send email with MD report attachment
-  community.general.mail:
-    host: "{{ smtp_host }}"
-    port: "{{ smtp_port }}"
-    username: "{{ smtp_user }}"
-    password: "{{ smtp_password }}"
-    to: "{{ mail_to }}"
-    subject: "{{ _mail_subject }}"
-    body: "{{ _mail_body }}"
-    attach:
-      - "{{ proxmox_patch_dryrun_report_dir }}/{{ dryrun_timestamp }}_report.md"
-    secure: starttls
+- name: Set Slack channel and status for dryrun result
+  ansible.builtin.set_fact:
+    _notify_channel: "{{ 'alerts' if _final_status == 'BLOCKED' else 'patches' }}"
+    _notify_status: >-
+      {%- if _final_status == 'BLOCKED' -%}
+      critical
+      {%- elif _final_status in ['MAINTENANCE_REQUIRED', 'MAJOR_UPGRADE_DETECTED'] -%}
+      warning
+      {%- elif _final_status == 'NO_UPDATES' -%}
+      info
+      {%- else -%}
+      ok
+      {%- endif -%}
   run_once: true
   delegate_to: localhost
   become: false
-  when: _mail_attach | bool
 
-- name: Send email without attachment
-  community.general.mail:
-    host: "{{ smtp_host }}"
-    port: "{{ smtp_port }}"
-    username: "{{ smtp_user }}"
-    password: "{{ smtp_password }}"
-    to: "{{ mail_to }}"
-    subject: "{{ _mail_subject }}"
-    body: "{{ _mail_body }}"
-    secure: starttls
+- name: Send Slack notification
+  ansible.builtin.include_tasks: "{{ playbook_dir }}/../roles/common_slack/tasks/notify.yml"
+  vars:
+    slack_channel: "{{ _notify_channel }}"
+    slack_status: "{{ _notify_status }}"
+    slack_title: "{{ _notify_subject }}"
+    slack_message: "{{ _notify_body }}"
   run_once: true
-  delegate_to: localhost
-  become: false
-  when: not (_mail_attach | bool)
 
 - name: Cleanup temp nodes file
   ansible.builtin.file:

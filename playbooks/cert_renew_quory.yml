@@ -71,10 +71,6 @@
   vars:
     cert_renew_ca_host: localhost
   tasks:
-    - name: Load mail variables
-      ansible.builtin.include_vars:
-        file: "{{ inventory_dir }}/../vars/mail.yml"
-
     - name: Build renewal summary
       ansible.builtin.set_fact:
         cert_renew_summary: |
@@ -96,22 +92,18 @@
           {% endif %}
           CA cleanup: {{ cert_cleanup_status | default('OK') }}
 
-    - name: Send completion notification
-      community.general.mail:
-        host: "{{ smtp_host }}"
-        port: "{{ smtp_port }}"
-        username: "{{ smtp_user }}"
-        password: "{{ smtp_password }}"
-        to: "{{ mail_to }}"
-        subject: "[cert_renew_quory] Certificate renewal completed"
-        body: |
+    - name: Send Slack notification
+      ansible.builtin.include_tasks: "{{ playbook_dir }}/../roles/common_slack/tasks/notify.yml"
+      vars:
+        slack_channel: "{{ 'alerts' if 'FAILED' in cert_renew_summary else 'info' }}"
+        slack_status: "{{ 'error' if 'FAILED' in cert_renew_summary else 'ok' }}"
+        slack_title: "[cert_renew_quory] Certificate renewal completed"
+        slack_message: |
           TLS certificate renewal run (quory) completed.
 
           Results:
           {{ cert_renew_summary }}
           Executed at: {{ lookup('pipe', 'date +%Y-%m-%dT%H:%M:%S+09:00') }}
-        secure: starttls
-      ignore_errors: true
 
     - name: Fail if CA cleanup was not successful
       ansible.builtin.fail:

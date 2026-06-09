@@ -35,41 +35,10 @@
     _post_hc_status: "UNKNOWN"
     _pre_hc_status: "UNKNOWN"
     _running_on_target: []
-    _mail_subject: "[UNKNOWN] {{ inventory_hostname }}: パッチ適用結果不明"
-    _mail_body: "パッチ適用の結果を取得できませんでした。ログを確認してください。"
-    _mail_send_result:
-      failed: true
-      msg: "mail send not attempted"
+    _notify_subject: "[UNKNOWN] {{ inventory_hostname }}: パッチ適用結果不明"
+    _notify_body: "パッチ適用の結果を取得できませんでした。ログを確認してください。"
     _post_hc_retry_status: "CRITICAL"
     _post_hc_retry_json: {}
-
-- name: Load mail variables
-  ansible.builtin.include_vars:
-    file: "{{ inventory_dir }}/../vars/mail.yml"
-  delegate_to: localhost
-  become: false
-  ignore_errors: true
-
-- name: Assert required mail variables are defined and non-empty
-  ansible.builtin.assert:
-    that:
-      - smtp_host is defined
-      - smtp_host | string | length > 0
-      - smtp_port is defined
-      - smtp_port | int > 0
-      - smtp_user is defined
-      - smtp_user | string | length > 0
-      - smtp_password is defined
-      - smtp_password | string | length > 0
-      - mail_to is defined
-      - mail_to | string | length > 0
-    fail_msg: >-
-      Required mail variables are missing or empty.
-      Ensure inventories/vars/mail.yml exists and defines non-empty values for
-      smtp_host, smtp_port (>0), smtp_user, smtp_password, mail_to.
-      Aborting before patch apply to avoid silent mail failures.
-  delegate_to: localhost
-  become: false
 
 - name: Ensure report directory exists
   ansible.builtin.file:
@@ -428,9 +397,9 @@
         _post_hc_status: "{{ _post_hc_retry_status }}"
       when: _post_hc_status in ['CRITICAL', 'UNKNOWN'] and (_apply_reboot_done | bool)
 
-    - name: Set email subject and body
+    - name: Set notification subject and body
       ansible.builtin.set_fact:
-        _mail_subject: >-
+        _notify_subject: >-
           {%- if _apply_abort_type == 'maintenance_required' -%}
           [ABORT] {{ inventory_hostname }}: 自動適用中止 - 更新内容が変化しました
           {%- elif _apply_abort_type in ['control_node', 'healthcheck', 'vms_not_evacuated', 'apt_update', 'apt_check', 'sim_failed', 'manual_not_confirmed'] -%}
@@ -446,7 +415,7 @@
           {%- else -%}
           [SUCCESS] {{ inventory_hostname }}: パッチ適用完了
           {%- endif -%}
-        _mail_body: |
+        _notify_body: |
           Proxmox パッチ適用結果
 
           実行日時 : {{ _apply_run_ts }}
@@ -520,24 +489,26 @@
           Phase 4: post-healthcheck
           =========================================
           post-healthcheck: {{ _post_hc_status }}
+        _notify_channel: "{{ 'alerts' if (_apply_abort_type != 'none' or _apply_failed | bool or _post_hc_status != 'OK') else 'patches' }}"
+        _notify_status: >-
+          {%- if _apply_abort_type != 'none' or _apply_failed | bool -%}
+          error
+          {%- elif _post_hc_status != 'OK' -%}
+          warning
+          {%- else -%}
+          ok
+          {%- endif -%}
       delegate_to: localhost
       become: false
       ignore_errors: true
 
-    - name: Send summary email
-      community.general.mail:
-        host: "{{ smtp_host }}"
-        port: "{{ smtp_port }}"
-        username: "{{ smtp_user }}"
-        password: "{{ smtp_password }}"
-        to: "{{ mail_to }}"
-        subject: "{{ _mail_subject }}"
-        body: "{{ _mail_body }}"
-        secure: starttls
-      register: _mail_send_result
-      delegate_to: localhost
-      become: false
-      ignore_errors: true
+    - name: Send Slack notification
+      ansible.builtin.include_tasks: "{{ playbook_dir }}/../roles/common_slack/tasks/notify.yml"
+      vars:
+        slack_channel: "{{ _notify_channel }}"
+        slack_status: "{{ _notify_status }}"
+        slack_title: "{{ _notify_subject }}"
+        slack_message: "{{ _notify_body }}"
 
     - name: Build and save final report
       ansible.builtin.copy:
@@ -554,9 +525,7 @@
             'reboot_done': _apply_reboot_done,
             'reboot_trigger': _apply_collect.reboot_trigger | default(''),
             'running_kernel': _apply_collect.running_kernel | default(''),
-            'post_healthcheck_status': _post_hc_status,
-            'mail_sent': not (_mail_send_result.failed | default(true) | bool),
-            'mail_error': _mail_send_result.msg | default('')
+            'post_healthcheck_status': _post_hc_status
           } | to_nice_json }}"
         dest: "{{ proxmox_patch_apply_report_dir }}/{{ _apply_run_ts }}_{{ inventory_hostname }}_apply.json"
       delegate_to: localhost
@@ -565,11 +534,5 @@
 
     - name: Re-raise failure to mark play as failed
       ansible.builtin.fail:
-        msg: >-
-          {%- if _apply_failed | bool -%}
-          proxmox_patch_apply_node failed: {{ _apply_error_msg }}
-          {%- else -%}
-          proxmox_patch_apply_node: apply succeeded but summary mail could not be sent:
-          {{ _mail_send_result.msg | default('unknown error') }}
-          {%- endif -%}
-      when: (_apply_failed | bool) or (_mail_send_result.failed | default(true) | bool)
+        msg: "proxmox_patch_apply_node failed: {{ _apply_error_msg }}"
+      when: _apply_failed | bool

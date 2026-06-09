@@ -1,10 +1,4 @@
 ---
-- name: Load mail variables
-  ansible.builtin.include_vars:
-    file: "{{ inventory_dir }}/../vars/mail.yml"
-  delegate_to: localhost
-  become: false
-
 - name: Copy radius healthcheck script
   ansible.builtin.copy:
     src: radius-healthcheck.sh
@@ -92,15 +86,13 @@
       - "Criticals: {{ radius_criticals }}"
       - "Warnings : {{ radius_warnings }}"
 
-- name: Send healthcheck notification
-  community.general.mail:
-    host: "{{ smtp_host }}"
-    port: "{{ smtp_port }}"
-    username: "{{ smtp_user }}"
-    password: "{{ smtp_password }}"
-    to: "{{ mail_to }}"
-    subject: "[RADIUS Healthcheck] {{ radius_report.result.status }} - {{ inventory_hostname }}"
-    body: |
+- name: Send Slack notification
+  ansible.builtin.include_tasks: "{{ playbook_dir }}/../roles/common_slack/tasks/notify.yml"
+  vars:
+    slack_channel: "alerts"
+    slack_status: "{{ 'critical' if radius_criticals | length > 0 else 'warning' }}"
+    slack_title: "[RADIUS Healthcheck] {{ radius_report.result.status }} - {{ inventory_hostname }}"
+    slack_message: |
       Host    : {{ inventory_hostname }}
       Status  : {{ radius_report.result.status }}
 
@@ -116,10 +108,6 @@
       {% else %}
       (none)
       {% endfor %}
-    secure: starttls
-  delegate_to: localhost
-  become: false
-  ignore_errors: true
   when: radius_criticals | length > 0 or radius_warnings | length > 0
 
 - name: Fail if critical

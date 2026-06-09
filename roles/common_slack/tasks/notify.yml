@@ -1,0 +1,61 @@
+---
+# Incoming vars (required):
+#   slack_channel: info / alerts / patches
+#   slack_status:  ok / warning / critical / error / info
+#   slack_title:   Notification title
+#   slack_message: Notification body
+
+- name: Send Slack notification (best-effort)
+  block:
+    - name: Load Slack variables
+      ansible.builtin.include_vars:
+        file: "{{ inventory_dir }}/../vars/slack.yml"
+      delegate_to: localhost
+      become: false
+      no_log: true
+
+    - name: Set Slack color and icon
+      ansible.builtin.set_fact:
+        _slack_color: >-
+          {{ {'ok': 'good', 'warning': 'warning', 'critical': 'danger',
+              'error': 'danger', 'info': '#36a64f'}.get(slack_status, 'good') }}
+        _slack_icon: >-
+          {{ {'ok': '✅', 'warning': '⚠️', 'critical': '🔴',
+              'error': '❌', 'info': '📋'}.get(slack_status, '📋') }}
+      delegate_to: localhost
+      become: false
+
+    - name: Set Slack webhook URL
+      ansible.builtin.set_fact:
+        _slack_webhook: >-
+          {{ {'info': slack_webhook_info, 'alerts': slack_webhook_alerts,
+              'patches': slack_webhook_patches}.get(slack_channel, slack_webhook_alerts) }}
+      delegate_to: localhost
+      become: false
+      no_log: true
+
+    - name: Extract token from webhook URL
+      ansible.builtin.set_fact:
+        _slack_token: "{{ _slack_webhook | replace('https://hooks.slack.com/services/', '') }}"
+      delegate_to: localhost
+      become: false
+      no_log: true
+
+    - name: Send Slack notification
+      community.general.slack:
+        token: "{{ _slack_token }}"
+        attachments:
+          - title: "{{ _slack_icon }} {{ slack_title }}"
+            text: "{{ slack_message }}"
+            color: "{{ _slack_color }}"
+            fallback: "{{ slack_title }}"
+      delegate_to: localhost
+      become: false
+      no_log: true
+
+  rescue:
+    - name: Slack notification failed (ignored)
+      ansible.builtin.debug:
+        msg: "Slack notification failed and was ignored (channel={{ slack_channel }}, title={{ slack_title }})."
+      delegate_to: localhost
+      become: false

@@ -1,10 +1,4 @@
 ---
-- name: Load mail variables
-  ansible.builtin.include_vars:
-    file: "{{ inventory_dir }}/../vars/mail.yml"
-  delegate_to: localhost
-  become: false
-
 - name: Copy monitoring healthcheck script
   ansible.builtin.copy:
     src: monitoring-healthcheck.sh
@@ -93,15 +87,13 @@
       - "Criticals : {{ monitoring_criticals }}"
       - "Warnings  : {{ monitoring_warnings }}"
 
-- name: Send healthcheck notification
-  community.general.mail:
-    host: "{{ smtp_host }}"
-    port: "{{ smtp_port }}"
-    username: "{{ smtp_user }}"
-    password: "{{ smtp_password }}"
-    to: "{{ mail_to }}"
-    subject: "[Monitoring Healthcheck] {{ monitoring_report.result.status }} - {{ inventory_hostname }}"
-    body: |
+- name: Send Slack notification
+  ansible.builtin.include_tasks: "{{ playbook_dir }}/../roles/common_slack/tasks/notify.yml"
+  vars:
+    slack_channel: "alerts"
+    slack_status: "{{ 'critical' if monitoring_criticals | length > 0 else 'warning' }}"
+    slack_title: "[Monitoring Healthcheck] {{ monitoring_report.result.status }} - {{ inventory_hostname }}"
+    slack_message: |
       Host    : {{ inventory_hostname }}
       Status  : {{ monitoring_report.result.status }}
 
@@ -117,10 +109,6 @@
       {% else %}
       (none)
       {% endfor %}
-    secure: starttls
-  delegate_to: localhost
-  become: false
-  ignore_errors: true
   when: monitoring_criticals | length > 0 or monitoring_warnings | length > 0
 
 - name: Fail if critical

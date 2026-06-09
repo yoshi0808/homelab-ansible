@@ -63,133 +63,132 @@
       ansible.builtin.meta: end_host
       when: not reboot_required
 
-    - name: Load mail variables
-      ansible.builtin.include_vars:
-        file: "{{ inventory_dir }}/../vars/mail.yml"
-      delegate_to: localhost
-      become: false
-
     - name: Send reboot start notification
-      community.general.mail:
-        host: "{{ smtp_host }}"
-        port: "{{ smtp_port }}"
-        username: "{{ smtp_user }}"
-        password: "{{ smtp_password }}"
-        to: "{{ mail_to }}"
-        subject: "[ubuntu_nightly] Reboot started - {{ inventory_hostname }}"
-        body: |
+      ansible.builtin.include_tasks: "{{ playbook_dir }}/../roles/common_slack/tasks/notify.yml"
+      vars:
+        slack_channel: "info"
+        slack_status: "info"
+        slack_title: "[ubuntu_nightly] Reboot started - {{ inventory_hostname }}"
+        slack_message: |
           Host: {{ inventory_hostname }}
           Action: Reboot started
           Time: {{ ansible_facts["date_time"]["iso8601"] }}
-        secure: starttls
-      delegate_to: localhost
-      become: false
-      ignore_errors: true
 
-    - name: Reboot host
-      ansible.builtin.reboot:
-        reboot_timeout: 300
+    - block:
+        - name: Reboot host
+          ansible.builtin.reboot:
+            reboot_timeout: 300
 
-    - name: Check freeradius service status
-      ansible.builtin.command:
-        cmd: systemctl is-active freeradius
-      register: freeradius_active
-      changed_when: false
-      failed_when: false
+        - name: Check freeradius service status
+          ansible.builtin.command:
+            cmd: systemctl is-active freeradius
+          register: freeradius_active
+          changed_when: false
+          failed_when: false
 
-    - name: Check 1812/udp listening
-      ansible.builtin.shell:
-        cmd: ss -ulnH 'sport = :1812'
-      register: port_1812_output
-      changed_when: false
-      failed_when: false
+        - name: Check 1812/udp listening
+          ansible.builtin.shell:
+            cmd: ss -ulnH 'sport = :1812'
+          register: port_1812_output
+          changed_when: false
+          failed_when: false
 
-    - name: Check 1813/udp listening
-      ansible.builtin.shell:
-        cmd: ss -ulnH 'sport = :1813'
-      register: port_1813_output
-      changed_when: false
-      failed_when: false
+        - name: Check 1813/udp listening
+          ansible.builtin.shell:
+            cmd: ss -ulnH 'sport = :1813'
+          register: port_1813_output
+          changed_when: false
+          failed_when: false
 
-    - name: Evaluate service and port results
-      ansible.builtin.set_fact:
-        nightly_criticals: "{{ []
-          + ([] if freeradius_active.stdout.strip() == 'active'
-                 else ['freeradius service is not active: ' + freeradius_active.stdout.strip()])
-          + ([] if port_1812_output.stdout | length > 0
-                 else ['port 1812/udp is not listening'])
-          + ([] if port_1813_output.stdout | length > 0
-                 else ['port 1813/udp is not listening'])
-          }}"
+        - name: Evaluate service and port results
+          ansible.builtin.set_fact:
+            nightly_criticals: "{{ []
+              + ([] if freeradius_active.stdout.strip() == 'active'
+                     else ['freeradius service is not active: ' + freeradius_active.stdout.strip()])
+              + ([] if port_1812_output.stdout | length > 0
+                     else ['port 1812/udp is not listening'])
+              + ([] if port_1813_output.stdout | length > 0
+                     else ['port 1813/udp is not listening'])
+              }}"
 
-    - name: Gather facts after reboot
-      ansible.builtin.setup:
-        gather_subset:
-          - date_time
+        - name: Gather facts after reboot
+          ansible.builtin.setup:
+            gather_subset:
+              - date_time
 
-    - name: Print post-reboot result
-      ansible.builtin.debug:
-        msg:
-          - "Host      : {{ inventory_hostname }}"
-          - "Result    : {{ 'CRITICAL' if nightly_criticals | length > 0 else 'OK' }}"
-          - "freeradius: {{ freeradius_active.stdout.strip() }}"
-          - "1812/udp  : {{ 'listening' if port_1812_output.stdout | length > 0 else 'not listening' }}"
-          - "1813/udp  : {{ 'listening' if port_1813_output.stdout | length > 0 else 'not listening' }}"
-          - "Criticals : {{ nightly_criticals }}"
+        - name: Print post-reboot result
+          ansible.builtin.debug:
+            msg:
+              - "Host      : {{ inventory_hostname }}"
+              - "Result    : {{ 'CRITICAL' if nightly_criticals | length > 0 else 'OK' }}"
+              - "freeradius: {{ freeradius_active.stdout.strip() }}"
+              - "1812/udp  : {{ 'listening' if port_1812_output.stdout | length > 0 else 'not listening' }}"
+              - "1813/udp  : {{ 'listening' if port_1813_output.stdout | length > 0 else 'not listening' }}"
+              - "Criticals : {{ nightly_criticals }}"
 
-    - name: Build result report
-      ansible.builtin.set_fact:
-        nightly_report:
-          host: "{{ inventory_hostname }}"
-          executed_at: "{{ lookup('pipe', 'date +%Y-%m-%dT%H:%M:%S+09:00') }}"
-          reboot_required: true
-          rebooted: true
-          freeradius: "{{ freeradius_active.stdout.strip() }}"
-          port_1812: "{{ 'listening' if port_1812_output.stdout | length > 0 else 'not listening' }}"
-          port_1813: "{{ 'listening' if port_1813_output.stdout | length > 0 else 'not listening' }}"
-          criticals: "{{ nightly_criticals }}"
-          result: "{{ 'CRITICAL' if nightly_criticals | length > 0 else 'OK' }}"
+        - name: Build result report
+          ansible.builtin.set_fact:
+            nightly_report:
+              host: "{{ inventory_hostname }}"
+              executed_at: "{{ lookup('pipe', 'date +%Y-%m-%dT%H:%M:%S+09:00') }}"
+              reboot_required: true
+              rebooted: true
+              freeradius: "{{ freeradius_active.stdout.strip() }}"
+              port_1812: "{{ 'listening' if port_1812_output.stdout | length > 0 else 'not listening' }}"
+              port_1813: "{{ 'listening' if port_1813_output.stdout | length > 0 else 'not listening' }}"
+              criticals: "{{ nightly_criticals }}"
+              result: "{{ 'CRITICAL' if nightly_criticals | length > 0 else 'OK' }}"
 
-    - name: Save result report
-      ansible.builtin.copy:
-        content: "{{ nightly_report | to_nice_json }}"
-        dest: "{{ nightly_report_dir }}/{{ inventory_hostname }}_{{ ansible_facts['date_time']['iso8601_basic_short'] }}.json"
-      delegate_to: localhost
-      become: false
+        - name: Save result report
+          ansible.builtin.copy:
+            content: "{{ nightly_report | to_nice_json }}"
+            dest: "{{ nightly_report_dir }}/{{ inventory_hostname }}_{{ ansible_facts['date_time']['iso8601_basic_short'] }}.json"
+          delegate_to: localhost
+          become: false
 
-    - name: Send result notification
-      community.general.mail:
-        host: "{{ smtp_host }}"
-        port: "{{ smtp_port }}"
-        username: "{{ smtp_user }}"
-        password: "{{ smtp_password }}"
-        to: "{{ mail_to }}"
-        subject: "[ubuntu_nightly] {{ 'CRITICAL' if nightly_criticals | length > 0 else 'OK' }} - {{ inventory_hostname }}"
-        body: |
-          Host: {{ inventory_hostname }}
-          Result: {{ 'CRITICAL' if nightly_criticals | length > 0 else 'OK' }}
-          Time: {{ ansible_facts["date_time"]["iso8601"] }}
+        - name: Send result notification
+          ansible.builtin.include_tasks: "{{ playbook_dir }}/../roles/common_slack/tasks/notify.yml"
+          vars:
+            slack_channel: "{{ 'alerts' if nightly_criticals | length > 0 else 'info' }}"
+            slack_status: "{{ 'critical' if nightly_criticals | length > 0 else 'ok' }}"
+            slack_title: "[ubuntu_nightly] {{ 'CRITICAL' if nightly_criticals | length > 0 else 'OK' }} - {{ inventory_hostname }}"
+            slack_message: |
+              Host: {{ inventory_hostname }}
+              Result: {{ 'CRITICAL' if nightly_criticals | length > 0 else 'OK' }}
+              Time: {{ ansible_facts["date_time"]["iso8601"] }}
 
-          Service:
-            freeradius: {{ freeradius_active.stdout.strip() }}
-            1812/udp: {{ 'listening' if port_1812_output.stdout | length > 0 else 'not listening' }}
-            1813/udp: {{ 'listening' if port_1813_output.stdout | length > 0 else 'not listening' }}
+              Service:
+                freeradius: {{ freeradius_active.stdout.strip() }}
+                1812/udp: {{ 'listening' if port_1812_output.stdout | length > 0 else 'not listening' }}
+                1813/udp: {{ 'listening' if port_1813_output.stdout | length > 0 else 'not listening' }}
 
-          Criticals:
-          {% for item in nightly_criticals %}
-          - {{ item }}
-          {% else %}
-          (none)
-          {% endfor %}
-        secure: starttls
-      delegate_to: localhost
-      become: false
-      ignore_errors: true
+              Criticals:
+              {% for item in nightly_criticals %}
+              - {{ item }}
+              {% else %}
+              (none)
+              {% endfor %}
+
+      rescue:
+        - name: Send reboot failure notification
+          ansible.builtin.include_tasks: "{{ playbook_dir }}/../roles/common_slack/tasks/notify.yml"
+          vars:
+            slack_channel: "alerts"
+            slack_status: "critical"
+            slack_title: "[ubuntu_nightly] reboot FAILED - {{ inventory_hostname }}"
+            slack_message: |
+              Host: {{ inventory_hostname }}
+              reboot タイムアウトまたは SSH 接続不能。手動確認が必要。
+              Time: {{ lookup('pipe', 'date +%Y-%m-%dT%H:%M:%S+09:00') }}
+
+        - name: Re-raise reboot failure
+          ansible.builtin.fail:
+            msg: "ubuntu_nightly: reboot or post-reboot check failed on {{ inventory_hostname }}"
 
     - name: Fail if critical
       ansible.builtin.fail:
         msg: "CRITICAL on {{ inventory_hostname }}: {{ nightly_criticals | join(', ') }}"
-      when: nightly_criticals | length > 0
+      when: nightly_criticals | default([]) | length > 0
 
 - name: Ubuntu nightly - conditional reboot and service check (monitoring_servers)
   hosts: monitoring_servers
@@ -255,190 +254,189 @@
       ansible.builtin.meta: end_host
       when: not reboot_required
 
-    - name: Load mail variables
-      ansible.builtin.include_vars:
-        file: "{{ inventory_dir }}/../vars/mail.yml"
-      delegate_to: localhost
-      become: false
-
     - name: Send reboot start notification
-      community.general.mail:
-        host: "{{ smtp_host }}"
-        port: "{{ smtp_port }}"
-        username: "{{ smtp_user }}"
-        password: "{{ smtp_password }}"
-        to: "{{ mail_to }}"
-        subject: "[ubuntu_nightly] Reboot started - {{ inventory_hostname }}"
-        body: |
+      ansible.builtin.include_tasks: "{{ playbook_dir }}/../roles/common_slack/tasks/notify.yml"
+      vars:
+        slack_channel: "info"
+        slack_status: "info"
+        slack_title: "[ubuntu_nightly] Reboot started - {{ inventory_hostname }}"
+        slack_message: |
           Host: {{ inventory_hostname }}
           Action: Reboot started
           Time: {{ ansible_facts["date_time"]["iso8601"] }}
-        secure: starttls
-      delegate_to: localhost
-      become: false
-      ignore_errors: true
 
-    - name: Reboot host
-      ansible.builtin.reboot:
-        reboot_timeout: 300
+    - block:
+        - name: Reboot host
+          ansible.builtin.reboot:
+            reboot_timeout: 300
 
-    - name: Check prometheus service status
-      ansible.builtin.command:
-        cmd: systemctl is-active prometheus
-      register: prometheus_active
-      changed_when: false
-      failed_when: false
-      retries: 12
-      delay: 5
-      until: prometheus_active.stdout.strip() == 'active'
-      ignore_errors: true
+        - name: Check prometheus service status
+          ansible.builtin.command:
+            cmd: systemctl is-active prometheus
+          register: prometheus_active
+          changed_when: false
+          failed_when: false
+          retries: 12
+          delay: 5
+          until: prometheus_active.stdout.strip() == 'active'
+          ignore_errors: true
 
-    - name: Check grafana-server service status
-      ansible.builtin.command:
-        cmd: systemctl is-active grafana-server
-      register: grafana_active
-      changed_when: false
-      failed_when: false
-      retries: 12
-      delay: 5
-      until: grafana_active.stdout.strip() == 'active'
-      ignore_errors: true
+        - name: Check grafana-server service status
+          ansible.builtin.command:
+            cmd: systemctl is-active grafana-server
+          register: grafana_active
+          changed_when: false
+          failed_when: false
+          retries: 12
+          delay: 5
+          until: grafana_active.stdout.strip() == 'active'
+          ignore_errors: true
 
-    - name: Check loki service status
-      ansible.builtin.command:
-        cmd: systemctl is-active loki
-      register: loki_active
-      changed_when: false
-      failed_when: false
-      retries: 12
-      delay: 5
-      until: loki_active.stdout.strip() == 'active'
-      ignore_errors: true
+        - name: Check loki service status
+          ansible.builtin.command:
+            cmd: systemctl is-active loki
+          register: loki_active
+          changed_when: false
+          failed_when: false
+          retries: 12
+          delay: 5
+          until: loki_active.stdout.strip() == 'active'
+          ignore_errors: true
 
-    - name: Check 9090/tcp listening
-      ansible.builtin.shell:
-        cmd: ss -tlnH 'sport = :9090'
-      register: port_9090_output
-      changed_when: false
-      failed_when: false
-      retries: 12
-      delay: 5
-      until: port_9090_output.stdout | length > 0
-      ignore_errors: true
+        - name: Check 9090/tcp listening
+          ansible.builtin.shell:
+            cmd: ss -tlnH 'sport = :9090'
+          register: port_9090_output
+          changed_when: false
+          failed_when: false
+          retries: 12
+          delay: 5
+          until: port_9090_output.stdout | length > 0
+          ignore_errors: true
 
-    - name: Check 3000/tcp listening
-      ansible.builtin.shell:
-        cmd: ss -tlnH 'sport = :3000'
-      register: port_3000_output
-      changed_when: false
-      failed_when: false
-      retries: 12
-      delay: 5
-      until: port_3000_output.stdout | length > 0
-      ignore_errors: true
+        - name: Check 3000/tcp listening
+          ansible.builtin.shell:
+            cmd: ss -tlnH 'sport = :3000'
+          register: port_3000_output
+          changed_when: false
+          failed_when: false
+          retries: 12
+          delay: 5
+          until: port_3000_output.stdout | length > 0
+          ignore_errors: true
 
-    - name: Check 3100/tcp listening
-      ansible.builtin.shell:
-        cmd: ss -tlnH 'sport = :3100'
-      register: port_3100_output
-      changed_when: false
-      failed_when: false
-      retries: 12
-      delay: 5
-      until: port_3100_output.stdout | length > 0
-      ignore_errors: true
+        - name: Check 3100/tcp listening
+          ansible.builtin.shell:
+            cmd: ss -tlnH 'sport = :3100'
+          register: port_3100_output
+          changed_when: false
+          failed_when: false
+          retries: 12
+          delay: 5
+          until: port_3100_output.stdout | length > 0
+          ignore_errors: true
 
-    - name: Evaluate service and port results
-      ansible.builtin.set_fact:
-        nightly_criticals: "{{ []
-          + ([] if prometheus_active.stdout.strip() == 'active'
-                 else ['prometheus service is not active: ' + prometheus_active.stdout.strip()])
-          + ([] if grafana_active.stdout.strip() == 'active'
-                 else ['grafana-server service is not active: ' + grafana_active.stdout.strip()])
-          + ([] if loki_active.stdout.strip() == 'active'
-                 else ['loki service is not active: ' + loki_active.stdout.strip()])
-          + ([] if port_9090_output.stdout | length > 0
-                 else ['port 9090/tcp is not listening'])
-          + ([] if port_3000_output.stdout | length > 0
-                 else ['port 3000/tcp is not listening'])
-          + ([] if port_3100_output.stdout | length > 0
-                 else ['port 3100/tcp is not listening'])
-          }}"
+        - name: Evaluate service and port results
+          ansible.builtin.set_fact:
+            nightly_criticals: "{{ []
+              + ([] if prometheus_active.stdout.strip() == 'active'
+                     else ['prometheus service is not active: ' + prometheus_active.stdout.strip()])
+              + ([] if grafana_active.stdout.strip() == 'active'
+                     else ['grafana-server service is not active: ' + grafana_active.stdout.strip()])
+              + ([] if loki_active.stdout.strip() == 'active'
+                     else ['loki service is not active: ' + loki_active.stdout.strip()])
+              + ([] if port_9090_output.stdout | length > 0
+                     else ['port 9090/tcp is not listening'])
+              + ([] if port_3000_output.stdout | length > 0
+                     else ['port 3000/tcp is not listening'])
+              + ([] if port_3100_output.stdout | length > 0
+                     else ['port 3100/tcp is not listening'])
+              }}"
 
-    - name: Gather facts after reboot
-      ansible.builtin.setup:
-        gather_subset:
-          - date_time
+        - name: Gather facts after reboot
+          ansible.builtin.setup:
+            gather_subset:
+              - date_time
 
-    - name: Print post-reboot result
-      ansible.builtin.debug:
-        msg:
-          - "Host       : {{ inventory_hostname }}"
-          - "Result     : {{ 'CRITICAL' if nightly_criticals | length > 0 else 'OK' }}"
-          - "prometheus : {{ prometheus_active.stdout.strip() }}"
-          - "grafana    : {{ grafana_active.stdout.strip() }}"
-          - "loki       : {{ loki_active.stdout.strip() }}"
-          - "9090/tcp   : {{ 'listening' if port_9090_output.stdout | length > 0 else 'not listening' }}"
-          - "3000/tcp   : {{ 'listening' if port_3000_output.stdout | length > 0 else 'not listening' }}"
-          - "3100/tcp   : {{ 'listening' if port_3100_output.stdout | length > 0 else 'not listening' }}"
-          - "Criticals  : {{ nightly_criticals }}"
+        - name: Print post-reboot result
+          ansible.builtin.debug:
+            msg:
+              - "Host       : {{ inventory_hostname }}"
+              - "Result     : {{ 'CRITICAL' if nightly_criticals | length > 0 else 'OK' }}"
+              - "prometheus : {{ prometheus_active.stdout.strip() }}"
+              - "grafana    : {{ grafana_active.stdout.strip() }}"
+              - "loki       : {{ loki_active.stdout.strip() }}"
+              - "9090/tcp   : {{ 'listening' if port_9090_output.stdout | length > 0 else 'not listening' }}"
+              - "3000/tcp   : {{ 'listening' if port_3000_output.stdout | length > 0 else 'not listening' }}"
+              - "3100/tcp   : {{ 'listening' if port_3100_output.stdout | length > 0 else 'not listening' }}"
+              - "Criticals  : {{ nightly_criticals }}"
 
-    - name: Build result report
-      ansible.builtin.set_fact:
-        nightly_report:
-          host: "{{ inventory_hostname }}"
-          executed_at: "{{ lookup('pipe', 'date +%Y-%m-%dT%H:%M:%S+09:00') }}"
-          reboot_required: true
-          rebooted: true
-          prometheus: "{{ prometheus_active.stdout.strip() }}"
-          grafana: "{{ grafana_active.stdout.strip() }}"
-          loki: "{{ loki_active.stdout.strip() }}"
-          port_9090: "{{ 'listening' if port_9090_output.stdout | length > 0 else 'not listening' }}"
-          port_3000: "{{ 'listening' if port_3000_output.stdout | length > 0 else 'not listening' }}"
-          port_3100: "{{ 'listening' if port_3100_output.stdout | length > 0 else 'not listening' }}"
-          criticals: "{{ nightly_criticals }}"
-          result: "{{ 'CRITICAL' if nightly_criticals | length > 0 else 'OK' }}"
+        - name: Build result report
+          ansible.builtin.set_fact:
+            nightly_report:
+              host: "{{ inventory_hostname }}"
+              executed_at: "{{ lookup('pipe', 'date +%Y-%m-%dT%H:%M:%S+09:00') }}"
+              reboot_required: true
+              rebooted: true
+              prometheus: "{{ prometheus_active.stdout.strip() }}"
+              grafana: "{{ grafana_active.stdout.strip() }}"
+              loki: "{{ loki_active.stdout.strip() }}"
+              port_9090: "{{ 'listening' if port_9090_output.stdout | length > 0 else 'not listening' }}"
+              port_3000: "{{ 'listening' if port_3000_output.stdout | length > 0 else 'not listening' }}"
+              port_3100: "{{ 'listening' if port_3100_output.stdout | length > 0 else 'not listening' }}"
+              criticals: "{{ nightly_criticals }}"
+              result: "{{ 'CRITICAL' if nightly_criticals | length > 0 else 'OK' }}"
 
-    - name: Save result report
-      ansible.builtin.copy:
-        content: "{{ nightly_report | to_nice_json }}"
-        dest: "{{ nightly_report_dir }}/{{ inventory_hostname }}_{{ ansible_facts['date_time']['iso8601_basic_short'] }}.json"
-      delegate_to: localhost
-      become: false
+        - name: Save result report
+          ansible.builtin.copy:
+            content: "{{ nightly_report | to_nice_json }}"
+            dest: "{{ nightly_report_dir }}/{{ inventory_hostname }}_{{ ansible_facts['date_time']['iso8601_basic_short'] }}.json"
+          delegate_to: localhost
+          become: false
 
-    - name: Send result notification
-      community.general.mail:
-        host: "{{ smtp_host }}"
-        port: "{{ smtp_port }}"
-        username: "{{ smtp_user }}"
-        password: "{{ smtp_password }}"
-        to: "{{ mail_to }}"
-        subject: "[ubuntu_nightly] {{ 'CRITICAL' if nightly_criticals | length > 0 else 'OK' }} - {{ inventory_hostname }}"
-        body: |
-          Host: {{ inventory_hostname }}
-          Result: {{ 'CRITICAL' if nightly_criticals | length > 0 else 'OK' }}
-          Time: {{ ansible_facts["date_time"]["iso8601"] }}
+        - name: Send result notification
+          ansible.builtin.include_tasks: "{{ playbook_dir }}/../roles/common_slack/tasks/notify.yml"
+          vars:
+            slack_channel: "{{ 'alerts' if nightly_criticals | length > 0 else 'info' }}"
+            slack_status: "{{ 'critical' if nightly_criticals | length > 0 else 'ok' }}"
+            slack_title: "[ubuntu_nightly] {{ 'CRITICAL' if nightly_criticals | length > 0 else 'OK' }} - {{ inventory_hostname }}"
+            slack_message: |
+              Host: {{ inventory_hostname }}
+              Result: {{ 'CRITICAL' if nightly_criticals | length > 0 else 'OK' }}
+              Time: {{ ansible_facts["date_time"]["iso8601"] }}
 
-          Service:
-            prometheus: {{ prometheus_active.stdout.strip() }}
-            grafana: {{ grafana_active.stdout.strip() }}
-            loki: {{ loki_active.stdout.strip() }}
-            9090/tcp: {{ 'listening' if port_9090_output.stdout | length > 0 else 'not listening' }}
-            3000/tcp: {{ 'listening' if port_3000_output.stdout | length > 0 else 'not listening' }}
-            3100/tcp: {{ 'listening' if port_3100_output.stdout | length > 0 else 'not listening' }}
+              Service:
+                prometheus: {{ prometheus_active.stdout.strip() }}
+                grafana: {{ grafana_active.stdout.strip() }}
+                loki: {{ loki_active.stdout.strip() }}
+                9090/tcp: {{ 'listening' if port_9090_output.stdout | length > 0 else 'not listening' }}
+                3000/tcp: {{ 'listening' if port_3000_output.stdout | length > 0 else 'not listening' }}
+                3100/tcp: {{ 'listening' if port_3100_output.stdout | length > 0 else 'not listening' }}
 
-          Criticals:
-          {% for item in nightly_criticals %}
-          - {{ item }}
-          {% else %}
-          (none)
-          {% endfor %}
-        secure: starttls
-      delegate_to: localhost
-      become: false
-      ignore_errors: true
+              Criticals:
+              {% for item in nightly_criticals %}
+              - {{ item }}
+              {% else %}
+              (none)
+              {% endfor %}
+
+      rescue:
+        - name: Send reboot failure notification
+          ansible.builtin.include_tasks: "{{ playbook_dir }}/../roles/common_slack/tasks/notify.yml"
+          vars:
+            slack_channel: "alerts"
+            slack_status: "critical"
+            slack_title: "[ubuntu_nightly] reboot FAILED - {{ inventory_hostname }}"
+            slack_message: |
+              Host: {{ inventory_hostname }}
+              reboot タイムアウトまたは SSH 接続不能。手動確認が必要。
+              Time: {{ lookup('pipe', 'date +%Y-%m-%dT%H:%M:%S+09:00') }}
+
+        - name: Re-raise reboot failure
+          ansible.builtin.fail:
+            msg: "ubuntu_nightly: reboot or post-reboot check failed on {{ inventory_hostname }}"
 
     - name: Fail if critical
       ansible.builtin.fail:
         msg: "CRITICAL on {{ inventory_hostname }}: {{ nightly_criticals | join(', ') }}"
-      when: nightly_criticals | length > 0
+      when: nightly_criticals | default([]) | length > 0

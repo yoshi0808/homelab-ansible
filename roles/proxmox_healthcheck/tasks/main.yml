@@ -219,6 +219,30 @@
     msg: "{{ semaphore_health_summary_text }}"
   run_once: true
 
+- name: Send Slack notification for WARNING or CRITICAL
+  ansible.builtin.include_tasks: "{{ playbook_dir }}/../roles/common_slack/tasks/notify.yml"
+  vars:
+    slack_channel: "alerts"
+    slack_status: "{{ 'critical' if proxmox_criticals | length > 0 else 'warning' }}"
+    slack_title: "[Proxmox Healthcheck] {{ proxmox_report.result.status }} - {{ inventory_hostname }}"
+    slack_message: |
+      Host    : {{ inventory_hostname }}
+      Status  : {{ proxmox_report.result.status }}
+
+      Criticals:
+      {% for item in proxmox_criticals %}
+      - {{ item }}
+      {% else %}
+      (none)
+      {% endfor %}
+      Warnings:
+      {% for item in proxmox_warnings %}
+      - {{ item }}
+      {% else %}
+      (none)
+      {% endfor %}
+  when: proxmox_criticals | length > 0 or proxmox_warnings | length > 0
+
 - name: Fail if critical
   ansible.builtin.fail:
     msg: "CRITICAL on {{ inventory_hostname }}: {{ proxmox_criticals | join(' | ') }}"
