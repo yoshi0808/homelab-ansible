@@ -27,6 +27,29 @@
   when: ca_key_stat.stat.mode != '0600'
   no_log: true
 
+- name: Check intermediate CA certificate days remaining
+  ansible.builtin.shell: |
+    EXPIRE_DATE=$(openssl x509 -enddate -noout -in "{{ cert_renew_ca_src_crt }}" | sed 's/notAfter=//')
+    EXPIRE_EPOCH=$(date -d "$EXPIRE_DATE" +%s)
+    NOW=$(date +%s)
+    echo $(( (EXPIRE_EPOCH - NOW) / 86400 ))
+  register: intermediate_ca_days_left
+  changed_when: false
+
+- name: Warn if intermediate CA certificate is expiring soon
+  ansible.builtin.debug:
+    msg: >-
+      WARNING: Intermediate CA certificate ({{ cert_renew_ca_src_crt }})
+      expires in {{ intermediate_ca_days_left.stdout | trim }} days.
+      Renew the intermediate CA before it expires.
+  when: (intermediate_ca_days_left.stdout | trim | int) < cert_renew_intermediate_ca_warn_days
+
+- name: Record intermediate CA warning
+  ansible.builtin.set_fact:
+    cert_intermediate_ca_warn: true
+    cert_intermediate_ca_days_left: "{{ intermediate_ca_days_left.stdout | trim }}"
+  when: (intermediate_ca_days_left.stdout | trim | int) < cert_renew_intermediate_ca_warn_days
+
 - name: Create CA staging directories on tmpfs
   ansible.builtin.file:
     path: "{{ item }}"

@@ -5,8 +5,9 @@ cert_renew_valid_days: 45
 cert_renew_renew_threshold: 15
 force_renew: false
 
-cert_renew_ca_src_crt: /home/yoshi/.cert/radius_ca.crt
-cert_renew_ca_src_key: /home/yoshi/.cert/radius_ca.key
+cert_renew_ca_src_crt: /home/yoshi/.cert/ca/home_tls_ca.crt
+cert_renew_ca_src_key: /home/yoshi/.cert/ca/home_tls_ca.key
+cert_renew_intermediate_ca_warn_days: 90
 
 cert_renew_hosts_config:
   ansy:

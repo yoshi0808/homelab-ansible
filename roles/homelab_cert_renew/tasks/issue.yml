@@ -100,6 +100,22 @@
   when: cert_needs_renewal
   changed_when: true
 
+- name: Create fullchain certificate on quory
+  ansible.builtin.shell: |
+    cat "{{ cert_renew_ca_dir }}/certs/{{ inventory_hostname }}.crt" \
+        "{{ cert_renew_ca_dir }}/ca.crt" \
+        > "{{ cert_renew_ca_dir }}/certs/{{ inventory_hostname }}.fullchain.crt"
+  delegate_to: "{{ cert_renew_ca_host }}"
+  when: cert_needs_renewal
+  changed_when: true
+
+- name: Set fullchain file permissions
+  ansible.builtin.file:
+    path: "{{ cert_renew_ca_dir }}/certs/{{ inventory_hostname }}.fullchain.crt"
+    mode: "0600"
+  delegate_to: "{{ cert_renew_ca_host }}"
+  when: cert_needs_renewal
+
 - name: Record renewal status
   ansible.builtin.set_fact:
     cert_renewed: "{{ cert_needs_renewal }}"

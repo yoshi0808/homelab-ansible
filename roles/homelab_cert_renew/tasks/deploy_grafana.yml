@@ -1,7 +1,7 @@
 ---
-- name: Read certificate from CA host
+- name: Read fullchain certificate from CA host
   ansible.builtin.slurp:
-    src: "{{ cert_renew_ca_dir }}/certs/{{ inventory_hostname }}.crt"
+    src: "{{ cert_renew_ca_dir }}/certs/{{ inventory_hostname }}.fullchain.crt"
   register: slurp_crt
   delegate_to: "{{ cert_renew_ca_host }}"
   when: cert_needs_renewal

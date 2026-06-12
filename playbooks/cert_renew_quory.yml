@@ -91,12 +91,15 @@
           {% endif %}
           {% endif %}
           CA cleanup: {{ cert_cleanup_status | default('OK') }}
+          {% if hostvars['quory'].cert_intermediate_ca_warn | default(false) | bool %}
+          WARNING: Intermediate CA expires in {{ hostvars['quory'].cert_intermediate_ca_days_left }} days!
+          {% endif %}
 
     - name: Send Slack notification
       ansible.builtin.include_tasks: "{{ playbook_dir }}/../roles/common_slack/tasks/notify.yml"
       vars:
-        slack_channel: "{{ 'alerts' if 'FAILED' in cert_renew_summary else 'info' }}"
-        slack_status: "{{ 'error' if 'FAILED' in cert_renew_summary else 'ok' }}"
+        slack_channel: "{{ 'alerts' if ('FAILED' in cert_renew_summary or 'WARNING' in cert_renew_summary) else 'info' }}"
+        slack_status: "{{ 'error' if 'FAILED' in cert_renew_summary else ('warning' if 'WARNING' in cert_renew_summary else 'ok') }}"
         slack_title: "[cert_renew_quory] Certificate renewal completed"
         slack_message: |
           TLS certificate renewal run (quory) completed.
