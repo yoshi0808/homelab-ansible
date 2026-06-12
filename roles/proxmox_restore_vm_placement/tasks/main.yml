@@ -155,7 +155,7 @@
         _restore_vms_started: "{{ _stopped_after_migrate | default([]) | map(attribute='vmid') | list }}"
 
     # =========================================================================
-    # Phase 3: Disable maintenance mode (triggers HA restore)
+    # Phase 3: Disable maintenance mode and relocate HA VMs home
     # =========================================================================
 
     - name: Disable maintenance mode on target node
@@ -178,6 +178,30 @@
     - name: Record maintenance mode disabled
       ansible.builtin.set_fact:
         _restore_maintenance_disabled: true
+
+    # Issue explicit relocate commands so HA CRM moves VMs back.
+    # Proxmox HA does not auto-relocate running VMs when maintenance ends;
+    # the 'prefer' policy only influences initial placement.
+    - name: Find HA VMs that prefer target_node but are currently elsewhere
+      ansible.builtin.set_fact:
+        _ha_vms_to_relocate: >-
+          {{ _restore_all_resources |
+             selectattr('type', 'defined') |
+             selectattr('type', 'in', ['qemu', 'lxc']) |
+             selectattr('tags', 'defined') |
+             selectattr('tags', 'search', '(^|;)hacritical(;|$)') |
+             selectattr('tags', 'search', '(^|;)prefer' ~ inventory_hostname ~ '(;|$)') |
+             rejectattr('node', 'equalto', inventory_hostname) |
+             list }}
+
+    - name: Relocate HA VMs back to target_node
+      ansible.builtin.command:
+        cmd: ha-manager crm-command relocate vm:{{ item.vmid }} {{ inventory_hostname }}
+      loop: "{{ _ha_vms_to_relocate }}"
+      loop_control:
+        label: "{{ item.type }}:{{ item.vmid }} {{ item.name | default('') }} from {{ item.node }}"
+      changed_when: true
+      when: _ha_vms_to_relocate | length > 0
 
     # Wait for HA VMs that prefer target_node to return home
     - name: Get HA VMs that prefer target_node

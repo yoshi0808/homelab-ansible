@@ -11,9 +11,10 @@
 #   1. Validate target_node
 #   2. Migrate non-HA VMs with prefer<target_node> tag back to target_node
 #   3. Start any stopped VMs after migration
-#   4. Disable maintenance mode (HA restores hacritical VMs automatically)
-#   5. Wait for HA VMs to return to target_node
-#   6. Run healthcheck on target_node
+#   4. Disable maintenance mode and wait for LRM to become active
+#   5. Issue ha-manager crm-command relocate for each hacritical+prefer<target> VM
+#   6. Wait for HA VMs to return to target_node
+#   7. Run healthcheck on target_node
 
 - name: Validate target_node
   hosts: localhost

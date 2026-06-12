@@ -240,14 +240,14 @@ hacritical
 | タグ構成 | 分類 | evacuate時の挙動 | restore時の挙動 |
 |---|---|---|---|
 | `preferpve*` あり、`hacritical` なし | non-HA VM/CT | `qm migrate` / `pct migrate` で手動退避 | `qm migrate` / `pct migrate` で home node へ戻す |
-| `hacritical` あり | HA管理 VM/CT（タグが印） | maintenance mode enable により HA が自動退避 | maintenance mode disable により HA が自動復帰 |
+| `hacritical` あり | HA管理 VM/CT（タグが印） | maintenance mode enable により HA が自動退避 | maintenance mode disable 後、`ha-manager crm-command relocate` を明示的に発行して復帰 |
 | タグなし | 明示 migration の対象外 | migrate しない。ただし running のまま残れば force stop の対象になる | 対象外 |
 
 `hacritical` タグは、そのVM/CTが HA 管理対象であることを Ansible に伝える印である。実際の HA 登録状態を pvesh で照会して分類するのではなく、タグの有無だけを判断基準とする。
 
 evacuate ロールは、non-HA VM/CT を手動 migrate した後、`ha-manager crm-command node-maintenance enable <node>` で maintenance mode を有効化し、HA がその後の退避を担う。non-HA migrate でも `hacritical` でもない VM/CT は migrate 対象にはならないが、最終確認で running のまま残っていた場合は `qm stop` / `pct stop` で強制停止する。
 
-restore ロールは、non-HA VM/CT を手動 migrate で home node に戻した後、`ha-manager crm-command node-maintenance disable <node>` で maintenance mode を無効化し、HA が `hacritical` + `prefer<target>` を持つ VM/CT を自動復帰させる。HA VM/CT が home node に戻り running になるまで待機する。
+restore ロールは、non-HA VM/CT を手動 migrate で home node に戻した後、`ha-manager crm-command node-maintenance disable <node>` で maintenance mode を無効化する。Proxmox HA はメンテナンス解除後に稼働中 VM/CT を自動リロケートしないため、`hacritical` + `prefer<target>` を持ち target node 以外にいる各 VM/CT に対して明示的に `ha-manager crm-command relocate vm:<vmid> <target_node>` を発行する。その後、HA VM/CT が home node に戻り running になるまで待機する。
 
 現在の evacuation / restore report は、migrated / force-stopped の VM ID 配列と HA VM 数を JSON で保存する。weekly_full の完了メールにも個別 VM の詳細は含まない。
 
@@ -811,9 +811,11 @@ OSパッチ適用なし
 5. 停止したまま target_node に到着した VM / CT を起動する（`qm start` / `pct start`）
 6. `ha-manager crm-command node-maintenance disable <target_node>` で maintenance mode を無効化する
 7. maintenance mode が inactive になるまで待機する（`ha-manager status` でポーリング）
-8. `hacritical` + `prefer<target_node>` を持つ HA VM / CT が target_node に戻り running になるまで待機する
-9. target_node の post-restore healthcheck を実行する
-10. restore report を保存する
+8. `hacritical` + `prefer<target_node>` を持ち target_node 以外にいる HA VM / CT を特定する
+9. 各 HA VM / CT に `ha-manager crm-command relocate vm:<vmid> <target_node>` を発行する
+10. `hacritical` + `prefer<target_node>` を持つ HA VM / CT が target_node に戻り running になるまで待機する
+11. target_node の post-restore healthcheck を実行する
+12. restore report を保存する
 
 #### 停止条件
 
@@ -1248,12 +1250,12 @@ Mode A は、quory / 外部 control node からのみ実行する。
 8.  pve2 に自動適用
 9.  pve2 で reboot-required があれば自動 reboot
 10. pve2 post-patch healthcheck（NG なら停止）
-11. pve2 を restore（non-HA migrate back → 停止VMを起動 → maintenance disable → HA復帰待機 → post-restore healthcheck）
+11. pve2 を restore（non-HA migrate back → 停止VMを起動 → maintenance disable → LRM待機 → HA relocate → HA復帰待機 → post-restore healthcheck）
 12. pve1 を evacuate
 13. pve1 に自動適用
 14. pve1 で reboot-required があれば自動 reboot
 15. pve1 post-patch healthcheck（NG なら停止）
-16. pve1 を restore
+16. pve1 を restore（non-HA migrate back → 停止VMを起動 → maintenance disable → LRM待機 → HA relocate → HA復帰待機 → post-restore healthcheck）
 17. summary mail
 ```
 
@@ -1816,12 +1818,12 @@ quory / 外部 control node から実行する。
 6.  pve2 apply
 7.  pve2 reboot if required
 8.  pve2 post-patch healthcheck OK
-9.  pve2 restore (non-HA VM/CT を home へ + HA復帰 + post-restore healthcheck OK)
+9.  pve2 restore (non-HA VM/CT を home へ + maintenance disable → LRM待機 → HA relocate → HA復帰待機 + post-restore healthcheck OK)
 10. pve1 evacuate
 11. pve1 apply
 12. pve1 reboot if required
 13. pve1 post-patch healthcheck OK
-14. pve1 restore (non-HA VM/CT を home へ + HA復帰 + post-restore healthcheck OK)
+14. pve1 restore (non-HA VM/CT を home へ + maintenance disable → LRM待機 → HA relocate → HA復帰待機 + post-restore healthcheck OK)
 15. summary mail
 ```
 
