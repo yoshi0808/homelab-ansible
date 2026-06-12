@@ -205,6 +205,8 @@ ansible-playbook -i inventories/homelab/hosts.yml playbooks/cert_renew.yml \
 
 Semaphore から実行する場合は Task Template の Extra Variables に `force_renew: true` を設定する。
 
+運用は両経路とも force_renew=true の月次強制再発行とする。閾値条件(残15日以下)は、月次実行間隔に対して安全マージンが不足するため運用上は使用しない(forceなし手動実行時のフォールバックとして残置)。
+
 ---
 
 ### 中間CA秘密鍵の再配置（quory OS再インストール時など）
