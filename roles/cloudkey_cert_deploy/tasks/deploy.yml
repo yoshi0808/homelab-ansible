@@ -102,48 +102,52 @@
   no_log: true
 
 # ---- Verification (precondition for any delete) ----
-# Verify against what is actually served over TLS, not the API echo. Right after
-# activation the service may still be restarting, hence the retry loop.
-- name: Verify served leaf certificate matches the uploaded fingerprint
+# Verify against what is actually served over TLS, not the API echo.
+# get_certificate with get_certificate_chain returns the served leaf (`cert`) and
+# the chain in server order (`unverified_chain`, first entry = the leaf). Right
+# after activation the device may still be serving the old certificate or be
+# restarting, so retry until the served leaf matches the new leaf we just signed.
+# NOTE: get_certificate does NOT expose a `fingerprints` key; the served leaf
+# fingerprint is derived separately via x509_certificate_info below.
+- name: Fetch the served TLS certificate and chain
   community.crypto.get_certificate:
     host: "{{ cloudkey_host }}"
     port: 443
+    get_certificate_chain: true
   register: cloudkey_served
   until:
-    - cloudkey_served.fingerprints is defined
-    - (cloudkey_served.fingerprints.sha1 | regex_replace('[^0-9A-Fa-f]', '') | upper)
-      == (cloudkey_new_fp | regex_replace('[^0-9A-Fa-f]', '') | upper)
+    - cloudkey_served.cert is defined
+    - (cloudkey_served.cert | regex_replace('-----[^-]+-----', '') | regex_replace('\s+', ''))
+      == cloudkey_expected_cert_bodies[0]
   retries: "{{ cloudkey_verify_retries }}"
   delay: "{{ cloudkey_verify_delay }}"
   ignore_errors: true
 
+# Leaf fingerprint check (requirement §6): the fingerprint of the cert actually
+# served must equal the fingerprint the upload API reported. Derive it from the
+# served leaf, since get_certificate itself does not return fingerprints.
+- name: Compute served leaf certificate fingerprint
+  community.crypto.x509_certificate_info:
+    content: "{{ cloudkey_served.cert }}"
+  register: cloudkey_served_leaf_info
+  when: cloudkey_served.cert is defined
+
 - name: Record leaf fingerprint verification result
   ansible.builtin.set_fact:
     cloudkey_leaf_fp_ok: >-
-      {{ (cloudkey_served.fingerprints is defined)
-         and ((cloudkey_served.fingerprints.sha1 | regex_replace('[^0-9A-Fa-f]', '') | upper)
+      {{ (cloudkey_served.cert is defined)
+         and (cloudkey_served_leaf_info.fingerprints.sha1 is defined)
+         and ((cloudkey_served_leaf_info.fingerprints.sha1 | regex_replace('[^0-9A-Fa-f]', '') | upper)
               == (cloudkey_new_fp | regex_replace('[^0-9A-Fa-f]', '') | upper)) }}
 
 # Confirm the chain actually served is the expected 3 layers, *in order*
-# (leaf -> Home-TLS-CA -> Home-RADIUS-CA). A device that serves only the leaf,
-# or serves the chain out of order, would otherwise still pass; both must fail.
-- name: Fetch the served TLS certificate chain (collection only)
-  ansible.builtin.shell:
-    cmd: >-
-      openssl s_client -connect {{ cloudkey_host }}:443
-      -servername {{ cloudkey_host }} -showcerts </dev/null 2>/dev/null
-      | awk '/-----BEGIN CERTIFICATE-----/,/-----END CERTIFICATE-----/'
-  register: cloudkey_served_chain
-  changed_when: false
-  when: cloudkey_leaf_fp_ok | bool
-
-# Split into an *ordered* list of normalized (marker/whitespace-stripped) cert
-# bodies. regex_findall preserves the order the certificates were served in.
+# (leaf -> Home-TLS-CA -> Home-RADIUS-CA). unverified_chain is already split per
+# certificate and preserves the served order; just normalize each body. This is
+# evaluated independently of the leaf fingerprint result (no skip coupling).
 - name: Split served chain into ordered normalized certificate bodies
   ansible.builtin.set_fact:
     cloudkey_served_bodies: >-
-      {{ cloudkey_served_chain.stdout | default('')
-         | regex_findall('(?s)-----BEGIN CERTIFICATE-----.*?-----END CERTIFICATE-----')
+      {{ cloudkey_served.unverified_chain | default([])
          | map('regex_replace', '-----[^-]+-----', '')
          | map('regex_replace', '\s+', '')
          | list }}
@@ -155,8 +159,7 @@
 - name: Record served-chain verification result (ordered, leaf -> intermediate -> root)
   ansible.builtin.set_fact:
     cloudkey_chain_ok: >-
-      {{ (cloudkey_leaf_fp_ok | bool)
-         and ((cloudkey_served_bodies | length) == 3)
+      {{ ((cloudkey_served_bodies | length) == 3)
          and (cloudkey_served_bodies[0] == cloudkey_expected_cert_bodies[0])
          and (cloudkey_served_bodies[1] == cloudkey_expected_cert_bodies[1])
          and (cloudkey_served_bodies[2] == cloudkey_expected_cert_bodies[2]) }}
