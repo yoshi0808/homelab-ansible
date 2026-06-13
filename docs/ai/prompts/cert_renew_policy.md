@@ -240,5 +240,5 @@ Semaphore から実行する場合は Task Template の Extra Variables に `for
 
 | 対象 | 理由 |
 |---|---|
-| CloudKey の証明書 | 内蔵 Let's Encrypt で運用継続 |
+| CloudKey の証明書 | Home-TLS-CA 配下へ移行。別ポリシー `cert_renew_cloudkey_policy.md`（cloudkey_cert_deploy role）で管理 |
 | authy の EAP-TLS クライアント/サーバー証明書 | ルートCA直下30年、別管理 |

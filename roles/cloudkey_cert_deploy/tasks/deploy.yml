@@ -1,0 +1,243 @@
+---
+# UniFi OS non-public API lifecycle (requirement §5.1 / §5.2):
+#   login -> derive CSRF from JWT -> list -> upload -> activate
+#   -> verify served fingerprint -> delete old uploaded certs
+#
+# Connection is always over the hostname with an Origin header; IP + missing
+# Origin gets DELETE rejected with 403 (requirement §5.3). UniFi OS presents a
+# private-CA certificate, so validate_certs is disabled (LAN hostname only).
+
+- name: Log in to CloudKey
+  ansible.builtin.uri:
+    url: "https://{{ cloudkey_host }}/api/auth/login"
+    method: POST
+    body_format: json
+    body:
+      username: "{{ cloudkey_api_user }}"
+      password: "{{ cloudkey_api_password }}"
+    headers:
+      Origin: "https://{{ cloudkey_host }}"
+    validate_certs: false
+    status_code: 200
+  register: cloudkey_login
+  no_log: true
+
+- name: Extract TOKEN cookie (JWT)
+  ansible.builtin.set_fact:
+    cloudkey_token: "{{ cloudkey_login.cookies.TOKEN }}"
+  no_log: true
+
+- name: Decode CSRF token from JWT payload
+  ansible.builtin.set_fact:
+    _cloudkey_jwt_payload: >-
+      {{ cloudkey_token.split('.')[1] | replace('-', '+') | replace('_', '/') }}
+  no_log: true
+
+- name: Pad base64url payload to a valid base64 length
+  ansible.builtin.set_fact:
+    _cloudkey_jwt_padded: >-
+      {{ _cloudkey_jwt_payload
+         + ('=' * ((4 - (_cloudkey_jwt_payload | length) % 4) % 4)) }}
+  no_log: true
+
+- name: Set CSRF token fact
+  ansible.builtin.set_fact:
+    cloudkey_csrf: "{{ (_cloudkey_jwt_padded | b64decode | from_json).csrfToken }}"
+  no_log: true
+
+- name: Assert authentication material is present
+  ansible.builtin.assert:
+    that:
+      - cloudkey_token | length > 0
+      - cloudkey_csrf | length > 0
+    fail_msg: "Login succeeded but TOKEN/CSRF could not be derived."
+    quiet: true
+
+- name: Build authenticated headers
+  ansible.builtin.set_fact:
+    cloudkey_auth_headers:
+      Cookie: "TOKEN={{ cloudkey_token }}"
+      X-CSRF-Token: "{{ cloudkey_csrf }}"
+      Origin: "https://{{ cloudkey_host }}"
+  no_log: true
+
+- name: Upload the new certificate
+  ansible.builtin.uri:
+    url: "https://{{ cloudkey_host }}/api/userCertificates"
+    method: POST
+    body_format: json
+    body:
+      name: "{{ cloudkey_cert_name }}"
+      key: "{{ cloudkey_leaf_key }}"
+      cert: "{{ cloudkey_fullchain }}"
+    headers: "{{ cloudkey_auth_headers }}"
+    validate_certs: false
+    status_code: [200, 201]
+  register: cloudkey_upload
+  no_log: true
+
+- name: Record new certificate id and fingerprint
+  ansible.builtin.set_fact:
+    cloudkey_new_id: "{{ cloudkey_upload.json.id }}"
+    cloudkey_new_fp: "{{ cloudkey_upload.json.fingerprint }}"
+
+- name: Assert upload returned an id
+  ansible.builtin.assert:
+    that:
+      - cloudkey_new_id | length > 0
+    fail_msg: "Upload did not return a certificate id."
+    quiet: true
+
+- name: Activate the new certificate
+  ansible.builtin.uri:
+    url: "https://{{ cloudkey_host }}/api/userCertificates/{{ cloudkey_new_id }}/status"
+    method: PUT
+    body_format: json
+    body:
+      active: true
+    headers: "{{ cloudkey_auth_headers }}"
+    validate_certs: false
+    status_code: [200, 204]
+  register: cloudkey_activate
+  no_log: true
+
+# ---- Verification (precondition for any delete) ----
+# Verify against what is actually served over TLS, not the API echo. Right after
+# activation the service may still be restarting, hence the retry loop.
+- name: Verify served leaf certificate matches the uploaded fingerprint
+  community.crypto.get_certificate:
+    host: "{{ cloudkey_host }}"
+    port: 443
+  register: cloudkey_served
+  until:
+    - cloudkey_served.fingerprints is defined
+    - (cloudkey_served.fingerprints.sha1 | regex_replace('[^0-9A-Fa-f]', '') | upper)
+      == (cloudkey_new_fp | regex_replace('[^0-9A-Fa-f]', '') | upper)
+  retries: "{{ cloudkey_verify_retries }}"
+  delay: "{{ cloudkey_verify_delay }}"
+  ignore_errors: true
+
+- name: Record leaf fingerprint verification result
+  ansible.builtin.set_fact:
+    cloudkey_leaf_fp_ok: >-
+      {{ (cloudkey_served.fingerprints is defined)
+         and ((cloudkey_served.fingerprints.sha1 | regex_replace('[^0-9A-Fa-f]', '') | upper)
+              == (cloudkey_new_fp | regex_replace('[^0-9A-Fa-f]', '') | upper)) }}
+
+# Confirm the chain actually served is the expected 3 layers, *in order*
+# (leaf -> Home-TLS-CA -> Home-RADIUS-CA). A device that serves only the leaf,
+# or serves the chain out of order, would otherwise still pass; both must fail.
+- name: Fetch the served TLS certificate chain (collection only)
+  ansible.builtin.shell:
+    cmd: >-
+      openssl s_client -connect {{ cloudkey_host }}:443
+      -servername {{ cloudkey_host }} -showcerts </dev/null 2>/dev/null
+      | awk '/-----BEGIN CERTIFICATE-----/,/-----END CERTIFICATE-----/'
+  register: cloudkey_served_chain
+  changed_when: false
+  when: cloudkey_leaf_fp_ok | bool
+
+# Split into an *ordered* list of normalized (marker/whitespace-stripped) cert
+# bodies. regex_findall preserves the order the certificates were served in.
+- name: Split served chain into ordered normalized certificate bodies
+  ansible.builtin.set_fact:
+    cloudkey_served_bodies: >-
+      {{ cloudkey_served_chain.stdout | default('')
+         | regex_findall('(?s)-----BEGIN CERTIFICATE-----.*?-----END CERTIFICATE-----')
+         | map('regex_replace', '-----[^-]+-----', '')
+         | map('regex_replace', '\s+', '')
+         | list }}
+
+- name: Set served chain count fact
+  ansible.builtin.set_fact:
+    cloudkey_served_chain_count: "{{ cloudkey_served_bodies | length }}"
+
+- name: Record served-chain verification result (ordered, leaf -> intermediate -> root)
+  ansible.builtin.set_fact:
+    cloudkey_chain_ok: >-
+      {{ (cloudkey_leaf_fp_ok | bool)
+         and ((cloudkey_served_bodies | length) == 3)
+         and (cloudkey_served_bodies[0] == cloudkey_expected_cert_bodies[0])
+         and (cloudkey_served_bodies[1] == cloudkey_expected_cert_bodies[1])
+         and (cloudkey_served_bodies[2] == cloudkey_expected_cert_bodies[2]) }}
+
+- name: Record overall verification result
+  ansible.builtin.set_fact:
+    cloudkey_verify_ok: "{{ (cloudkey_leaf_fp_ok | bool) and (cloudkey_chain_ok | bool) }}"
+
+- name: Fail if the served certificate/chain could not be verified
+  ansible.builtin.fail:
+    msg: >-
+      Served certificate verification failed
+      (leaf fingerprint match: {{ cloudkey_leaf_fp_ok | bool }},
+      served chain layers: {{ cloudkey_served_chain_count | default('n/a') }},
+      expected 3-layer chain match: {{ cloudkey_chain_ok | bool }}).
+      Expected fingerprint {{ cloudkey_new_fp }}. Old certificates were left untouched.
+  when: not (cloudkey_verify_ok | bool)
+
+# ---- Delete old uploaded certificates ----
+# Re-fetch the list *after* activation/verification and restrict the delete set
+# to source==uploaded AND active==false AND id!=new (requirement §5.4 / §6).
+# The newly activated cert is active==true, so it is excluded both structurally
+# and by the explicit id guard; lets_encrypt certs are excluded by source.
+- name: Re-fetch certificate list after activation
+  ansible.builtin.uri:
+    url: "https://{{ cloudkey_host }}/api/userCertificates"
+    method: GET
+    headers: "{{ cloudkey_auth_headers }}"
+    validate_certs: false
+    status_code: 200
+  register: cloudkey_postlist
+  no_log: true
+  when:
+    - cloudkey_delete_old | bool
+    - cloudkey_verify_ok | bool
+
+- name: Build delete candidate list (uploaded, inactive, not the new cert)
+  ansible.builtin.set_fact:
+    cloudkey_delete_targets: >-
+      {{ cloudkey_postlist.json
+         | selectattr('source', 'equalto', 'uploaded')
+         | selectattr('active', 'defined')
+         | rejectattr('active')
+         | rejectattr('id', 'equalto', cloudkey_new_id)
+         | list }}
+  when:
+    - cloudkey_delete_old | bool
+    - cloudkey_verify_ok | bool
+
+- name: Assert delete targets are safe (no active / no new / uploaded only)
+  ansible.builtin.assert:
+    that:
+      - cloudkey_new_id not in (cloudkey_delete_targets | map(attribute='id') | list)
+      - (cloudkey_delete_targets | rejectattr('source', 'equalto', 'uploaded') | list | length) == 0
+      - (cloudkey_delete_targets | selectattr('active') | list | length) == 0
+    fail_msg: >-
+      Refusing to delete: a candidate is active, not uploaded, or is the new cert.
+    quiet: true
+  when:
+    - cloudkey_delete_old | bool
+    - cloudkey_verify_ok | bool
+
+- name: Delete old uploaded certificates
+  ansible.builtin.uri:
+    url: "https://{{ cloudkey_host }}/api/userCertificates/{{ item.id }}"
+    method: DELETE
+    headers: "{{ cloudkey_auth_headers }}"
+    validate_certs: false
+    status_code: [200, 204]
+  loop: "{{ cloudkey_delete_targets }}"
+  loop_control:
+    label: "{{ item.id }}"
+  register: cloudkey_delete
+  no_log: true
+  when:
+    - cloudkey_delete_old | bool
+    - cloudkey_verify_ok | bool
+
+- name: Record deleted certificate IDs
+  ansible.builtin.set_fact:
+    cloudkey_deleted_ids: "{{ cloudkey_delete_targets | map(attribute='id') | list }}"
+  when:
+    - cloudkey_delete_old | bool
+    - cloudkey_verify_ok | bool

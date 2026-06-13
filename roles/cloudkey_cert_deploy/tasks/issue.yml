@@ -1,0 +1,107 @@
+---
+# Issue an RSA/PKCS#1 leaf certificate signed by Home-TLS-CA (intermediate),
+# then assemble the fullchain (leaf + intermediate + root) required by UniFi OS.
+# All material is generated locally on the executor (quory / ansy) as yoshi.
+
+- name: Resolve CloudKey IPv4 address for SAN
+  ansible.builtin.command:
+    cmd: "getent ahostsv4 {{ cloudkey_host }}"
+  register: cloudkey_resolve
+  changed_when: false
+  failed_when: cloudkey_resolve.rc != 0
+
+- name: Set resolved IPv4 fact
+  ansible.builtin.set_fact:
+    cloudkey_resolved_ip: "{{ cloudkey_resolve.stdout.split()[0] }}"
+
+- name: Generate RSA private key (PKCS#1 / traditional)
+  community.crypto.openssl_privatekey:
+    path: "{{ cloudkey_workdir.path }}/leaf.key"
+    type: RSA
+    size: "{{ cloudkey_leaf_key_size }}"
+    format: pkcs1
+    mode: "0600"
+  no_log: true
+
+- name: Generate CSR for the leaf certificate
+  community.crypto.openssl_csr:
+    path: "{{ cloudkey_workdir.path }}/leaf.csr"
+    privatekey_path: "{{ cloudkey_workdir.path }}/leaf.key"
+    common_name: "{{ cloudkey_host }}"
+    organization_name: Home
+    country_name: JP
+    subject_alt_name: "{{ ['DNS:' + cloudkey_host] + ['IP:' + cloudkey_resolved_ip] }}"
+    key_usage:
+      - digitalSignature
+      - keyEncipherment
+    key_usage_critical: true
+    extended_key_usage:
+      - serverAuth
+    mode: "0600"
+
+- name: Sign the leaf certificate with Home-TLS-CA
+  community.crypto.x509_certificate:
+    path: "{{ cloudkey_workdir.path }}/leaf.crt"
+    csr_path: "{{ cloudkey_workdir.path }}/leaf.csr"
+    provider: ownca
+    ownca_path: "{{ cloudkey_intermediate_ca_crt }}"
+    ownca_privatekey_path: "{{ cloudkey_intermediate_ca_key }}"
+    ownca_not_before: "+0s"
+    ownca_not_after: "+{{ cloudkey_leaf_valid_days }}d"
+    ownca_digest: sha384
+    mode: "0600"
+  no_log: true
+
+- name: Read issued leaf certificate
+  ansible.builtin.slurp:
+    src: "{{ cloudkey_workdir.path }}/leaf.crt"
+  register: cloudkey_leaf_crt_b64
+
+- name: Read intermediate CA certificate
+  ansible.builtin.slurp:
+    src: "{{ cloudkey_intermediate_ca_crt }}"
+  register: cloudkey_int_crt_b64
+
+- name: Read root CA certificate
+  ansible.builtin.slurp:
+    src: "{{ cloudkey_root_ca_crt }}"
+  register: cloudkey_root_crt_b64
+
+- name: Read issued leaf private key
+  ansible.builtin.slurp:
+    src: "{{ cloudkey_workdir.path }}/leaf.key"
+  register: cloudkey_leaf_key_b64
+  no_log: true
+
+- name: Assemble fullchain (leaf + intermediate + root)
+  ansible.builtin.set_fact:
+    cloudkey_fullchain: >-
+      {{ (cloudkey_leaf_crt_b64.content | b64decode)
+         + (cloudkey_int_crt_b64.content | b64decode)
+         + (cloudkey_root_crt_b64.content | b64decode) }}
+
+- name: Store leaf private key as a (no_log) fact for the API body
+  ansible.builtin.set_fact:
+    cloudkey_leaf_key: "{{ cloudkey_leaf_key_b64.content | b64decode }}"
+  no_log: true
+
+- name: Assert fullchain contains exactly 3 certificates
+  ansible.builtin.assert:
+    that:
+      - (cloudkey_fullchain | regex_findall('BEGIN CERTIFICATE') | length) == 3
+    fail_msg: >-
+      fullchain must contain exactly 3 certificates
+      (leaf + Home-TLS-CA + Home-RADIUS-CA), private CA chain is incomplete.
+
+# Whitespace/marker-stripped base64 DER of each expected cert (leaf, intermediate,
+# root). Used in deploy.yml to confirm the *served* TLS chain is exactly this
+# 3-layer chain before any old certificate is deleted (requirement §6).
+- name: Compute normalized expected certificate bodies for served-chain check
+  ansible.builtin.set_fact:
+    cloudkey_expected_cert_bodies: >-
+      {{ [ (cloudkey_leaf_crt_b64.content | b64decode),
+           (cloudkey_int_crt_b64.content | b64decode),
+           (cloudkey_root_crt_b64.content | b64decode) ]
+         | map('regex_replace', '-----[^-]+-----', '')
+         | map('regex_replace', '\s+', '')
+         | list }}

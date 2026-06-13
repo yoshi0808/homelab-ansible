@@ -1,0 +1,34 @@
+---
+# Entry point for CloudKey certificate deployment.
+# Primary entry point is playbooks/cloudkey_cert_deploy.yml.
+#
+# Lifecycle (requirement §5):
+#   issue (RSA/PKCS#1 leaf + fullchain) -> login -> upload -> activate
+#   -> verify served fingerprint -> delete old uploaded certs
+#
+# The leaf private key only ever lives in a transient work directory that is
+# removed in `always`, and inside the API request body. It is never committed.
+
+- name: Initialize CloudKey deploy facts
+  ansible.builtin.set_fact:
+    cloudkey_deploy_host: "{{ cloudkey_host }}"
+    cloudkey_cert_name: "{{ cloudkey_cert_name_prefix }}-{{ ansible_date_time.iso8601_basic_short }}"
+    cloudkey_verify_ok: false
+    cloudkey_deleted_ids: []
+
+- name: Create transient work directory for leaf key/cert material
+  ansible.builtin.tempfile:
+    state: directory
+    prefix: cloudkey_cert_deploy.
+  register: cloudkey_workdir
+
+- name: Issue leaf and run API deploy lifecycle
+  block:
+    - ansible.builtin.import_tasks: issue.yml
+    - ansible.builtin.import_tasks: deploy.yml
+  always:
+    - name: Remove transient work directory (leaf private key material)
+      ansible.builtin.file:
+        path: "{{ cloudkey_workdir.path }}"
+        state: absent
+      when: cloudkey_workdir.path is defined

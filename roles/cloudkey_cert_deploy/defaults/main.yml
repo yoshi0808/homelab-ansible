@@ -1,0 +1,30 @@
+---
+# CloudKey Gen2 Plus (UniFi OS) Web UI TLS certificate auto-deploy.
+# 実行元(quory / ansy)ローカルで RSA/PKCS#1 リーフを発行し、UniFi OS の
+# 非公開 API (/api/userCertificates) 経由でアップロード・有効化・旧削除する。
+# cert_renew とは独立。詳細は docs/ai/reviews/cloudkey_cert_deploy/ を参照。
+
+# 接続先 CloudKey。必ずホスト名で接続する(IP直叩き + Origin欠如だと
+# DELETE が 403 になるため。requirement §5.3)。
+cloudkey_host: cloudkey.internal
+
+# 世代が分かるユニークなリーフ証明書名(name/fingerprint はユニーク制約)。
+# 毎回新規発行(force運用)で衝突を避けるため秒精度のタイムスタンプを含める。
+cloudkey_cert_name_prefix: cloudkey
+
+# リーフ証明書の仕様(requirement §4)
+cloudkey_leaf_valid_days: 45
+cloudkey_leaf_key_size: 2048
+
+# 署名用 CA(実行元ローカルに配置済み。requirement §8.2)
+cloudkey_ca_dir: /home/yoshi/.cert/ca
+cloudkey_intermediate_ca_crt: "{{ cloudkey_ca_dir }}/home_tls_ca.crt"
+cloudkey_intermediate_ca_key: "{{ cloudkey_ca_dir }}/home_tls_ca.key"
+cloudkey_root_ca_crt: "{{ cloudkey_ca_dir }}/radius_ca.crt"
+
+# 旧 uploaded 証明書を削除するか(切替検証成功時のみ削除する)
+cloudkey_delete_old: true
+
+# 配信証明書の指紋検証(有効化直後は再起動途中のことがあるためリトライ)
+cloudkey_verify_retries: 6
+cloudkey_verify_delay: 5

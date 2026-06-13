@@ -1,0 +1,74 @@
+---
+# cloudkey_cert_deploy.yml - CloudKey Gen2 Plus (UniFi OS) Web UI TLS cert deploy
+# 変更系: UniFi OS 非公開 API 経由で証明書のアップロード・有効化・旧削除を行う。
+#
+# 対象: cloudkey.internal (CloudKey Gen2 Plus)
+# 実行元: quory (本番 / Semaphore) または ansy (開発 / CLI)。
+#         すべて localhost (connection: local) で実行する。
+# cert_renew とは独立。鍵は RSA/PKCS#1、配送は HTTP API。詳細は
+# docs/ai/reviews/cloudkey_cert_deploy/2026-06-13_001_requirement.md を参照。
+#
+# 通知: 結果を Slack へ通知する(成功/検証不一致/失敗)。
+# 認証情報は inventories/vars/cloudkey.yml (Vault) から読み込む。
+
+- name: cloudkey_cert_deploy
+  hosts: localhost
+  connection: local
+  gather_facts: true
+  vars_files:
+    - "{{ playbook_dir }}/../inventories/vars/cloudkey.yml"
+  tasks:
+    - name: Ensure this playbook is running on quory or ansy
+      ansible.builtin.assert:
+        that:
+          - ansible_hostname in ['quory', 'ansy']
+        fail_msg: >-
+          cloudkey_cert_deploy.yml must be run on quory or ansy
+          (current host: {{ ansible_hostname }}).
+
+    - name: Deploy CloudKey certificate
+      block:
+        - name: Run cloudkey_cert_deploy role
+          ansible.builtin.include_role:
+            name: cloudkey_cert_deploy
+      rescue:
+        - name: Record deploy failure
+          ansible.builtin.set_fact:
+            cloudkey_deploy_failed: true
+            cloudkey_deploy_error: "{{ ansible_failed_result.msg | default('unknown error') }}"
+      always:
+        - name: Build deploy summary
+          ansible.builtin.set_fact:
+            cloudkey_summary: |
+              host: {{ cloudkey_deploy_host | default(cloudkey_host) }}
+              {% if cloudkey_deploy_failed | default(false) | bool %}
+              result: FAILED
+              error: {{ cloudkey_deploy_error | default('unknown') }}
+              cert name: {{ cloudkey_cert_name | default('n/a') }}
+              verify: {{ 'OK' if (cloudkey_verify_ok | default(false) | bool) else 'NOT VERIFIED' }}
+              {% else %}
+              result: deployed and verified
+              cert name: {{ cloudkey_cert_name | default('n/a') }}
+              new cert id: {{ cloudkey_new_id | default('n/a') }}
+              fingerprint: {{ cloudkey_new_fp | default('n/a') }}
+              deleted old uploaded certs: {{ cloudkey_deleted_ids | default([]) | length }}
+              {% endif %}
+
+        - name: Send Slack notification
+          ansible.builtin.include_tasks: "{{ playbook_dir }}/../roles/common_slack/tasks/notify.yml"
+          vars:
+            slack_channel: "{{ 'alerts' if (cloudkey_deploy_failed | default(false) | bool) else 'info' }}"
+            slack_status: "{{ 'error' if (cloudkey_deploy_failed | default(false) | bool) else 'ok' }}"
+            slack_title: "[cloudkey_cert_deploy] CloudKey certificate deploy completed"
+            slack_message: |
+              CloudKey Web UI TLS certificate deploy run completed.
+
+              Results:
+              {{ cloudkey_summary }}
+              Executed on: {{ ansible_hostname }}
+              Executed at: {{ lookup('pipe', 'date +%Y-%m-%dT%H:%M:%S+09:00') }}
+
+        - name: Fail if deploy did not succeed
+          ansible.builtin.fail:
+            msg: "CloudKey certificate deploy failed: {{ cloudkey_deploy_error | default('see log above') }}"
+          when: cloudkey_deploy_failed | default(false) | bool
