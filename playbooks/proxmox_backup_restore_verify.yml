@@ -1,0 +1,142 @@
+---
+# Monthly VM backup restore-verify (controlled apply).
+#
+# Restores the latest vzdump backup of one core VM into a dedicated throw-away
+# VMID (999), boots it with the NIC disconnected, checks it came up, then
+# destroys 999. Detects silent backup corruption.
+#
+# Production VMs are only read (config), never rebooted or migrated.
+#
+# Usage (production / monthly rotation):
+#   ansible-playbook -i inventories/homelab/hosts.yml \
+#     playbooks/proxmox_backup_restore_verify.yml
+#
+# Usage (manual / dev — bypass rotation, verify a specific VMID):
+#   ansible-playbook -i inventories/homelab/hosts.yml \
+#     playbooks/proxmox_backup_restore_verify.yml -e target_vmid=101
+#
+# Target VM selection, agent expectation and restore node are decided from
+# Proxmox tags (verify / prefer<node>) and qm config — no Ansible-side list.
+
+# ---------------------------------------------------------------------------
+# Play 1: Decide the monthly target VM, its agent expectation, and the
+#         restore node (the node it prefers). Runs once on any Proxmox node;
+#         cluster resources are cluster-wide.
+# ---------------------------------------------------------------------------
+- name: Determine monthly restore-verify target
+  hosts: proxmox
+  gather_facts: false
+  become: true
+  run_once: true
+  tasks:
+    - name: Get cluster resources
+      ansible.builtin.command:
+        cmd: pvesh get /cluster/resources --output-format json
+      register: _brv_resources_raw
+      changed_when: false
+
+    - name: Parse cluster resources
+      ansible.builtin.set_fact:
+        _brv_resources: "{{ _brv_resources_raw.stdout | from_json }}"
+
+    - name: Build deterministic list of verify-tagged VMs (vmid ascending)
+      ansible.builtin.set_fact:
+        _brv_verify_vms: >-
+          {{ _brv_resources |
+             selectattr('type', 'defined') |
+             selectattr('type', 'equalto', 'qemu') |
+             selectattr('tags', 'defined') |
+             selectattr('tags', 'search', '(^|;)verify(;|$)') |
+             sort(attribute='vmid') |
+             list }}
+
+    - name: Resolve manual target VM (target_vmid bypasses rotation)
+      ansible.builtin.set_fact:
+        _brv_target: >-
+          {{ (_brv_resources |
+              selectattr('type', 'defined') |
+              selectattr('type', 'equalto', 'qemu') |
+              selectattr('vmid', 'defined') |
+              selectattr('vmid', 'equalto', (target_vmid | int)) |
+              list | first) | default(none) }}
+      when: target_vmid is defined
+
+    - name: Fail if manual target_vmid does not exist
+      ansible.builtin.fail:
+        msg: "target_vmid={{ target_vmid }} was not found as a QEMU VM in the cluster."
+      when:
+        - target_vmid is defined
+        - _brv_target is none
+
+    - name: Fail if no verify-tagged VMs exist (rotation mode)
+      ansible.builtin.fail:
+        msg: >-
+          No QEMU VM carries the 'verify' tag. Tag the core VMs to enroll them
+          in monthly restore-verify, or pass -e target_vmid=<id>.
+      when:
+        - target_vmid is not defined
+        - _brv_verify_vms | length == 0
+
+    - name: Select monthly target by (month - 1) %% list length
+      ansible.builtin.set_fact:
+        _brv_target: >-
+          {{ _brv_verify_vms[((lookup('pipe', 'date +%m') | int) - 1)
+                             % (_brv_verify_vms | length)] }}
+      when: target_vmid is not defined
+
+    - name: Determine restore node from prefer<node> tag
+      ansible.builtin.set_fact:
+        _brv_restore_node: >-
+          {{ 'pve1' if (_brv_target.tags | default('') is search('(^|;)preferpve1(;|$)'))
+             else ('pve2' if (_brv_target.tags | default('') is search('(^|;)preferpve2(;|$)'))
+             else '') }}
+
+    - name: Fail if restore node could not be determined
+      ansible.builtin.fail:
+        msg: >-
+          Target VM {{ _brv_target.vmid }} ({{ _brv_target.name | default('?') }})
+          has no preferpve1/preferpve2 tag; cannot decide a restore node.
+      when: _brv_restore_node | length == 0
+
+    - name: Read target VM config (agent expectation) via API
+      ansible.builtin.command:
+        cmd: >-
+          pvesh get /nodes/{{ _brv_target.node }}/qemu/{{ _brv_target.vmid }}/config
+          --output-format json
+      register: _brv_target_cfg_raw
+      changed_when: false
+
+    - name: Decide expected health level from agent config
+      ansible.builtin.set_fact:
+        _brv_agent_raw: "{{ (_brv_target_cfg_raw.stdout | from_json).agent | default('') | string }}"
+
+    - name: Register the restore node into a dynamic group with the decision
+      ansible.builtin.add_host:
+        name: "{{ _brv_restore_node }}"
+        groups: brv_restore_targets
+        brv_target_vmid: "{{ _brv_target.vmid }}"
+        brv_target_name: "{{ _brv_target.name | default('vm-' ~ _brv_target.vmid) }}"
+        brv_agent_expected: "{{ (_brv_agent_raw == '1') or ('enabled=1' in _brv_agent_raw) }}"
+      changed_when: false
+
+    - name: Show selection
+      ansible.builtin.debug:
+        msg: >-
+          Monthly restore-verify target: VM {{ _brv_target.vmid }}
+          ({{ _brv_target.name | default('?') }}),
+          restore node={{ _brv_restore_node }},
+          agent_expected={{ (_brv_agent_raw == '1') or ('enabled=1' in _brv_agent_raw) }}
+
+# ---------------------------------------------------------------------------
+# Play 2: Run the full restore-verify lifecycle on the chosen restore node.
+# ---------------------------------------------------------------------------
+- name: Verify backup restore on chosen node
+  hosts: brv_restore_targets
+  gather_facts: false
+  become: true
+  vars:
+    verify_target_vmid: "{{ brv_target_vmid }}"
+    verify_target_name: "{{ brv_target_name }}"
+    verify_agent_expected: "{{ brv_agent_expected }}"
+  roles:
+    - proxmox_backup_restore_verify

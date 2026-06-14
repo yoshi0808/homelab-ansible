@@ -1,0 +1,490 @@
+---
+# =============================================================================
+# proxmox_backup_restore_verify
+#
+# Restore the latest vzdump backup of verify_target_vmid into verify_restore_vmid
+# (999), boot it NIC-disconnected, judge health, then destroy 999.
+# Runs on the restore node (inventory_hostname). Production VMs are read-only.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Hard safety guards (must hold before anything destructive can run)
+# -----------------------------------------------------------------------------
+- name: Assert restore VMID is pinned to 999
+  ansible.builtin.assert:
+    that:
+      - verify_restore_vmid | int == 999
+    fail_msg: "verify_restore_vmid must be 999 (got {{ verify_restore_vmid }}). Refusing to run."
+    quiet: true
+
+- name: Assert a target VM was selected and it is not 999
+  ansible.builtin.assert:
+    that:
+      - verify_target_vmid is defined
+      - (verify_target_vmid | int) > 0
+      - (verify_target_vmid | int) != (verify_restore_vmid | int)
+    fail_msg: "Invalid verify_target_vmid={{ verify_target_vmid | default('undefined') }}."
+    quiet: true
+
+# -----------------------------------------------------------------------------
+# Initialize result facts
+# -----------------------------------------------------------------------------
+- name: Initialize result facts
+  ansible.builtin.set_fact:
+    _brv_run_ts: "{{ lookup('pipe', 'date +%Y%m%dT%H%M%S') }}"
+    _brv_failed: false
+    _brv_error_msg: ""
+    _brv_lock_acquired: false
+    _brv_run_token: "{{ inventory_hostname }}-{{ lookup('pipe', 'date +%Y%m%dT%H%M%S') }}-{{ lookup('pipe', 'cat /proc/sys/kernel/random/uuid') }}"
+    _brv_preexisting_residue: false
+    _brv_restore_attempted: false
+    _brv_restored: false
+    _brv_started: false
+    _brv_health_ok: false
+    _brv_status: "UNKNOWN"
+    _brv_cleanup_ok: true
+    _brv_backup_volid: ""
+    _brv_agent_expected: "{{ verify_agent_expected | bool }}"
+
+- name: Ensure report directory exists
+  ansible.builtin.file:
+    path: "{{ verify_report_dir }}"
+    state: directory
+    mode: "0755"
+  delegate_to: localhost
+  become: false
+
+# =============================================================================
+# Main lifecycle
+# =============================================================================
+- block:
+
+    # -------------------------------------------------------------------------
+    # Phase -1: Minimal cluster-wide lock (best-effort guard against a double
+    # start). Concurrent runs are forbidden by operation, not by code:
+    #   - monthly run: single scheduled run from quory at a fixed time
+    #   - manual run (ansy): a human ensures it does not overlap the monthly run
+    # This lock is only a convenience guard, NOT a full distributed mutex (3-way
+    # agreement, see proxmox_backup_restore_verify_policy.md). It uses Proxmox's
+    # official pmxcfs lock: an ATOMIC mkdir under /etc/pve/priv/lock/ that fails
+    # if the directory exists. The dir is kept EMPTY so pmxcfs's standard 120s
+    # stale-lock reclamation works (a crashed run's lock auto-clears). No
+    # refresher / expiry-renewal is used. Real safety against wrong destroys
+    # comes from the 999-fixed asserts, the residue guard, and the owner token.
+    # -------------------------------------------------------------------------
+    - name: Acquire restore-verify lock (atomic mkdir, no wait)
+      ansible.builtin.command:
+        cmd: mkdir {{ verify_lock_dir }}
+      register: _brv_lock_res
+      changed_when: _brv_lock_res.rc == 0
+      failed_when: false
+
+    - name: Abort if another restore-verify run holds the lock
+      ansible.builtin.fail:
+        msg: >-
+          Could not acquire restore-verify lock {{ verify_lock_dir }}.
+          Another run is in progress, or a stale lock remains (pmxcfs reclaims
+          stale empty locks automatically). Refusing to proceed.
+      when: _brv_lock_res.rc != 0
+
+    - name: Mark lock acquired
+      ansible.builtin.set_fact:
+        _brv_lock_acquired: true
+
+    # -------------------------------------------------------------------------
+    # Phase 0: 999 must not already exist (residue guard)
+    # -------------------------------------------------------------------------
+    - name: Get cluster resources
+      ansible.builtin.command:
+        cmd: pvesh get /cluster/resources --output-format json
+      register: _brv_pre_raw
+      changed_when: false
+
+    - name: Detect any existing resource using VMID 999
+      ansible.builtin.set_fact:
+        _brv_existing_999: >-
+          {{ _brv_pre_raw.stdout | from_json |
+             selectattr('type', 'defined') |
+             selectattr('type', 'in', ['qemu', 'lxc']) |
+             selectattr('vmid', 'defined') |
+             selectattr('vmid', 'equalto', (verify_restore_vmid | int)) |
+             list }}
+
+    - name: Abort on pre-existing 999 (residue — do not touch it)
+      when: _brv_existing_999 | length > 0
+      block:
+        - name: Mark residue and stop
+          ansible.builtin.set_fact:
+            _brv_preexisting_residue: true
+        - name: Fail because 999 already exists
+          ansible.builtin.fail:
+            msg: >-
+              VMID {{ verify_restore_vmid }} already exists on
+              {{ (_brv_existing_999 | first).node | default('?') }}. Refusing to
+              reuse it. Manual cleanup required before restore-verify can run.
+
+    # -------------------------------------------------------------------------
+    # Phase 1: Locate the latest vzdump backup for the target VM
+    # -------------------------------------------------------------------------
+    - name: List node storages (for backup-storage auto-detect)
+      ansible.builtin.command:
+        cmd: pvesh get /nodes/{{ inventory_hostname }}/storage --output-format json
+      register: _brv_storage_raw
+      changed_when: false
+
+    - name: Determine backup storages to search
+      ansible.builtin.set_fact:
+        _brv_backup_storages: >-
+          {{ [verify_backup_storage] if (verify_backup_storage | length > 0)
+             else (_brv_storage_raw.stdout | from_json |
+                   selectattr('type', 'defined') |
+                   selectattr('type', 'equalto', 'nfs') |
+                   selectattr('content', 'defined') |
+                   selectattr('content', 'search', 'backup') |
+                   map(attribute='storage') | list) }}
+
+    - name: Fail if no backup storage found
+      ansible.builtin.fail:
+        msg: "No NFS backup storage found on {{ inventory_hostname }}; set verify_backup_storage."
+      when: _brv_backup_storages | length == 0
+
+    - name: List backups for the target VM in each storage
+      ansible.builtin.command:
+        cmd: >-
+          pvesh get /nodes/{{ inventory_hostname }}/storage/{{ item }}/content
+          --content backup --vmid {{ verify_target_vmid | int }} --output-format json
+      register: _brv_content_raw
+      changed_when: false
+      loop: "{{ _brv_backup_storages }}"
+      loop_control:
+        label: "{{ item }}"
+
+    - name: Collect and sort backups by ctime (newest last)
+      ansible.builtin.set_fact:
+        _brv_backups: >-
+          {{ _brv_content_raw.results |
+             map(attribute='stdout') | map('from_json') | flatten |
+             selectattr('volid', 'defined') |
+             sort(attribute='ctime') | list }}
+
+    - name: Fail if no backup exists for the target VM
+      ansible.builtin.fail:
+        msg: >-
+          No vzdump backup found for VM {{ verify_target_vmid }}
+          ({{ verify_target_name }}) in {{ _brv_backup_storages | join(', ') }}.
+      when: _brv_backups | length == 0
+
+    - name: Select latest backup volid
+      ansible.builtin.set_fact:
+        _brv_backup_volid: "{{ (_brv_backups | last).volid }}"
+
+    - name: Show restore plan
+      ansible.builtin.debug:
+        msg: >-
+          Restoring VM {{ verify_target_vmid }} ({{ verify_target_name }})
+          backup '{{ _brv_backup_volid }}' into {{ verify_restore_vmid }} on
+          {{ inventory_hostname }} (agent_expected={{ _brv_agent_expected }}).
+
+    # -------------------------------------------------------------------------
+    # Phase 2: Restore into 999
+    #
+    # Phase 0 proved 999 did not exist before this run. From here on, ANY 999
+    # is ours: mark the attempt BEFORE qmrestore so a partial-failure 999
+    # (config/disk created, command then failed) is still owned and cleaned up.
+    # -------------------------------------------------------------------------
+    - name: Mark restore as attempted (claims ownership of any 999 from now on)
+      ansible.builtin.set_fact:
+        _brv_restore_attempted: true
+
+    - name: Restore backup into 999
+      ansible.builtin.command:
+        cmd: >-
+          qmrestore {{ _brv_backup_volid }} {{ verify_restore_vmid | int }}
+          --storage {{ verify_restore_storage }}
+      changed_when: true
+
+    - name: Mark 999 restore command succeeded
+      ansible.builtin.set_fact:
+        _brv_restored: true
+
+    # Stamp a durable ownership token on 999's config. This is the authoritative
+    # proof of ownership at cleanup time: even if the cluster lock later expires,
+    # we only destroy 999 when its description carries OUR token (or no token,
+    # which can only be our own partially-restored 999 — no other run can have
+    # created 999 while we held the lock, and VMID 999 is cluster-unique).
+    - name: Stamp ownership token on 999 description
+      ansible.builtin.command:
+        cmd: >-
+          qm set {{ verify_restore_vmid | int }}
+          --description "brv-owner={{ _brv_run_token }}"
+      changed_when: true
+
+    # -------------------------------------------------------------------------
+    # Phase 3: Disconnect NIC(s) before boot (avoid IP/MAC conflict)
+    # -------------------------------------------------------------------------
+    - name: Read restored 999 config
+      ansible.builtin.command:
+        cmd: pvesh get /nodes/{{ inventory_hostname }}/qemu/{{ verify_restore_vmid | int }}/config --output-format json
+      register: _brv_999_cfg_raw
+      changed_when: false
+
+    - name: Find network interfaces on 999
+      ansible.builtin.set_fact:
+        _brv_999_nics: >-
+          {{ (_brv_999_cfg_raw.stdout | from_json).keys() |
+             select('match', '^net[0-9]+$') | list }}
+
+    - name: Remove all NICs from 999 (no IP referenced)
+      ansible.builtin.command:
+        cmd: qm set {{ verify_restore_vmid | int }} --delete {{ item }}
+      loop: "{{ _brv_999_nics }}"
+      changed_when: true
+
+    # -------------------------------------------------------------------------
+    # Phase 4: Boot 999
+    # -------------------------------------------------------------------------
+    - name: Start 999
+      ansible.builtin.command:
+        cmd: qm start {{ verify_restore_vmid | int }}
+      changed_when: true
+
+    - name: Mark 999 as started
+      ansible.builtin.set_fact:
+        _brv_started: true
+
+    # -------------------------------------------------------------------------
+    # Phase 5: Health judgement (expected level decided by production agent cfg)
+    # -------------------------------------------------------------------------
+
+    # --- 5a: agent-capable VMs — osinfo must come back from the guest agent ---
+    - name: Poll guest agent for osinfo (agent-capable VMs)
+      ansible.builtin.command:
+        cmd: qm agent {{ verify_restore_vmid | int }} get-osinfo
+      register: _brv_osinfo
+      changed_when: false
+      failed_when: false
+      retries: "{{ verify_agent_osinfo_retries | int }}"
+      delay: "{{ verify_agent_osinfo_delay | int }}"
+      until: _brv_osinfo.rc == 0
+      when: _brv_agent_expected | bool
+
+    - name: Judge health (agent-capable)
+      ansible.builtin.set_fact:
+        _brv_health_ok: "{{ _brv_osinfo.rc == 0 }}"
+      when: _brv_agent_expected | bool
+
+    # --- 5b: agent-less VMs — must still be running after a settle period ---
+    #     (Isolated: replace this block with serial0 console-string match later.)
+    - name: Judge health (agent-less — running continuity)
+      when: not (_brv_agent_expected | bool)
+      block:
+        - name: Let the VM settle
+          ansible.builtin.pause:
+            seconds: "{{ verify_running_settle_seconds | int }}"
+
+        - name: Get 999 status
+          ansible.builtin.command:
+            cmd: qm status {{ verify_restore_vmid | int }}
+          register: _brv_status_raw
+          changed_when: false
+
+        - name: Judge health (agent-less)
+          ansible.builtin.set_fact:
+            _brv_health_ok: "{{ 'status: running' in _brv_status_raw.stdout }}"
+
+    - name: Record verification result
+      ansible.builtin.set_fact:
+        _brv_status: "{{ 'OK' if (_brv_health_ok | bool) else 'NG' }}"
+
+    - name: Fail if health judgement is NG
+      ansible.builtin.fail:
+        msg: >-
+          Restore-verify NG for VM {{ verify_target_vmid }} ({{ verify_target_name }}):
+          restored 999 did not reach the expected health level
+          (agent_expected={{ _brv_agent_expected }}).
+      when: not (_brv_health_ok | bool)
+
+  rescue:
+    - name: Capture failure info
+      ansible.builtin.set_fact:
+        _brv_failed: true
+        _brv_error_msg: "{{ ansible_failed_result.msg | default('Unknown error during restore-verify') }}"
+
+  always:
+    # -------------------------------------------------------------------------
+    # Cleanup: destroy 999 only if it exists AND we own it.
+    #
+    # Ownership (re-query live state so the decision reflects reality):
+    #   - description token == ours -> definitively our 999, destroy.
+    #   - no brv-owner token        -> our own partial restore (concurrent runs
+    #     are forbidden by operation; the residue guard proved 999 was absent at
+    #     start, and VMID 999 is cluster-unique), destroy.
+    #   - token == another run      -> NOT ours, DO NOT destroy. Cheap defence in
+    #     depth in case the operational no-overlap rule is ever violated.
+    # -------------------------------------------------------------------------
+    - name: Clean up 999 (only if attempted by this run and not residue)
+      when:
+        - _brv_restore_attempted | bool
+        - not (_brv_preexisting_residue | bool)
+      block:
+        - name: Re-query cluster resources for 999
+          ansible.builtin.command:
+            cmd: pvesh get /cluster/resources --output-format json
+          register: _brv_cleanup_raw
+          changed_when: false
+
+        - name: Determine whether 999 currently exists
+          ansible.builtin.set_fact:
+            _brv_999_present: >-
+              {{ (_brv_cleanup_raw.stdout | from_json |
+                  selectattr('type', 'defined') |
+                  selectattr('type', 'in', ['qemu', 'lxc']) |
+                  selectattr('vmid', 'defined') |
+                  selectattr('vmid', 'equalto', (verify_restore_vmid | int)) |
+                  list | length) > 0 }}
+
+        - name: Read 999 config to verify ownership token
+          ansible.builtin.command:
+            cmd: pvesh get /nodes/{{ inventory_hostname }}/qemu/{{ verify_restore_vmid | int }}/config --output-format json
+          register: _brv_999_cfg_cleanup
+          changed_when: false
+          failed_when: false
+          when: _brv_999_present | bool
+
+        - name: Determine 999 ownership from description token
+          ansible.builtin.set_fact:
+            _brv_999_owner: >-
+              {{ (((_brv_999_cfg_cleanup.stdout | default('{}') | from_json).description | default(''))
+                  | regex_search('brv-owner=\S+') | default('', true))
+                 | regex_replace('^brv-owner=', '') }}
+          when: _brv_999_present | bool
+
+        - name: Decide whether 999 is owned by this run
+          ansible.builtin.set_fact:
+            _brv_999_owned: "{{ (_brv_999_owner == _brv_run_token) or (_brv_999_owner == '') }}"
+          when: _brv_999_present | bool
+
+        - name: Skip destroy — 999 carries another run's owner token
+          ansible.builtin.debug:
+            msg: >-
+              VMID {{ verify_restore_vmid }} carries a different owner token
+              ({{ _brv_999_owner }}); a concurrent run owns it. Leaving it intact.
+          when:
+            - _brv_999_present | bool
+            - _brv_999_owner != ''
+            - _brv_999_owner != _brv_run_token
+
+        - name: Destroy 999 if present and owned by this run
+          when:
+            - _brv_999_present | bool
+            - _brv_999_owned | bool
+          block:
+            - name: Stop 999 (best-effort)
+              ansible.builtin.command:
+                cmd: qm stop {{ verify_restore_vmid | int }}
+              changed_when: true
+              failed_when: false
+
+            - name: Wait for lock to clear before destroy
+              ansible.builtin.pause:
+                seconds: "{{ verify_stop_settle_seconds | int }}"
+
+            - name: Destroy 999
+              ansible.builtin.command:
+                cmd: qm destroy {{ verify_restore_vmid | int }} --purge 1
+              changed_when: true
+      rescue:
+        - name: Mark cleanup as FAILED (999 residue left behind)
+          ansible.builtin.set_fact:
+            _brv_cleanup_ok: false
+
+    # -------------------------------------------------------------------------
+    # Release the cluster-wide lock by removing the empty lock directory.
+    # rmdir works because the dir is kept empty (see Phase -1). If we never
+    # acquired it (acquisition failed), we skip so we never remove another run's
+    # lock. A crashed run's leftover lock is auto-reclaimed by pmxcfs after 120s.
+    # -------------------------------------------------------------------------
+    - name: Release restore-verify lock (remove empty lock directory)
+      ansible.builtin.command:
+        cmd: rmdir {{ verify_lock_dir }}
+      changed_when: true
+      failed_when: false
+      when: _brv_lock_acquired | bool
+
+    # -------------------------------------------------------------------------
+    # Save report
+    # -------------------------------------------------------------------------
+    - name: Save restore-verify report
+      ansible.builtin.copy:
+        content: "{{ {
+            'run_timestamp': _brv_run_ts,
+            'restore_node': inventory_hostname,
+            'target_vmid': (verify_target_vmid | int),
+            'target_name': verify_target_name,
+            'restore_vmid': (verify_restore_vmid | int),
+            'run_token': _brv_run_token,
+            'lock_dir': verify_lock_dir,
+            'lock_acquired': (_brv_lock_acquired | bool),
+            'vm999_owner_token': (_brv_999_owner | default('')),
+            'vm999_owned_by_us': (_brv_999_owned | default(false)),
+            'agent_expected': (_brv_agent_expected | bool),
+            'backup_volid': _brv_backup_volid,
+            'restore_attempted': (_brv_restore_attempted | bool),
+            'restored': (_brv_restored | bool),
+            'started': (_brv_started | bool),
+            'health_ok': (_brv_health_ok | bool),
+            'status': _brv_status,
+            'preexisting_residue': (_brv_preexisting_residue | bool),
+            'cleanup_ok': (_brv_cleanup_ok | bool),
+            'failed': (_brv_failed | bool),
+            'error_msg': _brv_error_msg
+          } | to_nice_json }}"
+        dest: "{{ verify_report_dir }}/{{ _brv_run_ts }}_{{ verify_target_vmid }}_verify.json"
+      delegate_to: localhost
+      become: false
+      ignore_errors: true
+
+    # -------------------------------------------------------------------------
+    # Notify Slack (best-effort). Priority: residue/cleanup-fail > NG > OK.
+    # -------------------------------------------------------------------------
+    - name: Decide notification kind
+      ansible.builtin.set_fact:
+        _brv_notify: >-
+          {{ 'critical' if (_brv_preexisting_residue | bool) or (not (_brv_cleanup_ok | bool))
+             else ('error' if (_brv_failed | bool) or (not (_brv_health_ok | bool)) else 'ok') }}
+
+    - name: Send Slack notification
+      ansible.builtin.include_tasks: "{{ playbook_dir }}/../roles/common_slack/tasks/notify.yml"
+      vars:
+        slack_channel: "{{ 'info' if _brv_notify == 'ok' else 'alerts' }}"
+        slack_status: "{{ _brv_notify }}"
+        slack_title: >-
+          [Backup Verify] {{ _brv_notify | upper }} -
+          VM {{ verify_target_vmid }} ({{ verify_target_name }}) on {{ inventory_hostname }}
+        slack_message: |
+          月次バックアップ リストア検証結果
+
+          実行日時      : {{ lookup('pipe', 'date "+%Y-%m-%d %H:%M:%S %Z"') }}
+          対象VM        : {{ verify_target_vmid }} ({{ verify_target_name }})
+          リストア先    : {{ inventory_hostname }} / VMID {{ verify_restore_vmid }}
+          期待レベル    : {{ 'agent (osinfo)' if (_brv_agent_expected | bool) else 'running 継続' }}
+          バックアップ  : {{ _brv_backup_volid | default('(未特定)') }}
+          判定          : {{ _brv_status }}
+          999 残骸検出  : {{ _brv_preexisting_residue | bool }}
+          999 削除      : {{ 'OK' if (_brv_cleanup_ok | bool) else 'FAILED（手動対応が必要）' }}
+          {% if _brv_error_msg | length > 0 %}エラー        : {{ _brv_error_msg }}{% endif %}
+
+    # -------------------------------------------------------------------------
+    # Re-raise so the playbook exit code reflects the outcome.
+    # A cleanup failure (999 left behind) is itself a verification failure and
+    # must exit non-zero, even if health judgement passed.
+    # -------------------------------------------------------------------------
+    - name: Re-raise failure
+      ansible.builtin.fail:
+        msg: >-
+          proxmox_backup_restore_verify failed:
+          {{ _brv_error_msg if (_brv_error_msg | length > 0)
+             else 'cleanup of VMID ' ~ verify_restore_vmid ~ ' failed; it was left behind and needs manual removal' }}
+          {{ '(cleanup FAILED: VMID ' ~ verify_restore_vmid ~ ' residue)'
+             if (not (_brv_cleanup_ok | bool)) else '' }}
+      when: (_brv_failed | bool) or (not (_brv_cleanup_ok | bool))

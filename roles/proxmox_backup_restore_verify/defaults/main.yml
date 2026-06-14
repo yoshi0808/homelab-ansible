@@ -1,0 +1,47 @@
+---
+# Report output directory (control node side)
+verify_report_dir: "{{ reports_base_dir }}/proxmox-backup-verify"
+
+# Dedicated restore VMID. Hard-coded to 999 by policy. Never destroy any other VMID.
+verify_restore_vmid: 999
+
+# Minimal best-effort lock guarding against an accidental double start.
+#
+# Concurrent runs are forbidden by OPERATION, not by code (3-way agreement; see
+# docs/ai/prompts/proxmox_backup_restore_verify_policy.md): the monthly run is a
+# single scheduled run from quory, and any manual run from ansy is made by a
+# human who ensures it does not overlap. This is therefore only a convenience
+# guard, NOT a full distributed mutex.
+#
+# Uses Proxmox's official pmxcfs lock: an atomic mkdir under /etc/pve/priv/lock/
+# that fails if the directory exists. The directory is kept EMPTY so pmxcfs's
+# standard 120s stale-lock reclamation works (a crashed run's lock auto-clears,
+# no manual removal). No refresher / expiry-renewal is used. Real protection
+# against wrong destroys comes from the 999-fixed asserts, the residue guard,
+# and the owner token stamped on 999 — not from this lock.
+verify_lock_dir: /etc/pve/priv/lock/brv-restore-verify
+
+# Tag that marks a production VM as a monthly restore-verify candidate.
+verify_tag: verify
+
+# Target storage for the restored disks (qmrestore --storage).
+# This homelab uses local-zfs for all VMs.
+verify_restore_storage: local-zfs
+
+# vzdump backup source storage on the NFS (Synology) share.
+# Leave empty to auto-detect: NFS-type node storages whose content includes 'backup'.
+# Set explicitly (storage name, not an IP) to pin one storage.
+verify_backup_storage: ""
+
+# --- Health judgement: agent-capable VMs (expected level = agent) ---
+# Poll qm agent get-osinfo until the guest agent answers.
+verify_agent_osinfo_retries: 20
+verify_agent_osinfo_delay: 15
+
+# --- Health judgement: agent-less VMs (expected level = running) ---
+# Wait this many seconds after start, then require the VM is still running.
+# (Isolated here so a future serial0 console-string match can replace it.)
+verify_running_settle_seconds: 60
+
+# Seconds to wait after qm stop before qm destroy, so the lock clears.
+verify_stop_settle_seconds: 5
