@@ -12,7 +12,7 @@
 - name: Initialize CloudKey deploy facts
   ansible.builtin.set_fact:
     cloudkey_deploy_host: "{{ cloudkey_host }}"
-    cloudkey_cert_name: "{{ cloudkey_cert_name_prefix }}-{{ ansible_date_time.iso8601_basic_short }}"
+    cloudkey_cert_name: "{{ cloudkey_cert_name_prefix }}-{{ ansible_facts['date_time']['iso8601_basic_short'] }}"
     cloudkey_verify_ok: false
     cloudkey_deleted_ids: []
 

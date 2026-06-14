@@ -18,11 +18,11 @@
     - name: Ensure this playbook is running on quory
       ansible.builtin.assert:
         that:
-          - ansible_hostname == 'quory'
+          - ansible_facts['hostname'] == 'quory'
         fail_msg: >-
           cert_renew.yml must be run on quory only
-          (current host: {{ ansible_hostname }}).
-          CA private key must never be placed on {{ ansible_hostname }}.
+          (current host: {{ ansible_facts['hostname'] }}).
+          CA private key must never be placed on {{ ansible_facts['hostname'] }}.
 
 - name: cert_renew - prepare CA key on quory
   hosts: quory

@@ -21,10 +21,10 @@
     - name: Ensure this playbook is running on quory or ansy
       ansible.builtin.assert:
         that:
-          - ansible_hostname in ['quory', 'ansy']
+          - ansible_facts['hostname'] in ['quory', 'ansy']
         fail_msg: >-
           cloudkey_cert_deploy.yml must be run on quory or ansy
-          (current host: {{ ansible_hostname }}).
+          (current host: {{ ansible_facts['hostname'] }}).
 
     - name: Deploy CloudKey certificate
       block:
@@ -65,7 +65,7 @@
 
               Results:
               {{ cloudkey_summary }}
-              Executed on: {{ ansible_hostname }}
+              Executed on: {{ ansible_facts['hostname'] }}
               Executed at: {{ lookup('pipe', 'date +%Y-%m-%dT%H:%M:%S+09:00') }}
 
         - name: Fail if deploy did not succeed
