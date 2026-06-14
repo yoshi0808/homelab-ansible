@@ -79,7 +79,7 @@ become: true（root）で実行する（NFS のアクセス権が root に絞ら
 ```text
 Phase -1 最小ロック取得（§6）
 Phase 0  999 残骸ガード（既存なら触れず critical 通知して中断）
-Phase 1  最新 vzdump バックアップ特定（ctime 最新）
+Phase 1  最新 vzdump バックアップ特定（ctime 最新※）
 Phase 2  qmrestore で 999 へリストア → 999 description に owner トークン刻印
 Phase 3  NIC 切断（net デバイス削除、IP は指定しない）
 Phase 4  qm start で 999 起動
@@ -87,6 +87,7 @@ Phase 5  正常性判定（§5）
 rescue   失敗を捕捉
 always   999 cleanup（§7）→ ロック解放 → レポート保存 → Slack 通知 → 結果に応じ再 fail
 ```
+※バックアップ作成時刻（storage content API の ctime フィールド）が最新
 
 shell / Ansible の責務分離: qmrestore / qm set / start / stop / destroy / guest cmd は
 Ansible tasks 側で実行条件を明示制御する。OK/NG 判定と fail 制御も Ansible tasks 側に置く。
