@@ -1,0 +1,27 @@
+---
+# unifi_backup_fetch role defaults.
+# CloudKey Gen2 Plus (UniFi OS) システムバックアップを取得し Synology NFS に保存する。
+# 詳細は docs/ai/reviews/unifi_backup_fetch/ を参照。
+
+# 接続先 CloudKey。必ずホスト名で接続する(私設 CA + Origin ヘッダ必須。
+# IP 直叩きは禁止。core.md §3 / cloudkey_cert_deploy と同方針)。
+cloudkey_host: cloudkey.internal
+
+# UniFi OS 非公開 API パス
+unifi_backup_login_path: /api/auth/login
+unifi_backup_download_path: /api/backup/download
+
+# 保存先(pve1 上の既存 Synology NFS マウント)。末尾スラッシュは付けない。
+unifi_backup_dest_dir: /mnt/pve/Synology-nfs/user-backup/unifi
+
+# ダウンロード中の一時ファイル。保存先と同一 FS に置き、確定は原子的 rename で行う。
+unifi_backup_tmp_path: "{{ unifi_backup_dest_dir }}/.unifi_backup_fetch.download.tmp"
+
+# 残す世代数。これを超える古いバックアップを古い順に削除する。
+unifi_backup_keep_generations: 8
+
+# 鮮度ガード。ファイル名のタイムスタンプと現在時刻の差の許容秒数。
+unifi_backup_freshness_max_seconds: 60
+
+# ダウンロードのタイムアウト秒(バックアップ生成に数秒かかるため余裕を持たせる)。
+unifi_backup_download_timeout: 120

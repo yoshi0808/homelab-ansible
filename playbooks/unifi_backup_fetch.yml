@@ -1,0 +1,73 @@
+---
+# unifi_backup_fetch.yml - CloudKey Gen2 Plus (UniFi OS) システムバックアップ取得。
+# 変更系: CloudKey 上で新規バックアップを生成し、Synology NFS に保存・ローテーションする。
+#         CloudKey の設定変更は行わない。
+#
+# 対象: pve1(NFS マウントを持つ実行ホスト)。CloudKey へは cloudkey.internal で接続する。
+#       connection: local は使わず、pve1 上で become: true(root)で実行する。
+# 実行元: quory(本番 / Semaphore 週次)または ansy(開発 / CLI)。
+# 認証情報は inventories/vars/cloudkey.yml(Vault)から読み込む。
+# 詳細は docs/ai/reviews/unifi_backup_fetch/2026-06-15_001_requirement.md を参照。
+#
+# 通知: 結果を Slack へ通知する(取得・保存 OK = info/ok、失敗 = alerts/error)。
+
+- name: unifi_backup_fetch
+  hosts: pve1
+  become: true
+  gather_facts: true
+  vars_files:
+    - "{{ playbook_dir }}/../inventories/vars/cloudkey.yml"
+  tasks:
+    - name: Fetch UniFi OS backup
+      block:
+        - name: Run unifi_backup_fetch role
+          ansible.builtin.include_role:
+            name: unifi_backup_fetch
+      rescue:
+        - name: Record fetch failure
+          ansible.builtin.set_fact:
+            unifi_backup_failed: true
+            unifi_backup_error: "{{ ansible_failed_result.msg | default('unknown error') }}"
+      always:
+        - name: Remove leftover temporary download file
+          ansible.builtin.file:
+            path: "{{ unifi_backup_tmpfile }}"
+            state: absent
+          when: unifi_backup_tmpfile is defined
+
+        - name: Build fetch summary
+          ansible.builtin.set_fact:
+            unifi_backup_summary: |
+              cloudkey: {{ unifi_backup_cloudkey | default('n/a') }}
+              dest: {{ unifi_backup_dest | default('n/a') }}
+              {% if unifi_backup_failed | default(false) | bool %}
+              result: FAILED
+              error: {{ unifi_backup_error | default('unknown') }}
+              file: {{ unifi_backup_filename | default('n/a') }}
+              {% else %}
+              result: fetched and saved
+              file: {{ unifi_backup_filename | default('n/a') }}
+              freshness age: {{ unifi_backup_age_ms | default('n/a') }} ms
+              kept generations: {{ unifi_backup_kept | default('n/a') }}
+              deleted old backups: {{ unifi_backup_deleted | default(0) }}
+              csrf source: {{ unifi_csrf_source | default('n/a') }}
+              {% endif %}
+
+        - name: Send Slack notification
+          ansible.builtin.include_tasks: "{{ playbook_dir }}/../roles/common_slack/tasks/notify.yml"
+          vars:
+            slack_channel: "{{ 'alerts' if (unifi_backup_failed | default(false) | bool) else 'info' }}"
+            slack_status: "{{ 'error' if (unifi_backup_failed | default(false) | bool) else 'ok' }}"
+            slack_title: "[unifi_backup_fetch] CloudKey UniFi OS backup fetch completed"
+            slack_message: |
+              CloudKey UniFi OS system backup fetch run completed.
+
+              Results:
+              {{ unifi_backup_summary }}
+              Executed on: {{ ansible_facts['hostname'] }}
+              Executed at: {{ lookup('pipe', 'date +%Y-%m-%dT%H:%M:%S+09:00') }}
+
+        - name: Fail if fetch did not succeed
+          ansible.builtin.fail:
+            msg: "UniFi OS backup fetch failed: {{ unifi_backup_error | default('see log above') }}"
+          when: unifi_backup_failed | default(false) | bool

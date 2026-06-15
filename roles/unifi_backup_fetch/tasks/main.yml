@@ -1,0 +1,240 @@
+---
+# unifi_backup_fetch role: CloudKey Gen2 Plus (UniFi OS) システムバックアップ取得。
+#
+# ライフサイクル(requirement Phase 1〜5):
+#   Phase 1 login -> TOKEN(JWT) + CSRF 取得
+#   Phase 2 GET /api/backup/download(叩いた瞬間に新規バックアップを生成して返す)
+#   Phase 3 ファイル名のタイムスタンプで鮮度ガード
+#   Phase 4 Synology の保存先へ確定(原子的 rename)
+#   Phase 5 8世代を超える古いバックアップを削除
+#
+# pve1 上で become: true(root)で実行する(NFS のアクセス権が root に絞られているため)。
+# CloudKey は私設 CA を提示するため validate_certs は無効。LAN ホスト名でのみ接続する。
+# 秘密情報(TOKEN/CSRF/認証情報)を扱うタスクには no_log: true を付与する。
+
+# 失敗時に playbook 側の always ブロックが参照する値を、ログイン前に play スコープの
+# fact として確定しておく。role の defaults は include_role 終了後の always では
+# 参照できないが、set_fact は play スコープに残るため(Phase 1 で落ちても通知できる)。
+- name: Phase 0 - Initialize fetch facts (available to rescue/always)
+  ansible.builtin.set_fact:
+    unifi_backup_failed: false
+    unifi_backup_cloudkey: "{{ cloudkey_host }}"
+    unifi_backup_dest: "{{ unifi_backup_dest_dir }}"
+    unifi_backup_tmpfile: "{{ unifi_backup_tmp_path }}"
+
+# ---- Phase 1: 認証(TOKEN + CSRF) ----
+# CSRF は要求仕様どおりログインレスポンスヘッダーから取得する。X-CSRF-Token を
+# 優先し、無ければ X-Updated-CSRF-Token を使う。どちらのヘッダーも無い場合に限り、
+# JWT ペイロードの csrfToken をデコードして fallback とする(優先順位は
+# requirement 2026-06-15_001 に追記済み)。uri モジュールはレスポンスヘッダーを
+# 小文字 + ハイフン→アンダースコアのキーで返す(X-CSRF-Token -> x_csrf_token)。
+
+- name: Phase 1 - Log in to CloudKey
+  ansible.builtin.uri:
+    url: "https://{{ cloudkey_host }}{{ unifi_backup_login_path }}"
+    method: POST
+    body_format: json
+    body:
+      username: "{{ cloudkey_api_user }}"
+      password: "{{ cloudkey_api_password }}"
+    headers:
+      Origin: "https://{{ cloudkey_host }}"
+    validate_certs: false
+    status_code: 200
+  register: unifi_login
+  no_log: true
+
+- name: Phase 1 - Extract TOKEN cookie (JWT)
+  ansible.builtin.set_fact:
+    unifi_token: "{{ unifi_login.cookies.TOKEN }}"
+  no_log: true
+
+# まずレスポンスヘッダーから CSRF を選ぶ(X-CSRF-Token > X-Updated-CSRF-Token)。
+# 同時に供給源ラベルも決める。秘密値(ヘッダー値)を参照するため no_log を付ける
+# (review 2026-06-15_005 [Low])。_unifi_csrf_jwt は後段の参照に備えて空で初期化する。
+- name: Phase 1 - Select CSRF token from response headers (preferred)
+  ansible.builtin.set_fact:
+    _unifi_csrf_header: >-
+      {{ unifi_login.x_csrf_token
+         | default(unifi_login.x_updated_csrf_token | default('', true), true) }}
+    _unifi_csrf_jwt: ""
+    unifi_csrf_source: >-
+      {{ 'X-CSRF-Token' if (unifi_login.x_csrf_token | default('') | length > 0)
+         else ('X-Updated-CSRF-Token' if (unifi_login.x_updated_csrf_token | default('') | length > 0)
+               else 'JWT-csrfToken') }}
+  no_log: true
+
+# JWT のデコードは両ヘッダーが空のときだけ実行する。ヘッダーが有効な場合は
+# JWT 形式/構造の変化があっても一切デコードしない(review 2026-06-15_005 [Medium])。
+- name: Phase 1 - Derive CSRF token from JWT payload (fallback, only if headers absent)
+  when: _unifi_csrf_header | length == 0
+  no_log: true
+  block:
+    - name: Phase 1 - Extract base64url JWT payload
+      ansible.builtin.set_fact:
+        _unifi_jwt_payload: >-
+          {{ unifi_token.split('.')[1] | replace('-', '+') | replace('_', '/') }}
+
+    - name: Phase 1 - Pad base64url payload to a valid base64 length
+      ansible.builtin.set_fact:
+        _unifi_jwt_padded: >-
+          {{ _unifi_jwt_payload
+             + ('=' * ((4 - (_unifi_jwt_payload | length) % 4) % 4)) }}
+
+    - name: Phase 1 - Decode csrfToken from JWT payload
+      ansible.builtin.set_fact:
+        _unifi_csrf_jwt: "{{ (_unifi_jwt_padded | b64decode | from_json).csrfToken | default('') }}"
+
+# 最終 CSRF = ヘッダー値があればそれ、無ければ JWT fallback 値。
+- name: Phase 1 - Set final CSRF token (header value or JWT fallback)
+  ansible.builtin.set_fact:
+    unifi_csrf: "{{ _unifi_csrf_header if (_unifi_csrf_header | length > 0) else (_unifi_csrf_jwt | default('')) }}"
+  no_log: true
+
+# TOKEN / CSRF を参照するため no_log を付ける(requirement 2026-06-15_001 の
+# 秘密情報方針 / review 2026-06-15_005 [Low])。
+- name: Phase 1 - Assert authentication material is present
+  ansible.builtin.assert:
+    that:
+      - unifi_token | length > 0
+      - unifi_csrf | length > 0
+    fail_msg: >-
+      Login succeeded but no usable CSRF token was found in the response headers
+      (X-CSRF-Token / X-Updated-CSRF-Token) or the JWT payload.
+    quiet: true
+  no_log: true
+
+- name: Phase 1 - Build authenticated headers
+  ansible.builtin.set_fact:
+    unifi_auth_headers:
+      Cookie: "TOKEN={{ unifi_token }}"
+      X-CSRF-Token: "{{ unifi_csrf }}"
+      Origin: "https://{{ cloudkey_host }}"
+  no_log: true
+
+# ---- Phase 2: バックアップ生成 + ダウンロード ----
+# 保存先と同一 FS の一時ファイルへ書き出す。確定(rename)は鮮度ガード通過後に行う。
+
+- name: Phase 2 - Ensure backup destination directory exists
+  ansible.builtin.file:
+    path: "{{ unifi_backup_dest_dir }}"
+    state: directory
+    mode: "0750"
+
+- name: Phase 2 - Generate and download the UniFi OS backup
+  ansible.builtin.uri:
+    url: "https://{{ cloudkey_host }}{{ unifi_backup_download_path }}"
+    method: GET
+    headers: "{{ unifi_auth_headers }}"
+    validate_certs: false
+    status_code: 200
+    dest: "{{ unifi_backup_tmp_path }}"
+    timeout: "{{ unifi_backup_download_timeout }}"
+  register: unifi_backup
+  no_log: true
+
+# ---- Phase 3: 鮮度ガード ----
+# Content-Disposition の filename から取得し、埋め込みタイムスタンプ(ミリ秒)と
+# 実行ホストの現在時刻を比較する。差が閾値を超えたら fail する。
+
+# uri は dest 利用時、サーバの Content-Disposition から推定したファイル名を
+# `filename` フィールドへ格納する(content_disposition キー自体は再公開されない)。
+# 例: unifi_os_backup_1781526859523_<uuid>.unifi。basename で念のためパスを除去し、
+# 直後の allowlist assert で形式を厳格検証する。
+- name: Phase 3 - Take backup filename from the download response
+  ansible.builtin.set_fact:
+    unifi_backup_filename: "{{ unifi_backup.filename | default('') | basename | trim }}"
+
+# API 由来の filename をそのまま root の mv に渡すため、保存先外への書き出しを
+# 防ぐ厳格な検証を行う(review 2026-06-15_003 [Medium])。許可文字を
+# 「unifi_os_backup_<数字>_<英数字とハイフン>.unifi」に限定する allowlist 正規表現で
+# `/`・`\`・`..`・`;`・空白を構造的に排除し、さらに basename 一致と
+# `/`・`..`・`\` の不在を明示 assert する(多層防御)。
+- name: Phase 3 - Assert filename is a safe, well-formed UniFi OS backup name
+  ansible.builtin.assert:
+    that:
+      - unifi_backup_filename is match('^unifi_os_backup_[0-9]+_[0-9A-Za-z-]+\.unifi$')
+      - unifi_backup_filename == (unifi_backup_filename | basename)
+      - "'/' not in unifi_backup_filename"
+      - "'..' not in unifi_backup_filename"
+      - '''\\'' not in unifi_backup_filename'
+    fail_msg: >-
+      Unsafe or unexpected backup filename from CloudKey: '{{ unifi_backup_filename }}'.
+    quiet: true
+
+- name: Phase 3 - Extract embedded backup timestamp (epoch ms)
+  ansible.builtin.set_fact:
+    unifi_backup_ts_ms: >-
+      {{ unifi_backup_filename | regex_replace('^unifi_os_backup_([0-9]+)_.*$', '\1') }}
+
+- name: Phase 3 - Capture current time on the execution host (epoch ms)
+  ansible.builtin.command: date +%s%3N
+  register: unifi_now_cmd
+  changed_when: false
+
+- name: Phase 3 - Compute backup age (absolute, ms)
+  ansible.builtin.set_fact:
+    unifi_backup_age_ms: >-
+      {{ ((unifi_now_cmd.stdout | int) - (unifi_backup_ts_ms | int)) | abs }}
+
+- name: Phase 3 - Freshness guard (filename timestamp vs now)
+  ansible.builtin.assert:
+    that:
+      - (unifi_backup_age_ms | int) <= (unifi_backup_freshness_max_seconds | int) * 1000
+    fail_msg: >-
+      Backup freshness guard failed: backup timestamp differs from now by
+      {{ (unifi_backup_age_ms | int) // 1000 }}s
+      (max {{ unifi_backup_freshness_max_seconds }}s). File: {{ unifi_backup_filename }}.
+    quiet: true
+
+# ---- Phase 4: Synology へ確定 ----
+# 同一 FS 内の rename なので原子的。ファイル名は CloudKey が返したものをそのまま使う。
+
+- name: Phase 4 - Set final backup path
+  ansible.builtin.set_fact:
+    unifi_backup_final_path: "{{ unifi_backup_dest_dir }}/{{ unifi_backup_filename }}"
+
+# creates は付けない。CloudKey が同じ filename を返した場合でも、毎回ダウンロード
+# した最新を必ず上書き保存するため(同名スキップによる「取得したのに保存されず
+# 成功通知」という誤判定を防ぐ。review 2026-06-15_003 [Medium])。
+- name: Phase 4 - Place backup file at final path (atomic overwrite via rename within NFS)
+  ansible.builtin.command:
+    cmd: "mv -f {{ unifi_backup_tmp_path | quote }} {{ unifi_backup_final_path | quote }}"
+  changed_when: true
+
+- name: Phase 4 - Normalize backup file permissions
+  ansible.builtin.file:
+    path: "{{ unifi_backup_final_path }}"
+    mode: "0640"
+
+# ---- Phase 5: 世代ローテーション ----
+# ファイル名のタイムスタンプ昇順(= パス文字列昇順)でソートし、新しい N 世代を残して
+# 古いものを削除する。エポックミリ秒は固定桁数のため辞書順 = 時刻順になる。
+
+- name: Phase 5 - List existing UniFi OS backups
+  ansible.builtin.find:
+    paths: "{{ unifi_backup_dest_dir }}"
+    patterns: "unifi_os_backup_*.unifi"
+    file_type: file
+  register: unifi_backup_existing
+
+- name: Phase 5 - Sort backups oldest first (by filename timestamp)
+  ansible.builtin.set_fact:
+    unifi_backup_sorted: "{{ unifi_backup_existing.files | map(attribute='path') | list | sort }}"
+
+- name: Phase 5 - Select old backups beyond the retention limit
+  ansible.builtin.set_fact:
+    unifi_backup_delete_targets: >-
+      {{ unifi_backup_sorted[:([0, (unifi_backup_sorted | length)
+         - (unifi_backup_keep_generations | int)] | max)] }}
+
+- name: Phase 5 - Remove old backups beyond retention
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop: "{{ unifi_backup_delete_targets }}"
+
+- name: Record fetch result facts for notification
+  ansible.builtin.set_fact:
+    unifi_backup_kept: "{{ (unifi_backup_sorted | length) - (unifi_backup_delete_targets | length) }}"
+    unifi_backup_deleted: "{{ unifi_backup_delete_targets | length }}"
