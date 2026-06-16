@@ -1,154 +1,109 @@
 # homelab-ansible
 
-## 概要
+English | [日本語](README.ja.md)
 
-自宅環境（Proxmox / Ubuntu VM）の構成管理・運用自動化を目的とした Ansible リポジトリ。
+This repository is an Ansible automation project designed for a personal homelab environment.
 
-主な用途：
+Its goal is to build a sustainable approach to security, operations, and backup management with the assistance of AI.
 
-- Proxmoxノードの状態確認
-- Ubuntuサーバの共通設定管理
-- 監視サーバ（quory）の構築
-- 将来的な自動化・復旧の基盤
+However, this project is not intended to be merely a collection of Ansible playbooks.
 
----
+Cyber threats continue to evolve rapidly. Today, even home users need to think about security controls, certificate management, backup operations, and continuous patch management.
 
-## 構成
+At the same time, designing, implementing, and maintaining these capabilities as an individual is not easy.
 
-```
-ansy（Ansible制御ノード）
-  ↓
-pve1 / pve2（Proxmox）
-  ↓
-各VM（Ubuntuなど）
-```
+This project explores how AI can help make enterprise-inspired operational practices achievable in a personal environment.
 
----
+AI-Assisted Development Approach
 
-## ディレクトリ構成
+This project uses multiple AI systems during implementation and review.
 
-```
-homelab-ansible/
-├── README.md
-├── ansible.cfg
-├── inventories/
-│   ├── homelab/
-│   │   ├── hosts.yml
-│   │   ├── group_vars/
-│   │   │   ├── control_nodes.yml
-│   │   │   ├── dev_nodes.yml
-│   │   │   ├── proxmox.yml
-│   │   │   └── radius_servers.yml
-│   │   └── host_vars/
-│   │       ├── pve1.yml
-│   │       ├── pve2.yml
-│   │       └── quory.yml
-│   └── vars/
-│       └── mail.yml
-├── playbooks/
-│   ├── proxmox_healthcheck.yml
-│   ├── proxmox_hw_check.yml
-│   ├── proxmox_patch_apply_node.yml
-│   ├── proxmox_patch_dryrun.yml
-│   └── radius_healthcheck.yml
-├── roles/
-│   ├── proxmox_healthcheck/
-│   │   ├── defaults/
-│   │   ├── files/
-│   │   └── tasks/
-│   ├── proxmox_hw_check/
-│   │   ├── defaults/
-│   │   ├── files/
-│   │   └── tasks/
-│   ├── proxmox_patch_apply_node/
-│   │   ├── defaults/
-│   │   ├── files/
-│   │   └── tasks/
-│   ├── proxmox_patch_dryrun/
-│   │   ├── defaults/
-│   │   ├── files/
-│   │   └── tasks/
-│   └── radius_healthcheck/
-│       ├── defaults/
-│       ├── files/
-│       └── tasks/
-├── scripts/
-│   └── codex-classify.sh
-├── reports/
-│   ├── proxmox-dryrun/
-│   ├── proxmox-hardware/
-│   ├── proxmox-health/
-│   ├── proxmox-patch/
-│   └── radius-health/
-├── cloudinit/
-└── docs/
-    └── ai/
-        ├── prompts/
-        └── reviews/
-```
+* One AI proposes implementations
+* Another AI performs reviews
+* Different AI systems cross-check each other
+* Final decisions are always made by a human
 
----
+AI is not the decision maker.
 
-## inventory
+AI serves as an assistant, while responsibility for code quality, security, and operational decisions remains with the human operator.
 
-Inventory は `inventories/homelab/hosts.yml` を正とする。
+Instead of relying solely on a traditional Issue / Pull Request workflow, this repository stores requirements, implementation records, and review documents as part of the project history.
 
-```yaml
-all:
-  children:
-    proxmox:
-      hosts:
-        pve1:
-          ansible_host: pve1.internal
-        pve2:
-          ansible_host: pve2.internal
-    radius_servers:
-      hosts:
-        authy:
-          ansible_host: authy.internal
-    control_nodes:
-      hosts:
-        quory:
-          ansible_host: quory.internal
-    dev_nodes:
-      hosts:
-        ansy:
-          ansible_host: ansy.internal
-    local:
-      hosts:
-        localhost:
-          ansible_connection: local
-```
+This makes it possible to trace:
 
-### group_vars
+* Design decisions
+* AI discussions
+* Review findings
+* Implementation changes
+* Improvement history
 
-SSHの接続情報を記載（公開鍵認証）
+Even users who are not deeply familiar with Git can follow the evolution of a feature and understand how AI-assisted development can improve design quality and code quality over time.
 
----
+AI-Assisted Operations
 
-## ansible.cfg
+AI is also used to support patch management.
 
-```
-[defaults]
-inventory = inventories/homelab/hosts.yml
-roles_path = roles
-host_key_checking = True
-interpreter_python = /usr/bin/python3
-retry_files_enabled = False
-```
+In personal environments, patching often depends on manual decisions and inconsistent processes.
 
----
+To address this, patch classification rules and deployment criteria are defined by a human in advance. AI then analyzes update information and summarizes the potential operational and security impact according to those predefined rules.
 
-## vars/mail.yml (.gitignore)
+AI never decides whether updates should be installed.
 
-```
-# inventories/homelab/vars/mail.yml（git管理しない）
-smtp_host: smtp.gmail.com
-smtp_port: 587
-smtp_user: username@gmail.com
-smtp_password: "<app-password>"  # アプリパスワード
-mail_to: username@gmail.com
-```
+The final decision always belongs to the operator.
 
----
+Following human-defined operational policies, AI organizes information such as:
 
+* Urgency
+* Risk level
+* Impact scope
+* Decision-making factors
+
+The objective is to provide information in a format that helps operators make informed decisions more efficiently.
+
+Technologies Covered
+
+This project actively incorporates technologies that are expected to become increasingly important for home users.
+
+* WPA3 Enterprise
+* FreeRADIUS
+* EAP-TLS
+* SSL/TLS Certificate Management
+* Passwordless Authentication
+* Certificate-Based VPN Authentication
+* Automated Patch Management
+* Backup Verification
+* Continuous Health Monitoring
+* Infrastructure Automation
+
+While this repository focuses on Ansible automation, it is intended to complement the accompanying blog and help home users improve both security awareness and practical IT skills.
+
+Blog
+
+Detailed articles about homelab architecture, operations, and security are available on the blog:
+
+https://yoshi0808.github.io/new-technology/
+
+The long-term goal is to make operational practices that were traditionally associated with enterprise environments sustainable and achievable for individuals through the practical use of AI.
+
+Main Features
+
+* Proxmox Cluster Health Check
+* Proxmox Automated Patch Workflow
+* FreeRADIUS Monitoring
+* Certificate Renewal
+* UniFi Backup Collection
+* Backup Restore Verification
+* Slack Notifications
+
+Why This Repository Exists
+
+The purpose of this project is not simply to generate code with AI.
+
+Its purpose is to build sustainable solutions for the operational and security challenges that home users face.
+
+AI is not a replacement for the operator.
+
+Humans make decisions.
+Humans remain accountable.
+
+This repository is published as a practical example of how AI can be used to support responsible infrastructure operations in a personal environment.
