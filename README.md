@@ -146,7 +146,7 @@ retry_files_enabled = False
 smtp_host: smtp.gmail.com
 smtp_port: 587
 smtp_user: username@gmail.com
-smtp_password: "xxxx xxxxgp xxxx xxxx"  # アプリパスワード
+smtp_password: "<app-password>"  # アプリパスワード
 mail_to: username@gmail.com
 ```
 
