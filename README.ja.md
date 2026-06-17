@@ -122,3 +122,6 @@ AI は運用者の代わりではありません。
 AI を活用しながら、人間が判断し、人間が責任を持つ。
 
 その実践例として、このリポジトリを公開しています。
+
+## License
+This project is licensed under the MIT License.
