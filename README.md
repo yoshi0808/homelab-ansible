@@ -131,3 +131,6 @@ Humans make decisions.
 Humans remain accountable.
 
 This repository is published as a practical example of how AI can be used to support responsible infrastructure operations in a personal environment.
+
+License
+This project is licensed under the MIT License.
