@@ -60,6 +60,30 @@ Following human-defined operational policies, AI organizes information such as:
 
 The objective is to provide information in a format that helps operators make informed decisions more efficiently.
 
+Repository Structure
+
+```text
+homelab-ansible/
+├── inventories/         # Inventory definitions and variables
+├── playbooks/           # Entry point playbooks
+├── roles/               # Reusable Ansible roles
+├── reports/             # Generated reports and summaries
+├── scripts/             # Utility scripts
+├── docs/
+│   └── ai/
+│       ├── prompts/     # AI design and implementation policies
+│       └── reviews/     # Requirement / Implement / Review history
+├── README.md            # English documentation
+├── README.ja.md         # Japanese documentation
+└── LICENSE
+```
+
+The `docs/ai/reviews` directory contains the requirement, implementation,
+and review history used during development.
+
+Instead of relying solely on Issues and Pull Requests, the project preserves
+AI-assisted design decisions and review records as documentation.
+
 Technologies Covered
 
 This project actively incorporates technologies that are expected to become increasingly important for home users.
