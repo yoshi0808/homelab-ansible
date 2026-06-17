@@ -52,6 +52,30 @@ AI が勝手に更新を判断することはありません。
 
 これにより、運用者が判断しやすい形で情報を提示することを目的としています。
 
+## このリポジトリの構成
+
+```text
+homelab-ansible/
+├── inventories/         # Inventory 定義・変数
+├── playbooks/           # Playbook
+├── roles/               # 共通ロール
+├── reports/             # レポート出力
+├── scripts/             # 補助スクリプト
+├── docs/
+│   └── ai/
+│       ├── prompts/     # AI向け設計・実装ポリシー
+│       └── reviews/     # 要求仕様・実装・レビュー履歴
+├── README.md            # English
+├── README.ja.md         # 日本語
+└── LICENSE
+```
+
+`docs/ai/reviews` には、要求仕様（requirement）、実装記録（implement）、
+レビュー結果（review）が保存されています。
+
+本プロジェクトでは、一般的な Issue / Pull Request ベースの管理だけではなく、
+AIとの対話や設計判断の履歴もドキュメントとして残しています。
+
 ## このリポジトリで扱うテーマ
 
 本プロジェクトでは、今後ホームユーザーにも求められると考えられる技術を積極的に採用しています。
