@@ -38,3 +38,6 @@ homelab_vault_pass
 # CA source files (誤ってリポジトリ内に配置された場合の保護)
 # 実際の /home/yoshi/.cert はリポジトリ外であり、ファイル権限(0600)で保護する
 .cert/
+
+# ヘルパーシェル
+new-session.sh
