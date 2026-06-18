@@ -1,0 +1,122 @@
+---
+- name: Copy proxmox snapshot collect script
+  ansible.builtin.copy:
+    src: proxmox-snapshot-collect.sh
+    dest: /usr/local/sbin/proxmox-snapshot-collect.sh
+    mode: "0750"
+    owner: root
+    group: root
+
+- name: Run proxmox snapshot collect
+  ansible.builtin.command:
+    cmd: /usr/local/sbin/proxmox-snapshot-collect.sh
+  register: snapshot_raw
+  changed_when: false
+
+- name: Fail if snapshot collection returned no output
+  ansible.builtin.fail:
+    msg: "proxmox-snapshot-collect.sh on {{ inventory_hostname }} returned empty output (rc={{ snapshot_raw.rc }}). Run the script manually on the host to diagnose."
+  when: snapshot_raw.stdout | length == 0
+
+- name: Parse snapshot JSON
+  ansible.builtin.set_fact:
+    proxmox_snapshot_data: "{{ snapshot_raw.stdout | from_json }}"
+
+- name: Compute staleness threshold (epoch)
+  ansible.builtin.set_fact:
+    _snap_now_epoch: "{{ ansible_facts['date_time']['epoch'] | int }}"
+    _snap_threshold_epoch: "{{ (ansible_facts['date_time']['epoch'] | int) - (proxmox_snapshot_check_threshold_seconds | int) }}"
+
+# Requirement: "7日（604800秒）以上前" -> snapshots at or beyond the threshold age
+# (snaptime <= now - threshold), so a snapshot exactly at the boundary is included.
+- name: Find stale snapshots (at or beyond threshold age)
+  ansible.builtin.set_fact:
+    _stale_raw: "{{ proxmox_snapshot_data.snapshots |
+      selectattr('snaptime', 'gt', 0) |
+      selectattr('snaptime', 'le', _snap_threshold_epoch | int) | list }}"
+
+- name: Initialize enriched stale snapshot list
+  ansible.builtin.set_fact:
+    _stale_entries: []
+
+- name: Enrich stale snapshots with age in days
+  ansible.builtin.set_fact:
+    _stale_entries: "{{ _stale_entries + [item | combine({
+      'age_days': ((_snap_now_epoch | int - item.snaptime | int) / 86400) | int,
+      'snaptime_iso': '%Y-%m-%dT%H:%M:%S%z' | strftime(item.snaptime | int) }) ] }}"
+  loop: "{{ _stale_raw }}"
+  loop_control:
+    label: "{{ item.type }}/{{ item.vmid }}/{{ item.snapname }}"
+
+# A collection failure must not be reported as "no stale snapshots / OK".
+- name: Determine collection failure
+  ansible.builtin.set_fact:
+    _snap_collection_failed: "{{ (not proxmox_snapshot_data.collection_ok) or (proxmox_snapshot_data.errors | length > 0) }}"
+
+- name: Build snapshot report
+  ansible.builtin.set_fact:
+    proxmox_snapshot_report:
+      host: "{{ inventory_hostname }}"
+      node: "{{ proxmox_snapshot_data.node }}"
+      collected_at: "{{ proxmox_snapshot_data.collected_at }}"
+      threshold_days: "{{ proxmox_snapshot_check_threshold_seconds | int // 86400 }}"
+      collection_ok: "{{ proxmox_snapshot_data.collection_ok }}"
+      errors: "{{ proxmox_snapshot_data.errors }}"
+      total_snapshots: "{{ proxmox_snapshot_data.snapshots | length }}"
+      stale_count: "{{ _stale_entries | length }}"
+      stale_snapshots: "{{ _stale_entries }}"
+      result:
+        status: "{{ 'WARNING' if (_stale_entries | length > 0 or _snap_collection_failed | bool) else 'OK' }}"
+
+- name: Ensure report directory exists
+  ansible.builtin.file:
+    path: "{{ proxmox_snapshot_check_report_dir }}"
+    state: directory
+    mode: "0755"
+  delegate_to: localhost
+  become: false
+
+- name: Save report
+  ansible.builtin.copy:
+    content: "{{ proxmox_snapshot_report | to_nice_json }}"
+    dest: "{{ proxmox_snapshot_check_report_dir }}/{{ inventory_hostname }}_{{ ansible_facts['date_time']['iso8601_basic_short'] }}.json"
+  delegate_to: localhost
+  become: false
+
+- name: Build snapshot check summary
+  ansible.builtin.set_fact:
+    snapshot_check_summary_text: |-
+      {% set ns = namespace(result='OK', lines=[]) -%}
+      {% for host in ansible_play_hosts -%}
+      {% set r = hostvars[host].proxmox_snapshot_report -%}
+      {% if r.result.status == 'WARNING' %}{% set ns.result = 'WARNING' %}{% endif -%}
+      {% set _ = ns.lines.append(host ~ '=' ~ r.result.status ~ '(stale=' ~ (r.stale_count | string) ~ '/' ~ (r.total_snapshots | string) ~ ',collection_ok=' ~ (r.collection_ok | string | lower) ~ ',errors=' ~ (r.errors | length | string) ~ ')') -%}
+      {% endfor -%}
+      SUMMARY proxmox_snapshot_check | Result={{ ns.result }} | {{ ns.lines | join(' | ') }} | Threshold={{ proxmox_snapshot_check_threshold_seconds | int // 86400 }}d
+  run_once: true
+
+- name: Print snapshot check summary
+  ansible.builtin.debug:
+    msg: "{{ snapshot_check_summary_text }}"
+  run_once: true
+
+- name: Send Slack notification for stale snapshots or collection failure
+  ansible.builtin.include_tasks: "{{ playbook_dir }}/../roles/common_slack/tasks/notify.yml"
+  tags: notify
+  vars:
+    slack_channel: "alerts"
+    slack_status: "warning"
+    slack_title: "[Proxmox Snapshot Check] WARNING - {{ inventory_hostname }}"
+    slack_message: |
+      Host : {{ inventory_hostname }}
+      Stale snapshots (>= {{ proxmox_snapshot_report.threshold_days }} days): {{ proxmox_snapshot_report.stale_count }}
+      {% for s in proxmox_snapshot_report.stale_snapshots %}
+      - {{ s.type }} {{ s.vmid }} ({{ s.guest_name }}) snapshot "{{ s.snapname }}" - {{ s.age_days }} days old (created {{ s.snaptime_iso }})
+      {% endfor %}
+      {% if not proxmox_snapshot_report.collection_ok or proxmox_snapshot_report.errors | length > 0 %}
+      Collection problems (results may be incomplete):
+      {% for e in proxmox_snapshot_report.errors %}
+      - {{ e.scope }}: {{ e.error }}
+      {% endfor %}
+      {% endif %}
+  when: proxmox_snapshot_report.result.status == 'WARNING'

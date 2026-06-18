@@ -1,0 +1,8 @@
+---
+- name: Proxmox snapshot check
+  hosts: proxmox
+  gather_facts: true
+  become: true
+
+  roles:
+    - proxmox_snapshot_check
