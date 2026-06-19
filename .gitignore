@@ -41,3 +41,8 @@ homelab_vault_pass
 
 # ヘルパーシェル
 new-session.sh
+kick.sh
+prep-agent.sh
+start-tester.sh
+stop-tester.sh
+swap-right.sh
