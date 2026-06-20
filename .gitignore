@@ -46,3 +46,6 @@ prep-agent.sh
 start-tester.sh
 stop-tester.sh
 swap-right.sh
+
+# テスト出力（ローカル。スクショ等を含むため public リポジトリに入れない）
+test-output/
