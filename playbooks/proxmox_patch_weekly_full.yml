@@ -10,7 +10,9 @@
 # Flow:
 #   0.  preflight: control node not on cluster
 #   1.  healthcheck pve1 + pve2  (stop if not both OK)
-#   2.  dry-run                  (stop if not PATCH_READY)
+#   2.  dry-run                  (PATCH_READY → continue; clean-skip rc=0 on
+#                                 NO_UPDATES/MAINTENANCE_REQUIRED/MAJOR_UPGRADE_DETECTED;
+#                                 fail on BLOCKED/UNKNOWN)
 #   3.  evacuate pve2
 #   4.  patch apply pve2
 #   5.  post-patch healthcheck pve2
@@ -113,41 +115,53 @@
 
 # Step 2b: Handle dry-run status
 #
-# PATCH_READY           → continue to evacuate/patch/restore flow
-# NO_UPDATES            → dry-run role has already notified; set skip flag and end cleanly
-# MAINTENANCE_REQUIRED  → fail (manual action required)
-# BLOCKED               → fail (apt/dpkg broken, patch ops halted)
-# MAJOR_UPGRADE_DETECTED → fail (major upgrade suspected, manual action required)
-# UNKNOWN               → fail (unexpected state)
-- name: Handle dry-run status - set NO_UPDATES flag or abort on error
+# PATCH_READY            → continue to evacuate/patch/restore flow
+# NO_UPDATES             → skip + normal exit (dry-run role already notified: info)
+# MAINTENANCE_REQUIRED   → skip + normal exit (dry-run role already notified: warning)
+# MAJOR_UPGRADE_DETECTED → skip + normal exit (dry-run role already notified: warning)
+# BLOCKED                → fail (apt/dpkg broken, patch ops halted - manual action)
+# UNKNOWN / other        → fail (unexpected state)
+#
+# Semaphore only has success/fail (no warning). For the warning-level skip
+# statuses the dry-run role has already sent a Slack notification, so the job
+# ends as a normal (success) exit instead of failing — failing would surface a
+# false error in Semaphore even though patching was correctly skipped, not broken.
+- name: Handle dry-run status - skip cleanly or abort on genuine error
   hosts: localhost
   gather_facts: false
   vars:
     _status: "{{ hostvars[groups['proxmox'][0]]['_final_status'] | default('UNKNOWN') }}"
+    # Patching intentionally skipped AND the dry-run role already notified Slack
+    # → end the job as a normal (success) exit, not a failure.
+    _weekly_full_skip_statuses:
+      - NO_UPDATES
+      - MAINTENANCE_REQUIRED
+      - MAJOR_UPGRADE_DETECTED
   tasks:
-    - name: Set NO_UPDATES skip flag and end play cleanly
-      when: _status == 'NO_UPDATES'
+    - name: Set skip flag and end play cleanly (patch skipped, dry-run role already notified)
+      when: _status in _weekly_full_skip_statuses
       block:
-        - name: Set NO_UPDATES skip flag for subsequent plays
+        - name: Set skip flag for subsequent plays
           ansible.builtin.set_fact:
-            _weekly_full_no_updates: true
+            _weekly_full_skip: true
 
-        - name: End this play (NO_UPDATES - normal exit, notification sent by dry-run role)
+        - name: End this play (normal exit - patching intentionally skipped)
           ansible.builtin.meta: end_play
 
-    - name: Fail if dry-run status requires manual action or is unexpected
+    - name: Fail if dry-run status is a genuine error or unexpected
       ansible.builtin.fail:
         msg: >-
           Dry-run status is {{ _status }}.
-          Weekly full patch apply requires PATCH_READY. Stopping.
-          (MAINTENANCE_REQUIRED/BLOCKED/MAJOR_UPGRADE_DETECTED requires manual action.)
+          Weekly full patch apply requires PATCH_READY (or a clean skip:
+          {{ _weekly_full_skip_statuses | join(', ') }}). Stopping.
+          (BLOCKED = apt/dpkg broken; UNKNOWN = unexpected - manual action required.)
       when: _status != 'PATCH_READY'
 
 # ---------------------------------------------------------------------------
 # Step 3: Evacuate pve2
 # ---------------------------------------------------------------------------
 - import_playbook: proxmox_evacuate_node.yml
-  when: not (hostvars['localhost']['_weekly_full_no_updates'] | default(false))
+  when: not (hostvars['localhost']['_weekly_full_skip'] | default(false))
   vars:
     target_node: pve2
 
@@ -155,7 +169,7 @@
 # Step 4: Patch apply pve2
 # ---------------------------------------------------------------------------
 - import_playbook: proxmox_patch_apply_node.yml
-  when: not (hostvars['localhost']['_weekly_full_no_updates'] | default(false))
+  when: not (hostvars['localhost']['_weekly_full_skip'] | default(false))
   vars:
     target_node: pve2
 
@@ -169,7 +183,7 @@
   tasks:
     - name: Skip if NO_UPDATES
       ansible.builtin.meta: end_play
-      when: hostvars['localhost']['_weekly_full_no_updates'] | default(false)
+      when: hostvars['localhost']['_weekly_full_skip'] | default(false)
 
     - name: Gather facts for healthcheck role
       ansible.builtin.setup:
@@ -189,7 +203,7 @@
 # Step 6: Restore pve2
 # ---------------------------------------------------------------------------
 - import_playbook: proxmox_restore_vm_placement.yml
-  when: not (hostvars['localhost']['_weekly_full_no_updates'] | default(false))
+  when: not (hostvars['localhost']['_weekly_full_skip'] | default(false))
   vars:
     target_node: pve2
 
@@ -197,7 +211,7 @@
 # Step 7: Evacuate pve1
 # ---------------------------------------------------------------------------
 - import_playbook: proxmox_evacuate_node.yml
-  when: not (hostvars['localhost']['_weekly_full_no_updates'] | default(false))
+  when: not (hostvars['localhost']['_weekly_full_skip'] | default(false))
   vars:
     target_node: pve1
 
@@ -205,7 +219,7 @@
 # Step 8: Patch apply pve1
 # ---------------------------------------------------------------------------
 - import_playbook: proxmox_patch_apply_node.yml
-  when: not (hostvars['localhost']['_weekly_full_no_updates'] | default(false))
+  when: not (hostvars['localhost']['_weekly_full_skip'] | default(false))
   vars:
     target_node: pve1
 
@@ -219,7 +233,7 @@
   tasks:
     - name: Skip if NO_UPDATES
       ansible.builtin.meta: end_play
-      when: hostvars['localhost']['_weekly_full_no_updates'] | default(false)
+      when: hostvars['localhost']['_weekly_full_skip'] | default(false)
 
     - name: Gather facts for healthcheck role
       ansible.builtin.setup:
@@ -239,7 +253,7 @@
 # Step 10: Restore pve1
 # ---------------------------------------------------------------------------
 - import_playbook: proxmox_restore_vm_placement.yml
-  when: not (hostvars['localhost']['_weekly_full_no_updates'] | default(false))
+  when: not (hostvars['localhost']['_weekly_full_skip'] | default(false))
   vars:
     target_node: pve1
 
@@ -252,7 +266,7 @@
   tasks:
     - name: Skip if NO_UPDATES (notification already sent by dry-run role)
       ansible.builtin.meta: end_play
-      when: _weekly_full_no_updates | default(false)
+      when: _weekly_full_skip | default(false)
 
     - name: Send Slack notification
       ansible.builtin.include_tasks: "{{ playbook_dir }}/../roles/common_slack/tasks/notify.yml"
