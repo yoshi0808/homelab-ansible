@@ -1,1 +1,12 @@
 # Host variables for quory
+
+# quory is both a managed host (control_nodes group) and, in production, the
+# Ansible/Semaphore execution host itself. When a playbook targets quory and
+# is also being run FROM quory (e.g. via Semaphore running natively on quory),
+# connecting to "quory.internal" over SSH as ann is unnecessary and may fail
+# if ann's authorized_keys / the controller's own SSH key setup doesn't cover
+# this self-connection case. Fall back to a local connection in that case;
+# otherwise (e.g. run from ansy) use the normal ann-key SSH connection.
+# Same controller-identity pattern as playbooks/proxmox_patch_weekly_full.yml's
+# preflight check (lookup('pipe', 'hostname -s')).
+ansible_connection: "{{ 'local' if lookup('pipe', 'hostname -s') == 'quory' else 'ssh' }}"
