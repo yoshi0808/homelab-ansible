@@ -1,0 +1,36 @@
+---
+# chrony tracking の収集・判定。quory(Phase 1)と他のchronyホスト(Phase 2)の
+# 両方から include_tasks され、呼び出し側の when 条件でホストを絞り込む。
+
+- name: Check chrony tracking
+  ansible.builtin.command:
+    cmd: chronyc tracking
+  register: time_sync_chrony_raw
+  changed_when: false
+  failed_when: false
+  ignore_unreachable: true
+  check_mode: false
+
+- name: Judge chrony sync status
+  ansible.builtin.set_fact:
+    time_sync_collected: >-
+      {{ not (time_sync_chrony_raw.unreachable | default(false))
+         and (time_sync_chrony_raw.rc | default(1)) == 0
+         and 'Leap status' in (time_sync_chrony_raw.stdout | default(''))
+         and _offset_found }}
+    time_sync_synced: >-
+      {{ (time_sync_chrony_raw.rc | default(1)) == 0
+         and 'Leap status' in (time_sync_chrony_raw.stdout | default(''))
+         and 'Not synchronised' not in (time_sync_chrony_raw.stdout | default(''))
+         and _offset_found
+         and ((_offset_ms | abs) <= time_sync_check_threshold_ms) }}
+    time_sync_offset_ms: "{{ _offset_ms }}"
+    time_sync_detail: "{{ _offset_line }}"
+  vars:
+    _offset_match: >-
+      {{ time_sync_chrony_raw.stdout | default('') | regex_search('System time\s*:\s*([0-9.]+) seconds', '\1') }}
+    _offset_found: "{{ _offset_match is not none }}"
+    _offset_str: "{{ (_offset_match | default([], true) | first) | default('0', true) }}"
+    _offset_ms: "{{ (_offset_str | float) * 1000 if _offset_found else 0 }}"
+    _offset_line: >-
+      {{ (time_sync_chrony_raw.stdout | default('') | regex_search('System time\s*:.*')) | default('(no chronyc output / offset not parseable)', true) }}

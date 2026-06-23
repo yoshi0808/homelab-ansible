@@ -32,8 +32,6 @@ else
   journal_error_count=$(echo "$journal_errors_raw" | wc -l)
 fi
 
-chrony_tracking=$(chronyc tracking 2>/dev/null || echo "unavailable")
-
 if mem_line=$(free -b 2>/dev/null | awk '/^Mem:/{print $2, $3, $7}') && [ -n "$mem_line" ]; then
   mem_total_bytes=$(echo "$mem_line" | cut -d' ' -f1)
   mem_used_bytes=$(echo "$mem_line" | cut -d' ' -f2)
@@ -62,7 +60,6 @@ PORT_1812="$port_1812" \
 PORT_1813="$port_1813" \
 JOURNAL_ERROR_COUNT="$journal_error_count" \
 JOURNAL_ERRORS="${journal_errors_raw}" \
-CHRONY_TRACKING="$chrony_tracking" \
 MEM_COLLECTION_OK="$mem_collection_ok" \
 MEM_TOTAL_BYTES="$mem_total_bytes" \
 MEM_USED_BYTES="$mem_used_bytes" \
@@ -91,9 +88,6 @@ print(json.dumps({
     "journal": {
         "error_count_1h": int(os.environ["JOURNAL_ERROR_COUNT"]),
         "errors": os.environ["JOURNAL_ERRORS"]
-    },
-    "chrony": {
-        "tracking": os.environ["CHRONY_TRACKING"]
     },
     "memory": {
         "collection_ok": mem_collection_ok,

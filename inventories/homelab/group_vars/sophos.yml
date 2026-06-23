@@ -1,0 +1,6 @@
+---
+# Sophos Firewall はベンダー製アプライアンスのため、Ansible管理ユーザー ann (core.md §5)
+# は使わず、デバイス側の admin アカウント + 専用鍵で接続する。
+ansible_user: admin
+ansible_ssh_private_key_file: ~/.ssh/id_rsa_sophos
+ansible_connection: ssh

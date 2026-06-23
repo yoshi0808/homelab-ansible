@@ -57,8 +57,6 @@
       journal:
         error_count_1h: "{{ radius_health.journal.error_count_1h }}"
         errors: "{{ radius_health.journal.errors }}"
-      chrony:
-        tracking: "{{ radius_health.chrony.tracking }}"
       memory:
         collection_ok: "{{ radius_health.memory.collection_ok }}"
         total_mb: "{{ radius_health.memory.total_mb }}"

@@ -1,0 +1,21 @@
+---
+# time_sync_check.yml - homelab 主要ホストの NTP 同期状態チェック。
+# read-only。各ホスト自身の NTP クライアント(chrony / systemd-timesyncd / ntpclient)に
+# 同期状態を自己報告させ、異常があれば通知する。対象ホストの設定変更は行わない。
+#
+# 対象: quory(基準・Phase1でabortゲート), pve1, pve2, ansy, monnie, authy
+#       (chronyc tracking)、sophos-fw(SSH -> Advanced Shell経由でntpclientログ確認)、
+#       cloudkey(SSH パスワード認証で timedatectl status 確認)
+# 実行元: quory(本番)/ ansy(開発・CLI)
+#
+# CloudKey の SSH 認証情報は inventories/vars/cloudkey.yml (Vault) から読み込む。
+# 詳細・設計転換の経緯は docs/ai/reviews/time_sync_check/2026-06-23_006_implement.md を参照。
+
+- name: Time sync check (per-host NTP self-report)
+  hosts: quory:pve1:pve2:ansy:monnie:authy:sophos
+  gather_facts: false
+  become: false
+  vars_files:
+    - "{{ playbook_dir }}/../inventories/vars/cloudkey.yml"
+  roles:
+    - time_sync_check

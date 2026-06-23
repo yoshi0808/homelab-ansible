@@ -1,0 +1,249 @@
+---
+# time_sync_check: homelab 主要ホストの NTP 同期状態チェック。
+# read-only。各ホストでの状態取得は command/expect のみで行い、
+# 正常/異常判定・fail制御は本ファイル(Ansible tasks側)で行う(core.md §7)。
+#
+# 設計方針(quory基準の生時刻比較方式からの転換):
+# 当初は quory の時刻と各ホストの時刻をSSH/HTTPで一回取得して差分を計算する方式を
+# 検討したが、ローカル・実機検証の結果、SSH接続確立やHTTPのDateヘッダー(秒精度)
+# 自体の測定誤差(数百ms〜数秒)が、検出したい時刻ズレと同程度かそれ以上になることが
+# 判明した。実機調査で、対象ホストがいずれも自分自身のNTP同期状態を自己報告できる
+# ことを確認できたため(chrony / systemd-timesyncd / ntpclientログ)、各ホスト自身の
+# 自己診断結果を収集する方式に変更した。これにより、各ホストが長期間統計的に測定した
+# (ミリ秒未満の精度を持つ)結果を使えるため、検出精度はむしろ向上する。
+# 経緯は docs/ai/reviews/time_sync_check/2026-06-23_006_implement.md を参照。
+
+# ---------------------------------------------------------------------------
+# Phase 1: quory自身のNTP同期状態を確認する。同期できていない場合は他ホストへの
+# 接続を一切行わずにここで中断する(基準が信頼できないため)。
+# quoryのみを対象にした収集・判定を完了させてから Abort 判定を行う。他のchrony
+# ホストの収集はこの後の Phase 2 でのみ行う(quory判定前に他ホストへ接続しない)。
+# ---------------------------------------------------------------------------
+- name: Check and judge quory chrony tracking
+  ansible.builtin.include_tasks: check_chrony.yml
+  when: inventory_hostname == time_sync_check_reference_host
+
+- name: Abort and notify if quory NTP is not synchronized
+  when: not (hostvars[time_sync_check_reference_host].time_sync_synced | default(false))
+  run_once: true
+  delegate_to: localhost
+  block:
+    - name: Send Slack notification (quory NTP not synchronized)
+      ansible.builtin.include_tasks: "{{ playbook_dir }}/../roles/common_slack/tasks/notify.yml"
+      vars:
+        slack_channel: "alerts"
+        slack_status: "critical"
+        slack_title: "[time_sync_check] CRITICAL - quory NTP not synchronized"
+        slack_message: |
+          基準ノード {{ time_sync_check_reference_host }} の chronyc tracking が
+          同期異常を示しているため、time_sync_check を中断しました。
+          他ホストへの接続は行っていません。
+
+          詳細: {{ hostvars[time_sync_check_reference_host].time_sync_detail | default('(no detail)') }}
+      when: not ansible_check_mode
+
+    - name: Fail because reference node time is not trustworthy
+      ansible.builtin.fail:
+        msg: >-
+          quory の NTP 同期が異常なため、time_sync_check を中断しました。
+          他ホストの確認は実施していません。
+
+# 以降のタスクはすべて、quoryのNTPが正常な場合のみ実行する。
+# (synced=falseの場合、各収集タスクは when ガードによりスキップされ、
+#  対象ホストへの接続自体が発生しない)
+
+# ---------------------------------------------------------------------------
+# Phase 2: pve1/pve2/ansy/monnie/authy の chrony tracking を確認する。
+# ---------------------------------------------------------------------------
+- name: Check and judge chrony tracking (other chrony-based hosts)
+  ansible.builtin.include_tasks: check_chrony.yml
+  when:
+    - hostvars[time_sync_check_reference_host].time_sync_synced | default(false)
+    - inventory_hostname in time_sync_check_chrony_hosts
+
+# ---------------------------------------------------------------------------
+# Phase 3 (Sophos): SSH -> Advanced Shell経由 (メニュー "5"->"3", 終了 exit->"0"->"0")
+# sophos_trim role の遷移ロジックを流用する。/var/tslog/ntpclient.log の末尾行が
+# 成功(System Clock set to)で、かつファイルの更新が直近(daily実行が停止していない)
+# であることの両方を正常条件とする。
+# ---------------------------------------------------------------------------
+- name: Check ntpclient sync log (Sophos via Advanced Shell)
+  ansible.builtin.expect:
+    command: >-
+      ssh
+      -i {{ ansible_ssh_private_key_file | replace('~', lookup('env', 'HOME')) }}
+      -o StrictHostKeyChecking=accept-new
+      {{ ansible_user }}@{{ ansible_host }}
+    responses:
+      'Select Menu Number \[0-7\]:':
+        - "5"
+        - "0"
+      'Select Menu Number \[0-4\]:':
+        - "3"
+        - "0"
+      '# ':
+        - "echo __MTIME__:$(stat -c %Y /var/tslog/ntpclient.log 2>/dev/null); echo __NOW__:$(date +%s); tail -n {{ time_sync_check_sophos_log_lines }} /var/tslog/ntpclient.log 2>&1; echo __NTP_LOG_RC__:$?"
+        - "exit"
+    timeout: "{{ time_sync_check_ssh_timeout }}"
+  delegate_to: localhost
+  register: time_sync_sophos_raw
+  no_log: true
+  ignore_errors: true
+  check_mode: false
+  when:
+    - hostvars[time_sync_check_reference_host].time_sync_synced | default(false)
+    - inventory_hostname == 'sophos-fw'
+
+- name: Judge ntpclient sync status (Sophos)
+  ansible.builtin.set_fact:
+    time_sync_collected: "{{ _rc_found and (_rc | int) == 0 and _mtime_found and _now_found }}"
+    time_sync_synced: "{{ _rc_found and (_rc | int) == 0 and _mtime_found and _now_found and _last_line_ok and _fresh }}"
+    time_sync_detail: >-
+      {{ _last_line }}{{ '' if _fresh else ' (stale: last update ' ~ _age_hours ~ 'h ago)' }}
+  vars:
+    _log_lines: "{{ (time_sync_sophos_raw.stdout | default('')).split('\n') | select('match', '^(MESSAGE|ERROR)') | list }}"
+    _last_line: "{{ _log_lines[-1] if (_log_lines | length > 0) else '(/var/tslog/ntpclient.log にログ行が見つからない)' }}"
+    _last_line_ok: "{{ _last_line is search('System Clock set to') }}"
+    _rc_match: "{{ (time_sync_sophos_raw.stdout | default('') | regex_search('__NTP_LOG_RC__:([0-9]+)', '\\1') | default([], true) | first) | default('', true) }}"
+    _rc_found: "{{ _rc_match | length > 0 }}"
+    _rc: "{{ _rc_match | default('1', true) }}"
+    _mtime_match: "{{ (time_sync_sophos_raw.stdout | default('') | regex_search('__MTIME__:([0-9]+)', '\\1') | default([], true) | first) | default('', true) }}"
+    _mtime_found: "{{ _mtime_match | length > 0 }}"
+    _now_match: "{{ (time_sync_sophos_raw.stdout | default('') | regex_search('__NOW__:([0-9]+)', '\\1') | default([], true) | first) | default('', true) }}"
+    _now_found: "{{ _now_match | length > 0 }}"
+    _age_sec: "{{ ((_now_match | default('0', true) | int) - (_mtime_match | default('0', true) | int)) }}"
+    _age_hours: "{{ (_age_sec / 3600) | round(1) }}"
+    _fresh: >-
+      {{ _mtime_found and _now_found
+         and ((_age_sec | int) >= 0)
+         and ((_age_sec | int) <= (time_sync_check_sophos_max_age_hours | int) * 3600) }}
+  when:
+    - hostvars[time_sync_check_reference_host].time_sync_synced | default(false)
+    - inventory_hostname == 'sophos-fw'
+  no_log: true
+
+# ---------------------------------------------------------------------------
+# Phase 4 (CloudKey): 通常SSH(パスワード認証)。cloudkey_ssh_user/cloudkey_ssh_password
+# は inventories/vars/cloudkey.yml (Vault) から読み込む。実ホストではないため
+# run_once + delegate_to: localhost + delegate_facts: true で localhost の
+# hostvars に保存する(register結果自体は delegate_facts の対象外のため、
+# 正規化済みfactだけをここで明示的に保存する)。
+# ---------------------------------------------------------------------------
+- name: Check NTP sync status (CloudKey via password SSH)
+  ansible.builtin.expect:
+    command: >-
+      ssh
+      -o StrictHostKeyChecking=accept-new
+      -o PreferredAuthentications=keyboard-interactive,password
+      -o PubkeyAuthentication=no
+      {{ cloudkey_ssh_user }}@{{ cloudkey_host }}
+    responses:
+      '(?i)password:':
+        - "{{ cloudkey_ssh_password }}"
+      '# ':
+        - "timedatectl status; echo __NTP_STATUS_RC__:$?"
+        - "exit"
+    timeout: "{{ time_sync_check_ssh_timeout }}"
+  delegate_to: localhost
+  run_once: true
+  register: time_sync_cloudkey_raw
+  no_log: true
+  ignore_errors: true
+  check_mode: false
+  when: hostvars[time_sync_check_reference_host].time_sync_synced | default(false)
+
+- name: Judge NTP sync status (CloudKey)
+  ansible.builtin.set_fact:
+    time_sync_collected: "{{ _rc_found and (_rc | int) == 0 and _status_found }}"
+    time_sync_synced: >-
+      {{ _rc_found and (_rc | int) == 0 and _status_found
+         and (_sync_value == 'yes') and (_service_value == 'active') }}
+    time_sync_detail: >-
+      {{ 'System clock synchronized: ' ~ (_sync_value | default('(not found)', true))
+         ~ ' / NTP service: ' ~ (_service_value | default('(not found)', true)) }}
+  vars:
+    _rc_match: "{{ (time_sync_cloudkey_raw.stdout | default('') | regex_search('__NTP_STATUS_RC__:([0-9]+)', '\\1') | default([], true) | first) | default('', true) }}"
+    _rc_found: "{{ _rc_match | length > 0 }}"
+    _rc: "{{ _rc_match | default('1', true) }}"
+    _sync_value: >-
+      {{ (time_sync_cloudkey_raw.stdout | default('') | regex_search('System clock synchronized:\s*(\S+)', '\1') | default([], true) | first) | default('', true) }}
+    _service_value: >-
+      {{ (time_sync_cloudkey_raw.stdout | default('') | regex_search('NTP service:\s*(\S+)', '\1') | default([], true) | first) | default('', true) }}
+    _status_found: "{{ (_sync_value | length > 0) and (_service_value | length > 0) }}"
+  delegate_to: localhost
+  delegate_facts: true
+  run_once: true
+  no_log: true
+  when: hostvars[time_sync_check_reference_host].time_sync_synced | default(false)
+
+# ---------------------------------------------------------------------------
+# Phase 5 / Phase 6: 各対象ホストの自己報告結果を集約し、判定する
+# (quoryのNTPが正常な場合のみ)
+# ---------------------------------------------------------------------------
+- name: Build and judge time sync report
+  when: hostvars[time_sync_check_reference_host].time_sync_synced | default(false)
+  run_once: true
+  delegate_to: localhost
+  block:
+    - name: Initialize comparison results
+      ansible.builtin.set_fact:
+        time_sync_results: []
+
+    - name: Compute per-target health
+      ansible.builtin.set_fact:
+        time_sync_results: "{{ time_sync_results + [{'host': item, 'collected': _collected, 'ok': _ok, 'detail': _detail}] }}"
+      vars:
+        _hv: "{{ hostvars['localhost'] if item == 'cloudkey' else hostvars[item] }}"
+        _collected: "{{ _hv.time_sync_collected | default(false) }}"
+        _synced: "{{ _hv.time_sync_synced | default(false) }}"
+        _ok: "{{ _collected and _synced }}"
+        _detail: "{{ _hv.time_sync_detail | default('(no detail)') }}"
+      loop: "{{ time_sync_check_targets }}"
+      loop_control:
+        label: "{{ item }}"
+
+    - name: Classify warning and error hosts
+      ansible.builtin.set_fact:
+        time_sync_warning_hosts: "{{ time_sync_results | selectattr('collected') | rejectattr('ok') | list }}"
+        time_sync_error_hosts: "{{ time_sync_results | rejectattr('collected') | list }}"
+
+    - name: Print time sync summary
+      ansible.builtin.debug:
+        msg:
+          - "Reference : {{ time_sync_check_reference_host }} ({{ hostvars[time_sync_check_reference_host].time_sync_detail }})"
+          - "Results   : {{ time_sync_results }}"
+          - "Warnings  : {{ time_sync_warning_hosts | map(attribute='host') | list }}"
+          - "Errors    : {{ time_sync_error_hosts | map(attribute='host') | list }}"
+
+    - name: Send Slack notification (NTP not synced and/or collection errors)
+      ansible.builtin.include_tasks: "{{ playbook_dir }}/../roles/common_slack/tasks/notify.yml"
+      vars:
+        slack_channel: "alerts"
+        slack_status: "{{ 'error' if time_sync_error_hosts | length > 0 else 'warning' }}"
+        slack_title: >-
+          [time_sync_check] {{ 'ERROR' if time_sync_error_hosts | length > 0 else 'WARNING' }}
+        slack_message: |
+          基準ノード: {{ time_sync_check_reference_host }} ({{ hostvars[time_sync_check_reference_host].time_sync_detail }})
+
+          NTP同期異常ホスト:
+          {% for r in time_sync_warning_hosts %}
+          - {{ r.host }}: {{ r.detail }}
+          {% else %}
+          (なし)
+          {% endfor %}
+          接続/収集エラー:
+          {% for r in time_sync_error_hosts %}
+          - {{ r.host }}
+          {% else %}
+          (なし)
+          {% endfor %}
+      when:
+        - not ansible_check_mode
+        - (time_sync_warning_hosts | length > 0) or (time_sync_error_hosts | length > 0)
+
+    - name: Fail if collection errors occurred
+      ansible.builtin.fail:
+        msg: >-
+          time_sync_check: 以下のホストでNTP状態取得に失敗しました:
+          {{ time_sync_error_hosts | map(attribute='host') | join(', ') }}
+      when: time_sync_error_hosts | length > 0
