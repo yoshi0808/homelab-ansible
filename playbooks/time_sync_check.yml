@@ -12,6 +12,37 @@
 #       数値Offset)。実行元はquoryまたはansy。実行元ホスト自身は比較対象
 #       から動的に除外する(time_sync_check_executor_host)。
 #
+# 比較対象・許容値・判定（仕様）:
+#
+#   | 対象                          | 何と比較するか        | 取得方法                                  | 許容値(既定)                              |
+#   |-------------------------------|------------------------|--------------------------------------------|--------------------------------------------|
+#   | quory（基準）                 | quory自身の外部NTP     | chronyc tracking の System time            | 500ms (time_sync_check_threshold_ms)       |
+#   | pve1/pve2/ansy/monnie/authy    | 各ホスト自身の参照NTP  | chronyc tracking の System time            | 500ms (time_sync_check_threshold_ms)       |
+#   | cloudkey                      | cloudkey自身の参照NTP  | timedatectl timesync-status の Offset      | 500ms (time_sync_check_threshold_ms)       |
+#   | sophos-fw                     | quory（直接比較）      | SSH→Advanced Shell経由のdate直接比較        | 5000ms (time_sync_check_sophos_threshold_ms) |
+#
+#   - chrony/cloudkeyの「何と比較するか」は、各ホストが現在実際に同期している
+#     NTPソース（quoryへの参照を追加済みでも、それを使うとは限らない。
+#     playbooks/time_sync_ntp_reference.yml参照）。time_sync_checkはあくまで
+#     「各ホスト自身が自己申告する同期ズレ」を読むだけで、特定のソースとの
+#     比較を強制するものではない。
+#   - sophos-fwのみ、自己申告する同期ズレが取得できないため、quoryとの
+#     date直接比較で代替する（前提が他ホストと異なる例外）。
+#
+# Fail条件（仕様）:
+#
+#   - quory自身が「未収集」または「未同期(許容値超え含む)」の場合:
+#     Phase 1でcritical/error通知し、他ホストへ一切接続せずplaybook全体を
+#     fail（非ゼロ終了）させる。
+#   - 個別ホストへの接続・収集に失敗した場合（quory以外）:
+#     time_sync_error_hosts に分類され、warning通知ではなくerror通知。
+#     1件以上あればplaybook全体をfailさせる。
+#   - 個別ホストの許容値超え（収集はできたが閾値を超えている）の場合:
+#     time_sync_warning_hosts に分類され、warning通知。
+#     **playbook自体はfailしない**（収集失敗とは区別する。
+#     radius_healthcheck等の既存判定方針に合わせている）。
+#   - 全ホストが許容値内の場合: Slack通知は行わない（成功時は静か）。
+#
 # 主要な処理フロー:
 #   Phase 1: quory自身のchronyc trackingを確認。未収集/未同期ならここで
 #            中断し、他ホストへは一切接続しない(基準が信頼できないため)。
