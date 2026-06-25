@@ -63,6 +63,14 @@ Network アプリ単体バックアップ（`.unf`）は取得しない。OS バ
 pve1 で root 実行する理由は、NFS のアクセス権が root に絞られているため。
 CloudKey へは必ずホスト名で接続する（私設 CA + `Origin` ヘッダ必須。IP 直叩き禁止）。
 
+## 対応するPlaybook
+
+| Playbook | 役割 |
+|---|---|
+| `unifi_backup_fetch.yml` | CloudKey Gen2 PlusのUniFi OSシステムバックアップを週次で取得し、pve1経由でSynology NASに世代保管する。 |
+
+実装ファイルの詳細（role / defaults / Vault変数）は §11「構成ファイル」を参照。
+
 ---
 
 ## 4. ライフサイクル（block / rescue / always）

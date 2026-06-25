@@ -46,6 +46,15 @@ homelab内の管理系Web UIのTLS証明書を自動更新する。
 
 cert_renew_quory.yml は quory のみを対象とする。ansy の証明書はこのPlaybookには含まれない。
 
+## 対応するPlaybook
+
+| Playbook | 役割 |
+|---|---|
+| `cert_renew.yml` | ansy（Semaphore）/ pve1・pve2（pveproxy）/ monnie（Grafana）のTLS証明書を更新する。Semaphoreから実行する。 |
+| `cert_renew_quory.yml` | quory（Semaphore）のTLS証明書を更新する。Semaphore自身の再起動を伴うため、systemd timerから独立実行する。 |
+
+CloudKeyの証明書更新は対象外（`cert_renew_cloudkey_policy.md` / `cloudkey_cert_deploy.yml` を参照）。
+
 ---
 
 ## 4. CA構成

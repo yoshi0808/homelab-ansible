@@ -40,6 +40,12 @@
 
 inventory / group_vars / host_vars は変更しない（対象はタグで動的決定）。
 
+## 対応するPlaybook
+
+| Playbook | 役割 |
+|---|---|
+| `proxmox_backup_restore_verify.yml` | コアVMのvzdumpバックアップを月次でVMID 999へリストアし、実際に起動できることを検証する（2プレイ: 対象VM決定 → 検証）。 |
+
 ---
 
 ## 3. 対象VMの決定（Play 1, run_once on proxmox）
