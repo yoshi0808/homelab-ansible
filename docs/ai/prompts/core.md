@@ -125,7 +125,7 @@ all:
 | `radius_servers`     | `authy`        | FreeRADIUS / RADIUS サーバー管理               |
 | `monitoring_servers` | `monnie`       | 監視基盤（Prometheus / Grafana / Loki）管理    |
 | `sophos`             | `sophos-fw`    | Sophos Firewall 管理（SSD Trim 等）            |
-| `cloudkey`           | `cloudkey`     | UniFi CloudKey 管理（証明書配信・バックアップ取得・NTP状態確認等） |
+| `cloudkey_devices`   | `cloudkey`     | UniFi CloudKey 管理（証明書配信・バックアップ取得・NTP状態確認等） |
 | `local`              | `localhost`    | ansy / quory 上でのローカル処理                |
 
 `proxmox_healthcheck.yml` や `proxmox_hw_check.yml` は `proxmox` グループを対象にする。
