@@ -341,6 +341,7 @@ playbook は 1 ファイルにまとめず、運用目的ごとに分ける。
 | `cert_renew_cloudkey_policy.md`                 | CloudKey の TLS 証明書自動更新                            |
 | `proxmox_backup_restore_verify_policy.md`       | Proxmox バックアップの月次リストア検証                    |
 | `unifi_backup_fetch_policy.md`                  | CloudKey の UniFi OS システムバックアップ取得             |
+| `time_sync_check_policy.md`                     | quory 基準の NTP 同期状態チェック・quory 参照追加準備     |
 
 AI は該当システムを扱う際、本書（`core.md`）に加えて、対応する `*_policy.md`
 を必ず参照する。

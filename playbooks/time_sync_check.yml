@@ -1,15 +1,39 @@
 ---
-# time_sync_check.yml - homelab 主要ホストの NTP 同期状態チェック。
-# read-only。各ホスト自身の NTP クライアント(chrony / systemd-timesyncd / ntpclient)に
-# 同期状態を自己報告させ、異常があれば通知する。対象ホストの設定変更は行わない。
+# time_sync_check.yml
 #
-# 対象: quory(基準・Phase1でabortゲート), pve1, pve2, ansy, monnie, authy
-#       (chronyc tracking)、sophos-fw(SSH -> Advanced Shell経由でntpclientログ確認)、
-#       cloudkey(SSH パスワード認証で timedatectl status 確認)
-# 実行元: quory(本番)/ ansy(開発・CLI)
+# 目的: quoryを基準として、homelab内の主要ホストのNTP同期状態を確認する。
+#       各ホスト自身のNTPクライアントが報告するoffset値を使い、SSH越しの
+#       直接時刻比較より高精度に時刻ズレを検出する(sophos-fwのみ例外)。
 #
-# CloudKey の SSH 認証情報は inventories/vars/cloudkey.yml (Vault) から読み込む。
-# 詳細・設計転換の経緯は docs/ai/reviews/time_sync_check/2026-06-23_006_implement.md を参照。
+# 対象ホスト・実行元: quory(基準・Phase1でabortゲート)、pve1, pve2, ansy,
+#       monnie, authy(chronyc trackingのSystem time)、sophos-fw(SSH→
+#       Advanced Shell経由、自己報告手段が無いためquoryとのdate直接比較で
+#       代替)、cloudkey(SSHパスワード認証、timedatectl timesync-statusの
+#       数値Offset)。実行元はquoryまたはansy。実行元ホスト自身は比較対象
+#       から動的に除外する(time_sync_check_executor_host)。
+#
+# 主要な処理フロー:
+#   Phase 1: quory自身のchronyc trackingを確認。未収集/未同期ならここで
+#            中断し、他ホストへは一切接続しない(基準が信頼できないため)。
+#   Phase 2: pve1/pve2/ansy/monnie/authyのchronyc trackingを確認
+#            (quoryが正常な場合のみ)。
+#   Phase 3: sophos-fwとquoryのdate直接比較(SSH/メニュー往復をコント
+#            ローラー側でbefore/afterブラケットし誤差として明記)。
+#   Phase 4: cloudkeyのtimedatectl timesync-status数値Offset確認。
+#   Phase 5: 結果集約・閾値判定・Slack通知(warning/critical/error)。
+#
+# 重要な前提・制約:
+#   - read-only。対象ホストの時刻・NTP設定の変更は行わない
+#     (NTPクライアント設定へのquory参照追加は playbooks/time_sync_ntp_reference.yml
+#     で別途実施する。core.md §9: 読み取り専用ロールと変更系ロールの分離)。
+#   - sophos-fwの直接比較は、Advanced Shellのメニュー遷移全体を含む往復遅延が
+#     誤差として混入するため、他ホストより大きい閾値
+#     (time_sync_check_sophos_threshold_ms)を用いる。
+#   - quory.internal等の名前解決はsophos-fw(社内DNS)に依存する。
+#   - cloudkeyのSSHパスワード、sophos-fwのSSH鍵を扱うタスクには
+#     no_log: true を設定している。
+#
+# 参照: docs/ai/reviews/time_sync_check/2026-06-25_002_implement.md
 
 - name: Time sync check (per-host NTP self-report)
   hosts: quory:pve1:pve2:ansy:monnie:authy:sophos

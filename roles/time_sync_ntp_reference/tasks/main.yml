@@ -1,0 +1,9 @@
+---
+# CloudKey is intentionally out of scope here: its NTP server list is managed
+# through the UniFi OS GUI (with an "Auto" mode that may regenerate
+# /etc/systemd/timesyncd.conf on reboot / settings save), so a direct
+# Ansible file edit would conflict with that management path. The user
+# manages CloudKey's NTP servers manually via the GUI instead (2026-06-25).
+- name: Add quory as an additional chrony source
+  ansible.builtin.include_tasks: chrony_hosts.yml
+  when: inventory_hostname in time_sync_ntp_reference_chrony_hosts

@@ -1,0 +1,42 @@
+---
+# time_sync_ntp_reference.yml
+#
+# 目的: time_sync_check（quory基準の時刻同期チェック）の精度向上のため、
+#       各ノードのNTPクライアント設定にquoryを参照先として追加する準備作業。
+#       time_sync_check.yml本体はread-onlyのまま、本playbookのみが
+#       変更系としてNTP設定に手を加える（core.md §9: 読み取り専用ロールと
+#       変更系ロールの分離）。
+#
+# 対象ホスト・実行元: pve1, pve2, ansy, monnie, authy（chrony）。
+#       実行元はquoryまたはansy（host_vars/quory.ymlの動的ansible_connection
+#       により、quory自身が対象に含まれる場合も自己SSHにならない）。
+#       cloudkeyは対象外（UniFi OSのGUIで管理されており「Auto」設定が
+#       再起動・GUI保存時にtimesyncd.confを再生成する可能性があるため、
+#       直接ファイル編集はGUI管理と衝突する。ユーザーがGUIから手動で
+#       quory.internalを含むNTPサーバーを登録する運用とした。2026-06-25）。
+#       sophos-fwも対象外（独自設定データベースで管理されており、
+#       Advanced Shell経由の変更は非サポート・サポート失効リスクのため
+#       quory参照の追加は不可と判断。既存の外部NTP参照を維持する）。
+#
+# 主要な処理フロー:
+#   chronyホスト: /etc/chrony/conf.d/quory.conf に
+#   `server quory.internal iburst` を配置（既存のpool/sources.d設定は
+#   変更しない。追加のみ）。新規ファイル作成時のみchronyを再起動。
+#
+# 重要な前提・制約:
+#   - quory自体は `/etc/chrony/chrony.conf` にhomelab管理ネットワーク向けの
+#     allow設定が既に設定済み・123/udp稼働確認済みのため、quory側の追加対応は不要。
+#   - quory.internal の名前解決は sophos-fw（社内DNS）に依存する。
+#     sophos-fwが起動していない場合、quory参照の追加・time_sync_check双方が
+#     正常に動作しない前提を許容する（別途の冗長化は対象外）。
+#   - 本playbookは変更系（chronyの再起動を伴う）。実行前にCodexレビューおよび
+#     --check/--diffでの確認を経ること。
+#
+# 参照: docs/ai/reviews/time_sync_check/2026-06-25_002_implement.md
+
+- name: Add quory as an additional NTP reference on homelab nodes
+  hosts: pve1:pve2:ansy:monnie:authy
+  gather_facts: false
+  become: true
+  roles:
+    - time_sync_ntp_reference

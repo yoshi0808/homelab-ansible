@@ -4,37 +4,43 @@
 # targets are not even connected to).
 time_sync_check_reference_host: quory
 
+# Host actually running ansible-playbook (quory or ansy). lookup('pipe', ...)
+# always executes on the controller, regardless of which inventory_hostname's
+# template context evaluates it, so this is safe to use as a filter below.
+# Used to dynamically exclude the executor from the comparison targets
+# (comparing a host against itself is meaningless; see 2026-06-25 requirement).
+time_sync_check_executor_host: "{{ lookup('pipe', 'hostname -s') }}"
+
 # Hosts that run chrony and are reachable via the normal ann-key SSH
 # connection. quory itself is also checked the same way (chronyc tracking),
 # but kept out of this list / out of time_sync_check_targets since it has
-# its own dedicated Phase 1 gate above.
-time_sync_check_chrony_hosts:
-  - pve1
-  - pve2
-  - ansy
-  - monnie
-  - authy
+# its own dedicated Phase 1 gate above. The executor host (quory or ansy) is
+# excluded dynamically so it never compares against itself.
+time_sync_check_chrony_hosts: >-
+  {{ ['pve1', 'pve2', 'ansy', 'monnie', 'authy']
+     | reject('equalto', time_sync_check_executor_host) | list }}
 
 # Comparison targets (excludes the reference host itself).
-# sophos-fw is checked via Advanced Shell (expect) reading /var/tslog/ntpclient.log;
-# cloudkey is checked via password SSH (expect) reading `timedatectl status`.
+# sophos-fw is checked via Advanced Shell (expect) + direct date comparison
+# against quory (no self-reporting NTP client available on sophos-fw);
+# cloudkey is checked via password SSH (expect) reading
+# `timedatectl timesync-status`.
 time_sync_check_targets: "{{ time_sync_check_chrony_hosts + ['sophos-fw', 'cloudkey'] }}"
 
-# For chrony-based hosts only: warn when chrony's own measured System time
-# offset (its own statistically-tracked NTP offset, not a value we measure
-# ourselves over the network) exceeds this.
+# Common offset threshold for chrony hosts and CloudKey (systemd-timesyncd),
+# both of which report their own statistically-tracked NTP offset directly.
 time_sync_check_threshold_ms: 500
+
+# sophos-fw has no self-reporting NTP client, so its offset is measured via a
+# direct `date` comparison over an interactive Advanced Shell SSH session.
+# The full menu-navigation round trip (not just the date command itself) is
+# bracketed on the controller side, so the SSH/menu latency itself becomes
+# part of the measured error. This threshold is intentionally much larger
+# than time_sync_check_threshold_ms to account for that.
+time_sync_check_sophos_threshold_ms: 5000
 
 # Timeout for the expect-based SSH sessions (Sophos / CloudKey).
 time_sync_check_ssh_timeout: 60
-
-# How many trailing lines of /var/tslog/ntpclient.log to inspect on Sophos.
-time_sync_check_sophos_log_lines: 5
-
-# Sophos's ntpclient runs once daily. If /var/tslog/ntpclient.log hasn't been
-# touched within this many hours, treat it as stale (ntpclient itself may have
-# stopped running) even if its last logged line was a success.
-time_sync_check_sophos_max_age_hours: 30
 
 # CloudKey connection target (DNS name; see core.md §3 - no IP literals).
 cloudkey_host: cloudkey.internal

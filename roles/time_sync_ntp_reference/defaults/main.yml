@@ -1,0 +1,9 @@
+---
+time_sync_ntp_reference_host: quory.internal
+
+time_sync_ntp_reference_chrony_hosts:
+  - pve1
+  - pve2
+  - ansy
+  - monnie
+  - authy

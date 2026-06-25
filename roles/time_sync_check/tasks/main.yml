@@ -91,11 +91,31 @@
 
 # ---------------------------------------------------------------------------
 # Phase 3 (Sophos): SSH -> Advanced Shell経由 (メニュー "5"->"3", 終了 exit->"0"->"0")
-# sophos_trim role の遷移ロジックを流用する。/var/tslog/ntpclient.log の末尾行が
-# 成功(System Clock set to)で、かつファイルの更新が直近(daily実行が停止していない)
-# であることの両方を正常条件とする。
+# sophos_trim role の遷移ロジックを流用する。sophos-fw には offset を自己報告する
+# NTPクライアントが存在しない(独自ntpclient実装、ログは絶対時刻のみ)ため、
+# quoryとのdate直接比較で代替する(2026-06-25、自己報告方式から変更)。
+#
+# 精度上の注意: ansible.builtin.expect はメニュー遷移全体を1タスクとして実行する
+# ため、コントローラー側のbefore/after計測はSSH接続〜メニュー操作〜date取得〜exit
+# の全体区間を挟むことになり、単純な1コマンドの往復よりかなり長くなる
+# (実機計測で前後の幅を time_sync_detail に記録し、Slack通知にも残す)。
+# このSSH往復遅延が誤差として直接混入するため、sophos-fw専用に他ホストより
+# 大きい閾値(time_sync_check_sophos_threshold_ms)を設けている。
 # ---------------------------------------------------------------------------
-- name: Check ntpclient sync log (Sophos via Advanced Shell)
+- name: Record controller time before Sophos SSH session
+  ansible.builtin.set_fact:
+    # Seconds-only (not %3N): the controller may run uutils-coreutils (Rust),
+    # whose `date +%s%3N` silently mis-truncates the nanosecond digits. The
+    # bracket already spans multiple seconds (Advanced Shell menu round
+    # trip), so second-level precision here does not add meaningful error.
+    time_sync_sophos_t_before_ms: "{{ ((lookup('pipe', 'date +%s')) | int) * 1000 }}"
+  delegate_to: localhost
+  check_mode: false
+  when:
+    - hostvars[time_sync_check_reference_host].time_sync_synced | default(false)
+    - inventory_hostname == 'sophos-fw'
+
+- name: Check current time (Sophos via Advanced Shell, direct date comparison)
   ansible.builtin.expect:
     command: >-
       ssh
@@ -110,7 +130,7 @@
         - "3"
         - "0"
       '# ':
-        - "echo __MTIME__:$(stat -c %Y /var/tslog/ntpclient.log 2>/dev/null); echo __NOW__:$(date +%s); tail -n {{ time_sync_check_sophos_log_lines }} /var/tslog/ntpclient.log 2>&1; echo __NTP_LOG_RC__:$?"
+        - "echo __SOPHOS_NOW__:$(date +%s%3N); echo __DATE_RC__:$?"
         - "exit"
     timeout: "{{ time_sync_check_ssh_timeout }}"
   delegate_to: localhost
@@ -122,29 +142,38 @@
     - hostvars[time_sync_check_reference_host].time_sync_synced | default(false)
     - inventory_hostname == 'sophos-fw'
 
-- name: Judge ntpclient sync status (Sophos)
+- name: Record controller time after Sophos SSH session
   ansible.builtin.set_fact:
-    time_sync_collected: "{{ _rc_found and (_rc | int) == 0 and _mtime_found and _now_found }}"
-    time_sync_synced: "{{ _rc_found and (_rc | int) == 0 and _mtime_found and _now_found and _last_line_ok and _fresh }}"
+    # See "before" task above for why this is seconds-only, not %3N.
+    time_sync_sophos_t_after_ms: "{{ ((lookup('pipe', 'date +%s')) | int) * 1000 }}"
+  delegate_to: localhost
+  check_mode: false
+  when:
+    - hostvars[time_sync_check_reference_host].time_sync_synced | default(false)
+    - inventory_hostname == 'sophos-fw'
+
+- name: Judge time sync status (Sophos, direct date comparison)
+  ansible.builtin.set_fact:
+    time_sync_collected: "{{ _rc_found and (_rc | int) == 0 and _remote_found }}"
+    time_sync_synced: >-
+      {{ _rc_found and (_rc | int) == 0 and _remote_found
+         and ((_offset_ms | abs) <= time_sync_check_sophos_threshold_ms) }}
+    time_sync_offset_ms: "{{ _offset_ms }}"
     time_sync_detail: >-
-      {{ _last_line }}{{ '' if _fresh else ' (stale: last update ' ~ _age_hours ~ 'h ago)' }}
+      {{ ('offset=' ~ (_offset_ms | round(0) | int) ~ 'ms (SSH往復 約' ~ _rtt_ms ~ 'ms、date直接比較。往復遅延が誤差として混入)')
+         if _remote_found else '(date +%s%3N の出力を解析できなかった)' }}
   vars:
-    _log_lines: "{{ (time_sync_sophos_raw.stdout | default('')).split('\n') | select('match', '^(MESSAGE|ERROR)') | list }}"
-    _last_line: "{{ _log_lines[-1] if (_log_lines | length > 0) else '(/var/tslog/ntpclient.log にログ行が見つからない)' }}"
-    _last_line_ok: "{{ _last_line is search('System Clock set to') }}"
-    _rc_match: "{{ (time_sync_sophos_raw.stdout | default('') | regex_search('__NTP_LOG_RC__:([0-9]+)', '\\1') | default([], true) | first) | default('', true) }}"
+    _rc_match: >-
+      {{ (time_sync_sophos_raw.stdout | default('') | regex_search('__DATE_RC__:([0-9]+)', '\1') | default([], true) | first) | default('', true) }}
     _rc_found: "{{ _rc_match | length > 0 }}"
     _rc: "{{ _rc_match | default('1', true) }}"
-    _mtime_match: "{{ (time_sync_sophos_raw.stdout | default('') | regex_search('__MTIME__:([0-9]+)', '\\1') | default([], true) | first) | default('', true) }}"
-    _mtime_found: "{{ _mtime_match | length > 0 }}"
-    _now_match: "{{ (time_sync_sophos_raw.stdout | default('') | regex_search('__NOW__:([0-9]+)', '\\1') | default([], true) | first) | default('', true) }}"
-    _now_found: "{{ _now_match | length > 0 }}"
-    _age_sec: "{{ ((_now_match | default('0', true) | int) - (_mtime_match | default('0', true) | int)) }}"
-    _age_hours: "{{ (_age_sec / 3600) | round(1) }}"
-    _fresh: >-
-      {{ _mtime_found and _now_found
-         and ((_age_sec | int) >= 0)
-         and ((_age_sec | int) <= (time_sync_check_sophos_max_age_hours | int) * 3600) }}
+    _remote_match: >-
+      {{ (time_sync_sophos_raw.stdout | default('') | regex_search('__SOPHOS_NOW__:([0-9]+)', '\1') | default([], true) | first) | default('', true) }}
+    _remote_found: "{{ _remote_match | length > 0 }}"
+    _remote_ms: "{{ _remote_match | default('0', true) | int }}"
+    _midpoint_ms: "{{ ((time_sync_sophos_t_before_ms | default(0, true) | int) + (time_sync_sophos_t_after_ms | default(0, true) | int)) / 2 }}"
+    _rtt_ms: "{{ (time_sync_sophos_t_after_ms | default(0, true) | int) - (time_sync_sophos_t_before_ms | default(0, true) | int) }}"
+    _offset_ms: "{{ (_remote_ms - _midpoint_ms) if _remote_found else 0 }}"
   when:
     - hostvars[time_sync_check_reference_host].time_sync_synced | default(false)
     - inventory_hostname == 'sophos-fw'
@@ -169,7 +198,7 @@
       '(?i)password:':
         - "{{ cloudkey_ssh_password }}"
       '# ':
-        - "timedatectl status; echo __NTP_STATUS_RC__:$?"
+        - "timedatectl timesync-status; echo __NTP_STATUS_RC__:$?"
         - "exit"
     timeout: "{{ time_sync_check_ssh_timeout }}"
   delegate_to: localhost
@@ -182,22 +211,29 @@
 
 - name: Judge NTP sync status (CloudKey)
   ansible.builtin.set_fact:
-    time_sync_collected: "{{ _rc_found and (_rc | int) == 0 and _status_found }}"
+    time_sync_collected: "{{ _rc_found and (_rc | int) == 0 and _offset_found }}"
     time_sync_synced: >-
-      {{ _rc_found and (_rc | int) == 0 and _status_found
-         and (_sync_value == 'yes') and (_service_value == 'active') }}
-    time_sync_detail: >-
-      {{ 'System clock synchronized: ' ~ (_sync_value | default('(not found)', true))
-         ~ ' / NTP service: ' ~ (_service_value | default('(not found)', true)) }}
+      {{ _rc_found and (_rc | int) == 0 and _offset_found
+         and ((_offset_ms | abs) <= time_sync_check_threshold_ms) }}
+    time_sync_offset_ms: "{{ _offset_ms }}"
+    time_sync_detail: "{{ _offset_line }}"
   vars:
-    _rc_match: "{{ (time_sync_cloudkey_raw.stdout | default('') | regex_search('__NTP_STATUS_RC__:([0-9]+)', '\\1') | default([], true) | first) | default('', true) }}"
+    _rc_match: >-
+      {{ (time_sync_cloudkey_raw.stdout | default('') | regex_search('__NTP_STATUS_RC__:([0-9]+)', '\1') | default([], true) | first) | default('', true) }}
     _rc_found: "{{ _rc_match | length > 0 }}"
     _rc: "{{ _rc_match | default('1', true) }}"
-    _sync_value: >-
-      {{ (time_sync_cloudkey_raw.stdout | default('') | regex_search('System clock synchronized:\s*(\S+)', '\1') | default([], true) | first) | default('', true) }}
-    _service_value: >-
-      {{ (time_sync_cloudkey_raw.stdout | default('') | regex_search('NTP service:\s*(\S+)', '\1') | default([], true) | first) | default('', true) }}
-    _status_found: "{{ (_sync_value | length > 0) and (_service_value | length > 0) }}"
+    _offset_num_match: >-
+      {{ (time_sync_cloudkey_raw.stdout | default('') | regex_search('Offset:\s*([+-]?[0-9.]+)(us|ms|s)\b', '\1') | default([], true) | first) | default('', true) }}
+    _offset_unit_match: >-
+      {{ (time_sync_cloudkey_raw.stdout | default('') | regex_search('Offset:\s*([+-]?[0-9.]+)(us|ms|s)\b', '\2') | default([], true) | first) | default('', true) }}
+    _offset_found: "{{ (_offset_num_match | length > 0) and (_offset_unit_match | length > 0) }}"
+    _offset_ms: >-
+      {{ ((_offset_num_match | float) / 1000) if (_offset_found and _offset_unit_match == 'us')
+         else ((_offset_num_match | float) * 1000) if (_offset_found and _offset_unit_match == 's')
+         else (_offset_num_match | float) if _offset_found
+         else 0 }}
+    _offset_line: >-
+      {{ ((time_sync_cloudkey_raw.stdout | default('') | regex_search('Offset:.*')) | default('(no timesync-status output / offset not parseable)', true)) | trim }}
   delegate_to: localhost
   delegate_facts: true
   run_once: true

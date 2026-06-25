@@ -1,0 +1,16 @@
+---
+- name: Deploy chrony conf.d drop-in referencing quory
+  ansible.builtin.copy:
+    dest: /etc/chrony/conf.d/quory.conf
+    content: |
+      server {{ time_sync_ntp_reference_host }} iburst
+    owner: root
+    group: root
+    mode: "0644"
+  register: time_sync_ntp_reference_chrony_dropin
+
+- name: Restart chrony to pick up the new source
+  ansible.builtin.systemd:
+    name: chrony
+    state: restarted
+  when: time_sync_ntp_reference_chrony_dropin.changed
