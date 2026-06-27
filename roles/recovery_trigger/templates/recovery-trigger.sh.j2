@@ -62,6 +62,9 @@ if ! mkdir "$LOCK_FILE" 2>/dev/null; then
   logger -t "$LOG_TAG" "SKIP $TARGET: pipeline already running (lock exists)"
   exit 0
 fi
+# pipeline 起動前に異常終了した場合はこの trap が lock を解放する。
+# pipeline 起動後は trap を解除し、pipeline.sh の EXIT trap に引き継ぐ。
+trap 'rmdir "$LOCK_FILE" 2>/dev/null || true' EXIT
 
 # ---------------------------------------------------------------------------
 # 4. Flapping count — 24h window, 3+ triggers → immediate escalation
@@ -105,5 +108,8 @@ LOG_FILE="$LOG_DIR/${TARGET}_$(date -u +%Y%m%dT%H%M%SZ).log"
 
 nohup sudo -u "$PIPELINE_USER" "$PIPELINE" "$TARGET" "$ESCALATE_FLAG" \
   >"$LOG_FILE" 2>&1 &
+
+# pipeline が起動した — lock cleanup を pipeline.sh の EXIT trap に引き継ぐ
+trap - EXIT
 
 logger -t "$LOG_TAG" "TRIGGERED $TARGET: pipeline pid=$! log=$LOG_FILE"
