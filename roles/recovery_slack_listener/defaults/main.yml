@@ -11,3 +11,13 @@ recovery_slack_targets:
   - authy
   - monnie
   - sophos-fw
+
+recovery_slack_status_user: ann
+recovery_slack_sophos_host: sophos-fw.internal
+recovery_slack_status_targets:
+  - name: authy
+    host: authy.internal
+    script: /usr/local/sbin/radius-healthcheck.sh
+  - name: monnie
+    host: monnie.internal
+    script: /usr/local/sbin/monitoring-healthcheck.sh

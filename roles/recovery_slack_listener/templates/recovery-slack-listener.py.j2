@@ -2,10 +2,12 @@
 # Homelab Recovery Slack Listener
 # Runs on ansy. Receives app_mention events via Socket Mode.
 # Only responds to mentions from the authorized Slack user.
-# Parses target (authy/monnie/sophos-fw) from mention text,
-# then SSHes to quory as trigger user to start the recovery pipeline
-# with manual=1 flag (flapping check skipped per policy §6.3).
+#
+# Intent routing:
+#   "状態" / "確認" / "check" / "status" → status check (healthcheck script via SSH)
+#   other (default)                        → trigger recovery pipeline (flapping skip, manual=1)
 
+import json
 import os
 import subprocess
 import logging
@@ -26,15 +28,28 @@ APP_TOKEN           = os.environ["SLACK_APP_TOKEN"]
 AUTHORIZED_USER_ID  = os.environ["SLACK_AUTHORIZED_USER_ID"]
 QUORY_HOST          = os.environ.get("RECOVERY_QUORY_HOST", "{{ recovery_slack_quory_host }}")
 TRIGGER_USER        = "{{ recovery_slack_trigger_user }}"
+STATUS_USER         = "{{ recovery_slack_status_user }}"
 KEY_DIR             = "{{ recovery_slack_listener_key_dir }}"
+SOPHOS_HOST         = "{{ recovery_slack_sophos_host }}"
 SSH_TIMEOUT         = 15
 
 TARGETS = {{ recovery_slack_targets | to_json }}
+
+STATUS_TARGETS_CFG = {{ recovery_slack_status_targets | to_json }}
+STATUS_HOST = {item["name"]: item["host"] for item in STATUS_TARGETS_CFG}
+STATUS_KEY  = {
+    item["name"]: f"{KEY_DIR}/id_status_ansy_{item['name'].replace('-', '_')}"
+    for item in STATUS_TARGETS_CFG
+}
+CHECKABLE = set(STATUS_HOST.keys())
 
 TARGET_KEY = {
     t: f"{KEY_DIR}/id_trigger_ansy_{t.replace('-', '_')}"
     for t in TARGETS
 }
+
+_STATUS_KW  = ("状態", "確認", "check", "status", "health", "ステータス")
+_TRIGGER_KW = ("復旧", "再起動", "restart", "recover", "fix", "起動")
 
 app = App(token=BOT_TOKEN)
 
@@ -47,12 +62,21 @@ def parse_target(text: str):
     return None
 
 
+def parse_intent(text: str) -> str:
+    lower = text.lower()
+    for kw in _STATUS_KW:
+        if kw in lower:
+            return "status"
+    return "trigger"
+
+
+# ---- trigger ---------------------------------------------------------------
+
 def trigger_recovery(target: str) -> bool:
-    key_path = TARGET_KEY[target]
     result = subprocess.run(
         [
             "ssh",
-            "-i", key_path,
+            "-i", TARGET_KEY[target],
             "-o", "StrictHostKeyChecking=yes",
             "-o", "BatchMode=yes",
             "-o", "ConnectTimeout=10",
@@ -64,6 +88,85 @@ def trigger_recovery(target: str) -> bool:
     log.info("trigger_recovery target=%s rc=%d", target, result.returncode)
     return result.returncode == 0
 
+
+# ---- status check ----------------------------------------------------------
+
+def check_status_ssh(target: str):
+    """SSH to target with forced-command key; returns parsed JSON dict or None."""
+    result = subprocess.run(
+        [
+            "ssh",
+            "-i", STATUS_KEY[target],
+            "-o", "StrictHostKeyChecking=yes",
+            "-o", "BatchMode=yes",
+            "-o", "ConnectTimeout=10",
+            f"{STATUS_USER}@{STATUS_HOST[target]}",
+        ],
+        timeout=SSH_TIMEOUT,
+        capture_output=True,
+        text=True,
+    )
+    log.info("check_status target=%s rc=%d", target, result.returncode)
+    if result.returncode != 0:
+        log.error("check_status stderr: %s", result.stderr[:300])
+        return None
+    try:
+        return json.loads(result.stdout)
+    except json.JSONDecodeError:
+        log.error("check_status: invalid JSON: %s", result.stdout[:200])
+        return None
+
+
+def check_status_ping(host: str) -> bool:
+    result = subprocess.run(
+        ["ping", "-c", "1", "-W", "3", host],
+        capture_output=True,
+    )
+    return result.returncode == 0
+
+
+def _icon(ok: bool) -> str:
+    return "✅" if ok else "❌"
+
+
+def format_status_authy(data: dict) -> str:
+    fr  = data.get("freeradius", {})
+    pts = data.get("ports", {})
+    mem = data.get("memory", {})
+    jnl = data.get("journal", {})
+    active = fr.get("service_active", "?")
+    lines = [
+        f"*authy 状態* ({data.get('collected_at', '?')})",
+        f"freeradius: {_icon(active == 'active')} {active}  (v{fr.get('version', '?')})",
+        f"1812/udp: {_icon(pts.get('udp_1812') == 'yes')}  1813/udp: {_icon(pts.get('udp_1813') == 'yes')}",
+        f"メモリ: {mem.get('used_percent', '?')}%  ({mem.get('used_mb', '?')}/{mem.get('total_mb', '?')} MB)",
+        f"ジャーナルエラー(1h): {jnl.get('error_count_1h', '?')}",
+    ]
+    return "\n".join(lines)
+
+
+def format_status_monnie(data: dict) -> str:
+    svc = data.get("services", {})
+    pts = data.get("ports", {})
+    mem = data.get("memory", {})
+    lines = [
+        f"*monnie 状態* ({data.get('collected_at', '?')})",
+        f"prometheus: {_icon(svc.get('prometheus') == 'active')} {svc.get('prometheus', '?')}",
+        f"grafana:    {_icon(svc.get('grafana') == 'active')} {svc.get('grafana', '?')}",
+        f"loki:       {_icon(svc.get('loki') == 'active')} {svc.get('loki', '?')}",
+        f"9090/tcp: {_icon(pts.get('tcp_9090') == 'yes')}  3000/tcp: {_icon(pts.get('tcp_3000') == 'yes')}  3100/tcp: {_icon(pts.get('tcp_3100') == 'yes')}",
+        f"メモリ: {mem.get('used_percent', '?')}%  ({mem.get('used_mb', '?')}/{mem.get('total_mb', '?')} MB)",
+    ]
+    return "\n".join(lines)
+
+
+_FORMAT = {
+    "authy":  format_status_authy,
+    "monnie": format_status_monnie,
+}
+
+
+# ---- event handler ---------------------------------------------------------
 
 @app.event("app_mention")
 def handle_mention(event, say):
@@ -84,6 +187,34 @@ def handle_mention(event, say):
         )
         return
 
+    intent = parse_intent(text)
+
+    # ---- status intent ----
+    if intent == "status":
+        if target == "sophos-fw":
+            reachable = check_status_ping(SOPHOS_HOST)
+            say(
+                f"<@{user_id}> *sophos-fw 状態*\n"
+                f"到達可能: {_icon(reachable)} ({'ping OK' if reachable else 'ping 失敗'})"
+            )
+            return
+
+        say(f"<@{user_id}> `{target}` の状態を確認します...")
+        try:
+            data = check_status_ssh(target)
+        except subprocess.TimeoutExpired:
+            log.error("SSH status check timed out for target=%s", target)
+            say(f"<@{user_id}> `{target}` への接続がタイムアウトしました。")
+            return
+
+        if data is None:
+            say(f"<@{user_id}> `{target}` の状態取得に失敗しました (SSH / パースエラー)。")
+            return
+
+        say(f"<@{user_id}>\n{_FORMAT[target](data)}")
+        return
+
+    # ---- trigger intent ----
     say(f"<@{user_id}> `{target}` の復旧パイプラインを起動します...")
 
     try:

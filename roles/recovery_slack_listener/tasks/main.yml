@@ -99,6 +99,58 @@
   become: true
 
 # ---------------------------------------------------------------------------
+# Status check SSH keypairs: ansy → authy/monnie (forced command, ann user)
+# ---------------------------------------------------------------------------
+
+- name: Generate status check SSH keypairs on ansy
+  ansible.builtin.command:
+    cmd: >-
+      ssh-keygen -t ed25519 -N ''
+      -C "recovery-status-ansy-{{ item.name }}"
+      -f {{ recovery_slack_listener_key_dir }}/id_status_ansy_{{ item.name | replace('-', '_') }}
+    creates: "{{ recovery_slack_listener_key_dir }}/id_status_ansy_{{ item.name | replace('-', '_') }}"
+  loop: "{{ recovery_slack_status_targets }}"
+  become: true
+
+- name: Lock down status key permissions
+  ansible.builtin.file:
+    path: "{{ recovery_slack_listener_key_dir }}/id_status_ansy_{{ item.name | replace('-', '_') }}"
+    owner: "{{ recovery_slack_listener_user }}"
+    group: "{{ recovery_slack_listener_user }}"
+    mode: "0600"
+  loop: "{{ recovery_slack_status_targets }}"
+  become: true
+
+- name: Fetch status check public keys
+  ansible.builtin.slurp:
+    src: "{{ recovery_slack_listener_key_dir }}/id_status_ansy_{{ item.name | replace('-', '_') }}.pub"
+  register: _rsl_status_pubkeys
+  loop: "{{ recovery_slack_status_targets }}"
+  become: true
+
+- name: Register status check keys on target hosts (forced command)
+  ansible.posix.authorized_key:
+    user: "{{ recovery_slack_status_user }}"
+    key: "{{ _rsl_status_pubkeys.results[idx].content | b64decode | trim }}"
+    key_options: >-
+      command="{{ recovery_slack_status_targets[idx].script }}",no-agent-forwarding,no-X11-forwarding,no-port-forwarding,no-pty
+    state: present
+  loop: "{{ recovery_slack_status_targets }}"
+  loop_control:
+    index_var: idx
+  delegate_to: "{{ item.name }}"
+  become: true
+
+- name: Add authy/monnie host keys to recovery-slack known_hosts
+  ansible.builtin.known_hosts:
+    name: "{{ item.host }}"
+    key: "{{ lookup('pipe', 'ssh-keyscan -H ' + item.host) }}"
+    path: "/home/{{ recovery_slack_listener_user }}/.ssh/known_hosts"
+    state: present
+  loop: "{{ recovery_slack_status_targets }}"
+  become: true
+
+# ---------------------------------------------------------------------------
 # Python venv + slack-bolt
 # ---------------------------------------------------------------------------
 
