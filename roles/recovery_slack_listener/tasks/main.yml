@@ -99,7 +99,7 @@
   become: true
 
 # ---------------------------------------------------------------------------
-# Status check SSH keypairs: ansy → authy/monnie (forced command, ann user)
+# Status check SSH keypairs: ansy → authy/monnie (forced command, recovery-slack user)
 # ---------------------------------------------------------------------------
 
 - name: Generate status check SSH keypairs on ansy
@@ -126,6 +126,38 @@
     src: "{{ recovery_slack_listener_key_dir }}/id_status_ansy_{{ item.name | replace('-', '_') }}.pub"
   register: _rsl_status_pubkeys
   loop: "{{ recovery_slack_status_targets }}"
+  become: true
+
+- name: Create recovery-slack user on status check targets
+  ansible.builtin.user:
+    name: "{{ recovery_slack_status_user }}"
+    shell: /usr/sbin/nologin
+    create_home: true
+    password: "!"
+    comment: "Recovery status check account"
+    groups: systemd-journal
+    append: true
+  loop: "{{ recovery_slack_status_targets }}"
+  delegate_to: "{{ item.name }}"
+  become: true
+
+- name: Ensure healthcheck scripts are executable by recovery-slack
+  ansible.builtin.file:
+    path: "{{ item.script }}"
+    mode: "0755"
+  loop: "{{ recovery_slack_status_targets }}"
+  delegate_to: "{{ item.name }}"
+  become: true
+
+- name: Remove old status key from ann authorized_keys (cleanup)
+  ansible.posix.authorized_key:
+    user: ann
+    key: "{{ _rsl_status_pubkeys.results[idx].content | b64decode | trim }}"
+    state: absent
+  loop: "{{ recovery_slack_status_targets }}"
+  loop_control:
+    index_var: idx
+  delegate_to: "{{ item.name }}"
   become: true
 
 - name: Register status check keys on target hosts (forced command)

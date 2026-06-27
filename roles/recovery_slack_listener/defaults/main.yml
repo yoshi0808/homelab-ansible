@@ -12,7 +12,7 @@ recovery_slack_targets:
   - monnie
   - sophos-fw
 
-recovery_slack_status_user: ann
+recovery_slack_status_user: recovery-slack
 recovery_slack_sophos_host: sophos-fw.internal
 recovery_slack_status_targets:
   - name: authy
