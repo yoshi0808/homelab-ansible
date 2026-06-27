@@ -27,5 +27,5 @@
         slack_message: |
           対象    : {{ target }}
           理由    : {{ escalate_reason }}
-          時刻    : {{ lookup('pipe', 'date -u +%Y-%m-%dT%H:%M:%SZ') }}
+          時刻    : {{ lookup('pipe', "TZ='Asia/Tokyo' date '+%Y-%m-%dT%H:%M:%S+09:00'") }}
           対応    : 手動調査・復旧が必要です。自動対応を終了しました。

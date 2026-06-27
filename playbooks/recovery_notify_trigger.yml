@@ -24,5 +24,5 @@
         slack_message: |
           対象    : {{ target }}
           状況    : 自律復旧パイプラインを開始しました
-          時刻    : {{ lookup('pipe', 'date -u +%Y-%m-%dT%H:%M:%SZ') }}
+          時刻    : {{ lookup('pipe', "TZ='Asia/Tokyo' date '+%Y-%m-%dT%H:%M:%S+09:00'") }}
           次のアクション: 調査 → ラダー実行 (service restart → VM reboot → HA failover)

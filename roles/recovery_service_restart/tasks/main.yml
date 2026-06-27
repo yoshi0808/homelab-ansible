@@ -9,7 +9,7 @@
     _rsr_vmid: "(unknown)"
     _rsr_vm_node: "(unknown)"
     _rsr_units: []
-    _rsr_started_at: "{{ lookup('pipe', 'date -u +%Y-%m-%dT%H:%M:%SZ') }}"
+    _rsr_started_at: "{{ lookup('pipe', \"TZ='Asia/Tokyo' date '+%Y-%m-%dT%H:%M:%S+09:00'\") }}"
 
 - name: Service restart attempt (with report/notify in always)
   block:
@@ -140,7 +140,7 @@
           action: "service_restart"
           services: "{{ _rsr_units }}"
           started_at: "{{ _rsr_started_at }}"
-          completed_at: "{{ lookup('pipe', 'date -u +%Y-%m-%dT%H:%M:%SZ') }}"
+          completed_at: "{{ lookup('pipe', \"TZ='Asia/Tokyo' date '+%Y-%m-%dT%H:%M:%S+09:00'\") }}"
           result: "{{ _rsr_result }}"
           detail: "{{ _rsr_detail }}"
       delegate_to: localhost
