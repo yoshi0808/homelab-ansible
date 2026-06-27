@@ -8,6 +8,7 @@ set -uo pipefail
 prometheus_service_active=$(systemctl is-active prometheus 2>/dev/null) || prometheus_service_active="inactive"
 grafana_service_active=$(systemctl is-active grafana-server 2>/dev/null) || grafana_service_active="inactive"
 loki_service_active=$(systemctl is-active loki 2>/dev/null) || loki_service_active="inactive"
+unpoller_service_active=$(systemctl is-active unpoller 2>/dev/null) || unpoller_service_active="inactive"
 
 if ss -H -ltn 2>/dev/null | awk '{print $4}' | grep -qE ':9090$'; then
   port_9090="yes"
@@ -52,6 +53,7 @@ fi
 PROMETHEUS_SERVICE_ACTIVE="$prometheus_service_active" \
 GRAFANA_SERVICE_ACTIVE="$grafana_service_active" \
 LOKI_SERVICE_ACTIVE="$loki_service_active" \
+UNPOLLER_SERVICE_ACTIVE="$unpoller_service_active" \
 PORT_9090="$port_9090" \
 PORT_3000="$port_3000" \
 PORT_3100="$port_3100" \
@@ -75,7 +77,8 @@ print(json.dumps({
     "services": {
         "prometheus": os.environ["PROMETHEUS_SERVICE_ACTIVE"],
         "grafana": os.environ["GRAFANA_SERVICE_ACTIVE"],
-        "loki": os.environ["LOKI_SERVICE_ACTIVE"]
+        "loki": os.environ["LOKI_SERVICE_ACTIVE"],
+        "unpoller": os.environ["UNPOLLER_SERVICE_ACTIVE"]
     },
     "ports": {
         "tcp_9090": os.environ["PORT_9090"],

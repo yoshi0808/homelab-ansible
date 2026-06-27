@@ -21,3 +21,7 @@ recovery_slack_status_targets:
   - name: monnie
     host: monnie.internal
     script: /usr/local/sbin/monitoring-healthcheck.sh
+
+recovery_slack_claude_path: /usr/local/bin/claude
+recovery_slack_claude_ws: /etc/recovery/claude-ws
+recovery_slack_max_turns: 6

@@ -120,10 +120,10 @@
 # trigger user (SSH entry point)
 # ---------------------------------------------------------------------------
 
-- name: Create trigger user (nologin, no password)
+- name: Create trigger user (no password, forced-command only)
   ansible.builtin.user:
     name: "{{ recovery_trigger_user }}"
-    shell: /usr/sbin/nologin
+    shell: /bin/sh
     create_home: true
     password: "!"
     groups: homelab-recovery
@@ -196,3 +196,15 @@
     mode: "0440"
     validate: visudo -cf %s
   become: true
+
+# ---------------------------------------------------------------------------
+# Sync homelab-ansible repo so recovery playbooks are always up to date
+# ---------------------------------------------------------------------------
+
+- name: Pull latest homelab-ansible on quory (ensures recovery playbooks are current)
+  ansible.builtin.command:
+    cmd: git -C /home/yoshi/homelab-ansible pull
+  become: true
+  become_user: yoshi
+  register: _git_pull
+  changed_when: "'Already up to date.' not in _git_pull.stdout"

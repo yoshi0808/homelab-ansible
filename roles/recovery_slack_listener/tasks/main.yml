@@ -131,7 +131,7 @@
 - name: Create recovery-slack user on status check targets
   ansible.builtin.user:
     name: "{{ recovery_slack_status_user }}"
-    shell: /usr/sbin/nologin
+    shell: /bin/sh
     create_home: true
     password: "!"
     comment: "Recovery status check account"
@@ -180,6 +180,66 @@
     path: "/home/{{ recovery_slack_listener_user }}/.ssh/known_hosts"
     state: present
   loop: "{{ recovery_slack_status_targets }}"
+  become: true
+
+# ---------------------------------------------------------------------------
+# Claude binary (global install via npm)
+# ---------------------------------------------------------------------------
+
+- name: Install nodejs (bundles npm; conflicts with standalone npm package)
+  ansible.builtin.apt:
+    name: nodejs
+    state: present
+    update_cache: false
+  become: true
+
+- name: Install claude globally via npm
+  ansible.builtin.command:
+    cmd: npm install -g --prefix /usr/local @anthropic-ai/claude-code
+    creates: /usr/local/bin/claude
+  become: true
+
+# ---------------------------------------------------------------------------
+# Claude workspace: minimal settings (deny Bash / Write / Edit)
+# ---------------------------------------------------------------------------
+
+- name: Create claude workspace directories
+  ansible.builtin.file:
+    path: "{{ recovery_slack_claude_ws }}/.claude"
+    state: directory
+    owner: "{{ recovery_slack_listener_user }}"
+    group: "{{ recovery_slack_listener_user }}"
+    mode: "0750"
+  become: true
+
+- name: Deploy claude workspace settings (deny all tool execution)
+  ansible.builtin.copy:
+    content: |
+      {
+        "permissions": {
+          "deny": ["Bash", "Write", "Edit", "Read", "Glob", "Grep"]
+        }
+      }
+    dest: "{{ recovery_slack_claude_ws }}/.claude/settings.json"
+    owner: "{{ recovery_slack_listener_user }}"
+    group: "{{ recovery_slack_listener_user }}"
+    mode: "0644"
+  become: true
+
+- name: Pre-accept claude workspace trust for recovery-slack
+  ansible.builtin.copy:
+    content: |
+      {
+        "projects": {
+          "{{ recovery_slack_claude_ws }}": {
+            "hasTrustDialogAccepted": true
+          }
+        }
+      }
+    dest: "/home/{{ recovery_slack_listener_user }}/.claude.json"
+    owner: "{{ recovery_slack_listener_user }}"
+    group: "{{ recovery_slack_listener_user }}"
+    mode: "0600"
   become: true
 
 # ---------------------------------------------------------------------------
