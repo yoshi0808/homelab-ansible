@@ -32,11 +32,16 @@
   gather_facts: false
   become: true
   pre_tasks:
-    - name: Assert target variable is provided
+    - name: Validate target variable (prevent path traversal)
       ansible.builtin.assert:
         that:
           - target is defined
           - target | length > 0
-        fail_msg: "-e target=<target> が必要です (例: -e target=authy)"
+          - target is match('^[A-Za-z0-9_-]+$')
+          - target in ['authy', 'monnie']
+        fail_msg: >-
+          target が不正です: '{{ target | default('') }}'.
+          サービス restart の対象は authy / monnie のみです。
+          (sophos-fw はサービス restart の対象外)
   roles:
     - recovery_service_restart

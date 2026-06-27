@@ -35,11 +35,16 @@
   gather_facts: false
   become: true
   pre_tasks:
-    - name: Assert target variable is provided
+    - name: Validate target variable (prevent path traversal)
       ansible.builtin.assert:
         that:
           - target is defined
           - target | length > 0
-        fail_msg: "-e target=<target> が必要です (例: -e target=authy, -e target=sophos-fw)"
+          - target is match('^[A-Za-z0-9_-]+$')
+          - target in ['authy', 'sophos-fw']
+        fail_msg: >-
+          target が不正です: '{{ target | default('') }}'.
+          HA フェイルオーバーの対象は authy / sophos-fw のみです。
+          (monnie は hacritical タグなしのため対象外)
   roles:
     - recovery_ha_failover
