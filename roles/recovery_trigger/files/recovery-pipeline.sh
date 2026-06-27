@@ -1,8 +1,8 @@
 #!/bin/bash
 # /usr/local/bin/recovery-pipeline.sh <target> <escalate_immediately>
 #
-# Autonomous recovery orchestrator. Runs as yoshi (Ansible controller user)
-# on quory. Called by recovery-trigger.sh via sudo.
+# Autonomous recovery orchestrator. Runs as recovery-runner on quory.
+# Called by recovery-trigger.sh via sudo.
 #
 # Recovery ladder (policy §8):
 #   1. recovery_service_restart.yml  (authy/monnie only — not sophos-fw)

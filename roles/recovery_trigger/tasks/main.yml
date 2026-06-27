@@ -93,6 +93,17 @@
   become: true
 
 # ---------------------------------------------------------------------------
+# yoshi home traversal — recovery-runner needs to cd into homelab-ansible repo
+# mode 0711: others can traverse (x) but cannot list (no r)
+# ---------------------------------------------------------------------------
+
+- name: Allow recovery-runner to traverse yoshi home to reach ansible repo
+  ansible.builtin.file:
+    path: /home/yoshi
+    mode: "0711"
+  become: true
+
+# ---------------------------------------------------------------------------
 # reports/ setgid — new subdirectories/files inherit homelab-ansible group
 # so recovery-runner can write reports alongside yoshi
 # ---------------------------------------------------------------------------
