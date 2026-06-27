@@ -23,7 +23,7 @@ INVENTORY=inventories/homelab/hosts.yml
 LOG_TAG="homelab-recovery-pipeline"
 
 cleanup() {
-  rm -f "$LOCK_FILE"
+  rmdir "$LOCK_FILE" 2>/dev/null || true
   logger -t "$LOG_TAG" "EXIT $TARGET: lock released"
 }
 trap cleanup EXIT

@@ -210,14 +210,3 @@
     mode: "0440"
     validate: visudo -cf %s
   become: true
-
-# ---------------------------------------------------------------------------
-# Sync homelab-ansible repo so recovery playbooks are always up to date
-# ---------------------------------------------------------------------------
-
-- name: Pull latest homelab-ansible on quory (ensures recovery playbooks are current)
-  ansible.builtin.command:
-    cmd: sudo -u yoshi git -C /home/yoshi/homelab-ansible pull
-  become: true
-  register: _git_pull
-  changed_when: "'Already up to date.' not in _git_pull.stdout"
