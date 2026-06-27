@@ -1,0 +1,45 @@
+---
+# recovery_vm_reboot.yml
+#
+# 目的: 自律復旧ラダー第2段。VM をリブートして回復を試みる。
+#       ソフトシャットダウンが timeout 以内に応答しない場合、強制電源断＋起動に
+#       フォールバックする。フォールバックを含めてラダー「1回」のカウント(policy §8)。
+#
+# 対象 VM・シャットダウン手段:
+#   | target     | QEMU guest agent | シャットダウン手段                     | 必要タグ          |
+#   |------------|------------------|---------------------------------------|-------------------|
+#   | authy      | あり             | pvesh .../agent/shutdown (第1選択)    | hacritical        |
+#   | monnie     | あり             | pvesh .../agent/shutdown (第1選択)    | ops               |
+#   | sophos-fw  | なし             | pvesh .../status/shutdown (ACPI のみ) | hacritical        |
+#   ※ agent shutdown が失敗した場合は ACPI shutdown にフォールバック
+#   ※ ACPI shutdown が timeout の場合は pvesh .../status/stop (強制) にフォールバック
+#
+# 使用方法:
+#   ansible-playbook playbooks/recovery_vm_reboot.yml -e target=authy
+#   ansible-playbook playbooks/recovery_vm_reboot.yml -e target=sophos-fw
+#
+# 実行フロー:
+#   Phase 1: pvesh でタグ再検証 (hacritical or ops、VMID・現在ノード取得)
+#   Phase 2: ソフトシャットダウン要求(guest agent または ACPI)
+#   Phase 3: 停止待機 → timeout なら強制電源断にフォールバック
+#   Phase 4: pvesh .../status/start → running になるまで待機
+#   always:  JSON レポート保存 + Slack 通知
+#
+# Fail 条件: タグ不適格 / VM 不存在 / 起動後 running にならない
+#
+# 参照: docs/ai/prompts/autonomous_recovery_policy.md §5 §8 §13
+#       docs/ai/reviews/autonomous_recovery/2026-06-27_001_requirement.md
+
+- name: Recovery - VM reboot
+  hosts: pve1
+  gather_facts: false
+  become: true
+  pre_tasks:
+    - name: Assert target variable is provided
+      ansible.builtin.assert:
+        that:
+          - target is defined
+          - target | length > 0
+        fail_msg: "-e target=<target> が必要です (例: -e target=authy)"
+  roles:
+    - recovery_vm_reboot

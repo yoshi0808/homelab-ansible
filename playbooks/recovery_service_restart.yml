@@ -1,0 +1,42 @@
+---
+# recovery_service_restart.yml
+#
+# 目的: 自律復旧ラダー第1段。対象 VM のサービスを systemctl restart し、回復を試みる。
+#       policy §8 の通り 1 回のみ試行。タグ再検証必須(policy §5)。
+#
+# 比較対象・対象 VM:
+#   | target     | 再起動サービス                                          | 必要タグ   |
+#   |------------|--------------------------------------------------------|------------|
+#   | authy      | freeradius.service                                     | hacritical |
+#   | monnie     | grafana-server / prometheus / loki / unpoller          | ops        |
+#   | sophos-fw  | 対象外（VMリブートのみ: recovery_vm_reboot.yml を使用）| -          |
+#
+# 使用方法:
+#   ansible-playbook playbooks/recovery_service_restart.yml -e target=authy
+#   ansible-playbook playbooks/recovery_service_restart.yml -e target=monnie
+#
+# 実行フロー:
+#   Phase 1: pvesh で Proxmox タグを再検証（hacritical/ops タグ & sophos-fw 除外）
+#   Phase 2: target VM 上で対象サービスを systemctl restart（SSH/become）
+#   Phase 3: 各サービスが active になるまで待機（max 60s）
+#   always:  JSON レポート保存 + Slack 通知
+#
+# Fail 条件: タグ不適格 / VM 不存在/非実行中 / タイムアウト内に active にならない
+# 成功でも失敗でも Slack 通知を送り、レポートを保存する（best-effort）。
+#
+# 参照: docs/ai/prompts/autonomous_recovery_policy.md §5 §8
+#       docs/ai/reviews/autonomous_recovery/2026-06-27_001_requirement.md
+
+- name: Recovery - service restart
+  hosts: pve1
+  gather_facts: false
+  become: true
+  pre_tasks:
+    - name: Assert target variable is provided
+      ansible.builtin.assert:
+        that:
+          - target is defined
+          - target | length > 0
+        fail_msg: "-e target=<target> が必要です (例: -e target=authy)"
+  roles:
+    - recovery_service_restart

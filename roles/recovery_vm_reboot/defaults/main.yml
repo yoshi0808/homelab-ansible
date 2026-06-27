@@ -1,0 +1,19 @@
+---
+# ソフトシャットダウン(guest agent / ACPI)の最大待機秒数
+# この秒数以内に stopped にならなければ強制電源断にフォールバック
+recovery_vm_reboot_soft_shutdown_timeout_s: 60
+recovery_vm_reboot_soft_shutdown_poll_s: 5
+
+# 起動完了(running)までの最大待機秒数
+recovery_vm_reboot_start_timeout_s: 120
+recovery_vm_reboot_start_poll_s: 5
+
+# QEMU guest agent が使用可能な対象(policy §⑥確認済み)
+# authy / monnie: guest agent あり → pvesh .../agent/shutdown を第1選択
+# sophos-fw: guest agent なし → ACPI(pvesh .../status/shutdown)のみ
+recovery_vm_reboot_guest_agent_targets:
+  - authy
+  - monnie
+
+# レポート保存先
+recovery_vm_reboot_report_dir: "{{ reports_base_dir }}/recovery_investigations/{{ target | default('unknown') }}"

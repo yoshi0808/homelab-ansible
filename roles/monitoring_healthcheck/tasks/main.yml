@@ -123,7 +123,9 @@
       {% else %}
       (none)
       {% endfor %}
-  when: monitoring_criticals | length > 0 or monitoring_warnings | length > 0
+  when:
+    - monitoring_criticals | length > 0 or monitoring_warnings | length > 0
+    - not (skip_notifications | default(false) | bool)
 
 - name: Fail if critical
   ansible.builtin.fail:

@@ -1,0 +1,202 @@
+---
+# recovery_ha_failover: ラダー第3段（最終手段）
+# policy §8: 1 回のみ試行。hacritical タグ + HA 登録済みのみ対象。
+# policy §5: タグ再検証必須。
+
+- name: Initialize result tracking
+  ansible.builtin.set_fact:
+    _rhf_result: "failed"
+    _rhf_detail: "未実行"
+    _rhf_vmid: "(unknown)"
+    _rhf_source_node: "(unknown)"
+    _rhf_target_node: "(unknown)"
+    _rhf_started_at: "{{ lookup('pipe', 'date -u +%Y-%m-%dT%H:%M:%SZ') }}"
+
+- name: HA failover attempt (with report/notify in always)
+  block:
+
+    # -----------------------------------------------------------------------
+    # Phase 1: タグ再検証 (policy §5) + HA 登録確認
+    # -----------------------------------------------------------------------
+    - name: Get cluster resources for tag and node verification
+      ansible.builtin.command:
+        cmd: pvesh get /cluster/resources --output-format json
+      register: _rhf_pvesh_raw
+      changed_when: false
+      check_mode: false
+
+    - name: Find target VM in cluster resources
+      ansible.builtin.set_fact:
+        _rhf_vm: >-
+          {{ _rhf_pvesh_raw.stdout | from_json |
+             selectattr('type', 'equalto', 'qemu') |
+             selectattr('name', 'defined') |
+             selectattr('name', 'equalto', target) |
+             list | first | default({}) }}
+
+    - name: Assert target VM exists in cluster
+      ansible.builtin.assert:
+        that: _rhf_vm | length > 0
+        fail_msg: "対象 VM が見つかりません: target={{ target }}"
+
+    - name: Assert target has hacritical tag (HA failover は hacritical のみ)
+      ansible.builtin.assert:
+        that:
+          - _rhf_vm.tags is defined
+          - _rhf_vm.tags is search('(^|;)hacritical(;|$)')
+        fail_msg: >-
+          対象外: {{ target }} は HA フェイルオーバーの対象ではありません。
+          hacritical タグが必要です (monnie は ops タグのため対象外)。
+          (実際のタグ: {{ _rhf_vm.tags | default('(none)') }})
+
+    - name: Store current VM node
+      ansible.builtin.set_fact:
+        _rhf_vmid: "{{ _rhf_vm.vmid }}"
+        _rhf_source_node: "{{ _rhf_vm.node }}"
+
+    - name: Get HA resources to confirm VM is HA-registered
+      ansible.builtin.command:
+        cmd: pvesh get /cluster/ha/resources --output-format json
+      register: _rhf_ha_raw
+      changed_when: false
+      check_mode: false
+
+    - name: Confirm target VM is registered in Proxmox HA
+      ansible.builtin.set_fact:
+        _rhf_ha_entry: >-
+          {{ _rhf_ha_raw.stdout | from_json |
+             selectattr('sid', 'defined') |
+             selectattr('sid', 'equalto', 'vm:' ~ _rhf_vmid | string) |
+             list | first | default({}) }}
+
+    - name: Assert VM is HA-registered
+      ansible.builtin.assert:
+        that: _rhf_ha_entry | length > 0
+        fail_msg: >-
+          {{ target }} (vmid {{ _rhf_vmid }}) は Proxmox HA に登録されていません。
+          recovery_ha_failover.yml の実行条件を満たしていません。
+
+    # -----------------------------------------------------------------------
+    # Phase 2: 移行先ノードの決定
+    # 現在のノードとは異なる、クラスタに参加している別のノードを選択する
+    # -----------------------------------------------------------------------
+    - name: Get cluster member nodes
+      ansible.builtin.command:
+        cmd: pvesh get /cluster/status --output-format json
+      register: _rhf_cluster_status_raw
+      changed_when: false
+      check_mode: false
+
+    - name: Find an alternative node (online, not current node)
+      ansible.builtin.set_fact:
+        _rhf_target_node: >-
+          {{ _rhf_cluster_status_raw.stdout | from_json |
+             selectattr('type', 'equalto', 'node') |
+             selectattr('online', 'equalto', 1) |
+             rejectattr('name', 'equalto', _rhf_source_node) |
+             map(attribute='name') |
+             list | first | default('') }}
+
+    - name: Assert an alternative node is available
+      ansible.builtin.assert:
+        that: _rhf_target_node | length > 0
+        fail_msg: >-
+          フェイルオーバー先のノードが見つかりません。
+          現在のノード {{ _rhf_source_node }} 以外のオンラインノードが必要です。
+
+    # -----------------------------------------------------------------------
+    # Phase 3: HA マネージャーに relocate を指示
+    # -----------------------------------------------------------------------
+    - name: Issue HA relocate command
+      ansible.builtin.command:
+        cmd: ha-manager crm-command relocate vm:{{ _rhf_vmid }} {{ _rhf_target_node }}
+      changed_when: true
+
+    # -----------------------------------------------------------------------
+    # Phase 4: 移行完了待機 (target-node で running になるまで)
+    # -----------------------------------------------------------------------
+    - name: Wait for VM to be running on target node
+      ansible.builtin.command:
+        cmd: pvesh get /cluster/resources --output-format json
+      register: _rhf_migrate_poll
+      changed_when: false
+      check_mode: false
+      retries: "{{ (recovery_ha_failover_timeout_s | int) // (recovery_ha_failover_poll_s | int) }}"
+      delay: "{{ recovery_ha_failover_poll_s }}"
+      until: >-
+        _rhf_migrate_poll.stdout | from_json |
+        selectattr('type', 'equalto', 'qemu') |
+        selectattr('vmid', 'defined') |
+        selectattr('vmid', 'equalto', _rhf_vmid | int) |
+        selectattr('node', 'equalto', _rhf_target_node) |
+        selectattr('status', 'equalto', 'running') |
+        list | length > 0
+
+    - name: Mark HA failover as successful
+      ansible.builtin.set_fact:
+        _rhf_result: "ok"
+        _rhf_detail: >-
+          {{ target }}(vmid {{ _rhf_vmid }}) が {{ _rhf_source_node }} から
+          {{ _rhf_target_node }} へ移行し、running になりました。
+
+  rescue:
+    - name: Capture failure detail
+      ansible.builtin.set_fact:
+        _rhf_result: "failed"
+        _rhf_detail: >-
+          {{ ansible_failed_result.msg | default(ansible_failed_task.name | default('不明なエラー')) }}
+
+    - name: Re-raise to signal ladder failure (escalate to human)
+      ansible.builtin.fail:
+        msg: >-
+          recovery_ha_failover: {{ target }} の HA フェイルオーバーに失敗しました。
+          人間のエスカレーションが必要です。{{ _rhf_detail }}
+
+  always:
+    # -----------------------------------------------------------------------
+    # Phase 5: レポート保存 + Slack 通知 (常に実行)
+    # -----------------------------------------------------------------------
+    - name: Ensure report directory exists
+      ansible.builtin.file:
+        path: "{{ recovery_ha_failover_report_dir }}"
+        state: directory
+        mode: "0755"
+      delegate_to: localhost
+      become: false
+
+    - name: Save recovery report
+      ansible.builtin.copy:
+        content: "{{ _rhf_report | to_nice_json }}"
+        dest: >-
+          {{ recovery_ha_failover_report_dir }}/{{ _rhf_started_at
+          | replace(':', '') | replace('-', '') | replace('T', '_') }}.json
+      vars:
+        _rhf_report:
+          target: "{{ target }}"
+          vmid: "{{ _rhf_vmid }}"
+          source_node: "{{ _rhf_source_node }}"
+          target_node: "{{ _rhf_target_node }}"
+          action: "ha_failover"
+          started_at: "{{ _rhf_started_at }}"
+          completed_at: "{{ lookup('pipe', 'date -u +%Y-%m-%dT%H:%M:%SZ') }}"
+          result: "{{ _rhf_result }}"
+          detail: "{{ _rhf_detail }}"
+      delegate_to: localhost
+      become: false
+
+    - name: Send Slack notification (best-effort)
+      ansible.builtin.include_tasks: "{{ playbook_dir }}/../roles/common_slack/tasks/notify.yml"
+      vars:
+        slack_channel: "alerts"
+        slack_status: "{{ 'ok' if _rhf_result == 'ok' else 'critical' }}"
+        slack_title: "[recovery_ha_failover] {{ _rhf_result | upper }} - {{ target }}"
+        slack_message: |
+          対象      : {{ target }} (vmid {{ _rhf_vmid }})
+          結果      : {{ _rhf_result | upper }}
+          詳細      : {{ _rhf_detail }}
+          移行元    : {{ _rhf_source_node }}
+          移行先    : {{ _rhf_target_node }}
+          開始時刻  : {{ _rhf_started_at }}
+          {% if _rhf_result != 'ok' %}
+          ⚠️ 自動対応の限界です。人間による確認・対応が必要です。
+          {% endif %}

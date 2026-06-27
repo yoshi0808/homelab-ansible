@@ -1,0 +1,45 @@
+---
+# recovery_ha_failover.yml
+#
+# 目的: 自律復旧ラダー第3段（最終手段）。VM を Proxmox HA マネージャー経由で
+#       別ノードへフェイルオーバーさせる。これが失敗した場合は人間へエスカレーション。
+#       ラダー 1 回のみ試行(policy §8)。
+#
+# 対象 VM:
+#   | target     | 移行先               | 必要タグ   | HA 登録  |
+#   |------------|---------------------|------------|---------|
+#   | authy      | pve1/pve2 の別ノード | hacritical | 済み     |
+#   | sophos-fw  | pve1/pve2 の別ノード | hacritical | 済み     |
+#   | monnie     | 対象外              | ops のみ   | -        |
+#   ※ 移行先は「現在のノードではないオンラインのクラスタメンバー」を自動選択
+#
+# 使用方法:
+#   ansible-playbook playbooks/recovery_ha_failover.yml -e target=authy
+#   ansible-playbook playbooks/recovery_ha_failover.yml -e target=sophos-fw
+#
+# 実行フロー:
+#   Phase 1: pvesh でタグ再検証 (hacritical のみ) + HA 登録確認
+#   Phase 2: pvesh /cluster/status から移行先ノード(オンライン・非現在ノード)を選択
+#   Phase 3: ha-manager crm-command relocate vm:{vmid} {target-node}
+#   Phase 4: VM が target-node で running になるまで待機(max 300s)
+#   always:  JSON レポート保存 + Slack 通知(成功=ok / 失敗=critical)
+#
+# Fail 条件: タグ不適格 / HA 未登録 / 代替ノードなし / 移行タイムアウト
+# 失敗時は Slack に critical 通知し、人間のエスカレーションを促す。
+#
+# 参照: docs/ai/prompts/autonomous_recovery_policy.md §5 §8 §13
+#       docs/ai/reviews/autonomous_recovery/2026-06-27_001_requirement.md
+
+- name: Recovery - HA failover
+  hosts: pve1
+  gather_facts: false
+  become: true
+  pre_tasks:
+    - name: Assert target variable is provided
+      ansible.builtin.assert:
+        that:
+          - target is defined
+          - target | length > 0
+        fail_msg: "-e target=<target> が必要です (例: -e target=authy, -e target=sophos-fw)"
+  roles:
+    - recovery_ha_failover

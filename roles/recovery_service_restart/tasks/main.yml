@@ -1,0 +1,159 @@
+---
+# recovery_service_restart: ラダー第1段
+# policy §8: 各段 1 回のみ試行。タグ再検証必須(§5)。
+
+- name: Initialize result tracking
+  ansible.builtin.set_fact:
+    _rsr_result: "failed"
+    _rsr_detail: "未実行"
+    _rsr_vmid: "(unknown)"
+    _rsr_vm_node: "(unknown)"
+    _rsr_units: []
+    _rsr_started_at: "{{ lookup('pipe', 'date -u +%Y-%m-%dT%H:%M:%SZ') }}"
+
+- name: Service restart attempt (with report/notify in always)
+  block:
+
+    # -----------------------------------------------------------------------
+    # Phase 1: タグ再検証 (policy §5)
+    # -----------------------------------------------------------------------
+    - name: Get cluster resources for tag verification
+      ansible.builtin.command:
+        cmd: pvesh get /cluster/resources --output-format json
+      register: _rsr_pvesh_raw
+      changed_when: false
+      check_mode: false
+
+    - name: Find target VM in cluster resources
+      ansible.builtin.set_fact:
+        _rsr_vm: >-
+          {{ _rsr_pvesh_raw.stdout | from_json |
+             selectattr('type', 'equalto', 'qemu') |
+             selectattr('name', 'defined') |
+             selectattr('name', 'equalto', target) |
+             list | first | default({}) }}
+
+    - name: Assert target VM exists in cluster
+      ansible.builtin.assert:
+        that: _rsr_vm | length > 0
+        fail_msg: "対象 VM が見つかりません: target={{ target }}"
+
+    - name: Assert target is eligible for service restart
+      ansible.builtin.assert:
+        that:
+          - _rsr_vm.tags is defined
+          - (_rsr_vm.tags is search('(^|;)hacritical(;|$)')) or
+            (_rsr_vm.tags is search('(^|;)ops(;|$)'))
+          - target != 'sophos-fw'
+        fail_msg: >-
+          対象外: {{ target }} はサービス restart の対象ではありません。
+          hacritical または ops タグが必要、かつ sophos-fw は除外されます。
+          (実際のタグ: {{ _rsr_vm.tags | default('(none)') }})
+
+    - name: Assert target VM is running
+      ansible.builtin.assert:
+        that: _rsr_vm.status == 'running'
+        fail_msg: >-
+          {{ target }}(vmid {{ _rsr_vm.vmid }}) は {{ _rsr_vm.status }} 状態のため
+          サービス restart 不可。recovery_vm_reboot.yml を検討してください。
+
+    - name: Store verified VM metadata
+      ansible.builtin.set_fact:
+        _rsr_vmid: "{{ _rsr_vm.vmid }}"
+        _rsr_vm_node: "{{ _rsr_vm.node }}"
+        _rsr_units: "{{ recovery_service_restart_units[target] | default([]) }}"
+
+    - name: Assert services list is defined for this target
+      ansible.builtin.assert:
+        that: _rsr_units | length > 0
+        fail_msg: "{{ target }} に対応するサービス一覧が defaults/main.yml に定義されていません"
+
+    # -----------------------------------------------------------------------
+    # Phase 2: サービス restart
+    # -----------------------------------------------------------------------
+    - name: Restart target services
+      ansible.builtin.systemd:
+        name: "{{ item }}"
+        state: restarted
+      loop: "{{ _rsr_units }}"
+      loop_control:
+        label: "{{ item }}"
+      delegate_to: "{{ target }}"
+      become: true
+
+    # -----------------------------------------------------------------------
+    # Phase 3: 回復確認
+    # -----------------------------------------------------------------------
+    - name: Wait for services to become active
+      ansible.builtin.systemd:
+        name: "{{ item }}"
+      register: _rsr_svc_check
+      until: _rsr_svc_check.status.ActiveState == 'active'
+      retries: "{{ recovery_service_restart_retries }}"
+      delay: "{{ recovery_service_restart_delay }}"
+      loop: "{{ _rsr_units }}"
+      loop_control:
+        label: "{{ item }}"
+      delegate_to: "{{ target }}"
+      become: true
+      check_mode: false
+
+    - name: Mark restart as successful
+      ansible.builtin.set_fact:
+        _rsr_result: "ok"
+        _rsr_detail: "全サービスが active になりました: {{ _rsr_units | join(', ') }}"
+
+  rescue:
+    - name: Capture failure detail
+      ansible.builtin.set_fact:
+        _rsr_result: "failed"
+        _rsr_detail: >-
+          {{ ansible_failed_result.msg | default(ansible_failed_task.name | default('不明なエラー')) }}
+
+    - name: Re-raise to signal ladder failure
+      ansible.builtin.fail:
+        msg: "recovery_service_restart: {{ target }} のサービス restart に失敗しました。{{ _rsr_detail }}"
+
+  always:
+    # -----------------------------------------------------------------------
+    # Phase 4: レポート保存 + Slack 通知 (常に実行)
+    # -----------------------------------------------------------------------
+    - name: Ensure report directory exists
+      ansible.builtin.file:
+        path: "{{ recovery_service_restart_report_dir }}"
+        state: directory
+        mode: "0755"
+      delegate_to: localhost
+      become: false
+
+    - name: Save recovery report
+      ansible.builtin.copy:
+        content: "{{ _rsr_report | to_nice_json }}"
+        dest: >-
+          {{ recovery_service_restart_report_dir }}/{{ _rsr_started_at
+          | replace(':', '') | replace('-', '') | replace('T', '_') }}.json
+      vars:
+        _rsr_report:
+          target: "{{ target }}"
+          vmid: "{{ _rsr_vmid }}"
+          vm_node: "{{ _rsr_vm_node }}"
+          action: "service_restart"
+          services: "{{ _rsr_units }}"
+          started_at: "{{ _rsr_started_at }}"
+          completed_at: "{{ lookup('pipe', 'date -u +%Y-%m-%dT%H:%M:%SZ') }}"
+          result: "{{ _rsr_result }}"
+          detail: "{{ _rsr_detail }}"
+      delegate_to: localhost
+      become: false
+
+    - name: Send Slack notification (best-effort)
+      ansible.builtin.include_tasks: "{{ playbook_dir }}/../roles/common_slack/tasks/notify.yml"
+      vars:
+        slack_channel: "alerts"
+        slack_status: "{{ 'ok' if _rsr_result == 'ok' else 'error' }}"
+        slack_title: "[recovery_service_restart] {{ _rsr_result | upper }} - {{ target }}"
+        slack_message: |
+          対象    : {{ target }} (vmid {{ _rsr_vmid }}, node {{ _rsr_vm_node }})
+          結果    : {{ _rsr_result | upper }}
+          詳細    : {{ _rsr_detail }}
+          開始時刻: {{ _rsr_started_at }}

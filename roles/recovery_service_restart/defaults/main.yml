@@ -1,0 +1,17 @@
+---
+# サービスが active になるまでの待機: retries × delay 秒
+recovery_service_restart_retries: 12
+recovery_service_restart_delay: 5
+
+# レポート保存先
+recovery_service_restart_report_dir: "{{ reports_base_dir }}/recovery_investigations/{{ target | default('unknown') }}"
+
+# 対象 VM ごとの再起動対象サービス
+recovery_service_restart_units:
+  authy:
+    - freeradius.service
+  monnie:
+    - grafana-server.service
+    - prometheus.service
+    - loki.service
+    - unpoller.service

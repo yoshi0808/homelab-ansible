@@ -119,7 +119,9 @@
       {% else %}
       (none)
       {% endfor %}
-  when: radius_criticals | length > 0 or radius_warnings | length > 0
+  when:
+    - radius_criticals | length > 0 or radius_warnings | length > 0
+    - not (skip_notifications | default(false) | bool)
 
 - name: Fail if critical
   ansible.builtin.fail:
