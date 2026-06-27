@@ -1,0 +1,28 @@
+---
+# Sends a "recovery pipeline started" notification to the Slack alerts channel.
+# Called by recovery-pipeline.sh at the start of each recovery run.
+#
+# Required extra vars:
+#   target — recovery target name (e.g. "authy")
+
+- name: Send recovery trigger notification
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Assert target is defined
+      ansible.builtin.assert:
+        that:
+          - target is defined
+          - target | length > 0
+
+    - name: Send Slack trigger notification
+      ansible.builtin.include_tasks: "{{ playbook_dir }}/../roles/common_slack/tasks/notify.yml"
+      vars:
+        slack_channel: "alerts"
+        slack_status: "warning"
+        slack_title: "[autonomous_recovery] パイプライン開始 - {{ target }}"
+        slack_message: |
+          対象    : {{ target }}
+          状況    : 自律復旧パイプラインを開始しました
+          時刻    : {{ lookup('pipe', 'date -u +%Y-%m-%dT%H:%M:%SZ') }}
+          次のアクション: 調査 → ラダー実行 (service restart → VM reboot → HA failover)

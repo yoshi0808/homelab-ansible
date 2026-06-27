@@ -1,0 +1,72 @@
+---
+# recovery_trigger: quory-side setup
+# - Creates trigger UNIX user (nologin, no password)
+# - Deploys recovery-trigger.sh and recovery-pipeline.sh
+# - Creates required state/log directories
+# - Configures sudoers for trigger → yoshi privilege switch
+#
+# Caller is responsible for populating authorized_keys
+# (done by recovery_trigger_client role after key generation).
+
+- name: Create trigger user (nologin, no password)
+  ansible.builtin.user:
+    name: "{{ recovery_trigger_user }}"
+    shell: /usr/sbin/nologin
+    create_home: true
+    password: "!"
+    comment: "Autonomous recovery trigger (SSH forced-command only)"
+  become: true
+
+- name: Ensure trigger user .ssh directory exists
+  ansible.builtin.file:
+    path: "/home/{{ recovery_trigger_user }}/.ssh"
+    state: directory
+    owner: "{{ recovery_trigger_user }}"
+    group: "{{ recovery_trigger_user }}"
+    mode: "0700"
+  become: true
+
+- name: Create state and log directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop:
+    - "{{ recovery_trigger_state_base }}"
+    - "{{ recovery_trigger_state_base }}/mute"
+    - "{{ recovery_trigger_state_base }}/counts"
+    - "{{ recovery_trigger_run_base }}"
+    - "{{ recovery_trigger_log_dir }}"
+  become: true
+
+- name: Deploy recovery-trigger.sh
+  ansible.builtin.copy:
+    src: recovery-trigger.sh
+    dest: "{{ recovery_trigger_script_dir }}/recovery-trigger.sh"
+    owner: root
+    group: root
+    mode: "0755"
+  become: true
+
+- name: Deploy recovery-pipeline.sh
+  ansible.builtin.copy:
+    src: recovery-pipeline.sh
+    dest: "{{ recovery_trigger_script_dir }}/recovery-pipeline.sh"
+    owner: root
+    group: root
+    mode: "0755"
+  become: true
+
+- name: Configure sudoers for trigger → yoshi pipeline execution
+  ansible.builtin.copy:
+    content: |
+      # Autonomous recovery: trigger user may run pipeline as yoshi only
+      {{ recovery_trigger_user }} ALL=({{ recovery_trigger_pipeline_user }}) NOPASSWD: {{ recovery_trigger_script_dir }}/recovery-pipeline.sh *
+    dest: /etc/sudoers.d/homelab-recovery-trigger
+    owner: root
+    group: root
+    mode: "0440"
+    validate: visudo -cf %s
+  become: true

@@ -1,0 +1,24 @@
+# /etc/systemd/system/recovery-notify-quory@.service
+# Instantiated service: %I = the failed unit name (passed by OnFailure=).
+# Sends a single SSH connection to quory; the forced command on quory's
+# authorized_keys maps this key to "recovery-trigger.sh {{ recovery_trigger_target }}".
+# The SSH payload (stdin/command) is ignored by quory's forced command.
+
+[Unit]
+Description=Notify quory for autonomous recovery of %I
+DefaultDependencies=no
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/ssh \
+  -i {{ recovery_trigger_key_path }} \
+  -o StrictHostKeyChecking=yes \
+  -o BatchMode=yes \
+  -o ConnectTimeout=10 \
+  -o ServerAliveInterval=0 \
+  {{ recovery_trigger_quory_user }}@{{ recovery_trigger_quory_host }}
+# SSH exit code is ignored — notification is best-effort.
+# The forced command on quory handles all logic; this unit just knocks.
+SuccessExitStatus=0 255

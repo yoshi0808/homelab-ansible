@@ -1,0 +1,102 @@
+#!/bin/bash
+# /usr/local/bin/recovery-trigger.sh <target>
+#
+# Entry point for the autonomous recovery pipeline on quory.
+# Called via:
+#   - SSH forced command (from authy/monnie systemd OnFailure=)
+#   - Directly on quory (from Sophos/healthcheck probes: §6.2)
+#
+# Implements §6.4 checks in order:
+#   1. Validate target
+#   2. Lock check (concurrent pipeline prevention)
+#   3. Mute check (maintenance window)
+#   4. Flapping count (24h limit = 3)
+#   5. Spawn recovery-pipeline.sh in background
+#
+# All SSH connections blocked for < 1 second (nohup + immediate exit).
+
+set -euo pipefail
+
+TARGET="${1:-}"
+LOG_TAG="homelab-recovery"
+
+# ---------------------------------------------------------------------------
+# 1. Validate target (allowlist only)
+# ---------------------------------------------------------------------------
+case "$TARGET" in
+  authy|monnie|sophos-fw) ;;
+  *)
+    logger -t "$LOG_TAG" "REJECT: invalid target='$TARGET'"
+    exit 1
+    ;;
+esac
+
+LOCK_DIR=/var/run/homelab-recovery
+MUTE_DIR=/var/lib/homelab-recovery/mute
+COUNT_DIR=/var/lib/homelab-recovery/counts
+LOG_DIR=/var/log/homelab-recovery
+PIPELINE=/usr/local/bin/recovery-pipeline.sh
+PIPELINE_USER=yoshi
+
+mkdir -p "$LOCK_DIR" "$COUNT_DIR" "$LOG_DIR"
+
+# ---------------------------------------------------------------------------
+# 2. Lock check — skip if pipeline already running for this target
+# ---------------------------------------------------------------------------
+LOCK_FILE="$LOCK_DIR/${TARGET}.lock"
+if [[ -e "$LOCK_FILE" ]]; then
+  logger -t "$LOG_TAG" "SKIP $TARGET: pipeline already running (lock exists)"
+  exit 0
+fi
+
+# ---------------------------------------------------------------------------
+# 3. Mute check — skip if maintenance window is active
+# ---------------------------------------------------------------------------
+MUTE_FILE="$MUTE_DIR/${TARGET}.json"
+if [[ -f "$MUTE_FILE" ]]; then
+  mute_until=$(jq -r '.until // empty' "$MUTE_FILE" 2>/dev/null || true)
+  if [[ -n "$mute_until" && "$(date +%Y-%m-%dT%H:%M:%S%:z)" < "$mute_until" ]]; then
+    logger -t "$LOG_TAG" "SKIP $TARGET: muted until $mute_until"
+    exit 0
+  fi
+fi
+
+# ---------------------------------------------------------------------------
+# 4. Flapping count — 24h window, 3+ triggers → immediate escalation
+# ---------------------------------------------------------------------------
+TS="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+CUTOFF="$(date -u -d '24 hours ago' +%Y-%m-%dT%H:%M:%SZ)"
+COUNT_FILE="$COUNT_DIR/${TARGET}.json"
+
+if [[ -f "$COUNT_FILE" ]]; then
+  recent_count=$(jq --arg c "$CUTOFF" '[.[] | select(. >= $c)] | length' "$COUNT_FILE")
+else
+  recent_count=0
+fi
+
+# Record this invocation (pruning old entries at the same time)
+if [[ -f "$COUNT_FILE" ]]; then
+  jq --arg c "$CUTOFF" --arg ts "$TS" \
+    '[.[] | select(. >= $c)] + [$ts]' "$COUNT_FILE" > "${COUNT_FILE}.tmp" \
+    && mv "${COUNT_FILE}.tmp" "$COUNT_FILE"
+else
+  printf '["%s"]\n' "$TS" > "$COUNT_FILE"
+fi
+
+if (( recent_count >= 3 )); then
+  logger -t "$LOG_TAG" "FLAPPING $TARGET: $recent_count runs in 24h — escalating"
+  ESCALATE_FLAG=1
+else
+  ESCALATE_FLAG=0
+fi
+
+# ---------------------------------------------------------------------------
+# 5. Spawn pipeline in background (SSH connection must not block)
+# ---------------------------------------------------------------------------
+touch "$LOCK_FILE"
+LOG_FILE="$LOG_DIR/${TARGET}_$(date -u +%Y%m%dT%H%M%SZ).log"
+
+nohup sudo -u "$PIPELINE_USER" "$PIPELINE" "$TARGET" "$ESCALATE_FLAG" \
+  >"$LOG_FILE" 2>&1 &
+
+logger -t "$LOG_TAG" "TRIGGERED $TARGET: pipeline pid=$! log=$LOG_FILE"
