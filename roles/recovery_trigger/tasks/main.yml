@@ -12,12 +12,18 @@
 #   - reports/ setgid so recovery-runner can write reports alongside yoshi
 
 # ---------------------------------------------------------------------------
-# Shared group + users
+# Shared groups + users
 # ---------------------------------------------------------------------------
 
 - name: Create homelab-ansible group
   ansible.builtin.group:
     name: homelab-ansible
+    state: present
+  become: true
+
+- name: Create homelab-recovery group (trigger + recovery-runner share lock/count dirs)
+  ansible.builtin.group:
+    name: homelab-recovery
     state: present
   become: true
 
@@ -27,7 +33,7 @@
     shell: /usr/sbin/nologin
     create_home: true
     password: "!"
-    groups: homelab-ansible
+    groups: "homelab-ansible,homelab-recovery"
     append: true
     comment: "Autonomous recovery pipeline runner (no sudo)"
   become: true
@@ -109,6 +115,8 @@
     shell: /usr/sbin/nologin
     create_home: true
     password: "!"
+    groups: homelab-recovery
+    append: true
     comment: "Autonomous recovery trigger (SSH forced-command only)"
   become: true
 
@@ -127,17 +135,17 @@
 
 - name: Create state and log directories
   ansible.builtin.file:
-    path: "{{ item }}"
+    path: "{{ item.path }}"
     state: directory
     owner: root
-    group: root
-    mode: "0755"
+    group: "{{ item.group }}"
+    mode: "{{ item.mode }}"
   loop:
-    - "{{ recovery_trigger_state_base }}"
-    - "{{ recovery_trigger_state_base }}/mute"
-    - "{{ recovery_trigger_state_base }}/counts"
-    - "{{ recovery_trigger_run_base }}"
-    - "{{ recovery_trigger_log_dir }}"
+    - { path: "{{ recovery_trigger_state_base }}",           group: root,              mode: "0755" }
+    - { path: "{{ recovery_trigger_state_base }}/mute",      group: root,              mode: "0755" }
+    - { path: "{{ recovery_trigger_state_base }}/counts",    group: homelab-recovery,  mode: "0775" }
+    - { path: "{{ recovery_trigger_run_base }}",             group: homelab-recovery,  mode: "0775" }
+    - { path: "{{ recovery_trigger_log_dir }}",              group: homelab-recovery,  mode: "0775" }
   become: true
 
 # ---------------------------------------------------------------------------

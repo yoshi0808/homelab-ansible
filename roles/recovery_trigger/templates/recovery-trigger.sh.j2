@@ -18,6 +18,7 @@
 set -euo pipefail
 
 TARGET="${1:-}"
+MANUAL="${2:-0}"   # 1 = manual (Slack), skips flapping check; 0 = auto (systemd OnFailure=)
 LOG_TAG="homelab-recovery"
 
 # ---------------------------------------------------------------------------
@@ -83,7 +84,10 @@ else
   printf '["%s"]\n' "$TS" > "$COUNT_FILE"
 fi
 
-if (( recent_count >= 3 )); then
+if [[ "$MANUAL" == "1" ]]; then
+  logger -t "$LOG_TAG" "MANUAL $TARGET: Slack trigger, flapping check skipped (count=$recent_count)"
+  ESCALATE_FLAG=0
+elif (( recent_count >= 3 )); then
   logger -t "$LOG_TAG" "FLAPPING $TARGET: $recent_count runs in 24h — escalating"
   ESCALATE_FLAG=1
 else
