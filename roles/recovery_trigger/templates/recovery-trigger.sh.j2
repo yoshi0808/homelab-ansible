@@ -106,10 +106,13 @@ fi
 # ---------------------------------------------------------------------------
 LOG_FILE="$LOG_DIR/${TARGET}_$(date -u +%Y%m%dT%H%M%SZ).log"
 
-nohup sudo -u "$PIPELINE_USER" "$PIPELINE" "$TARGET" "$ESCALATE_FLAG" \
-  >"$LOG_FILE" 2>&1 &
+# wrapper: sudo/exec 失敗時は wrapper が lock を削除する。
+# 成功時は pipeline.sh の EXIT trap が lock を削除する（二重 rmdir は無害）。
+nohup bash -c '
+  sudo -u "$1" "$2" "$3" "$4" >"$5" 2>&1 \
+    || rmdir "$6" 2>/dev/null || true
+' -- "$PIPELINE_USER" "$PIPELINE" "$TARGET" "$ESCALATE_FLAG" "$LOG_FILE" "$LOCK_FILE" &
 
-# pipeline が起動した — lock cleanup を pipeline.sh の EXIT trap に引き継ぐ
 trap - EXIT
 
-logger -t "$LOG_TAG" "TRIGGERED $TARGET: pipeline pid=$! log=$LOG_FILE"
+logger -t "$LOG_TAG" "TRIGGERED $TARGET: wrapper pid=$! log=$LOG_FILE"
