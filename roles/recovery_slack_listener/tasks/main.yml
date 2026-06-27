@@ -81,6 +81,15 @@
   delegate_to: quory
   become: true
 
+- name: Create recovery-slack .ssh directory
+  ansible.builtin.file:
+    path: "/home/{{ recovery_slack_listener_user }}/.ssh"
+    state: directory
+    owner: "{{ recovery_slack_listener_user }}"
+    group: "{{ recovery_slack_listener_user }}"
+    mode: "0700"
+  become: true
+
 - name: Add quory host key to recovery-slack known_hosts
   ansible.builtin.known_hosts:
     name: "{{ recovery_slack_quory_host }}"
