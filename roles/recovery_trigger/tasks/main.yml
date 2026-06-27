@@ -73,6 +73,20 @@
     - { src: /home/yoshi/.ssh/id_rsa_sophos, dest: id_rsa_sophos }
   become: true
 
+- name: Add recovery target host keys to recovery-runner known_hosts
+  ansible.builtin.known_hosts:
+    name: "{{ item }}"
+    key: "{{ lookup('pipe', 'ssh-keyscan -H ' + item) }}"
+    path: /home/recovery-runner/.ssh/known_hosts
+    state: present
+  loop:
+    - pve1.internal
+    - pve2.internal
+    - authy.internal
+    - monnie.internal
+    - ansy.internal
+  become: true
+
 - name: Create recovery-runner vault directory
   ansible.builtin.file:
     path: /home/recovery-runner/.ansible/vault
@@ -203,8 +217,7 @@
 
 - name: Pull latest homelab-ansible on quory (ensures recovery playbooks are current)
   ansible.builtin.command:
-    cmd: git -C /home/yoshi/homelab-ansible pull
+    cmd: sudo -u yoshi git -C /home/yoshi/homelab-ansible pull
   become: true
-  become_user: yoshi
   register: _git_pull
   changed_when: "'Already up to date.' not in _git_pull.stdout"
