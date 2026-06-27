@@ -1,0 +1,95 @@
+---
+# Runs monitoring-healthcheck.sh, parses output, classifies results, builds report.
+# Does NOT send Slack notifications or fail — callers decide what to do with results.
+# Exports: monitoring_health, monitoring_criticals, monitoring_warnings, monitoring_report
+
+- name: Copy monitoring healthcheck script
+  ansible.builtin.copy:
+    src: monitoring-healthcheck.sh
+    dest: /usr/local/sbin/monitoring-healthcheck.sh
+    mode: "0755"
+    owner: root
+    group: root
+
+- name: Run monitoring healthcheck
+  ansible.builtin.command:
+    cmd: /usr/local/sbin/monitoring-healthcheck.sh
+  register: healthcheck_raw
+  changed_when: false
+
+- name: Fail if healthcheck returned no output
+  ansible.builtin.fail:
+    msg: "monitoring-healthcheck.sh on {{ inventory_hostname }} returned empty output (rc={{ healthcheck_raw.rc }}). Run the script manually on the host to diagnose."
+  when: healthcheck_raw.stdout | length == 0
+
+- name: Parse healthcheck JSON
+  ansible.builtin.set_fact:
+    monitoring_health: "{{ healthcheck_raw.stdout | from_json }}"
+
+- name: Classify criticals and warnings
+  ansible.builtin.set_fact:
+    monitoring_criticals: "{{ []
+      + ([] if monitoring_health.services.prometheus == 'active'
+             else ['prometheus service is not active: ' + monitoring_health.services.prometheus])
+      + ([] if monitoring_health.services.grafana == 'active'
+             else ['grafana-server service is not active: ' + monitoring_health.services.grafana])
+      + ([] if monitoring_health.services.loki == 'active'
+             else ['loki service is not active: ' + monitoring_health.services.loki])
+      + ([] if monitoring_health.services.unpoller == 'active'
+             else ['unpoller service is not active: ' + monitoring_health.services.unpoller])
+      + ([] if monitoring_health.ports.tcp_9090 == 'yes'
+             else ['port 9090/tcp is not listening'])
+      + ([] if monitoring_health.ports.tcp_3000 == 'yes'
+             else ['port 3000/tcp is not listening'])
+      + ([] if monitoring_health.ports.tcp_3100 == 'yes'
+             else ['port 3100/tcp is not listening'])
+      + ([] if monitoring_health.memory.collection_ok
+             else ['memory collection failed (free -b returned no data)'])
+      + ([] if monitoring_health.memory.used_percent | int < 90
+             else ['memory used_percent is ' + (monitoring_health.memory.used_percent | string) + '%'])
+      }}"
+    monitoring_warnings: "{{ []
+      + ([] if monitoring_health.memory.used_percent | int < 80 or monitoring_health.memory.used_percent | int >= 90
+             else ['memory used_percent is ' + (monitoring_health.memory.used_percent | string) + '%'])
+      }}"
+
+- name: Build report
+  ansible.builtin.set_fact:
+    monitoring_report:
+      host: "{{ inventory_hostname }}"
+      collected_at: "{{ monitoring_health.collected_at }}"
+      services:
+        prometheus: "{{ monitoring_health.services.prometheus }}"
+        grafana: "{{ monitoring_health.services.grafana }}"
+        loki: "{{ monitoring_health.services.loki }}"
+        unpoller: "{{ monitoring_health.services.unpoller }}"
+      ports:
+        tcp_9090: "{{ monitoring_health.ports.tcp_9090 }}"
+        tcp_3000: "{{ monitoring_health.ports.tcp_3000 }}"
+        tcp_3100: "{{ monitoring_health.ports.tcp_3100 }}"
+      memory:
+        collection_ok: "{{ monitoring_health.memory.collection_ok }}"
+        total_mb: "{{ monitoring_health.memory.total_mb }}"
+        used_mb: "{{ monitoring_health.memory.used_mb }}"
+        available_mb: "{{ monitoring_health.memory.available_mb }}"
+        used_percent: "{{ monitoring_health.memory.used_percent }}"
+      result:
+        status: "{{ 'CRITICAL' if monitoring_criticals | length > 0
+                    else ('WARNING' if monitoring_warnings | length > 0
+                    else 'OK') }}"
+        criticals: "{{ monitoring_criticals }}"
+        warnings: "{{ monitoring_warnings }}"
+
+- name: Print health summary
+  ansible.builtin.debug:
+    msg:
+      - "Host      : {{ inventory_hostname }}"
+      - "Status    : {{ monitoring_report.result.status }}"
+      - "prometheus: {{ monitoring_health.services.prometheus }}"
+      - "grafana   : {{ monitoring_health.services.grafana }}"
+      - "loki      : {{ monitoring_health.services.loki }}"
+      - "unpoller  : {{ monitoring_health.services.unpoller }}"
+      - "Ports     : 9090/tcp={{ monitoring_health.ports.tcp_9090 }} 3000/tcp={{ monitoring_health.ports.tcp_3000 }} 3100/tcp={{ monitoring_health.ports.tcp_3100 }}"
+      - "Memory    : collection_ok={{ monitoring_health.memory.collection_ok }} total={{ monitoring_health.memory.total_mb }}MB used={{ monitoring_health.memory.used_mb }}MB available={{ monitoring_health.memory.available_mb }}MB used_percent={{ monitoring_health.memory.used_percent }}%"
+      - "Criticals : {{ monitoring_criticals }}"
+      - "Warnings  : {{ monitoring_warnings }}"
