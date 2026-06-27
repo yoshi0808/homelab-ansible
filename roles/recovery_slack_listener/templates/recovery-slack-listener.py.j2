@@ -227,6 +227,15 @@ def run_loop(user_request: str) -> str:
             log.error("unknown action: %s", action)
             return f"不明なアクション '{action}' が返されました。"
 
+        # 同一アクションの重複実行を Python 側で機械的に拒否
+        if any(h["action"] == action for h in history):
+            log.warning("duplicate action rejected: %s already in history", action)
+            history.append({"action": action, "result": {
+                "ok": False,
+                "error": f"Python拒否: {action} は既に実行済み（同一ループ内での重複実行は不可）",
+            }})
+            continue
+
         # trigger 実行前の Python 側検証
         if action in _TRIGGER_ACTIONS:
             prereq = _TRIGGER_PREREQ[action]
