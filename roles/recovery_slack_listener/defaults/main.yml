@@ -1,0 +1,13 @@
+---
+recovery_slack_listener_user: recovery-slack
+recovery_slack_listener_key_dir: /etc/recovery
+recovery_slack_listener_install_dir: /opt/recovery-slack-listener
+recovery_slack_listener_script: /usr/local/bin/recovery-slack-listener
+
+recovery_slack_quory_host: quory.internal
+recovery_slack_trigger_user: trigger
+
+recovery_slack_targets:
+  - authy
+  - monnie
+  - sophos-fw

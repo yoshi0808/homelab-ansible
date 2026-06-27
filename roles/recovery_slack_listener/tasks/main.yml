@@ -1,0 +1,163 @@
+---
+# recovery_slack_listener: ansy-side setup (policy §6.3)
+#
+# Required vault vars (in inventories/vars/slack.yml):
+#   vault_slack_socket_bot_token      — xoxb-...
+#   vault_slack_socket_app_token      — xapp-...
+#   vault_slack_authorized_user_id    — e.g. U0B5S8K0UGY
+#
+# Creates recovery-slack user, per-target SSH keypairs for quory trigger,
+# installs Python venv + slack-bolt, deploys listener script + systemd service.
+
+- name: Load Slack vault variables
+  ansible.builtin.include_vars:
+    file: "{{ inventory_dir }}/../vars/slack.yml"
+  delegate_to: localhost
+  become: false
+  no_log: true
+
+# ---------------------------------------------------------------------------
+# Service user
+# ---------------------------------------------------------------------------
+
+- name: Create recovery-slack user (nologin)
+  ansible.builtin.user:
+    name: "{{ recovery_slack_listener_user }}"
+    shell: /usr/sbin/nologin
+    create_home: true
+    password: "!"
+    comment: "Recovery Slack listener service account"
+  become: true
+
+# ---------------------------------------------------------------------------
+# SSH keypairs: one per target, forced command includes manual=1 flag
+# ---------------------------------------------------------------------------
+
+- name: Create key directory
+  ansible.builtin.file:
+    path: "{{ recovery_slack_listener_key_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0711"
+  become: true
+
+- name: Generate per-target SSH keypairs on ansy
+  ansible.builtin.command:
+    cmd: >-
+      ssh-keygen -t ed25519 -N ''
+      -C "recovery-trigger-ansy-{{ item }}"
+      -f {{ recovery_slack_listener_key_dir }}/id_trigger_ansy_{{ item | replace('-', '_') }}
+    creates: "{{ recovery_slack_listener_key_dir }}/id_trigger_ansy_{{ item | replace('-', '_') }}"
+  loop: "{{ recovery_slack_targets }}"
+  become: true
+
+- name: Lock down private key permissions
+  ansible.builtin.file:
+    path: "{{ recovery_slack_listener_key_dir }}/id_trigger_ansy_{{ item | replace('-', '_') }}"
+    owner: "{{ recovery_slack_listener_user }}"
+    group: "{{ recovery_slack_listener_user }}"
+    mode: "0600"
+  loop: "{{ recovery_slack_targets }}"
+  become: true
+
+- name: Fetch public keys from ansy
+  ansible.builtin.slurp:
+    src: "{{ recovery_slack_listener_key_dir }}/id_trigger_ansy_{{ item | replace('-', '_') }}.pub"
+  register: _rsl_pubkeys
+  loop: "{{ recovery_slack_targets }}"
+  become: true
+
+- name: Register per-target public keys in quory trigger authorized_keys (manual=1 flag)
+  ansible.posix.authorized_key:
+    user: trigger
+    key: "{{ item.content | b64decode | trim }}"
+    key_options: >-
+      command="/usr/local/bin/recovery-trigger.sh {{ recovery_slack_targets[idx] }} 1",no-agent-forwarding,no-X11-forwarding,no-port-forwarding,no-pty
+    state: present
+  loop: "{{ _rsl_pubkeys.results }}"
+  loop_control:
+    index_var: idx
+  delegate_to: quory
+  become: true
+
+- name: Add quory host key to recovery-slack known_hosts
+  ansible.builtin.known_hosts:
+    name: "{{ recovery_slack_quory_host }}"
+    key: "{{ lookup('pipe', 'ssh-keyscan -H ' + recovery_slack_quory_host) }}"
+    path: "/home/{{ recovery_slack_listener_user }}/.ssh/known_hosts"
+    state: present
+  become: true
+
+# ---------------------------------------------------------------------------
+# Python venv + slack-bolt
+# ---------------------------------------------------------------------------
+
+- name: Ensure python3-venv is installed
+  ansible.builtin.apt:
+    name: python3-venv
+    state: present
+    update_cache: false
+  become: true
+
+- name: Create virtualenv
+  ansible.builtin.command:
+    cmd: python3 -m venv {{ recovery_slack_listener_install_dir }}/venv
+    creates: "{{ recovery_slack_listener_install_dir }}/venv/bin/python"
+  become: true
+
+- name: Install slack-bolt into venv
+  ansible.builtin.pip:
+    name: slack-bolt
+    virtualenv: "{{ recovery_slack_listener_install_dir }}/venv"
+    state: present
+  become: true
+
+# ---------------------------------------------------------------------------
+# Listener script + env file
+# ---------------------------------------------------------------------------
+
+- name: Deploy listener script
+  ansible.builtin.template:
+    src: recovery-slack-listener.py.j2
+    dest: "{{ recovery_slack_listener_script }}"
+    owner: root
+    group: root
+    mode: "0755"
+  become: true
+  notify: Restart recovery-slack-listener
+
+- name: Deploy environment file (contains tokens — no_log)
+  ansible.builtin.template:
+    src: slack-listener.env.j2
+    dest: "{{ recovery_slack_listener_key_dir }}/slack-listener.env"
+    owner: "{{ recovery_slack_listener_user }}"
+    group: "{{ recovery_slack_listener_user }}"
+    mode: "0600"
+  become: true
+  no_log: true
+  notify: Restart recovery-slack-listener
+
+# ---------------------------------------------------------------------------
+# systemd service
+# ---------------------------------------------------------------------------
+
+- name: Deploy systemd service unit
+  ansible.builtin.template:
+    src: recovery-slack-listener.service.j2
+    dest: /etc/systemd/system/recovery-slack-listener.service
+    owner: root
+    group: root
+    mode: "0644"
+  become: true
+  notify:
+    - Reload systemd
+    - Restart recovery-slack-listener
+
+- name: Enable and start recovery-slack-listener
+  ansible.builtin.systemd:
+    name: recovery-slack-listener
+    enabled: true
+    state: started
+    daemon_reload: false
+  become: true

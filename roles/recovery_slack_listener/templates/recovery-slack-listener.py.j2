@@ -1,0 +1,110 @@
+#!/usr/bin/env python3
+# Homelab Recovery Slack Listener
+# Runs on ansy. Receives app_mention events via Socket Mode.
+# Only responds to mentions from the authorized Slack user.
+# Parses target (authy/monnie/sophos-fw) from mention text,
+# then SSHes to quory as trigger user to start the recovery pipeline
+# with manual=1 flag (flapping check skipped per policy §6.3).
+
+import os
+import subprocess
+import logging
+import sys
+
+from slack_bolt import App
+from slack_bolt.adapter.socket_mode import SocketModeHandler
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(message)s",
+    stream=sys.stdout,
+)
+log = logging.getLogger("recovery-slack-listener")
+
+BOT_TOKEN           = os.environ["SLACK_BOT_TOKEN"]
+APP_TOKEN           = os.environ["SLACK_APP_TOKEN"]
+AUTHORIZED_USER_ID  = os.environ["SLACK_AUTHORIZED_USER_ID"]
+QUORY_HOST          = os.environ.get("RECOVERY_QUORY_HOST", "{{ recovery_slack_quory_host }}")
+TRIGGER_USER        = "{{ recovery_slack_trigger_user }}"
+KEY_DIR             = "{{ recovery_slack_listener_key_dir }}"
+SSH_TIMEOUT         = 15
+
+TARGETS = {{ recovery_slack_targets | to_json }}
+
+TARGET_KEY = {
+    t: f"{KEY_DIR}/id_trigger_ansy_{t.replace('-', '_')}"
+    for t in TARGETS
+}
+
+app = App(token=BOT_TOKEN)
+
+
+def parse_target(text: str):
+    lower = text.lower()
+    for t in TARGETS:
+        if t in lower:
+            return t
+    return None
+
+
+def trigger_recovery(target: str) -> bool:
+    key_path = TARGET_KEY[target]
+    result = subprocess.run(
+        [
+            "ssh",
+            "-i", key_path,
+            "-o", "StrictHostKeyChecking=yes",
+            "-o", "BatchMode=yes",
+            "-o", "ConnectTimeout=10",
+            f"{TRIGGER_USER}@{QUORY_HOST}",
+        ],
+        timeout=SSH_TIMEOUT,
+        capture_output=True,
+    )
+    log.info("trigger_recovery target=%s rc=%d", target, result.returncode)
+    return result.returncode == 0
+
+
+@app.event("app_mention")
+def handle_mention(event, say):
+    user_id = event.get("user", "")
+    text    = event.get("text", "")
+
+    if user_id != AUTHORIZED_USER_ID:
+        log.warning("Unauthorized mention from user_id=%s — ignored", user_id)
+        return
+
+    log.info("Mention from authorized user: %s", text)
+    target = parse_target(text)
+
+    if target is None:
+        say(
+            f"<@{user_id}> 対象を指定してください: "
+            + " / ".join(f"`{t}`" for t in TARGETS)
+        )
+        return
+
+    say(f"<@{user_id}> `{target}` の復旧パイプラインを起動します...")
+
+    try:
+        success = trigger_recovery(target)
+    except subprocess.TimeoutExpired:
+        log.error("SSH to quory timed out for target=%s", target)
+        say(f"<@{user_id}> quory への接続がタイムアウトしました。quory の状態を確認してください。")
+        return
+
+    if success:
+        say(
+            f"<@{user_id}> `{target}` のトリガーを送信しました。"
+            " Slack に進捗が通知されます。"
+        )
+    else:
+        say(
+            f"<@{user_id}> `{target}` へのトリガー送信に失敗しました (SSH エラー)。"
+            " quory の状態を確認してください。"
+        )
+
+
+if __name__ == "__main__":
+    log.info("Starting recovery Slack listener (authorized_user=%s)", AUTHORIZED_USER_ID)
+    SocketModeHandler(app, APP_TOKEN).start()
