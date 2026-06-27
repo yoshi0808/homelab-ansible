@@ -1,6 +1,6 @@
 ---
 recovery_trigger_user: trigger
-recovery_trigger_pipeline_user: yoshi
+recovery_trigger_pipeline_user: recovery-runner
 recovery_trigger_script_dir: /usr/local/bin
 recovery_trigger_state_base: /var/lib/homelab-recovery
 recovery_trigger_run_base: /var/run/homelab-recovery

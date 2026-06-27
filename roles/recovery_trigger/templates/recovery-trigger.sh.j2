@@ -35,8 +35,8 @@ LOCK_DIR=/var/run/homelab-recovery
 MUTE_DIR=/var/lib/homelab-recovery/mute
 COUNT_DIR=/var/lib/homelab-recovery/counts
 LOG_DIR=/var/log/homelab-recovery
-PIPELINE=/usr/local/bin/recovery-pipeline.sh
-PIPELINE_USER=yoshi
+PIPELINE={{ recovery_trigger_script_dir }}/recovery-pipeline.sh
+PIPELINE_USER={{ recovery_trigger_pipeline_user }}
 
 mkdir -p "$LOCK_DIR" "$COUNT_DIR" "$LOG_DIR"
 

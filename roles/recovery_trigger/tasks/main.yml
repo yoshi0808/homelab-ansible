@@ -1,12 +1,107 @@
 ---
 # recovery_trigger: quory-side setup
-# - Creates trigger UNIX user (nologin, no password)
-# - Deploys recovery-trigger.sh and recovery-pipeline.sh
-# - Creates required state/log directories
-# - Configures sudoers for trigger → yoshi privilege switch
 #
-# Caller is responsible for populating authorized_keys
-# (done by recovery_trigger_client role after key generation).
+# Creates:
+#   - homelab-ansible group (shared between yoshi and recovery-runner)
+#   - recovery-runner user: no shell, no sudo — sole purpose is running the pipeline
+#   - Copies of SSH keys + vault pass into recovery-runner's home
+#     (group_vars use ~/... so expanding to recovery-runner's home works correctly)
+#   - trigger user: receives SSH forced-command connections from authy/monnie
+#   - recovery-trigger.sh / recovery-pipeline.sh in /usr/local/bin/
+#   - sudoers: trigger → recovery-runner (NOPASSWD for pipeline script only)
+#   - reports/ setgid so recovery-runner can write reports alongside yoshi
+
+# ---------------------------------------------------------------------------
+# Shared group + users
+# ---------------------------------------------------------------------------
+
+- name: Create homelab-ansible group
+  ansible.builtin.group:
+    name: homelab-ansible
+    state: present
+  become: true
+
+- name: Create recovery-runner user (nologin, no sudo)
+  ansible.builtin.user:
+    name: recovery-runner
+    shell: /usr/sbin/nologin
+    create_home: true
+    password: "!"
+    groups: homelab-ansible
+    append: true
+    comment: "Autonomous recovery pipeline runner (no sudo)"
+  become: true
+
+- name: Add yoshi to homelab-ansible group
+  ansible.builtin.user:
+    name: yoshi
+    groups: homelab-ansible
+    append: true
+  become: true
+
+# ---------------------------------------------------------------------------
+# recovery-runner credentials
+# ~/.ssh/ and ~/.ansible/vault/ paths mirror yoshi's layout so
+# group_vars (~/.ssh/id_ann) and ansible.cfg (~/.ansible/vault/...) expand correctly
+# ---------------------------------------------------------------------------
+
+- name: Create recovery-runner .ssh directory
+  ansible.builtin.file:
+    path: /home/recovery-runner/.ssh
+    state: directory
+    owner: recovery-runner
+    group: recovery-runner
+    mode: "0700"
+  become: true
+
+- name: Copy SSH keys for Ansible remote connections
+  ansible.builtin.copy:
+    src: "{{ item.src }}"
+    dest: "/home/recovery-runner/.ssh/{{ item.dest }}"
+    remote_src: true
+    owner: recovery-runner
+    group: recovery-runner
+    mode: "0600"
+  loop:
+    - { src: /home/yoshi/.ssh/id_ann, dest: id_ann }
+    - { src: /home/yoshi/.ssh/id_rsa_sophos, dest: id_rsa_sophos }
+  become: true
+
+- name: Create recovery-runner vault directory
+  ansible.builtin.file:
+    path: /home/recovery-runner/.ansible/vault
+    state: directory
+    owner: recovery-runner
+    group: recovery-runner
+    mode: "0700"
+  become: true
+
+- name: Copy vault password file
+  ansible.builtin.copy:
+    src: /home/yoshi/.ansible/vault/homelab_vault_pass
+    dest: /home/recovery-runner/.ansible/vault/homelab_vault_pass
+    remote_src: true
+    owner: recovery-runner
+    group: recovery-runner
+    mode: "0600"
+  become: true
+
+# ---------------------------------------------------------------------------
+# reports/ setgid — new subdirectories/files inherit homelab-ansible group
+# so recovery-runner can write reports alongside yoshi
+# ---------------------------------------------------------------------------
+
+- name: Set homelab-ansible group + setgid on reports directory
+  ansible.builtin.file:
+    path: /home/yoshi/homelab-ansible/reports
+    state: directory
+    group: homelab-ansible
+    mode: "02775"
+  become: true
+
+# ---------------------------------------------------------------------------
+# trigger user (SSH entry point)
+# ---------------------------------------------------------------------------
 
 - name: Create trigger user (nologin, no password)
   ansible.builtin.user:
@@ -26,6 +121,10 @@
     mode: "0700"
   become: true
 
+# ---------------------------------------------------------------------------
+# State and log directories
+# ---------------------------------------------------------------------------
+
 - name: Create state and log directories
   ansible.builtin.file:
     path: "{{ item }}"
@@ -41,9 +140,13 @@
     - "{{ recovery_trigger_log_dir }}"
   become: true
 
-- name: Deploy recovery-trigger.sh
-  ansible.builtin.copy:
-    src: recovery-trigger.sh
+# ---------------------------------------------------------------------------
+# Scripts
+# ---------------------------------------------------------------------------
+
+- name: Deploy recovery-trigger.sh (template — embeds pipeline user)
+  ansible.builtin.template:
+    src: recovery-trigger.sh.j2
     dest: "{{ recovery_trigger_script_dir }}/recovery-trigger.sh"
     owner: root
     group: root
@@ -59,10 +162,14 @@
     mode: "0755"
   become: true
 
-- name: Configure sudoers for trigger → yoshi pipeline execution
+# ---------------------------------------------------------------------------
+# sudoers: trigger → recovery-runner, pipeline script only
+# ---------------------------------------------------------------------------
+
+- name: Configure sudoers for trigger → recovery-runner (pipeline only)
   ansible.builtin.copy:
     content: |
-      # Autonomous recovery: trigger user may run pipeline as yoshi only
+      # Autonomous recovery: trigger user may run pipeline as recovery-runner only
       {{ recovery_trigger_user }} ALL=({{ recovery_trigger_pipeline_user }}) NOPASSWD: {{ recovery_trigger_script_dir }}/recovery-pipeline.sh *
     dest: /etc/sudoers.d/homelab-recovery-trigger
     owner: root
