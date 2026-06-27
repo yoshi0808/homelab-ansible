@@ -27,6 +27,27 @@
           - target_node in ['pve1', 'pve2']
         fail_msg: "target_node must be 'pve1' or 'pve2', got: '{{ target_node | default('undefined') }}'"
 
+    - name: Set recovery mute for authy
+      ansible.builtin.include_tasks: "{{ playbook_dir }}/../roles/recovery_mute/tasks/set.yml"
+      vars:
+        recovery_mute_target: authy
+        recovery_mute_minutes: 90
+        recovery_mute_reason: "proxmox_restore_vm_placement: {{ target_node }} VM placement restore in progress"
+
+    - name: Set recovery mute for monnie
+      ansible.builtin.include_tasks: "{{ playbook_dir }}/../roles/recovery_mute/tasks/set.yml"
+      vars:
+        recovery_mute_target: monnie
+        recovery_mute_minutes: 90
+        recovery_mute_reason: "proxmox_restore_vm_placement: {{ target_node }} VM placement restore in progress"
+
+    - name: Set recovery mute for sophos-fw
+      ansible.builtin.include_tasks: "{{ playbook_dir }}/../roles/recovery_mute/tasks/set.yml"
+      vars:
+        recovery_mute_target: sophos-fw
+        recovery_mute_minutes: 90
+        recovery_mute_reason: "proxmox_restore_vm_placement: {{ target_node }} VM placement restore in progress"
+
 - name: Restore VM placement to target_node
   hosts: "{{ target_node }}"
   gather_facts: false

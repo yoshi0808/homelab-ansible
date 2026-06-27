@@ -1,0 +1,52 @@
+---
+# Sets or extends a recovery mute window on the control node.
+#
+# Input vars:
+#   recovery_mute_target  — target name (e.g. "authy", "monnie", "sophos-fw")
+#   recovery_mute_minutes — mute window from now, in minutes (int)
+#   recovery_mute_reason  — reason string written to the mute file
+#
+# Mute file: /var/lib/homelab-recovery/mute/<target>.json
+#   { "until": "<ISO8601>", "reason": "..." }
+# Update rule: max(existing until, now + minutes) — never shortens an active window.
+# All tasks delegate to localhost (quory), regardless of the calling play's hosts.
+
+- name: "Recovery mute | ensure mute directory exists"
+  ansible.builtin.file:
+    path: /var/lib/homelab-recovery/mute
+    state: directory
+    mode: "0755"
+  delegate_to: localhost
+  become: false
+
+- name: "Recovery mute | read existing mute file ({{ recovery_mute_target }})"
+  ansible.builtin.slurp:
+    src: "/var/lib/homelab-recovery/mute/{{ recovery_mute_target }}.json"
+  register: _recovery_mute_existing
+  delegate_to: localhost
+  become: false
+  ignore_errors: true
+
+- name: "Recovery mute | calculate effective until ({{ recovery_mute_target }})"
+  ansible.builtin.set_fact:
+    _recovery_mute_until_new: >-
+      {{ lookup('pipe',
+         'date -d "+' + (recovery_mute_minutes | string) + ' minutes" +"%Y-%m-%dT%H:%M:%S%:z"') }}
+    _recovery_mute_until_existing: >-
+      {{ (_recovery_mute_existing.content | b64decode | from_json).until
+         if _recovery_mute_existing is not failed
+         else '' }}
+
+- name: "Recovery mute | write mute file ({{ recovery_mute_target }})"
+  ansible.builtin.copy:
+    content: >-
+      {{ {
+           'until': ([_recovery_mute_until_new, _recovery_mute_until_existing]
+                     | select | list | max),
+           'reason': recovery_mute_reason
+         } | to_nice_json }}
+
+    dest: "/var/lib/homelab-recovery/mute/{{ recovery_mute_target }}.json"
+    mode: "0644"
+  delegate_to: localhost
+  become: false

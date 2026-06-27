@@ -63,6 +63,13 @@
       ansible.builtin.meta: end_host
       when: not reboot_required
 
+    - name: Set recovery mute before reboot
+      ansible.builtin.include_tasks: "{{ playbook_dir }}/../roles/recovery_mute/tasks/set.yml"
+      vars:
+        recovery_mute_target: "{{ inventory_hostname }}"
+        recovery_mute_minutes: 30
+        recovery_mute_reason: "ubuntu_nightly: {{ inventory_hostname }} reboot in progress"
+
     - name: Send reboot start notification
       ansible.builtin.include_tasks: "{{ playbook_dir }}/../roles/common_slack/tasks/notify.yml"
       vars:
@@ -253,6 +260,13 @@
     - name: End play if reboot is not required
       ansible.builtin.meta: end_host
       when: not reboot_required
+
+    - name: Set recovery mute before reboot
+      ansible.builtin.include_tasks: "{{ playbook_dir }}/../roles/recovery_mute/tasks/set.yml"
+      vars:
+        recovery_mute_target: "{{ inventory_hostname }}"
+        recovery_mute_minutes: 30
+        recovery_mute_reason: "ubuntu_nightly: {{ inventory_hostname }} reboot in progress"
 
     - name: Send reboot start notification
       ansible.builtin.include_tasks: "{{ playbook_dir }}/../roles/common_slack/tasks/notify.yml"
