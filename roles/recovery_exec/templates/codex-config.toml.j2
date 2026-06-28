@@ -1,11 +1,10 @@
 model = "{{ recovery_exec_codex_model }}"
 approval_policy = "never"
 
-# Sandbox: allow network (for SSH wrappers to reach targets), no writable roots.
+# Sandbox: allow network (for SSH wrappers to reach targets).
+# /var/lib/recovery-exec is in ReadWritePaths so bwrap can bind-mount it writable.
 [sandbox_workspace_write]
 network_access = true
-writable_roots = []
-exclude_slash_tmp = true
 
 # Execpolicy: deny all by default; allow only homelab-* wrapper scripts (§5.3).
 [execpolicy]

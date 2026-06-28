@@ -1,6 +1,6 @@
 #!/bin/bash
 # codex-exec-wrapper: Invoked by recovery-io via sudo.
-# Validates args, injects sandbox/approval flags, then executes Codex.
+# Validates args and injects sandbox/approval flags, then executes Codex.
 #
 # Authentication: Codex uses browser OAuth; token is in ~/.codex/ (no API key).
 # sudo -H ensures HOME=/home/recovery-exec so Codex finds its token and config.
@@ -21,7 +21,5 @@ exec "{{ recovery_exec_codex_bin }}" exec \
     --skip-git-repo-check \
     --sandbox workspace-write \
     -c 'approval_policy="never"' \
-    -c 'sandbox_workspace_write.writable_roots=[]' \
     -c 'sandbox_workspace_write.network_access=true' \
-    -c 'sandbox_workspace_write.exclude_slash_tmp=true' \
     "$@"
