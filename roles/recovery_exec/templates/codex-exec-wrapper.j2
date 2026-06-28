@@ -1,6 +1,6 @@
 #!/bin/bash
 # codex-exec-wrapper: Invoked by recovery-io via sudo.
-# Validates args, then executes Codex as recovery-exec.
+# Validates args, injects sandbox/approval flags, then executes Codex.
 #
 # Authentication: Codex uses browser OAuth; token is in ~/.codex/ (no API key).
 # sudo -H ensures HOME=/home/recovery-exec so Codex finds its token and config.
@@ -8,11 +8,19 @@
 # Security:
 #   - This file: mode 0500 owned by recovery-exec (recovery-io cannot read)
 #   - Only "exec" subcommand is accepted (prevents info leakage via other subcommands)
+#   - Sandbox and approval flags are injected here, not left to the caller (§5.4)
 set -euo pipefail
 
 if [[ "${1:-}" != "exec" ]]; then
     echo "denied: only 'exec' subcommand is permitted" >&2
     exit 1
 fi
+shift  # consume "exec"; remaining args: [--cd <workspace> "<message>"]
 
-exec "{{ recovery_exec_codex_bin }}" "$@"
+exec "{{ recovery_exec_codex_bin }}" exec \
+    --sandbox workspace-write \
+    -c 'approval_policy="never"' \
+    -c 'sandbox_workspace_write.writable_roots=[]' \
+    -c 'sandbox_workspace_write.network_access=true' \
+    -c 'sandbox_workspace_write.exclude_slash_tmp=true' \
+    "$@"

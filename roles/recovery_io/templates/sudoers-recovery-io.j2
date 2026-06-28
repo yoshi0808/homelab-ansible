@@ -1,4 +1,4 @@
 # recovery-io may invoke Codex as recovery-exec via wrapper only.
-# Wrapper validates args and sources the API key — recovery-io never
-# reads the key or any of recovery-exec's files directly (§4.4, §4.5).
+# Wrapper validates args and injects sandbox flags — recovery-io never
+# reads recovery-exec's config or OAuth token directly (§4.4, §4.5).
 {{ recovery_io_user }} ALL = ({{ recovery_io_exec_user }}) NOPASSWD: {{ recovery_io_codex_wrapper }}
