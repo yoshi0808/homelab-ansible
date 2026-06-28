@@ -1,0 +1,10 @@
+#!/bin/bash
+# recovery-action.sh — deployed on {{ target_item.name }}
+# Called via SSH forced command from recovery-exec@{{ inventory_hostname }}.
+# Action is completely fixed — no parameters from the SSH client (§4.3).
+set -euo pipefail
+
+{% for svc in target_item.action_services %}
+sudo systemctl restart {{ svc }}.service
+{% endfor %}
+echo "OK: restarted {{ target_item.action_services | join(', ') }} on {{ target_item.name }}"

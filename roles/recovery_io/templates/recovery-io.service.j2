@@ -1,0 +1,31 @@
+[Unit]
+Description=Homelab Recovery I/O (Slack listener)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User={{ recovery_io_user }}
+Group={{ recovery_io_user }}
+ExecStart={{ recovery_io_install_dir }}/venv/bin/python {{ recovery_io_script }}
+EnvironmentFile={{ recovery_io_env_dir }}/recovery-io.env
+Restart=on-failure
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+# Hardening (§7)
+# NoNewPrivileges left unset (default=no) — recovery-io must call sudo.
+PrivateTmp=yes
+ProtectSystem=strict
+# read-only (not "yes") — child processes need to read /home/recovery-exec/.codex/
+ProtectHome=read-only
+RestrictSUIDSGID=yes
+LockPersonality=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,173 @@
+---
+# recovery_exec: Codex runner for autonomous recovery pipeline (§4.2)
+#
+# Required vault vars (inventories/vars/slack.yml):
+#   vault_codex_openai_api_key  -- sk-proj-...
+#
+# Creates recovery-exec user, generates two shared SSH keys (investigate/action),
+# deploys wrapper scripts, Codex config and AGENTS.md.
+# Calls target_setup.yml to register keys and deploy scripts on authy/monnie.
+
+- name: Load Slack vault variables (for API key)
+  ansible.builtin.include_vars:
+    file: "{{ inventory_dir }}/../vars/slack.yml"
+  delegate_to: localhost
+  become: false
+  no_log: true
+
+# ---------------------------------------------------------------------------
+# Service user (home at /home/recovery-exec for SSH config + Codex config)
+# ---------------------------------------------------------------------------
+
+- name: Create recovery-exec user (nologin, home in /home)
+  ansible.builtin.user:
+    name: "{{ recovery_exec_user }}"
+    shell: /usr/sbin/nologin
+    create_home: true
+    home: "{{ recovery_exec_home }}"
+    password: "!"
+    comment: "Recovery Codex runner service account"
+  become: true
+
+# ---------------------------------------------------------------------------
+# SSH key directories
+# ---------------------------------------------------------------------------
+
+- name: Create .ssh directory for recovery-exec
+  ansible.builtin.file:
+    path: "{{ recovery_exec_ssh_dir }}"
+    state: directory
+    owner: "{{ recovery_exec_user }}"
+    group: "{{ recovery_exec_user }}"
+    mode: "0700"
+  become: true
+
+- name: Generate investigation SSH key (shared, parameterized forced command)
+  ansible.builtin.command:
+    cmd: >-
+      ssh-keygen -t ed25519 -N ''
+      -C "recovery-investigate"
+      -f {{ recovery_exec_investigate_key }}
+    creates: "{{ recovery_exec_investigate_key }}"
+  become: true
+  become_user: "{{ recovery_exec_user }}"
+
+- name: Generate action SSH key (shared, fixed forced commands)
+  ansible.builtin.command:
+    cmd: >-
+      ssh-keygen -t ed25519 -N ''
+      -C "recovery-action"
+      -f {{ recovery_exec_action_key }}
+    creates: "{{ recovery_exec_action_key }}"
+  become: true
+  become_user: "{{ recovery_exec_user }}"
+
+- name: Lock down SSH key permissions
+  ansible.builtin.file:
+    path: "{{ item }}"
+    owner: "{{ recovery_exec_user }}"
+    group: "{{ recovery_exec_user }}"
+    mode: "0600"
+  loop:
+    - "{{ recovery_exec_investigate_key }}"
+    - "{{ recovery_exec_action_key }}"
+  become: true
+
+# ---------------------------------------------------------------------------
+# Codex configuration directory and API key
+# ---------------------------------------------------------------------------
+
+- name: Create .codex directory
+  ansible.builtin.file:
+    path: "{{ recovery_exec_codex_dir }}"
+    state: directory
+    owner: "{{ recovery_exec_user }}"
+    group: "{{ recovery_exec_user }}"
+    mode: "0700"
+  become: true
+
+- name: Deploy Codex env file (OpenAI API key)
+  ansible.builtin.template:
+    src: codex.env.j2
+    dest: "{{ recovery_exec_codex_dir }}/codex.env"
+    owner: "{{ recovery_exec_user }}"
+    group: "{{ recovery_exec_user }}"
+    mode: "0600"
+  become: true
+  no_log: true
+
+- name: Deploy Codex config.toml (model + execpolicy)
+  ansible.builtin.template:
+    src: codex-config.toml.j2
+    dest: "{{ recovery_exec_codex_dir }}/config.toml"
+    owner: "{{ recovery_exec_user }}"
+    group: "{{ recovery_exec_user }}"
+    mode: "0600"
+  become: true
+
+# ---------------------------------------------------------------------------
+# Codex execution wrapper (sources API key; restricts args to "exec")
+# ---------------------------------------------------------------------------
+
+- name: Deploy codex-exec-wrapper
+  ansible.builtin.template:
+    src: codex-exec-wrapper.j2
+    dest: "{{ recovery_exec_codex_wrapper }}"
+    owner: "{{ recovery_exec_user }}"
+    group: "{{ recovery_exec_user }}"
+    mode: "0500"
+  become: true
+
+# ---------------------------------------------------------------------------
+# Workspace + AGENTS.md (Codex reads this for tool documentation)
+# ---------------------------------------------------------------------------
+
+- name: Create Codex workspace directory
+  ansible.builtin.file:
+    path: "{{ recovery_exec_workspace }}"
+    state: directory
+    owner: "{{ recovery_exec_user }}"
+    group: "{{ recovery_exec_user }}"
+    mode: "0750"
+  become: true
+
+- name: Deploy AGENTS.md (tool documentation for Codex)
+  ansible.builtin.template:
+    src: AGENTS.md.j2
+    dest: "{{ recovery_exec_workspace }}/AGENTS.md"
+    owner: "{{ recovery_exec_user }}"
+    group: "{{ recovery_exec_user }}"
+    mode: "0640"
+  become: true
+
+# ---------------------------------------------------------------------------
+# Local wrapper scripts: homelab-investigate-* and homelab-recover-*
+# ---------------------------------------------------------------------------
+
+- name: Deploy homelab-investigate-* wrapper scripts
+  ansible.builtin.copy:
+    src: "homelab-investigate-{{ item.name }}"
+    dest: "/usr/local/bin/homelab-investigate-{{ item.name }}"
+    owner: root
+    group: root
+    mode: "0755"
+  loop: "{{ recovery_exec_targets }}"
+  become: true
+
+- name: Deploy homelab-recover-* wrapper scripts
+  ansible.builtin.copy:
+    src: "homelab-recover-{{ item.name }}"
+    dest: "/usr/local/bin/homelab-recover-{{ item.name }}"
+    owner: root
+    group: root
+    mode: "0755"
+  loop: "{{ recovery_exec_targets }}"
+  become: true
+
+# ---------------------------------------------------------------------------
+# Target node setup (authy/monnie)
+# ---------------------------------------------------------------------------
+
+- name: Setup recovery-exec on target nodes
+  ansible.builtin.include_tasks: target_setup.yml
+  when: recovery_exec_setup_targets | default(true) | bool

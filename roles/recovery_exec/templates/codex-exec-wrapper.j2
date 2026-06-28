@@ -1,0 +1,20 @@
+#!/bin/bash
+# codex-exec-wrapper: Invoked by recovery-io via sudo.
+# Sources OpenAI API key, validates args, then executes Codex.
+#
+# Security:
+#   - This file: mode 0500 owned by recovery-exec (recovery-io cannot read)
+#   - codex.env: mode 0600 owned by recovery-exec (recovery-io cannot read)
+#   - Only "exec" subcommand is accepted to prevent API key disclosure via
+#     subcommands like "env" or "cat" (§4.4)
+set -euo pipefail
+
+if [[ "${1:-}" != "exec" ]]; then
+    echo "denied: only 'exec' subcommand is permitted" >&2
+    exit 1
+fi
+
+. "{{ recovery_exec_codex_dir }}/codex.env"
+export OPENAI_API_KEY
+
+exec "{{ recovery_exec_codex_bin }}" "$@"

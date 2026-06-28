@@ -1,0 +1,30 @@
+#!/bin/bash
+# homelab-investigate-monnie: SSH investigation wrapper for monnie.
+# Called by Codex: homelab-investigate-monnie <check>
+#
+# Allowed checks: prometheus, grafana-server, loki, unpoller,
+#                 journal-prometheus, journal-grafana-server, journal-loki, journal-unpoller,
+#                 status
+# Hostname is hardcoded (§4.3: connection target fixed in script, not from args).
+set -euo pipefail
+
+KEY=/home/recovery-exec/.ssh/id_recovery_investigate
+KNOWN=/home/recovery-exec/.ssh/known_hosts
+
+case "${1:-status}" in
+  prometheus|grafana-server|loki|unpoller|\
+  journal-prometheus|journal-grafana-server|journal-loki|journal-unpoller|\
+  status)
+    exec ssh -T \
+        -i "$KEY" \
+        -o StrictHostKeyChecking=yes \
+        -o UserKnownHostsFile="$KNOWN" \
+        -o ConnectTimeout=10 \
+        -o BatchMode=yes \
+        "recovery-exec@monnie.internal" "${1:-status}"
+    ;;
+  *)
+    echo "denied: unknown check '${1:-}'" >&2
+    exit 1
+    ;;
+esac

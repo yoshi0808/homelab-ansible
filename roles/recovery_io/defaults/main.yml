@@ -1,0 +1,12 @@
+---
+recovery_io_user: recovery-io
+recovery_io_install_dir: /opt/recovery-io
+recovery_io_script: /usr/local/bin/recovery-io
+recovery_io_env_dir: /etc/recovery-io
+recovery_io_exec_user: recovery-exec
+recovery_io_exec_workspace: /var/lib/recovery-exec/workspace
+recovery_io_codex_wrapper: /usr/local/bin/codex-exec-wrapper
+recovery_io_codex_timeout: 300
+
+# false = manual start (ansy dev); true = auto-start on boot (quory prod)
+recovery_io_service_enabled: false

@@ -1,0 +1,28 @@
+---
+# Deploy recovery-exec (Codex runner) to ansy or quory,
+# and set up SSH landing accounts on target nodes (authy, monnie).
+#
+# Development (ansy):
+#   ansible-playbook playbooks/recovery_exec_setup.yml -l ansy
+#
+# Production (quory):
+#   ansible-playbook playbooks/recovery_exec_setup.yml -l quory
+#
+# Skip target node setup (e.g. when authy/monnie is unreachable):
+#   ansible-playbook playbooks/recovery_exec_setup.yml -l ansy \
+#     -e recovery_exec_setup_targets=false
+#
+# Notes:
+# - vault_codex_openai_api_key must be added to inventories/vars/slack.yml
+# - Run this before recovery_io_setup.yml (creates codex-exec-wrapper)
+# - After first run, verify key permissions:
+#     ansible ansy -m command -a "sudo -u nobody stat /home/recovery-exec/.ssh/id_recovery_investigate"
+#   Expected: Permission denied
+
+- name: Deploy recovery-exec (Codex runner + SSH key generation)
+  hosts: dev_nodes:control_nodes
+  gather_facts: true
+  become: true
+
+  roles:
+    - recovery_exec

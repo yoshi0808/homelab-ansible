@@ -1,0 +1,148 @@
+---
+# recovery_io: Slack I/O bridge for autonomous recovery pipeline (§4.1)
+#
+# Required vault vars (inventories/vars/slack.yml):
+#   vault_slack_socket_bot_token      -- xoxb-...
+#   vault_slack_socket_app_token      -- xapp-...
+#   vault_slack_authorized_user_id    -- e.g. U0B5S8K0UGY
+#
+# recovery-io receives Slack @mentions, delegates to recovery-exec via
+# "sudo codex-exec-wrapper exec <message>", posts result to Slack.
+# No SSH keys, no secrets beyond Slack tokens.
+
+- name: Load Slack vault variables
+  ansible.builtin.include_vars:
+    file: "{{ inventory_dir }}/../vars/slack.yml"
+  delegate_to: localhost
+  become: false
+  no_log: true
+
+# ---------------------------------------------------------------------------
+# Service user
+# ---------------------------------------------------------------------------
+
+- name: Create recovery-io user (nologin, no home)
+  ansible.builtin.user:
+    name: "{{ recovery_io_user }}"
+    shell: /usr/sbin/nologin
+    create_home: false
+    system: true
+    password: "!"
+    comment: "Recovery Slack I/O service account"
+  become: true
+
+# ---------------------------------------------------------------------------
+# Env directory (holds Slack tokens — no SSH keys)
+# ---------------------------------------------------------------------------
+
+- name: Create recovery-io env directory
+  ansible.builtin.file:
+    path: "{{ recovery_io_env_dir }}"
+    state: directory
+    owner: "{{ recovery_io_user }}"
+    group: "{{ recovery_io_user }}"
+    mode: "0750"
+  become: true
+
+# ---------------------------------------------------------------------------
+# Python venv + slack-bolt
+# ---------------------------------------------------------------------------
+
+- name: Ensure python3-venv is installed
+  ansible.builtin.apt:
+    name: python3-venv
+    state: present
+    update_cache: false
+  become: true
+
+- name: Create virtualenv
+  ansible.builtin.command:
+    cmd: python3 -m venv {{ recovery_io_install_dir }}/venv
+    creates: "{{ recovery_io_install_dir }}/venv/bin/python"
+  become: true
+
+- name: Install slack-bolt into venv
+  ansible.builtin.pip:
+    name: slack-bolt
+    virtualenv: "{{ recovery_io_install_dir }}/venv"
+    state: present
+  become: true
+
+- name: Set venv ownership
+  ansible.builtin.file:
+    path: "{{ recovery_io_install_dir }}"
+    owner: root
+    group: root
+    mode: "0755"
+    recurse: false
+  become: true
+
+# ---------------------------------------------------------------------------
+# Listener script
+# ---------------------------------------------------------------------------
+
+- name: Deploy recovery-io script
+  ansible.builtin.template:
+    src: recovery-io.py.j2
+    dest: "{{ recovery_io_script }}"
+    owner: root
+    group: root
+    mode: "0755"
+  become: true
+  notify: Restart recovery-io
+
+# ---------------------------------------------------------------------------
+# Env file (Slack tokens)
+# ---------------------------------------------------------------------------
+
+- name: Deploy environment file (contains tokens)
+  ansible.builtin.template:
+    src: recovery-io.env.j2
+    dest: "{{ recovery_io_env_dir }}/recovery-io.env"
+    owner: "{{ recovery_io_user }}"
+    group: "{{ recovery_io_user }}"
+    mode: "0600"
+  become: true
+  no_log: true
+  notify: Restart recovery-io
+
+# ---------------------------------------------------------------------------
+# sudoers: recovery-io → recovery-exec (codex-exec-wrapper only)
+# ---------------------------------------------------------------------------
+
+- name: Deploy sudoers rule for recovery-io
+  ansible.builtin.template:
+    src: sudoers-recovery-io.j2
+    dest: /etc/sudoers.d/recovery-io
+    owner: root
+    group: root
+    mode: "0440"
+    validate: /usr/sbin/visudo -cf %s
+  become: true
+
+# ---------------------------------------------------------------------------
+# systemd service
+# ---------------------------------------------------------------------------
+
+- name: Deploy systemd service unit
+  ansible.builtin.template:
+    src: recovery-io.service.j2
+    dest: /etc/systemd/system/recovery-io.service
+    owner: root
+    group: root
+    mode: "0644"
+  become: true
+  notify:
+    - Reload systemd
+    - Restart recovery-io
+
+- name: Reload systemd daemon
+  ansible.builtin.systemd:
+    daemon_reload: true
+  become: true
+
+- name: Enable recovery-io service (quory only)
+  ansible.builtin.systemd:
+    name: recovery-io
+    enabled: "{{ recovery_io_service_enabled }}"
+  become: true

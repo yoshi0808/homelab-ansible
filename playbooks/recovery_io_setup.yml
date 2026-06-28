@@ -1,0 +1,23 @@
+---
+# Deploy recovery-io (Slack I/O bridge) to ansy or quory.
+#
+# Development (ansy):
+#   ansible-playbook playbooks/recovery_io_setup.yml -l ansy
+#   # service is deployed but NOT enabled/auto-started; use systemctl start manually
+#
+# Production (quory):
+#   ansible-playbook playbooks/recovery_io_setup.yml -l quory \
+#     -e recovery_io_service_enabled=true
+#
+# Notes:
+# - vault_slack_socket_bot_token, vault_slack_socket_app_token,
+#   vault_slack_authorized_user_id must be set in inventories/vars/slack.yml
+# - recovery_exec role must be deployed first (codex-exec-wrapper must exist)
+
+- name: Deploy recovery-io (Slack I/O bridge)
+  hosts: dev_nodes:control_nodes
+  gather_facts: true
+  become: true
+
+  roles:
+    - recovery_io

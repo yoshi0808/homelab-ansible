@@ -1,0 +1,29 @@
+#!/bin/bash
+# recovery-investigate-dispatch.sh — deployed on {{ target_item.name }}
+# Called via SSH forced command from recovery-exec@{{ inventory_hostname }}.
+# Validates SSH_ORIGINAL_COMMAND against an allowlist, then executes it.
+# No arguments accepted from the SSH client beyond the forced command key.
+set -euo pipefail
+
+cmd="${SSH_ORIGINAL_COMMAND:-status}"
+
+case "$cmd" in
+{% for svc in target_item.investigate_services %}
+  {{ svc }})
+    systemctl status {{ svc }} --no-pager -l
+    ;;
+  journal-{{ svc }})
+    journalctl -u {{ svc }} -n 100 --no-pager
+    ;;
+{% endfor %}
+  status)
+{% for svc in target_item.investigate_services %}
+    echo "=== {{ svc }} ==="
+    systemctl status {{ svc }} --no-pager -l || true
+{% endfor %}
+    ;;
+  *)
+    echo "denied: unknown command '${cmd}'" >&2
+    exit 1
+    ;;
+esac

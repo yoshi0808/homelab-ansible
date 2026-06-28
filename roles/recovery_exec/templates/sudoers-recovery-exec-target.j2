@@ -1,0 +1,5 @@
+# recovery-exec may restart the following services via the action script only.
+# Direct sudo for service management is not permitted outside the action script (§4.3).
+{% for svc in target_item.action_services %}
+{{ recovery_exec_user }} ALL = NOPASSWD: /bin/systemctl restart {{ svc }}.service
+{% endfor %}

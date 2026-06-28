@@ -1,0 +1,38 @@
+---
+recovery_exec_user: recovery-exec
+recovery_exec_home: /home/recovery-exec
+recovery_exec_ssh_dir: /home/recovery-exec/.ssh
+recovery_exec_codex_dir: /home/recovery-exec/.codex
+recovery_exec_workspace: /var/lib/recovery-exec/workspace
+recovery_exec_investigate_key: /home/recovery-exec/.ssh/id_recovery_investigate
+recovery_exec_action_key: /home/recovery-exec/.ssh/id_recovery_action
+recovery_exec_codex_bin: /usr/local/bin/codex
+recovery_exec_codex_wrapper: /usr/local/bin/codex-exec-wrapper
+recovery_exec_codex_model: gpt-4o
+
+# Set to false to skip target node setup (e.g. when target is unreachable)
+recovery_exec_setup_targets: true
+
+# Per-node investigation and action configuration.
+# investigate_services: services for which check/journal-<svc>/status are allowed.
+# action_services:      services restarted by the action wrapper (all at once).
+recovery_exec_targets:
+  - name: authy
+    host: authy.internal
+    investigate_services:
+      - freeradius
+      - sshd
+    action_services:
+      - freeradius
+  - name: monnie
+    host: monnie.internal
+    investigate_services:
+      - prometheus
+      - grafana-server
+      - loki
+      - unpoller
+    action_services:
+      - prometheus
+      - grafana-server
+      - loki
+      - unpoller

@@ -1,0 +1,23 @@
+model = "{{ recovery_exec_codex_model }}"
+approval_policy = "never"
+
+# Sandbox: allow network (for SSH wrappers to reach targets), no writable roots.
+[sandbox_workspace_write]
+network_access = true
+writable_roots = []
+exclude_slash_tmp = true
+
+# Execpolicy: deny all by default; allow only homelab-* wrapper scripts (§5.3).
+[execpolicy]
+default_policy = "deny"
+
+{% for target in recovery_exec_targets %}
+[[execpolicy.rules]]
+command = "homelab-investigate-{{ target.name }}"
+policy = "allow"
+
+[[execpolicy.rules]]
+command = "homelab-recover-{{ target.name }}"
+policy = "allow"
+
+{% endfor %}

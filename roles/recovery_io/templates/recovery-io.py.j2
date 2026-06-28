@@ -1,0 +1,102 @@
+#!/usr/bin/env python3
+"""
+recovery-io: Slack I/O bridge for autonomous recovery pipeline (§4.1).
+
+Receives @mention from Slack, delegates to recovery-exec via
+  sudo -H -u recovery-exec codex-exec-wrapper exec "<message>"
+Posts result back to Slack.
+
+No SSH operations. No decision-making. No secrets beyond Slack tokens.
+"""
+import logging
+import os
+import re
+import subprocess
+import sys
+
+from slack_bolt import App
+from slack_bolt.adapter.socket_mode import SocketModeHandler
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(message)s",
+    stream=sys.stdout,
+)
+log = logging.getLogger("recovery-io")
+
+BOT_TOKEN          = os.environ["SLACK_BOT_TOKEN"]
+APP_TOKEN          = os.environ["SLACK_APP_TOKEN"]
+AUTHORIZED_USER_ID = os.environ["RECOVERY_AUTHORIZED_USER_ID"]
+CODEX_WRAPPER      = "{{ recovery_io_codex_wrapper }}"
+EXEC_USER          = "{{ recovery_io_exec_user }}"
+EXEC_WORKSPACE     = "{{ recovery_io_exec_workspace }}"
+CODEX_TIMEOUT      = {{ recovery_io_codex_timeout }}
+
+
+def _run_codex(message: str) -> str:
+    """Invoke Codex as recovery-exec and return the response text."""
+    result = subprocess.run(
+        ["sudo", "-H", "-u", EXEC_USER,
+         CODEX_WRAPPER, "exec",
+         "--cd", EXEC_WORKSPACE,
+         message],
+        capture_output=True,
+        text=True,
+        timeout=CODEX_TIMEOUT,
+    )
+    output = (result.stdout or "") + (result.stderr or "")
+    response = _extract_response(output)
+    if not response:
+        log.warning("codex exec rc=%d, raw output: %s", result.returncode, output[:500])
+    return response or output.strip()
+
+
+def _extract_response(output: str) -> str:
+    """Extract the last assistant response block from codex exec stdout."""
+    # codex exec format: header ... "codex\n<response>\ntokens used\n..."
+    parts = re.split(r"^codex\s*$", output, flags=re.MULTILINE)
+    if len(parts) < 2:
+        return ""
+    last = parts[-1]
+    end = re.search(r"^tokens used", last, re.MULTILINE)
+    return last[: end.start()].strip() if end else last.strip()
+
+
+app = App(token=BOT_TOKEN)
+
+
+@app.event("app_mention")
+def handle_mention(event, say):
+    user_id = event.get("user", "")
+    if user_id != AUTHORIZED_USER_ID:
+        log.warning("Unauthorized mention from user_id=%s — ignored", user_id)
+        return
+
+    raw = event.get("text", "")
+    message = re.sub(r"<@[A-Z0-9]+>\s*", "", raw).strip()
+    if not message:
+        say(f"<@{user_id}> メッセージを入力してください。")
+        return
+
+    thread_ts = event.get("ts")
+    log.info("Mention from %s: %s", user_id, message[:120])
+    say(text=f"<@{user_id}> 調査を開始します...", thread_ts=thread_ts)
+
+    try:
+        response = _run_codex(message)
+    except subprocess.TimeoutExpired:
+        log.error("codex exec timed out after %ds", CODEX_TIMEOUT)
+        say(text=f"<@{user_id}> タイムアウトしました（{CODEX_TIMEOUT}秒）。手動で確認してください。",
+            thread_ts=thread_ts)
+        return
+    except Exception as exc:
+        log.exception("codex exec failed")
+        say(text=f"<@{user_id}> エラーが発生しました: {exc}", thread_ts=thread_ts)
+        return
+
+    say(text=f"<@{user_id}>\n{response[:3800]}", thread_ts=thread_ts)
+
+
+if __name__ == "__main__":
+    log.info("Starting recovery-io (authorized_user=%s)", AUTHORIZED_USER_ID)
+    SocketModeHandler(app, APP_TOKEN).start()

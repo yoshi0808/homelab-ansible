@@ -1,0 +1,26 @@
+#!/bin/bash
+# homelab-investigate-authy: SSH investigation wrapper for authy.
+# Called by Codex: homelab-investigate-authy <check>
+#
+# Allowed checks: freeradius, sshd, journal-freeradius, journal-sshd, status
+# Hostname is hardcoded (§4.3: connection target fixed in script, not from args).
+set -euo pipefail
+
+KEY=/home/recovery-exec/.ssh/id_recovery_investigate
+KNOWN=/home/recovery-exec/.ssh/known_hosts
+
+case "${1:-status}" in
+  freeradius|sshd|journal-freeradius|journal-sshd|status)
+    exec ssh -T \
+        -i "$KEY" \
+        -o StrictHostKeyChecking=yes \
+        -o UserKnownHostsFile="$KNOWN" \
+        -o ConnectTimeout=10 \
+        -o BatchMode=yes \
+        "recovery-exec@authy.internal" "${1:-status}"
+    ;;
+  *)
+    echo "denied: unknown check '${1:-}'" >&2
+    exit 1
+    ;;
+esac
