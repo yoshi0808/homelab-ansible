@@ -1,19 +1,12 @@
 ---
 # recovery_exec: Codex runner for autonomous recovery pipeline (§4.2)
 #
-# Required vault vars (inventories/vars/slack.yml):
-#   vault_codex_openai_api_key  -- sk-proj-...
-#
 # Creates recovery-exec user, generates two shared SSH keys (investigate/action),
 # deploys wrapper scripts, Codex config and AGENTS.md.
 # Calls target_setup.yml to register keys and deploy scripts on authy/monnie.
-
-- name: Load Slack vault variables (for API key)
-  ansible.builtin.include_vars:
-    file: "{{ inventory_dir }}/../vars/slack.yml"
-  delegate_to: localhost
-  become: false
-  no_log: true
+#
+# Authentication: Codex uses browser OAuth. The token is stored in
+# /home/recovery-exec/.codex/ (managed by Codex itself). No API key required.
 
 # ---------------------------------------------------------------------------
 # Service user (home at /home/recovery-exec for SSH config + Codex config)
@@ -74,10 +67,10 @@
   become: true
 
 # ---------------------------------------------------------------------------
-# Codex configuration directory and API key
+# Codex configuration directory (OAuth token stored here by Codex itself)
 # ---------------------------------------------------------------------------
 
-- name: Create .codex directory
+- name: Create .codex directory (OAuth token stored by Codex)
   ansible.builtin.file:
     path: "{{ recovery_exec_codex_dir }}"
     state: directory
@@ -85,16 +78,6 @@
     group: "{{ recovery_exec_user }}"
     mode: "0700"
   become: true
-
-- name: Deploy Codex env file (OpenAI API key)
-  ansible.builtin.template:
-    src: codex.env.j2
-    dest: "{{ recovery_exec_codex_dir }}/codex.env"
-    owner: "{{ recovery_exec_user }}"
-    group: "{{ recovery_exec_user }}"
-    mode: "0600"
-  become: true
-  no_log: true
 
 - name: Deploy Codex config.toml (model + execpolicy)
   ansible.builtin.template:
@@ -106,7 +89,7 @@
   become: true
 
 # ---------------------------------------------------------------------------
-# Codex execution wrapper (sources API key; restricts args to "exec")
+# Codex execution wrapper (restricts args to "exec" subcommand only)
 # ---------------------------------------------------------------------------
 
 - name: Deploy codex-exec-wrapper
