@@ -10,3 +10,7 @@
     name: pveproxy
     state: restarted
   become: true
+
+- name: update-ca-certificates
+  ansible.builtin.command: update-ca-certificates
+  changed_when: true

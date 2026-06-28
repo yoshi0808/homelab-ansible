@@ -1,0 +1,18 @@
+---
+# ca_trust_deploy.yml - Home-TLS-CA をノードのシステム信頼ストアに配布
+# 変更系: /usr/local/share/ca-certificates/ への書き込み + update-ca-certificates
+#
+# 対象: ansy, quory, monnie, authy, pve1, pve2
+# CA秘密鍵は不要（証明書のみ取得）。cert_renew_ca_host(quory)からSSHで取得する。
+
+- name: ca_trust_deploy - distribute CA cert to all nodes
+  hosts: control_nodes:dev_nodes:monitoring_servers:radius_servers:proxmox
+  gather_facts: false
+  become: true
+  vars:
+    cert_renew_ca_host: quory
+  tasks:
+    - name: Deploy Home-TLS-CA to system trust store
+      ansible.builtin.import_role:
+        name: homelab_cert_renew
+        tasks_from: deploy_ca_trust

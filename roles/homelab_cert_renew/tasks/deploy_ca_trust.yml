@@ -1,0 +1,16 @@
+---
+- name: Slurp CA certificate from source host
+  ansible.builtin.slurp:
+    src: "{{ cert_renew_ca_src_crt }}"
+  register: ca_cert_slurp
+  delegate_to: "{{ cert_renew_ca_host }}"
+  run_once: true
+
+- name: Deploy CA certificate to system trust store
+  ansible.builtin.copy:
+    content: "{{ ca_cert_slurp.content | b64decode }}"
+    dest: /usr/local/share/ca-certificates/home-tls-ca.crt
+    owner: root
+    group: root
+    mode: "0644"
+  notify: update-ca-certificates
