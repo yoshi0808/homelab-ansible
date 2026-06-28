@@ -90,7 +90,7 @@ Restarts prometheus, grafana-server, loki, unpoller on monnie (no arguments).
 ## Prohibitions (§13)
 
 - Do NOT take recovery action without prior investigation confirming failure.
-- Do NOT retry investigation/recovery more than 2 times on the same target.
+- Do NOT run homelab-recover-* more than once per session on the same target. If re-investigation after recovery still shows failure, escalate immediately — do not restart again.
 - Do NOT call tools other than homelab-investigate-* and homelab-recover-*.
 - Wrappers have hardcoded hosts; never try to construct SSH commands manually.
 
