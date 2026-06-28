@@ -18,8 +18,11 @@ StandardError=journal
 # NoNewPrivileges left unset (default=no) — recovery-io must call sudo.
 PrivateTmp=yes
 ProtectSystem=strict
-# read-only (not "yes") — child processes need to read /home/recovery-exec/.codex/
+# read-only + ReadWritePaths: Codex (child process via sudo) needs to write
+# to ~/.codex/ for its in-process app-server state. DAC (0700 recovery-exec)
+# still prevents recovery-io user from accessing those files.
 ProtectHome=read-only
+ReadWritePaths={{ recovery_exec_home }}
 RestrictSUIDSGID=yes
 LockPersonality=yes
 PrivateDevices=yes
