@@ -38,11 +38,11 @@ recovery_exec_targets:
       - unpoller
     investigate_extra:
       - name: prometheus-targets
-        cmd: "curl -s http://localhost:9090/api/v1/targets"
+        cmd: "curl -fsS --max-time 10 http://localhost:9090/api/v1/targets || echo 'prometheus-targets: request failed or timed out'"
       - name: grafana-health
-        cmd: "curl -s https://monnie.internal:3000/api/health"
+        cmd: "curl -fsS --max-time 10 https://monnie.internal:3000/api/health || echo 'grafana-health: request failed or timed out'"
       - name: loki-health
-        cmd: "curl -s http://localhost:3100/metrics | head -10"
+        cmd: "curl -fsS --max-time 10 http://localhost:3100/metrics | head -10 || echo 'loki-health: request failed or timed out'"
       - name: unpoller-config
         cmd: "systemctl show unpoller --property=ExecStart --no-pager; echo '---'; ss -ltnup | grep 9130 || echo 'port 9130 not listening'"
     action_services:
