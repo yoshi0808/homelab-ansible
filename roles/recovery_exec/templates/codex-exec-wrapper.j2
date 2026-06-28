@@ -18,6 +18,7 @@ fi
 shift  # consume "exec"; remaining args: [--cd <workspace> "<message>"]
 
 exec "{{ recovery_exec_codex_bin }}" exec \
+    --skip-git-repo-check \
     --sandbox workspace-write \
     -c 'approval_policy="never"' \
     -c 'sandbox_workspace_write.writable_roots=[]' \
