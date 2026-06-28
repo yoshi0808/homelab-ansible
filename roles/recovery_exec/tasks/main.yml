@@ -43,7 +43,6 @@
       -f {{ recovery_exec_investigate_key }}
     creates: "{{ recovery_exec_investigate_key }}"
   become: true
-  become_user: "{{ recovery_exec_user }}"
 
 - name: Generate action SSH key (shared, fixed forced commands)
   ansible.builtin.command:
@@ -53,7 +52,6 @@
       -f {{ recovery_exec_action_key }}
     creates: "{{ recovery_exec_action_key }}"
   become: true
-  become_user: "{{ recovery_exec_user }}"
 
 - name: Lock down SSH key permissions
   ansible.builtin.file:
