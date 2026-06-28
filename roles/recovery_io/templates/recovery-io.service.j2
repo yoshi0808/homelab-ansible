@@ -22,7 +22,7 @@ ProtectSystem=strict
 # to ~/.codex/ for its in-process app-server state. DAC (0700 recovery-exec)
 # still prevents recovery-io user from accessing those files.
 ProtectHome=read-only
-ReadWritePaths={{ recovery_exec_home }}
+ReadWritePaths={{ recovery_io_exec_home }}
 RestrictSUIDSGID=yes
 LockPersonality=yes
 PrivateDevices=yes
