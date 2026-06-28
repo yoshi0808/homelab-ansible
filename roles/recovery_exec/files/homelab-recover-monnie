@@ -1,12 +1,14 @@
 #!/bin/bash
 # homelab-recover-monnie: restart all monitoring services on monnie (no arguments).
 # Hostname and action are hardcoded (§4.3: fixed forced command, no params).
+# -F /dev/null: skip system ssh_config (bwrap UID mapping breaks ownership checks).
 set -euo pipefail
 
 KEY=/home/recovery-exec/.ssh/id_recovery_action
 KNOWN=/home/recovery-exec/.ssh/known_hosts
 
 exec ssh -T \
+    -F /dev/null \
     -i "$KEY" \
     -o StrictHostKeyChecking=yes \
     -o UserKnownHostsFile="$KNOWN" \

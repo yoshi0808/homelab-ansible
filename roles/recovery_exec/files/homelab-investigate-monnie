@@ -6,6 +6,7 @@
 #                 journal-prometheus, journal-grafana-server, journal-loki, journal-unpoller,
 #                 status
 # Hostname is hardcoded (§4.3: connection target fixed in script, not from args).
+# -F /dev/null: skip system ssh_config (bwrap UID mapping breaks ownership checks).
 set -euo pipefail
 
 KEY=/home/recovery-exec/.ssh/id_recovery_investigate
@@ -16,6 +17,7 @@ case "${1:-status}" in
   journal-prometheus|journal-grafana-server|journal-loki|journal-unpoller|\
   status)
     exec ssh -T \
+        -F /dev/null \
         -i "$KEY" \
         -o StrictHostKeyChecking=yes \
         -o UserKnownHostsFile="$KNOWN" \
