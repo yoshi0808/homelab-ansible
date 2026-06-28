@@ -6,7 +6,7 @@ recovery_exec_codex_dir: /home/recovery-exec/.codex
 recovery_exec_workspace: /var/lib/recovery-exec/workspace
 recovery_exec_investigate_key: /home/recovery-exec/.ssh/id_recovery_investigate
 recovery_exec_action_key: /home/recovery-exec/.ssh/id_recovery_action
-recovery_exec_codex_bin: /home/yoshi/.agents/bin/codex
+recovery_exec_codex_bin: /usr/bin/codex
 recovery_exec_codex_wrapper: /usr/local/bin/codex-exec-wrapper
 recovery_exec_codex_model: gpt-4o
 
