@@ -3,3 +3,7 @@
 {% for svc in target_item.action_services %}
 {{ recovery_exec_user }} ALL = NOPASSWD: /bin/systemctl restart {{ svc }}.service
 {% endfor %}
+{% if target_item.name == 'authy' %}
+# Read-only config check: does not start the daemon or bind ports.
+{{ recovery_exec_user }} ALL = NOPASSWD: /usr/sbin/freeradius -XC
+{% endif %}

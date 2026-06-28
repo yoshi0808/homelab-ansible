@@ -22,6 +22,11 @@ recovery_exec_targets:
     investigate_services:
       - freeradius
       - sshd
+    investigate_extra:
+      - name: radius-port
+        cmd: "ss -ltnup | grep -E '1812|1813' || echo 'no RADIUS ports listening'"
+      - name: radius-config-check
+        cmd: "sudo freeradius -XC 2>&1"
     action_services:
       - freeradius
   - name: monnie
@@ -31,6 +36,15 @@ recovery_exec_targets:
       - grafana-server
       - loki
       - unpoller
+    investigate_extra:
+      - name: prometheus-targets
+        cmd: "curl -s http://localhost:9090/api/v1/targets"
+      - name: grafana-health
+        cmd: "curl -s https://monnie.internal:3000/api/health"
+      - name: loki-health
+        cmd: "curl -s http://localhost:3100/metrics | head -10"
+      - name: unpoller-config
+        cmd: "systemctl show unpoller --property=ExecStart --no-pager; echo '---'; ss -ltnup | grep 9130 || echo 'port 9130 not listening'"
     action_services:
       - prometheus
       - grafana-server

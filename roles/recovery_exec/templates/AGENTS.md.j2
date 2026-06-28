@@ -14,25 +14,57 @@ All commands are wrapper scripts. The execpolicy allows ONLY these scripts.
 ```
 homelab-investigate-authy <check>
 ```
-Connects to authy via SSH and reports service status.
+Connects to authy via SSH and reports status.
 Allowed values for `<check>`:
+
+Service checks:
 - `freeradius` — systemctl status freeradius
 - `sshd` — systemctl status sshd
 - `journal-freeradius` — last 100 log lines for freeradius
 - `journal-sshd` — last 100 log lines for sshd
-- `status` — all of the above combined
+- `status` — all services combined
+
+System checks:
+- `failed` — all failed units (systemctl --failed)
+- `disk` — disk usage (df -h)
+- `memory` — RAM usage + OOM kernel messages
+- `load` — CPU load average (uptime)
+- `network` — IP addresses, routes, DNS
+- `ports` — listening ports (ss -ltnup)
+- `journal-system` — recent OS-level warnings/errors
+
+Node-specific checks:
+- `radius-port` — RADIUS UDP port binding (1812/1813)
+- `radius-config-check` — freeradius config validation (-XC, read-only, safe to run alongside live daemon)
 
 ```
 homelab-investigate-monnie <check>
 ```
-Connects to monnie via SSH and reports service status.
+Connects to monnie via SSH and reports status.
 Allowed values for `<check>`:
+
+Service checks:
 - `prometheus` — systemctl status prometheus
 - `grafana-server` — systemctl status grafana-server
 - `loki` — systemctl status loki
 - `unpoller` — systemctl status unpoller
 - `journal-prometheus`, `journal-grafana-server`, `journal-loki`, `journal-unpoller`
 - `status` — all services combined
+
+System checks:
+- `failed` — all failed units
+- `disk` — disk usage
+- `memory` — RAM usage + OOM kernel messages
+- `load` — CPU load average
+- `network` — IP addresses, routes, DNS
+- `ports` — listening ports
+- `journal-system` — recent OS-level warnings/errors
+
+Node-specific checks:
+- `prometheus-targets` — Prometheus target health (HTTP API)
+- `grafana-health` — Grafana health endpoint (HTTPS)
+- `loki-health` — Loki metrics endpoint
+- `unpoller-config` — unpoller ExecStart + port binding
 
 ### Recovery (homelab-recover-*)
 
@@ -50,9 +82,10 @@ Restarts prometheus, grafana-server, loki, unpoller on monnie (no arguments).
 
 1. **Investigate first.** Always run `homelab-investigate-<node> status` before acting.
 2. **Confirm failure.** Only proceed if the investigation shows a service is non-active.
-3. **Restart services (Ladder 1).** Run `homelab-recover-<node>` if services are down.
-4. **Re-investigate.** Run investigate again after recovery to confirm success.
-5. **Escalate.** If recovery fails, report in Japanese for human escalation.
+3. **Dig deeper if needed.** Use specific checks (disk, memory, load, ports, journal-*) to identify root cause before recovering.
+4. **Restart services (Ladder 1).** Run `homelab-recover-<node>` if services are down.
+5. **Re-investigate.** Run investigate again after recovery to confirm success.
+6. **Escalate.** If recovery fails, report in Japanese for human escalation.
 
 ## Prohibitions (§13)
 

@@ -8,6 +8,7 @@ set -euo pipefail
 cmd="${SSH_ORIGINAL_COMMAND:-status}"
 
 case "$cmd" in
+  # --- Service checks (systemctl status / journalctl) ---
 {% for svc in target_item.investigate_services %}
   {{ svc }})
     systemctl status {{ svc }} --no-pager -l
@@ -22,6 +23,43 @@ case "$cmd" in
     systemctl status {{ svc }} --no-pager -l || true
 {% endfor %}
     ;;
+
+  # --- Common system checks ---
+  failed)
+    systemctl --failed --no-pager
+    ;;
+  disk)
+    df -h
+    ;;
+  memory)
+    free -h
+    echo "--- OOM (last 20 kernel messages) ---"
+    journalctl -k -n 20 --no-pager | grep -i 'oom\|out of memory' || echo 'no OOM entries'
+    ;;
+  load)
+    uptime
+    ;;
+  network)
+    ip addr
+    echo "---"
+    ip route
+    echo "---"
+    resolvectl status 2>/dev/null || cat /etc/resolv.conf
+    ;;
+  ports)
+    ss -ltnup
+    ;;
+  journal-system)
+    journalctl -p warning..err -n 50 --no-pager
+    ;;
+
+  # --- Node-specific checks ---
+{% for extra in target_item.investigate_extra | default([]) %}
+  {{ extra.name }})
+    {{ extra.cmd }}
+    ;;
+{% endfor %}
+
   *)
     echo "denied: unknown command '${cmd}'" >&2
     exit 1

@@ -126,13 +126,15 @@
 # ---------------------------------------------------------------------------
 
 - name: Deploy homelab-investigate-* wrapper scripts
-  ansible.builtin.copy:
-    src: "homelab-investigate-{{ item.name }}"
-    dest: "/usr/local/bin/homelab-investigate-{{ item.name }}"
+  ansible.builtin.template:
+    src: homelab-investigate.sh.j2
+    dest: "/usr/local/bin/homelab-investigate-{{ target.name }}"
     owner: root
     group: root
     mode: "0755"
   loop: "{{ recovery_exec_targets }}"
+  loop_control:
+    loop_var: target
   become: true
 
 - name: Deploy homelab-recover-* wrapper scripts

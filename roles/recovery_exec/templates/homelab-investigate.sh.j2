@@ -1,10 +1,6 @@
 #!/bin/bash
-# homelab-investigate-monnie: SSH investigation wrapper for monnie.
-# Called by Codex: homelab-investigate-monnie <check>
-#
-# Allowed checks: prometheus, grafana-server, loki, unpoller,
-#                 journal-prometheus, journal-grafana-server, journal-loki, journal-unpoller,
-#                 status
+# homelab-investigate-{{ target.name }}: SSH investigation wrapper for {{ target.name }}.
+# Called by Codex: homelab-investigate-{{ target.name }} <check>
 # Hostname is hardcoded (§4.3: connection target fixed in script, not from args).
 # -F /dev/null: skip system ssh_config (bwrap UID mapping breaks ownership checks).
 set -euo pipefail
@@ -12,10 +8,9 @@ set -euo pipefail
 KEY=/home/recovery-exec/.ssh/id_recovery_investigate
 KNOWN=/home/recovery-exec/.ssh/known_hosts
 
+# Allowlist mirrors the dispatch script on {{ target.name }}.
 case "${1:-status}" in
-  prometheus|grafana-server|loki|unpoller|\
-  journal-prometheus|journal-grafana-server|journal-loki|journal-unpoller|\
-  status)
+  {% for svc in target.investigate_services %}{{ svc }}|journal-{{ svc }}|{% endfor %}failed|disk|memory|load|network|ports|journal-system|status{% for extra in target.investigate_extra | default([]) %}|{{ extra.name }}{% endfor %})
     exec ssh -T \
         -F /dev/null \
         -i "$KEY" \
@@ -23,7 +18,7 @@ case "${1:-status}" in
         -o UserKnownHostsFile="$KNOWN" \
         -o ConnectTimeout=10 \
         -o BatchMode=yes \
-        "recovery-exec@monnie.internal" "${1:-status}"
+        "recovery-exec@{{ target.host }}" "${1:-status}"
     ;;
   *)
     echo "denied: unknown check '${1:-}'" >&2
