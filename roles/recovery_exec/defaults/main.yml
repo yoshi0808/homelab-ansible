@@ -8,7 +8,7 @@ recovery_exec_investigate_key: /home/recovery-exec/.ssh/id_recovery_investigate
 recovery_exec_action_key: /home/recovery-exec/.ssh/id_recovery_action
 recovery_exec_codex_bin: /usr/bin/codex
 recovery_exec_codex_wrapper: /usr/local/bin/codex-exec-wrapper
-recovery_exec_codex_model: gpt-4o
+recovery_exec_codex_model: gpt-5.5
 
 # Set to false to skip target node setup (e.g. when target is unreachable)
 recovery_exec_setup_targets: true
