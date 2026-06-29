@@ -1,0 +1,2 @@
+command="/usr/local/sbin/recovery-investigate-dispatch.sh",no-agent-forwarding,no-X11-forwarding,no-port-forwarding,no-pty {{ _investigate_pubkey.content | b64decode | trim }}
+command="/usr/local/sbin/recovery-action.sh",no-agent-forwarding,no-X11-forwarding,no-port-forwarding,no-pty {{ _action_pubkey.content | b64decode | trim }}

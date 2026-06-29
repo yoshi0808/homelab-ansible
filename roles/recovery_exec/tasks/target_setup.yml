@@ -93,26 +93,13 @@
   delegate_to: "{{ target_item.name }}"
   become: true
 
-- name: Register investigate key in authorized_keys (forced command = dispatch script)
-  ansible.posix.authorized_key:
-    user: "{{ recovery_exec_user }}"
-    key: "{{ _investigate_pubkey.content | b64decode | trim }}"
-    key_options: >-
-      command="/usr/local/sbin/recovery-investigate-dispatch.sh",no-agent-forwarding,no-X11-forwarding,no-port-forwarding,no-pty
-    state: present
-  loop: "{{ recovery_exec_targets }}"
-  loop_control:
-    loop_var: target_item
-  delegate_to: "{{ target_item.name }}"
-  become: true
-
-- name: Register action key in authorized_keys (forced command = action script)
-  ansible.posix.authorized_key:
-    user: "{{ recovery_exec_user }}"
-    key: "{{ _action_pubkey.content | b64decode | trim }}"
-    key_options: >-
-      command="/usr/local/sbin/recovery-action.sh",no-agent-forwarding,no-X11-forwarding,no-port-forwarding,no-pty
-    state: present
+- name: Deploy authorized_keys on target nodes (exactly 2 keys, drift-safe)
+  ansible.builtin.template:
+    src: authorized_keys.j2
+    dest: "/home/{{ recovery_exec_user }}/.ssh/authorized_keys"
+    owner: "{{ recovery_exec_user }}"
+    group: "{{ recovery_exec_user }}"
+    mode: "0600"
   loop: "{{ recovery_exec_targets }}"
   loop_control:
     loop_var: target_item

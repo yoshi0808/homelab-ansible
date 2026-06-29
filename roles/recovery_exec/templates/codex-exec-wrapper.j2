@@ -1,25 +1,41 @@
 #!/bin/bash
 # codex-exec-wrapper: Invoked by recovery-io via sudo.
-# Validates args and injects sandbox/approval flags, then executes Codex.
+# Strictly validates args, then injects sandbox/approval flags and executes Codex.
 #
 # Authentication: Codex uses browser OAuth; token is in ~/.codex/ (no API key).
 # sudo -H ensures HOME=/home/recovery-exec so Codex finds its token and config.
 #
 # Security:
 #   - This file: mode 0500 owned by recovery-exec (recovery-io cannot read)
-#   - Only "exec" subcommand is accepted (prevents info leakage via other subcommands)
-#   - Sandbox and approval flags are injected here, not left to the caller (§5.4)
+#   - Accepts ONLY: exec --cd <workspace> <message>  (exactly 4 args, no more)
+#   - Caller cannot influence sandbox / approval / execpolicy flags (§5.4)
 set -euo pipefail
 
+WORKSPACE="{{ recovery_exec_workspace }}"
+
 if [[ "${1:-}" != "exec" ]]; then
-    echo "denied: only 'exec' subcommand is permitted" >&2
+    echo "denied: first argument must be 'exec'" >&2
     exit 1
 fi
-shift  # consume "exec"; remaining args: [--cd <workspace> "<message>"]
+if [[ "${2:-}" != "--cd" ]]; then
+    echo "denied: second argument must be '--cd'" >&2
+    exit 1
+fi
+if [[ "${3:-}" != "$WORKSPACE" ]]; then
+    echo "denied: workspace path must be '$WORKSPACE'" >&2
+    exit 1
+fi
+if [[ $# -ne 4 ]]; then
+    echo "denied: exactly 4 arguments required (exec --cd <workspace> <message>)" >&2
+    exit 1
+fi
+
+message="${4}"
 
 exec "{{ recovery_exec_codex_bin }}" exec \
     --skip-git-repo-check \
     --sandbox workspace-write \
     -c 'approval_policy="never"' \
     -c 'sandbox_workspace_write.network_access=true' \
-    "$@"
+    --cd "$WORKSPACE" \
+    "$message"
