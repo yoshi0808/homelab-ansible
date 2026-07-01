@@ -15,9 +15,22 @@
   hosts: pve1
   become: true
   gather_facts: true
+  vars:
+    skip_notifications: "{{ tester_mode | default(false) | bool }}"
   vars_files:
     - "{{ playbook_dir }}/../inventories/vars/cloudkey.yml"
   tasks:
+    - name: "[tester_mode] Plan-only: show intended UniFi backup fetch and stop"
+      when: tester_mode | default(false) | bool
+      block:
+        - name: Show planned UniFi backup fetch
+          ansible.builtin.debug:
+            msg:
+              - "[tester_mode] plan-only — 実変更は行いません"
+              - "操作 : CloudKey バックアップ生成 + NFS 保存 + ローテーション (uri モジュール)"
+              - "通知 : skip_notifications=true のため送信しません"
+        - name: End play (tester_mode)
+          ansible.builtin.meta: end_play
     - name: Fetch UniFi OS backup
       block:
         - name: Run unifi_backup_fetch role

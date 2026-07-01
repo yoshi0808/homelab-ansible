@@ -1,4 +1,19 @@
 ---
+- name: "[tester_mode] Plan-only: show intended Sophos trim and stop"
+  when: tester_mode | default(false) | bool
+  block:
+    - name: Show planned Sophos trim
+      ansible.builtin.debug:
+        msg:
+          - "[tester_mode] plan-only — 実変更は行いません"
+          - "操作 : Sophos SSD fstrim"
+          - "対象 : {{ inventory_hostname }}"
+          - "接続 : SSH → Advanced Shell (メニュー 5→3)"
+          - "コマンド: fstrim -v /var; fstrim -v /content"
+          - "通知 : skip_notifications=true のため送信しません"
+    - name: End play (tester_mode)
+      ansible.builtin.meta: end_play
+
 - name: Run SSD trim via interactive SSH
   ansible.builtin.expect:
     command: >-

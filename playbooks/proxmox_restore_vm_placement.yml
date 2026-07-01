@@ -27,6 +27,19 @@
           - target_node in ['pve1', 'pve2']
         fail_msg: "target_node must be 'pve1' or 'pve2', got: '{{ target_node | default('undefined') }}'"
 
+    - name: "[tester_mode] Plan-only: show intended VM placement restore and stop"
+      when: tester_mode | default(false) | bool
+      block:
+        - name: Show planned VM placement restore
+          ansible.builtin.debug:
+            msg:
+              - "[tester_mode] plan-only — 実変更は行いません"
+              - "操作  : proxmox_restore_vm_placement (qm migrate / ha-manager crm-command relocate)"
+              - "対象  : {{ target_node }}"
+              - "通知  : skip_notifications=true のため送信しません"
+        - name: End play (tester_mode)
+          ansible.builtin.meta: end_play
+
     - name: Set recovery mute for authy
       ansible.builtin.include_tasks: "{{ playbook_dir }}/../roles/recovery_mute/tasks/set.yml"
       vars:
@@ -52,10 +65,18 @@
   hosts: "{{ target_node }}"
   gather_facts: false
   become: true
+  vars:
+    skip_notifications: "{{ tester_mode | default(false) | bool }}"
   tasks:
     - name: Skip if called from weekly-full and no updates available
       ansible.builtin.meta: end_play
       when: hostvars['localhost']['_weekly_full_no_updates'] | default(false)
+
+    - name: "[tester_mode] Plan-only: stop before restore VM placement role"
+      when: tester_mode | default(false) | bool
+      block:
+        - name: End play (tester_mode — restore VM placement play)
+          ansible.builtin.meta: end_play
 
     - name: Gather facts
       ansible.builtin.setup:

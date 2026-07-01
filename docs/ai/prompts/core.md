@@ -922,3 +922,80 @@ Claude Codeは、実装完了の最後のステップとしてこのコメント
 - ホストはDNS名 / /etc/hosts で名前解決する
 ```
 
+---
+
+## 18. tester_mode 運用ルール
+
+tester_mode は Codex tester が本番影響なしで playbook の動作確認を行うための安全弁変数。
+
+### 発動条件
+
+```yaml
+ansible-playbook playbooks/xxx.yml -e tester_mode=true
+```
+
+- デフォルト値: `false`（指定なし = 通常実行、Semaphore/手動運用に影響なし）
+- `tester_mode=true` のとき `skip_notifications` も自動で `true` になる
+
+### tester_mode=true の挙動
+
+| 操作カテゴリ | tester_mode=true での動作 |
+|---|---|
+| 読み取り専用タスク（stat, pvesh get 等） | 通常通り実行 |
+| 変更タスク（reboot, restart, pvesh create, ha-manager 等） | 実行前に debug 表示して停止（`meta: end_play` / `meta: end_host`） |
+| Slack 通知（common_slack/tasks/notify.yml） | 送信しない、予定内容を debug 表示 |
+
+### ゲート対象モジュール（Ansible check mode では保護されないもの）
+
+```text
+command / shell / uri / expect / reboot
+systemd(state=restarted) / pvesh create
+qm migrate / pct migrate / ha-manager crm-command
+```
+
+### playbook 実装パターン
+
+変更処理の直前にゲートブロックを置く:
+
+```yaml
+- name: "[tester_mode] Plan-only: show intended action and stop"
+  when: tester_mode | default(false) | bool
+  block:
+    - name: Show planned action
+      ansible.builtin.debug:
+        msg:
+          - "[tester_mode] plan-only — 実変更は行いません"
+          - "操作 : <操作内容>"
+          - "対象 : <対象>"
+    - name: End play (tester_mode)
+      ansible.builtin.meta: end_play   # play 全体を停止
+      # または end_host で 1 ホストだけ停止
+```
+
+各 play の vars に以下を追加:
+
+```yaml
+vars:
+  skip_notifications: "{{ tester_mode | default(false) | bool }}"
+```
+
+### 複数 play / import_playbook 構成での注意
+
+`meta: end_play` は **現在の play だけ** を停止する。playbook 全体は止まらない。
+
+```text
+- 単一 play playbook: end_play / end_host で十分
+- 複数 play / import_playbook 構成: 危険操作を持つすべての play にゲートを置く
+- 二重防御推奨: 入口 play のゲート + 危険 role 先頭のゲート
+```
+
+具体例 (`proxmox_patch_apply_node.yml` の 2 play 構成):
+- Play 1 (validate/mute): ゲートで `end_play` → Play 2 はまだ実行される
+- Play 2 (patch apply): 追加ゲートで `end_play` → ここで確実に停止
+
+### tester の実行義務
+
+- `ansible-playbook` 実行時に必ず `-e tester_mode=true` を付ける
+- CC から渡されたコマンドに `-e tester_mode=true` がなければ自動で追加する
+- `allow_unsafe=true` は今回実装しない（将来のオプション）
+

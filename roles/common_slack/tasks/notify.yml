@@ -5,7 +5,20 @@
 #   slack_title:   Notification title
 #   slack_message: Notification body
 
+- name: "[tester_mode] Show notification instead of sending"
+  ansible.builtin.debug:
+    msg:
+      - "[tester_mode] 通知スキップ（tester_mode/skip_notifications=true）"
+      - "channel : {{ slack_channel }}"
+      - "status  : {{ slack_status }}"
+      - "title   : {{ slack_title }}"
+      - "message : {{ slack_message }}"
+  delegate_to: localhost
+  become: false
+  when: tester_mode | default(false) | bool or skip_notifications | default(false) | bool
+
 - name: Send Slack notification (best-effort)
+  when: not (tester_mode | default(false) | bool or skip_notifications | default(false) | bool)
   block:
     - name: Load Slack variables
       ansible.builtin.include_vars:

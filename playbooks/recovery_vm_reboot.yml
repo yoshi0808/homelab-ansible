@@ -34,6 +34,8 @@
   hosts: pve1
   gather_facts: false
   become: true
+  vars:
+    skip_notifications: "{{ tester_mode | default(false) | bool }}"
   pre_tasks:
     - name: Validate target variable (prevent path traversal)
       ansible.builtin.assert:
@@ -45,5 +47,18 @@
         fail_msg: >-
           target が不正です: '{{ target | default('') }}'.
           VM リブートの対象は authy / monnie / sophos-fw のみです。
+    - name: "[tester_mode] Plan-only: show intended VM reboot and stop"
+      when: tester_mode | default(false) | bool
+      block:
+        - name: Show planned VM reboot
+          ansible.builtin.debug:
+            msg:
+              - "[tester_mode] plan-only — 実変更は行いません"
+              - "操作  : VM reboot (pvesh shutdown → stop fallback → start)"
+              - "対象  : {{ target }}"
+              - "条件  : hacritical または ops タグが必要"
+              - "通知  : skip_notifications=true のため送信しません"
+        - name: End play (tester_mode)
+          ansible.builtin.meta: end_play
   roles:
     - recovery_vm_reboot

@@ -3,6 +3,8 @@
   hosts: sophos
   gather_facts: false
   become: false
+  vars:
+    skip_notifications: "{{ tester_mode | default(false) | bool }}"
 
   roles:
     - sophos_trim

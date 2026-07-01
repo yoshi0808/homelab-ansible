@@ -35,11 +35,10 @@
       "Bash(bash -n *)",
       "Bash(jq *)"
     ],
-    "ask": [
+    "deny": [
       "Bash(git commit*)",
       "Bash(git push*)",
-      "Bash(ssh*)",
-      "Bash(rm*)"
+      "Bash(ssh*)"
     ]
   }
 }

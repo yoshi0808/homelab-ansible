@@ -29,7 +29,21 @@
   gather_facts: false
   become: true
   connection: local
+  vars:
+    skip_notifications: "{{ tester_mode | default(false) | bool }}"
   tasks:
+    - name: "[tester_mode] Plan-only: show intended cert renewal and stop"
+      when: tester_mode | default(false) | bool
+      block:
+        - name: Show planned cert renewal
+          ansible.builtin.debug:
+            msg:
+              - "[tester_mode] plan-only — 実変更は行いません"
+              - "操作 : TLS 証明書更新 + サービス再起動 (pveproxy, grafana, semaphore)"
+              - "対象 : ansy, pve1, pve2, monnie"
+              - "通知 : skip_notifications=true のため送信しません"
+        - name: End play (tester_mode)
+          ansible.builtin.meta: end_play
     - name: Run prepare_ca tasks
       ansible.builtin.import_role:
         name: homelab_cert_renew
@@ -41,7 +55,13 @@
   become: true
   vars:
     cert_renew_ca_host: localhost
+    skip_notifications: "{{ tester_mode | default(false) | bool }}"
   tasks:
+    - name: "[tester_mode] Plan-only: stop before ansy cert deploy"
+      when: tester_mode | default(false) | bool
+      block:
+        - name: End host (tester_mode — ansy cert play)
+          ansible.builtin.meta: end_host
     - name: Run issue tasks
       ansible.builtin.import_role:
         name: homelab_cert_renew
@@ -59,7 +79,13 @@
   serial: 1
   vars:
     cert_renew_ca_host: localhost
+    skip_notifications: "{{ tester_mode | default(false) | bool }}"
   tasks:
+    - name: "[tester_mode] Plan-only: stop before proxmox cert deploy"
+      when: tester_mode | default(false) | bool
+      block:
+        - name: End host (tester_mode — proxmox cert play)
+          ansible.builtin.meta: end_host
     - name: Run issue tasks
       ansible.builtin.import_role:
         name: homelab_cert_renew
@@ -76,7 +102,13 @@
   become: true
   vars:
     cert_renew_ca_host: localhost
+    skip_notifications: "{{ tester_mode | default(false) | bool }}"
   tasks:
+    - name: "[tester_mode] Plan-only: stop before monnie cert deploy"
+      when: tester_mode | default(false) | bool
+      block:
+        - name: End host (tester_mode — monnie cert play)
+          ansible.builtin.meta: end_host
     - name: Run issue tasks
       ansible.builtin.import_role:
         name: homelab_cert_renew
@@ -93,7 +125,13 @@
   become: false
   vars:
     cert_renew_ca_host: localhost
+    skip_notifications: "{{ tester_mode | default(false) | bool }}"
   tasks:
+    - name: "[tester_mode] Plan-only: skip CA key cleanup"
+      when: tester_mode | default(false) | bool
+      block:
+        - name: End play (tester_mode — cleanup play)
+          ansible.builtin.meta: end_play
     - name: Run cleanup tasks
       ansible.builtin.import_role:
         name: homelab_cert_renew

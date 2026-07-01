@@ -173,6 +173,21 @@
       ansible.builtin.meta: end_play
       when: hostvars['localhost']['_weekly_full_skip'] | default(false)
 
+    - name: "[tester_mode] Plan-only: show intended weekly full patch and stop"
+      when: tester_mode | default(false) | bool
+      block:
+        - name: Show planned weekly full patch
+          ansible.builtin.debug:
+            msg:
+              - "[tester_mode] plan-only — 実変更は行いません"
+              - "操作  : proxmox_patch_weekly_full (pve2→pve1 ローリングパッチ)"
+              - "フロー: evacuate pve2 → patch pve2 → restore pve2 → evacuate pve1 → patch pve1 → restore pve1"
+              - "注意  : この play は停止しますが後続の import_playbook は評価されます"
+              - "       各 import 先 playbook にも tester_mode gate があるため危険操作には到達しません"
+              - "通知  : skip_notifications=true のため送信しません"
+        - name: End play (tester_mode)
+          ansible.builtin.meta: end_play
+
     - name: Set recovery mute for authy
       ansible.builtin.include_tasks: "{{ playbook_dir }}/../roles/recovery_mute/tasks/set.yml"
       vars:

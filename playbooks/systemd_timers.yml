@@ -11,6 +11,20 @@
   gather_facts: false
   become: true
   connection: local
+  vars:
+    skip_notifications: "{{ tester_mode | default(false) | bool }}"
+  pre_tasks:
+    - name: "[tester_mode] Plan-only: show intended systemd timers config and stop"
+      when: tester_mode | default(false) | bool
+      block:
+        - name: Show planned systemd timers config
+          ansible.builtin.debug:
+            msg:
+              - "[tester_mode] plan-only — 実変更は行いません"
+              - "操作 : systemd timer/service ユニット配置 + systemctl enable/start"
+              - "対象 : {{ inventory_hostname }}"
+        - name: End host (tester_mode)
+          ansible.builtin.meta: end_host
 
   roles:
     - systemd_timers

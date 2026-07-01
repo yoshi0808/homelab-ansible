@@ -38,5 +38,19 @@
   hosts: pve1:pve2:ansy:monnie:authy
   gather_facts: false
   become: true
+  vars:
+    skip_notifications: "{{ tester_mode | default(false) | bool }}"
+  pre_tasks:
+    - name: "[tester_mode] Plan-only: show intended NTP config change and stop"
+      when: tester_mode | default(false) | bool
+      block:
+        - name: Show planned NTP config change
+          ansible.builtin.debug:
+            msg:
+              - "[tester_mode] plan-only — 実変更は行いません"
+              - "操作 : chrony 設定に quory を NTP 参照先として追加"
+              - "対象 : {{ inventory_hostname }}"
+        - name: End host (tester_mode)
+          ansible.builtin.meta: end_host
   roles:
     - time_sync_ntp_reference

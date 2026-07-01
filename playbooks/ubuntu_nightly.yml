@@ -6,6 +6,7 @@
 
   vars:
     nightly_report_dir: "{{ reports_base_dir }}/ubuntu-nightly"
+    skip_notifications: "{{ tester_mode | default(false) | bool }}"
 
   tasks:
     - name: Check reboot-required flag
@@ -62,6 +63,20 @@
     - name: End play if reboot is not required
       ansible.builtin.meta: end_host
       when: not reboot_required
+
+    - name: "[tester_mode] Plan-only: show intended reboot and stop"
+      when: tester_mode | default(false) | bool
+      block:
+        - name: Show planned reboot
+          ansible.builtin.debug:
+            msg:
+              - "[tester_mode] plan-only — 実変更は行いません"
+              - "reboot_required: {{ reboot_required }}"
+              - "操作 : ansible.builtin.reboot (reboot_timeout=300)"
+              - "対象 : {{ inventory_hostname }}"
+              - "通知 : skip_notifications=true のため送信しません"
+        - name: End host (tester_mode)
+          ansible.builtin.meta: end_host
 
     - name: Set recovery mute before reboot
       ansible.builtin.include_tasks: "{{ playbook_dir }}/../roles/recovery_mute/tasks/set.yml"
@@ -204,6 +219,7 @@
 
   vars:
     nightly_report_dir: "{{ reports_base_dir }}/ubuntu-nightly"
+    skip_notifications: "{{ tester_mode | default(false) | bool }}"
 
   tasks:
     - name: Check reboot-required flag
@@ -260,6 +276,20 @@
     - name: End play if reboot is not required
       ansible.builtin.meta: end_host
       when: not reboot_required
+
+    - name: "[tester_mode] Plan-only: show intended reboot and stop"
+      when: tester_mode | default(false) | bool
+      block:
+        - name: Show planned reboot
+          ansible.builtin.debug:
+            msg:
+              - "[tester_mode] plan-only — 実変更は行いません"
+              - "reboot_required: {{ reboot_required }}"
+              - "操作 : ansible.builtin.reboot (reboot_timeout=300)"
+              - "対象 : {{ inventory_hostname }}"
+              - "通知 : skip_notifications=true のため送信しません"
+        - name: End host (tester_mode)
+          ansible.builtin.meta: end_host
 
     - name: Set recovery mute before reboot
       ansible.builtin.include_tasks: "{{ playbook_dir }}/../roles/recovery_mute/tasks/set.yml"

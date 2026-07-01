@@ -23,6 +23,20 @@
   hosts: dev_nodes:control_nodes
   gather_facts: true
   become: true
+  vars:
+    skip_notifications: "{{ tester_mode | default(false) | bool }}"
+  pre_tasks:
+    - name: "[tester_mode] Plan-only: show intended recovery-exec setup and stop"
+      when: tester_mode | default(false) | bool
+      block:
+        - name: Show planned recovery-exec setup
+          ansible.builtin.debug:
+            msg:
+              - "[tester_mode] plan-only — 実変更は行いません"
+              - "操作 : recovery-exec ユーザー作成 + SSH 鍵生成 + wrapper スクリプト配置"
+              - "対象 : {{ inventory_hostname }}"
+        - name: End host (tester_mode)
+          ansible.builtin.meta: end_host
 
   roles:
     - recovery_exec

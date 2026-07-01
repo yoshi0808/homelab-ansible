@@ -138,5 +138,19 @@
     verify_target_vmid: "{{ brv_target_vmid }}"
     verify_target_name: "{{ brv_target_name }}"
     verify_agent_expected: "{{ brv_agent_expected }}"
+    skip_notifications: "{{ tester_mode | default(false) | bool }}"
+  pre_tasks:
+    - name: "[tester_mode] Plan-only: show intended backup restore verify and stop"
+      when: tester_mode | default(false) | bool
+      block:
+        - name: Show planned backup restore verify
+          ansible.builtin.debug:
+            msg:
+              - "[tester_mode] plan-only — 実変更は行いません"
+              - "操作  : proxmox_backup_restore_verify (vzdump リストア → VMID 999 → 起動確認 → 破棄)"
+              - "対象  : VMID {{ brv_target_vmid | default('(TBD)') }} ({{ brv_target_name | default('(TBD)') }})"
+              - "通知  : skip_notifications=true のため送信しません"
+        - name: End play (tester_mode)
+          ansible.builtin.meta: end_play
   roles:
     - proxmox_backup_restore_verify

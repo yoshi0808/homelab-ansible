@@ -34,6 +34,8 @@
   hosts: pve1
   gather_facts: false
   become: true
+  vars:
+    skip_notifications: "{{ tester_mode | default(false) | bool }}"
   pre_tasks:
     - name: Validate target variable (prevent path traversal)
       ansible.builtin.assert:
@@ -46,5 +48,18 @@
           target が不正です: '{{ target | default('') }}'.
           HA フェイルオーバーの対象は authy / sophos-fw のみです。
           (monnie は hacritical タグなしのため対象外)
+    - name: "[tester_mode] Plan-only: show intended HA failover and stop"
+      when: tester_mode | default(false) | bool
+      block:
+        - name: Show planned HA failover
+          ansible.builtin.debug:
+            msg:
+              - "[tester_mode] plan-only — 実変更は行いません"
+              - "操作  : ha-manager crm-command relocate (別ノードへ移行)"
+              - "対象  : {{ target }}"
+              - "条件  : hacritical タグ + HA 登録が必要"
+              - "通知  : skip_notifications=true のため送信しません"
+        - name: End play (tester_mode)
+          ansible.builtin.meta: end_play
   roles:
     - recovery_ha_failover
