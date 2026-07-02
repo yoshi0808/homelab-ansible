@@ -8,7 +8,10 @@
 # 呼び出し側が指定する vars:
 #   tester_gate_plan : plan として表示する行のリスト。
 #                      停止のみでよい後続 play では省略する(表示なしで停止)。
-#   tester_gate_end  : "play"(既定)= meta: end_play / "host" = meta: end_host
+#   tester_gate_end  : "play"(既定)= meta: end_play / "host" = meta: end_host /
+#                      "continue" = 停止しない(L3 dry-run リハーサル用。呼び出し側が
+#                      後続の実行内容を dry-run に差し替えて不変条件を守る責任を持つ。
+#                      ※ "none" は YAML の null になる footgun のため採用しない)
 #
 # 呼び出し例:
 #   - name: "[tester_mode] Plan-only: show intended X and stop"
@@ -26,6 +29,14 @@
 - name: "[tester_mode] Plan-only: show plan and stop"
   when: tester_mode | default(false) | bool
   block:
+    - name: Validate tester_gate_end
+      ansible.builtin.assert:
+        that: tester_gate_end | default('play') in ['play', 'host', 'continue']
+        fail_msg: >-
+          tester_gate_end は play / host / continue のいずれかです:
+          '{{ tester_gate_end | default('play') }}'
+        quiet: true
+
     - name: Show planned actions
       ansible.builtin.debug:
         msg: "{{ ['[tester_mode] plan-only — 実変更は行いません'] + tester_gate_plan }}"

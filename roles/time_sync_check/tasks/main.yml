@@ -138,6 +138,7 @@
   no_log: true
   ignore_errors: true
   check_mode: false
+  changed_when: false
   when:
     - hostvars[time_sync_check_reference_host].time_sync_synced | default(false)
     - inventory_hostname == 'sophos-fw'
@@ -207,6 +208,7 @@
   no_log: true
   ignore_errors: true
   check_mode: false
+  changed_when: false
   when: hostvars[time_sync_check_reference_host].time_sync_synced | default(false)
 
 - name: Judge NTP sync status (CloudKey)

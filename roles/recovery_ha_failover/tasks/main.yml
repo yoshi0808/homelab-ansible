@@ -105,6 +105,28 @@
           現在のノード {{ _rhf_source_node }} 以外のオンラインノードが必要です。
 
     # -----------------------------------------------------------------------
+    # tester_mode gate (L2): Phase 1-2 の read-only 検証(タグ・HA 登録・移行先
+    # 選定)は実データで実行し、変更系 Phase 3 (relocate) の直前で停止する
+    # -----------------------------------------------------------------------
+    - name: "[tester_mode] Mark result as plan-only"
+      ansible.builtin.set_fact:
+        _rhf_result: "plan-only"
+        _rhf_detail: "tester_mode: タグ・HA 登録・移行先の read-only 検証まで実施し、relocate の前で停止"
+      when: tester_mode | default(false) | bool
+
+    - name: "[tester_mode] Plan-only: show verified failover plan and stop"
+      ansible.builtin.include_role:
+        name: tester_gate
+      when: tester_mode | default(false) | bool
+      vars:
+        tester_gate_plan:
+          - "操作  : ha-manager crm-command relocate vm:{{ _rhf_vmid }} {{ _rhf_target_node }}"
+          - "対象  : {{ target }} (vmid={{ _rhf_vmid }})"
+          - "タグ  : {{ _rhf_vm.tags | default('(none)') }} — hacritical 検証済み・HA 登録確認済み"
+          - "移行  : {{ _rhf_source_node }} → {{ _rhf_target_node }}"
+          - "通知  : skip_notifications=true のため送信しません"
+
+    # -----------------------------------------------------------------------
     # Phase 3: HA マネージャーに relocate を指示
     # -----------------------------------------------------------------------
     - name: Issue HA relocate command

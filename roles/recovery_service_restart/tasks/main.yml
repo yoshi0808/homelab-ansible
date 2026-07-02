@@ -69,6 +69,28 @@
         fail_msg: "{{ target }} に対応するサービス一覧が defaults/main.yml に定義されていません"
 
     # -----------------------------------------------------------------------
+    # tester_mode gate (L2): Phase 1 の read-only 検証(タグ・稼働状態・サービス
+    # 一覧解決)は実データで実行し、変更系 Phase 2 (restart) の直前で停止する
+    # -----------------------------------------------------------------------
+    - name: "[tester_mode] Mark result as plan-only"
+      ansible.builtin.set_fact:
+        _rsr_result: "plan-only"
+        _rsr_detail: "tester_mode: タグ・稼働状態・サービス一覧の read-only 検証まで実施し、restart の前で停止"
+      when: tester_mode | default(false) | bool
+
+    - name: "[tester_mode] Plan-only: show verified restart plan and stop"
+      ansible.builtin.include_role:
+        name: tester_gate
+      when: tester_mode | default(false) | bool
+      vars:
+        tester_gate_plan:
+          - "操作    : systemctl restart (SSH/become 経由)"
+          - "対象    : {{ target }} (vmid={{ _rsr_vmid }}, node={{ _rsr_vm_node }}, running 確認済み)"
+          - "タグ    : {{ _rsr_vm.tags | default('(none)') }} — 適格性検証済み"
+          - "サービス: {{ _rsr_units | join(', ') }}"
+          - "通知    : skip_notifications=true のため送信しません"
+
+    # -----------------------------------------------------------------------
     # Phase 2: サービス restart
     # -----------------------------------------------------------------------
     - name: Restart target services

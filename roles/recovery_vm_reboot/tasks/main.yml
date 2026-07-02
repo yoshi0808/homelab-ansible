@@ -57,6 +57,28 @@
         _rvr_use_guest_agent: "{{ target in recovery_vm_reboot_guest_agent_targets }}"
 
     # -----------------------------------------------------------------------
+    # tester_mode gate (L2): Phase 1 の read-only タグ再検証は実データで実行し、
+    # 変更系 Phase 2 以降の直前で停止する
+    # -----------------------------------------------------------------------
+    - name: "[tester_mode] Mark result as plan-only"
+      ansible.builtin.set_fact:
+        _rvr_result: "plan-only"
+        _rvr_detail: "tester_mode: Phase 1 タグ再検証まで実施し、変更系操作の前で停止"
+      when: tester_mode | default(false) | bool
+
+    - name: "[tester_mode] Plan-only: show verified VM state and stop"
+      ansible.builtin.include_role:
+        name: tester_gate
+      when: tester_mode | default(false) | bool
+      vars:
+        tester_gate_plan:
+          - "操作  : VM reboot (pvesh shutdown → stop fallback → start)"
+          - "対象  : {{ target }} (vmid={{ _rvr_vmid }}, node={{ _rvr_vm_node }})"
+          - "タグ  : {{ _rvr_vm.tags | default('(none)') }} — 適格性検証済み"
+          - "手段  : {{ 'guest agent shutdown' if _rvr_use_guest_agent | bool else 'ACPI shutdown' }}"
+          - "通知  : skip_notifications=true のため送信しません"
+
+    # -----------------------------------------------------------------------
     # Phase 2: ソフトシャットダウン
     # guest agent あり (authy / monnie): pvesh agent/shutdown
     # guest agent なし (sophos-fw): pvesh status/shutdown (ACPI)

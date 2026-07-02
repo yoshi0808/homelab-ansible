@@ -1017,6 +1017,10 @@ qm migrate / pct migrate / ha-manager crm-command
 - 停止のみでよい後続 play のゲートでは `tester_gate_plan` を省略する（表示なしで停止）。
 - 呼び出し側の `when` は通常運用時のログを skip 1 行に抑えるためのもの。
   ゲート発火条件は role 内でも判定するため、when を忘れても安全側に倒れる。
+- `tester_gate_end: continue`（L3 dry-run リハーサル用。plan 表示のみで停止しない）は、
+  **後続の全変更操作を dry-run または read-only に差し替えた場合のみ**使用できる。
+  不変条件の担保が呼び出し側に移るため、`continue` の使用箇所はレビューで
+  「後続に実変更が残っていないか」を必ず確認対象とする（例: sophos_trim の `fstrim -n`）。
 
 各 play の vars に以下を追加:
 
