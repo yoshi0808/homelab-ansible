@@ -1,5 +1,5 @@
 ---
-# tester-gate: gated-in-role — roles/sophos_trim/tasks/main.yml が tester_mode 時に fstrim -n (dry-run) リハーサルへ差し替え(L3)
+# tester-gate: gated-in-role — roles/sophos_trim/tasks/main.yml が tester_mode 時に fstrim --dry-run リハーサルへ差し替え(L3)
 - name: Sophos Firewall SSD Trim
   hosts: sophos
   gather_facts: false

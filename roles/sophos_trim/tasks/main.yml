@@ -1,6 +1,6 @@
 ---
 # tester_mode = L3 リハーサル: 停止せず、実 expect セッションで fstrim を
-# dry-run(-n: trim 以外のすべてを実行)に差し替えて実行する。
+# dry-run(--dry-run: trim 以外のすべてを実行)に差し替えて実行する。
 # メニュー遷移・RC マーカーのパースまで本番同等に検証できる。
 - name: "[tester_mode] Rehearsal: show dry-run plan and continue"
   ansible.builtin.include_role:
@@ -12,12 +12,12 @@
       - "操作 : Sophos SSD fstrim — dry-run リハーサル(実 trim なし)"
       - "対象 : {{ inventory_hostname }}"
       - "接続 : SSH → Advanced Shell (メニュー 5→3) を実際に実行します"
-      - "コマンド: fstrim -n -v /var; fstrim -n -v /content"
+      - "コマンド: fstrim --dry-run -v /var; fstrim --dry-run -v /content"
       - "通知 : skip_notifications=true のため送信しません"
 
 - name: Set fstrim options (dry-run in tester_mode)
   ansible.builtin.set_fact:
-    sophos_trim_fstrim_opts: "{{ '-n -v' if (tester_mode | default(false) | bool) else '-v' }}"
+    sophos_trim_fstrim_opts: "{{ '--dry-run -v' if (tester_mode | default(false) | bool) else '-v' }}"
 
 - name: Run SSD trim via interactive SSH
   ansible.builtin.expect:
