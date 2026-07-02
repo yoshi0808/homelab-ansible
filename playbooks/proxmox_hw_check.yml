@@ -1,4 +1,5 @@
 ---
+# tester-gate: safe-readonly — read-only 収集のみ(冪等な収集スクリプト配置とローカルレポート出力を含む)。通知は common_slack の tester_mode ガードで抑止される
 - name: Proxmox hardware check
   hosts: proxmox
   gather_facts: true

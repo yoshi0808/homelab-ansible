@@ -1,4 +1,5 @@
 ---
+# tester-gate: safe-readonly — 各ホストの NTP 同期状態を読むだけ(expect も読み取りコマンドのみ)。通知は common_slack の tester_mode ガードで抑止される
 # time_sync_check.yml
 #
 # 目的: quoryを基準として、homelab内の主要ホストのNTP同期状態を確認する。

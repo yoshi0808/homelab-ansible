@@ -1,4 +1,5 @@
 ---
+# tester-gate: role-guarded — 副作用は Slack 通知のみで、common_slack notify.yml の tester_mode ガードで抑止される
 # Sends a human escalation notification to the Slack alerts channel.
 # Called by recovery-pipeline.sh when all recovery attempts have failed,
 # or when flapping is detected (§9: 3+ triggers in 24h).

@@ -14,16 +14,14 @@
     skip_notifications: "{{ tester_mode | default(false) | bool }}"
   tasks:
     - name: "[tester_mode] Plan-only: show intended CA trust deploy and stop"
+      ansible.builtin.include_role:
+        name: tester_gate
       when: tester_mode | default(false) | bool
-      block:
-        - name: Show planned CA trust deploy
-          ansible.builtin.debug:
-            msg:
-              - "[tester_mode] plan-only — 実変更は行いません"
-              - "操作 : CA 証明書配布 + update-ca-certificates"
-              - "対象 : {{ inventory_hostname }}"
-        - name: End host (tester_mode)
-          ansible.builtin.meta: end_host
+      vars:
+        tester_gate_end: host
+        tester_gate_plan:
+          - "操作 : CA 証明書配布 + update-ca-certificates"
+          - "対象 : {{ inventory_hostname }}"
     - name: Deploy Home-TLS-CA to system trust store
       ansible.builtin.import_role:
         name: homelab_cert_renew

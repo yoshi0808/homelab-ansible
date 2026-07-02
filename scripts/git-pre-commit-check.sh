@@ -53,4 +53,6 @@ while IFS= read -r file; do
   esac
 done <<< "$staged_files"
 
+"$(dirname "${BASH_SOURCE[0]}")/check-tester-gate.sh"
+
 echo "[pre-commit] OK"

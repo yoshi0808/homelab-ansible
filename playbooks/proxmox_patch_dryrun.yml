@@ -1,4 +1,5 @@
 ---
+# tester-gate: safe-readonly — パッチ dry-run 収集(apt update + シミュレーション)のみで実変更なし。通知は common_slack の tester_mode ガードで抑止される
 - name: Proxmox patch dry-run
   hosts: proxmox
   gather_facts: true

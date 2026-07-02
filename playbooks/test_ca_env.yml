@@ -1,4 +1,5 @@
 # playbooks/test_ca_env.yml
+# tester-gate: safe-readonly — localhost で環境変数を debug 表示するのみ
 - name: Test CA env vars
   hosts: localhost
   gather_facts: false

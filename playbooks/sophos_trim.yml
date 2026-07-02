@@ -1,4 +1,5 @@
 ---
+# tester-gate: gated-in-role — ゲートは roles/sophos_trim/tasks/main.yml 先頭の tester_gate include
 - name: Sophos Firewall SSD Trim
   hosts: sophos
   gather_facts: false

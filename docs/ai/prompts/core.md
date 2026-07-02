@@ -468,7 +468,7 @@ AI の役割分担は以下とする。
 レビュー: Codex
 追加実装: Claude Code
 再レビュー: Codex
-テスト: Codex（tester ロール。dry-run / semi-safe を自律実行。本番適用はしない）
+テスト: Codex（tester ロール。安全な検証方法を選択し、品質を保証する QA 担当。本番適用はしない）
 運用判断: Yoshinobu
 本番実行判断: Yoshinobu
 確定判断: Yoshinobu
@@ -787,7 +787,7 @@ Codex を盲目的に追従もしない。「Codex が正しい（見落とし�
 8. Codex（reviewer）が再レビューする
 9. 必要に応じて 3〜8 を繰り返す
 10. Claude Code がテスト計画（test_plan）を起案し、Yoshinobu が承認する
-11. Codex（tester）が dry-run / semi-safe テストを実行し、test_result に保存する
+11. Codex（tester）が安全な検証方法を選択してテストを実行し、test_result に保存する
 12. Claude Code がテスト結果を意図（requirement の確認項目 / host_vars 期待値）と突合し、違和感や本番適用の要否を Yoshinobu に提示する
 13. Yoshinobu が「これで確定」と判断する
 14. 必要に応じて final ファイルを作る
@@ -801,34 +801,58 @@ implement / review の本文はファイルに書き、agmsg にはパスを載�
 ### テスト工程（tester）
 
 レビューがおおむね収束したら、実装をテストする。テストは reviewer とは別の Codex
-エージェント `tester` が担当する。役割を物理的に分けることで、Codex の作業が
-レビューとテストの間で混線するのを防ぐ。`tester` は on-demand で起動し、専用の
-作業ウィンドウで実行する。
+エージェント `tester` が担当する。`tester` は単なる Ansible 実行担当ではなく、
+実装内容の検証、安全な実行方法の選択、検証結果の品質保証を担う QA 担当である。
+役割を物理的に分けることで、Codex の作業がレビューとテストの間で混線するのを防ぐ。
+`tester` は on-demand で起動し、専用の作業ウィンドウで実行する。
 
 受け渡しと判定:
 
 - Claude Code が、requirement の確認項目とレビュー指摘から **test_plan** を起案する。
 - Yoshinobu が test_plan を承認する（テスト方針の判断は人間に残す）。
-- `tester` が test_plan に沿ってテストを実行し、結果を **test_result** に保存する。
+- `tester` が test_plan に沿って安全な検証方法を選択し、結果を **test_result** に保存する。
 - Claude Code がテスト結果を requirement の確認項目 / host_vars 期待値と突合し、
   「意図通り / 違和感」を判定する。違和感、または本番適用の要否は Yoshinobu に提示する。
 
+`tester` の責務:
+
+- 実装内容が requirement / implement / review の意図を満たしているか検証する。
+- 実行方法の安全性を判断し、必要に応じてより安全な検証方法へ置き換える。
+- Claude Code が提示したコマンドをそのまま実行しない。対象 playbook / role / task の性質を確認し、安全な実行方法を選ぶ。
+- playbook を実行するときは必ず `-e tester_mode=true` を付ける（§18 の不変条件）。
+- 検証結果、実行したコマンド、置き換えた理由、未検証事項を test_result に記録する。
+
 `tester` の自律境界:
 
-| 種別                                                         | tester の扱い                                                |
-| ------------------------------------------------------------ | ------------------------------------------------------------ |
-| SAFE:read-only（healthcheck / precheck / ping / `--syntax-check` / `ansible-lint`） | 自律実行してよい                                             |
-| SEMI-SAFE:（冪等で、何度実行しても安全な更新系）             | 自律実行してよい                                             |
-| UN-SAFE:変更系（patch / reboot / migrate など）              | `--check --diff` の dry-run のみ。複数ノードがあれば各ノード分のバリエーションを回し、差分を提示する |
-| 本番適用（実際の変更反映）                                   | `tester` は行わない。Claude Code が Yoshinobu と相談して決める |
+| 種別 | 判断基準 | tester の扱い |
+| --- | --- | --- |
+| SAFE（read-only） | healthcheck / precheck / ping / stat / `pvesh get` / `ansible-lint` / `--syntax-check` など、対象状態を読むだけ | 自律実行してよい |
+| SAFE（検証実行） | `--check` / `--check --diff` / `tester_mode=true` など、実変更を防ぐ検証実行 | 自律実行してよい |
+| CHANGE | 変更を伴う可能性がある実行。copy / template / file / package / service / command / shell / uri などを含み、実変更の可能性がある | そのまま実行しない。必ず `-e tester_mode=true` を付けて実行する（必要に応じて `--check --diff` を重ねる） |
+| APPLY | 本番変更。patch / reboot / restart / reload / migration / firewall変更 / VM操作 / 証明書有効化など | `tester` は実施しない。Yoshinobu の本番適用判断が必要 |
+
+Semaphore UI 登録・運用判断用のリスク分類:
+
+| 種別 | 意味 | Semaphore UI 登録時の扱い |
+| --- | --- | --- |
+| SAFE | read-only 確認、healthcheck、status、stat、gather、precheck など。実行しても対象状態を変更しない | 自動実行に載せてよい |
+| SEMI-SAFE | 変更を伴うが、冪等で、何度実行しても状態を壊しにくい構成管理・検証実行。例: `--check` / `--check --diff` / `tester_mode=true` / 明示的な dry-run | 自動実行可否を用途ごとに判断する。初回は手動確認を推奨 |
+| UN-SAFE | patch / reboot / restart / reload / migration / firewall変更 / VM操作 / 証明書有効化など、停止・切断・本番影響を起こし得る操作 | 人間の明示判断が必要。自動実行に載せる場合は個別ポリシーと停止条件を必ず確認する |
+
+この `SAFE / SEMI-SAFE / UN-SAFE` は、Yoshinobu が Semaphore UI に task を登録する際に
+リスクを認識するための運用分類である。tester の `SAFE（read-only）/ SAFE（検証実行）/
+CHANGE / APPLY` は、テスト時にどの検証方法へ置き換えるかを判断するための分類であり、
+用途が異なる。
 
 補足:
 
-- **semi-safe** とは、更新系であっても冪等で、何度実行しても結果が壊れない操作を指す。
+- SSH 接続そのものではなく、SSH 先で実行するコマンドの性質で判断する。
+- SSH 先で read-only コマンドを実行するだけなら、SAFE（read-only）として自律実行してよい。
+- SSH 先で変更を伴うコマンドを実行する場合は、CHANGE または APPLY として扱い、そのまま実行しない。
 - 本番適用を `tester` に行わせないのは、§14 の人間ゲートを保ち、かつ失敗時に Claude Code が
   状況をスムーズに把握できるようにするため。
 - テスト対象は pve2 を先行する（§2: pve2 は先行検証・縮退運用）。pve1 / 本番は dry-run → 人間判断。
-- 初期運用（v1）では高度なことは求めず、まず dry-run のバリエーションテストを中心に回す。
+- 初期運用（v1）では高度なことは求めず、まず `-e tester_mode=true` を軸に、`--syntax-check` / `--check --diff` を重ねるバリエーションテストを中心に回す。
 
 ### final ファイル
 
@@ -926,7 +950,24 @@ Claude Codeは、実装完了の最後のステップとしてこのコメント
 
 ## 18. tester_mode 運用ルール
 
-tester_mode は Codex tester が本番影響なしで playbook の動作確認を行うための安全弁変数。
+tester_mode は「シミュレーションフラグ」ではなく、**不変条件（invariant）を宣言する安全弁変数**。
+
+### 不変条件
+
+どの playbook も `-e tester_mode=true` 付きで実行した場合、対象ホストの実変更・
+外部副作用（Slack 通知含む）を起こさない。
+
+- 変更系 playbook はゲート（後述の `tester_gate` role）でこの条件を満たす。
+- read-only playbook はゲートなしで自明にこの条件を満たす（tester_mode=true でも
+  通常どおり全体が実行される。それ自体が安全なため、SAFE に tester_mode を付けても
+  no-op であり不自然ではない）。
+- したがって tester は対象を選別せず、**全 playbook に一律 `-e tester_mode=true` を付けてよい**。
+
+不変条件に違反しない操作（許容）:
+
+- コントローラ（ローカル）へのレポート出力
+- read-only 収集のための冪等な収集スクリプト配置（healthcheck 系）
+- `apt update` 等、収集に必要なキャッシュ更新
 
 ### 発動条件
 
@@ -934,7 +975,9 @@ tester_mode は Codex tester が本番影響なしで playbook の動作確認�
 ansible-playbook playbooks/xxx.yml -e tester_mode=true
 ```
 
-- デフォルト値: `false`（指定なし = 通常実行、Semaphore/手動運用に影響なし）
+- デフォルト値: `false`（`inventories/homelab/group_vars/all.yml` で定義。
+  指定なし = 通常実行、Semaphore/手動運用に影響なし。`-e` は変数優先順位が最強のため
+  group_vars のデフォルトを確実に上書きする）
 - `tester_mode=true` のとき `skip_notifications` も自動で `true` になる
 
 ### tester_mode=true の挙動
@@ -955,22 +998,25 @@ qm migrate / pct migrate / ha-manager crm-command
 
 ### playbook 実装パターン
 
-変更処理の直前にゲートブロックを置く:
+ゲート実装は共通 role `roles/tester_gate/tasks/main.yml` に集約している
+（plan 表示 + `end_play` / `end_host`）。インラインの block を書かず、
+変更処理の直前に include を置く（コピペ drift 防止）:
 
 ```yaml
 - name: "[tester_mode] Plan-only: show intended action and stop"
+  ansible.builtin.include_role:
+    name: tester_gate
   when: tester_mode | default(false) | bool
-  block:
-    - name: Show planned action
-      ansible.builtin.debug:
-        msg:
-          - "[tester_mode] plan-only — 実変更は行いません"
-          - "操作 : <操作内容>"
-          - "対象 : <対象>"
-    - name: End play (tester_mode)
-      ansible.builtin.meta: end_play   # play 全体を停止
-      # または end_host で 1 ホストだけ停止
+  vars:
+    tester_gate_end: host        # 省略時は play（end_play）。host は 1 ホストだけ停止
+    tester_gate_plan:
+      - "操作 : <操作内容>"
+      - "対象 : <対象>"
 ```
+
+- 停止のみでよい後続 play のゲートでは `tester_gate_plan` を省略する（表示なしで停止）。
+- 呼び出し側の `when` は通常運用時のログを skip 1 行に抑えるためのもの。
+  ゲート発火条件は role 内でも判定するため、when を忘れても安全側に倒れる。
 
 各 play の vars に以下を追加:
 
@@ -993,9 +1039,34 @@ vars:
 - Play 1 (validate/mute): ゲートで `end_play` → Play 2 はまだ実行される
 - Play 2 (patch apply): 追加ゲートで `end_play` → ここで確実に停止
 
+### 機械チェック（lint）
+
+「全 playbook が不変条件を満たす」は規約ではなく lint で保証する。
+
+- `scripts/check-tester-gate.sh` が playbooks/ 配下の全 playbook を検査する
+  （pre-commit フックから自動実行）。
+- 判定: `tester_gate` role の include（`name: tester_gate` 行）がある、または以下の
+  ヘッダマーカーがあること。単なる `tester_mode` 文字列やコメントでは通らない。
+
+```text
+# tester-gate: safe-readonly — <理由>      read-only playbook。ゲート不要
+# tester-gate: role-guarded — <理由>       副作用が通知のみで、common_slack notify.yml の
+                                           tester_mode ガードで抑止される playbook
+# tester-gate: gated-in-role — <role パス> ゲートが playbook ではなく role のタスク先頭にある
+                                           playbook（例: sophos_trim）
+```
+
+新規 playbook は、ゲートを入れるかマーカーを付けない限り commit できない。
+
 ### tester の実行義務
 
-- `ansible-playbook` 実行時に必ず `-e tester_mode=true` を付ける
-- CC から渡されたコマンドに `-e tester_mode=true` がなければ自動で追加する
+- tester は Claude Code から渡されたコマンドをそのまま実行しない。対象 playbook / role / task の性質を確認する。
+- **playbook を実行するときは必ず `-e tester_mode=true` を付ける。** どの検証方法を選ぶかに
+  かかわらず、これが安全性の下限を保証する（検証方法の選択ミスが事故に直結しない）。
+- `--syntax-check` / `--check` / `--check --diff` は置き換えではなく、情報を増やすために
+  tester_mode と**重ねて**使う追加手段。
+  - 注意: `--check` は `command` / `shell` / `uri` / `expect` を skip するため、収集系が動かず
+    plan 表示や判定が意図通り出ないことがある（§「ゲート対象モジュール」）。
+    ゲート自体は tester_mode 変数のみで判定するため、停止は保証される。
+- 通常実行による APPLY は Yoshinobu の本番適用判断後の運用手順で行う。tester は APPLY を行わない。
 - `allow_unsafe=true` は今回実装しない（将来のオプション）
-

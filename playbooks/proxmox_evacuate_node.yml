@@ -25,18 +25,15 @@
         fail_msg: "target_node must be 'pve1' or 'pve2', got: '{{ target_node | default('undefined') }}'"
 
     - name: "[tester_mode] Plan-only: show intended evacuation and stop"
+      ansible.builtin.include_role:
+        name: tester_gate
       when: tester_mode | default(false) | bool
-      block:
-        - name: Show planned evacuation
-          ansible.builtin.debug:
-            msg:
-              - "[tester_mode] plan-only — 実変更は行いません"
-              - "操作  : proxmox_evacuate_node (qm migrate / pct migrate / maintenance mode)"
-              - "対象  : {{ target_node }}"
-              - "移行先: {{ 'pve1' if target_node == 'pve2' else 'pve2' }}"
-              - "通知  : skip_notifications=true のため送信しません"
-        - name: End play (tester_mode)
-          ansible.builtin.meta: end_play
+      vars:
+        tester_gate_plan:
+          - "操作  : proxmox_evacuate_node (qm migrate / pct migrate / maintenance mode)"
+          - "対象  : {{ target_node }}"
+          - "移行先: {{ 'pve1' if target_node == 'pve2' else 'pve2' }}"
+          - "通知  : skip_notifications=true のため送信しません"
 
     - name: Set recovery mute for authy
       ansible.builtin.include_tasks: "{{ playbook_dir }}/../roles/recovery_mute/tasks/set.yml"
@@ -84,9 +81,8 @@
     skip_notifications: "{{ tester_mode | default(false) | bool }}"
   pre_tasks:
     - name: "[tester_mode] Plan-only: stop before evacuate role"
+      ansible.builtin.include_role:
+        name: tester_gate
       when: tester_mode | default(false) | bool
-      block:
-        - name: End play (tester_mode — evacuate play)
-          ansible.builtin.meta: end_play
   roles:
     - proxmox_evacuate_node

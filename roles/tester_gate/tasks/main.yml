@@ -1,0 +1,40 @@
+---
+# tester_mode 共通ゲート
+#
+# tester_mode=true のときだけ発火し、plan(実行するつもりだった操作)を表示して
+# 現在の play / host を終了する。tester_mode=false(通常運用・Semaphore タイマー)
+# では何もしない。
+#
+# 呼び出し側が指定する vars:
+#   tester_gate_plan : plan として表示する行のリスト。
+#                      停止のみでよい後続 play では省略する(表示なしで停止)。
+#   tester_gate_end  : "play"(既定)= meta: end_play / "host" = meta: end_host
+#
+# 呼び出し例:
+#   - name: "[tester_mode] Plan-only: show intended X and stop"
+#     ansible.builtin.include_role:
+#       name: tester_gate
+#     when: tester_mode | default(false) | bool
+#     vars:
+#       tester_gate_end: host
+#       tester_gate_plan:
+#         - "操作 : ..."
+#         - "対象 : {{ inventory_hostname }}"
+#
+# 呼び出し側の when は通常運用時のログを skip 1 行に抑えるためのもの。
+# ゲート発火条件は role 内でも判定するため、when を忘れても安全側に倒れる。
+- name: "[tester_mode] Plan-only: show plan and stop"
+  when: tester_mode | default(false) | bool
+  block:
+    - name: Show planned actions
+      ansible.builtin.debug:
+        msg: "{{ ['[tester_mode] plan-only — 実変更は行いません'] + tester_gate_plan }}"
+      when: tester_gate_plan is defined
+
+    - name: End host (tester_mode)
+      ansible.builtin.meta: end_host
+      when: tester_gate_end | default('play') == 'host'
+
+    - name: End play (tester_mode)
+      ansible.builtin.meta: end_play
+      when: tester_gate_end | default('play') == 'play'

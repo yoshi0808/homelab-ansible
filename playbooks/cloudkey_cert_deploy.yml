@@ -29,16 +29,13 @@
           (current host: {{ ansible_facts['hostname'] }}).
 
     - name: "[tester_mode] Plan-only: show intended CloudKey cert deploy and stop"
+      ansible.builtin.include_role:
+        name: tester_gate
       when: tester_mode | default(false) | bool
-      block:
-        - name: Show planned CloudKey cert deploy
-          ansible.builtin.debug:
-            msg:
-              - "[tester_mode] plan-only — 実変更は行いません"
-              - "操作 : CloudKey Gen2 Plus TLS 証明書アップロード・有効化 (HTTP API)"
-              - "通知 : skip_notifications=true のため送信しません"
-        - name: End play (tester_mode)
-          ansible.builtin.meta: end_play
+      vars:
+        tester_gate_plan:
+          - "操作 : CloudKey Gen2 Plus TLS 証明書アップロード・有効化 (HTTP API)"
+          - "通知 : skip_notifications=true のため送信しません"
 
     - name: Deploy CloudKey certificate
       block:
