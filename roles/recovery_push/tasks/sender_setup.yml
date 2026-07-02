@@ -63,7 +63,7 @@
   become: true
   delegate_to: "{{ push_target.name }}"
 
-- name: Create drop-in directory for {{ svc }} on {{ push_target.name }}
+- name: Create drop-in directories on {{ push_target.name }}
   ansible.builtin.file:
     path: "/etc/systemd/system/{{ svc }}.service.d"
     state: directory
@@ -75,8 +75,9 @@
   loop: "{{ push_target.push_services }}"
   loop_control:
     loop_var: svc
+    label: "{{ svc }}"
 
-- name: Deploy recovery-trigger drop-in for {{ svc }} on {{ push_target.name }}
+- name: Deploy recovery-trigger drop-ins on {{ push_target.name }}
   ansible.builtin.template:
     src: recovery-trigger-dropin.conf.j2
     dest: "/etc/systemd/system/{{ svc }}.service.d/recovery-trigger.conf"
@@ -88,6 +89,7 @@
   loop: "{{ push_target.push_services }}"
   loop_control:
     loop_var: svc
+    label: "{{ svc }}"
 
 - name: Scan quory host key for push known_hosts on {{ push_target.name }}
   ansible.builtin.command:
