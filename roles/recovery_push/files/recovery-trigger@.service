@@ -1,0 +1,7 @@
+[Unit]
+Description=Recovery push trigger for %i
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/recovery-push.sh
+RemainAfterExit=no

@@ -1,0 +1,59 @@
+---
+# recovery_push: Deploy OnFailure push trigger for authy/monnie → quory (E-2).
+#
+# Runs on quory. Delegates key generation and sender scripts to authy/monnie.
+# After all targets processed, deploys push authorized_keys to recovery-exec on quory.
+
+# ── quory: push state directory ──────────────────────────────────────────────
+
+- name: Create push state directory on quory
+  ansible.builtin.file:
+    path: "{{ recovery_push_state_dir }}"
+    state: directory
+    owner: "{{ recovery_push_user }}"
+    group: "{{ recovery_push_user }}"
+    mode: "0750"
+  become: true
+
+# ── quory: dispatch script ───────────────────────────────────────────────────
+
+- name: Deploy recovery-push-dispatch.sh on quory
+  ansible.builtin.copy:
+    src: recovery-push-dispatch.sh
+    dest: /usr/local/sbin/recovery-push-dispatch.sh
+    owner: root
+    group: root
+    mode: "0755"
+  become: true
+
+# ── per-target sender setup (delegates to authy/monnie) ────────────────────
+
+- name: Initialize push pubkey dict
+  ansible.builtin.set_fact:
+    _push_pubkeys: {}
+
+- name: Setup sender side per target
+  ansible.builtin.include_tasks: sender_setup.yml
+  loop: "{{ recovery_push_targets }}"
+  loop_control:
+    loop_var: push_target
+
+# ── quory: authorized_keys for recovery-exec (incoming push) ────────────────
+
+- name: Ensure recovery-exec .ssh directory exists on quory
+  ansible.builtin.file:
+    path: "{{ recovery_exec_home }}/.ssh"
+    state: directory
+    owner: "{{ recovery_push_user }}"
+    group: "{{ recovery_push_user }}"
+    mode: "0700"
+  become: true
+
+- name: Deploy push authorized_keys for recovery-exec on quory
+  ansible.builtin.template:
+    src: push-authorized_keys.j2
+    dest: "{{ recovery_exec_home }}/.ssh/authorized_keys"
+    owner: "{{ recovery_push_user }}"
+    group: "{{ recovery_push_user }}"
+    mode: "0600"
+  become: true

@@ -1,0 +1,3 @@
+{% for target in recovery_push_targets %}
+command="/usr/local/sbin/recovery-push-dispatch.sh {{ target.name }}",no-agent-forwarding,no-X11-forwarding,no-port-forwarding,no-pty {{ _push_pubkeys[target.name] }}
+{% endfor %}

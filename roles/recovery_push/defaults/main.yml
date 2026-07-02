@@ -1,0 +1,24 @@
+---
+recovery_push_user: recovery-exec
+recovery_push_mute_dir: /var/lib/homelab-recovery/mute
+recovery_push_state_dir: /var/lib/homelab-recovery/push
+recovery_push_key_path: /etc/homelab-recovery/push-key
+recovery_push_known_hosts: /etc/homelab-recovery/push-known_hosts
+
+# Shared with recovery_exec role
+recovery_exec_home: /home/recovery-exec
+recovery_exec_codex_wrapper: /usr/local/bin/codex-exec-wrapper
+recovery_exec_workspace: /var/lib/recovery-exec/workspace
+
+recovery_push_targets:
+  - name: authy
+    host: authy.internal
+    push_services:
+      - freeradius
+  - name: monnie
+    host: monnie.internal
+    push_services:
+      - grafana-server
+      - prometheus
+      - loki
+      - unpoller

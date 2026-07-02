@@ -12,10 +12,10 @@
 # Service user (home at /home/recovery-exec for SSH config + Codex config)
 # ---------------------------------------------------------------------------
 
-- name: Create recovery-exec user (nologin, home in /home)
+- name: Create recovery-exec user (restricted shell, home in /home)
   ansible.builtin.user:
     name: "{{ recovery_exec_user }}"
-    shell: /usr/sbin/nologin
+    shell: /bin/sh
     create_home: true
     home: "{{ recovery_exec_home }}"
     password: "!"

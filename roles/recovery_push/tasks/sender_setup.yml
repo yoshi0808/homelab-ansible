@@ -1,0 +1,112 @@
+---
+# sender_setup.yml: Sets up push trigger on target VM (authy or monnie).
+# Called per-target from main.yml; runs on quory with delegate_to.
+
+- name: Create recovery config dir on {{ push_target.name }}
+  ansible.builtin.file:
+    path: /etc/homelab-recovery
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  become: true
+  delegate_to: "{{ push_target.name }}"
+
+- name: Generate push SSH key on {{ push_target.name }}
+  ansible.builtin.command:
+    cmd: >-
+      ssh-keygen -t ed25519 -N ''
+      -C "recovery-push-{{ push_target.name }}"
+      -f {{ recovery_push_key_path }}
+    creates: "{{ recovery_push_key_path }}"
+  become: true
+  delegate_to: "{{ push_target.name }}"
+
+- name: Lock down push key on {{ push_target.name }}
+  ansible.builtin.file:
+    path: "{{ recovery_push_key_path }}"
+    owner: root
+    group: root
+    mode: "0600"
+  become: true
+  delegate_to: "{{ push_target.name }}"
+
+- name: Slurp push public key from {{ push_target.name }}
+  ansible.builtin.slurp:
+    src: "{{ recovery_push_key_path }}.pub"
+  register: _push_pubkey_raw
+  become: true
+  delegate_to: "{{ push_target.name }}"
+
+- name: Store {{ push_target.name }} pubkey in dict
+  ansible.builtin.set_fact:
+    _push_pubkeys: >-
+      {{ _push_pubkeys | combine({push_target.name: _push_pubkey_raw.content | b64decode | trim}) }}
+
+- name: Deploy recovery-push.sh on {{ push_target.name }}
+  ansible.builtin.copy:
+    src: recovery-push.sh
+    dest: /usr/local/sbin/recovery-push.sh
+    owner: root
+    group: root
+    mode: "0755"
+  become: true
+  delegate_to: "{{ push_target.name }}"
+
+- name: Deploy recovery-trigger@.service on {{ push_target.name }}
+  ansible.builtin.copy:
+    src: "recovery-trigger@.service"
+    dest: /etc/systemd/system/recovery-trigger@.service
+    owner: root
+    group: root
+    mode: "0644"
+  become: true
+  delegate_to: "{{ push_target.name }}"
+
+- name: Create drop-in directory for {{ svc }} on {{ push_target.name }}
+  ansible.builtin.file:
+    path: "/etc/systemd/system/{{ svc }}.service.d"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  become: true
+  delegate_to: "{{ push_target.name }}"
+  loop: "{{ push_target.push_services }}"
+  loop_var: svc
+
+- name: Deploy recovery-trigger drop-in for {{ svc }} on {{ push_target.name }}
+  ansible.builtin.template:
+    src: recovery-trigger-dropin.conf.j2
+    dest: "/etc/systemd/system/{{ svc }}.service.d/recovery-trigger.conf"
+    owner: root
+    group: root
+    mode: "0644"
+  become: true
+  delegate_to: "{{ push_target.name }}"
+  loop: "{{ push_target.push_services }}"
+  loop_var: svc
+
+- name: Scan quory host key for push known_hosts on {{ push_target.name }}
+  ansible.builtin.command:
+    cmd: ssh-keyscan -H quory.internal
+  register: _quory_hostkeys
+  changed_when: false
+  become: true
+  delegate_to: "{{ push_target.name }}"
+
+- name: Deploy push known_hosts on {{ push_target.name }}
+  ansible.builtin.copy:
+    content: "{{ _quory_hostkeys.stdout }}"
+    dest: "{{ recovery_push_known_hosts }}"
+    owner: root
+    group: root
+    mode: "0644"
+  become: true
+  delegate_to: "{{ push_target.name }}"
+
+- name: Reload systemd on {{ push_target.name }}
+  ansible.builtin.systemd:
+    daemon_reload: true
+  become: true
+  delegate_to: "{{ push_target.name }}"

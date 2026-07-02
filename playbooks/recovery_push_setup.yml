@@ -1,0 +1,32 @@
+---
+# Recovery push trigger setup (E-2): OnFailure → SSH → quory Codex pipeline.
+#
+# Deploys:
+#   quory : recovery-push-dispatch.sh(forced command handler) + recovery-exec authorized_keys
+#   authy : push SSH key + recovery-push.sh + recovery-trigger@.service + freeradius drop-in
+#   monnie: push SSH key + recovery-push.sh + recovery-trigger@.service + 4サービス drop-in
+#
+# VM delegates are driven from quory play (same pattern as recovery_exec_setup.yml).
+#
+# Dev run (place only, no live services modified):
+#   ansible-playbook playbooks/recovery_push_setup.yml -l quory -e tester_mode=true
+# Production:
+#   ansible-playbook playbooks/recovery_push_setup.yml -l quory
+
+- name: Deploy recovery push trigger (E-2)
+  hosts: quory
+  gather_facts: false
+  pre_tasks:
+    - name: "[tester_mode] Plan-only: show scope and stop"
+      ansible.builtin.include_role:
+        name: tester_gate
+      when: tester_mode | default(false) | bool
+      vars:
+        tester_gate_plan:
+          - "操作 : OnFailure push トリガ配布"
+          - "quory: /usr/local/sbin/recovery-push-dispatch.sh"
+          - "quory: /home/recovery-exec/.ssh/authorized_keys (push 受信用 2 エントリ)"
+          - "authy: push key 生成 + recovery-push.sh + recovery-trigger@.service + freeradius drop-in"
+          - "monnie: push key 生成 + recovery-push.sh + recovery-trigger@.service + 4サービス drop-in"
+  roles:
+    - recovery_push
