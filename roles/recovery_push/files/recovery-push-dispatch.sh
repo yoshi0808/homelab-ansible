@@ -47,5 +47,5 @@ trap 'rmdir "${LOCK_DIR}" 2>/dev/null || true; log "session ended"' EXIT
 
 log "firing: Codex investigation for ${TARGET}"
 
-exec "${WRAPPER}" exec --cd "${WORKSPACE}" \
+"${WRAPPER}" exec --cd "${WORKSPACE}" \
     "${TARGET} でサービス障害を OnFailure で検知しました。調査・復旧してください。"
