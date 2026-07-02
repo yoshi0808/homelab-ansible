@@ -1,0 +1,7 @@
+[Unit]
+Description=Recovery push drill — monnie (always fails, triggers OnFailure push)
+OnFailure=recovery-trigger@%p.service
+
+[Service]
+Type=oneshot
+ExecStart=/bin/false

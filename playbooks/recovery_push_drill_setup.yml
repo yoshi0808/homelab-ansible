@@ -1,0 +1,34 @@
+---
+# Recovery push drill setup (E-3): Deploy always-failing dummy units to authy/monnie.
+# Starting a drill unit fails immediately, triggering OnFailure → push → quory Codex pipeline.
+#
+# Deploy:
+#   ansible-playbook playbooks/recovery_push_drill_setup.yml -l quory
+# Fire drill:
+#   ansible authy -b -m ansible.builtin.systemd -a "name=recovery-drill-authy.service state=started"
+#   (unit fails → OnFailure → push → Codex investigates → finds services healthy → no recover called)
+
+- name: Deploy recovery push drill units (E-3)
+  hosts: quory
+  gather_facts: false
+  pre_tasks:
+    - name: "[tester_mode] Plan-only: show scope and stop"
+      ansible.builtin.include_role:
+        name: tester_gate
+      when: tester_mode | default(false) | bool
+      vars:
+        tester_gate_plan:
+          - "操作 : push drill ユニット配布"
+          - "authy: /etc/systemd/system/recovery-drill-authy.service"
+          - "monnie: /etc/systemd/system/recovery-drill-monnie.service"
+          - "各ユニットは Type=oneshot ExecStart=/bin/false OnFailure=recovery-trigger@%p.service"
+  tasks:
+    - name: Setup drill units per target
+      ansible.builtin.include_tasks: "{{ playbook_dir }}/../roles/recovery_push/tasks/drill_setup.yml"
+      loop: "{{ recovery_push_targets }}"
+      loop_control:
+        loop_var: drill_target
+      vars:
+        recovery_push_targets:
+          - name: authy
+          - name: monnie

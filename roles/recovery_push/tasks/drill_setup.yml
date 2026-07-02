@@ -1,0 +1,20 @@
+---
+# drill_setup.yml: Deploy push drill units to authy/monnie.
+# Each unit always fails on start, triggering OnFailure → recovery-trigger@%p.service → push.
+# Called from recovery_push_drill_setup.yml; runs on quory with delegate_to.
+
+- name: Deploy drill unit on {{ drill_target.name }}
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../roles/recovery_push/files/recovery-drill-{{ drill_target.name }}.service"
+    dest: "/etc/systemd/system/recovery-drill-{{ drill_target.name }}.service"
+    owner: root
+    group: root
+    mode: "0644"
+  become: true
+  delegate_to: "{{ drill_target.name }}"
+
+- name: Reload systemd on {{ drill_target.name }}
+  ansible.builtin.systemd:
+    daemon_reload: true
+  become: true
+  delegate_to: "{{ drill_target.name }}"
