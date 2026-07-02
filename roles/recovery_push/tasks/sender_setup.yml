@@ -73,7 +73,8 @@
   become: true
   delegate_to: "{{ push_target.name }}"
   loop: "{{ push_target.push_services }}"
-  loop_var: svc
+  loop_control:
+    loop_var: svc
 
 - name: Deploy recovery-trigger drop-in for {{ svc }} on {{ push_target.name }}
   ansible.builtin.template:
@@ -85,7 +86,8 @@
   become: true
   delegate_to: "{{ push_target.name }}"
   loop: "{{ push_target.push_services }}"
-  loop_var: svc
+  loop_control:
+    loop_var: svc
 
 - name: Scan quory host key for push known_hosts on {{ push_target.name }}
   ansible.builtin.command:
