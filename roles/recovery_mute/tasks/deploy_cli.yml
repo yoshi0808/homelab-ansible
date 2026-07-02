@@ -1,0 +1,19 @@
+---
+# homelab-mute CLI を配布する(recovery_probe_setup.yml から include される)。
+# mute ファイルの読み書きは set.yml と完全互換。
+
+- name: "Recovery mute | ensure mute directory exists"
+  ansible.builtin.file:
+    path: /var/lib/homelab-recovery/mute
+    state: directory
+    mode: "0755"
+  become: true
+
+- name: "Recovery mute | deploy homelab-mute CLI"
+  ansible.builtin.copy:
+    src: homelab-mute
+    dest: /usr/local/bin/homelab-mute
+    mode: "0755"
+    owner: root
+    group: root
+  become: true

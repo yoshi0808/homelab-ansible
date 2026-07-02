@@ -1,0 +1,45 @@
+---
+# recovery-probe (pull 検知 daemon) の設定
+# 設計: docs/ai/reviews/autonomous_recovery/2026-07-02_001_requirement.md
+
+# 60 秒間隔 × 5 回連続失敗で発火(Yoshinobu 判断 2026-07-02。
+# mute を忘れて Sophos GUI パッチを開始しても、通常のパッチリブートなら
+# 発火前に復帰するマージン)
+recovery_probe_interval_s: 60
+recovery_probe_threshold: 5
+
+# ラダー実行後、probe 応答の回復を待つ秒数
+recovery_probe_recovery_wait_s: 300
+
+# ansible-playbook / ansible を実行するリポジトリ(quory / ansy とも checkout あり)
+recovery_probe_repo_dir: /home/yoshi/homelab-ansible
+
+# probe サービスの実行ユーザー(repo・vault パスワード・SSH 鍵を持つ)
+recovery_probe_user: yoshi
+
+# 外部到達性チェック(ISP 切り分け・通知 flush 判定)。
+# ホスト名解決は sophos-fw の DNS に依存してよい: この URL を評価するのは
+# LAN 側が健全な分岐と通知 flush 時のみ(requirement 参照)
+recovery_probe_external_check_url: https://one.one.one.one
+
+# pvesh 確証に使う pve ホスト(inventory 名)
+recovery_probe_pve_host: pve1
+
+# true にすると systemd サービスを enable + start する(本番 quory)。
+# 開発(ansy)では配置のみで起動しない(recovery_io_setup と同じ流儀)
+recovery_probe_service_enabled: false
+
+# 検知対象。action: ladder = 決定論ラダー(E-1 は sophos-fw のみ)/
+# notify = 通知のみ(authy / monnie は E-2 でラダー統合予定)
+recovery_probe_targets:
+  sophos-fw:
+    probes: ["icmp", "dns"]
+    dns_check_name: quory.internal
+    action: ladder
+    failover: true
+  authy:
+    probes: ["icmp", "tcp:22"]
+    action: notify
+  monnie:
+    probes: ["icmp", "tcp:3000"]
+    action: notify

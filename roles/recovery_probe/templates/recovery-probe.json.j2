@@ -1,0 +1,11 @@
+{
+  "interval_s": {{ recovery_probe_interval_s }},
+  "threshold": {{ recovery_probe_threshold }},
+  "recovery_wait_s": {{ recovery_probe_recovery_wait_s }},
+  "mute_dir": "/var/lib/homelab-recovery/mute",
+  "state_dir": "/var/lib/homelab-recovery/probe",
+  "repo_dir": "{{ recovery_probe_repo_dir }}",
+  "external_check_url": "{{ recovery_probe_external_check_url }}",
+  "pve_host": "{{ recovery_probe_pve_host }}",
+  "targets": {{ recovery_probe_targets | to_nice_json }}
+}

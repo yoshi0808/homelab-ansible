@@ -1,0 +1,136 @@
+#!/usr/bin/env bash
+# homelab-mute — 自律復旧 mute の手動操作 CLI(quory / ansy に配布)
+#
+# mute ファイル形式は roles/recovery_mute/tasks/set.yml と完全互換:
+#   /var/lib/homelab-recovery/mute/<target>.json
+#   { "until": "<ISO8601 %:z>", "reason": "..." }
+#
+# 使い方:
+#   sudo homelab-mute set <target> <minutes> [reason...]
+#   homelab-mute status
+#   sudo homelab-mute clear <target>
+#
+# セマンティクス:
+#   - set は max(既存 until, now + minutes) — 有効な mute 窓を短縮しない(set.yml と同一)
+#   - TTL 必須。恒久 mute は作れない
+#   - mute は自律復旧(probe / OnFailure / Slack 手動依頼)を抑制する。
+#     ansible-playbook の直接実行や手作業は抑制しない(requirement 2026-07-02_001)
+set -euo pipefail
+
+MUTE_DIR=/var/lib/homelab-recovery/mute
+ALLOWED_TARGETS=("authy" "monnie" "sophos-fw")
+
+usage() {
+  cat >&2 <<'EOF'
+Usage:
+  sudo homelab-mute set <target> <minutes> [reason...]
+  homelab-mute status
+  sudo homelab-mute clear <target>
+
+Targets: authy / monnie / sophos-fw
+EOF
+  exit 2
+}
+
+validate_target() {
+  local t="$1" a
+  for a in "${ALLOWED_TARGETS[@]}"; do
+    [[ "$t" == "$a" ]] && return 0
+  done
+  echo "ERROR: unknown target '$t' (allowed: ${ALLOWED_TARGETS[*]})" >&2
+  exit 1
+}
+
+require_root() {
+  if [[ $EUID -ne 0 ]]; then
+    echo "ERROR: '$1' requires root (use sudo)" >&2
+    exit 1
+  fi
+}
+
+json_field() {  # $1=file $2=field → prints value or empty
+  python3 -c 'import json,sys
+try:
+    print(json.load(open(sys.argv[1])).get(sys.argv[2], ""))
+except Exception:
+    pass' "$1" "$2" 2>/dev/null || true
+}
+
+cmd="${1:-}"
+shift || true
+
+case "$cmd" in
+  set)
+    [[ $# -ge 2 ]] || usage
+    target="$1"
+    minutes="$2"
+    shift 2
+    reason="${*:-manual mute via homelab-mute}"
+    validate_target "$target"
+    if ! [[ "$minutes" =~ ^[0-9]+$ ]] || [[ "$minutes" -eq 0 ]]; then
+      echo "ERROR: minutes must be a positive integer" >&2
+      exit 1
+    fi
+    require_root set
+    mkdir -p "$MUTE_DIR"
+    chmod 0755 "$MUTE_DIR"
+
+    new_until="$(date -d "+${minutes} minutes" +"%Y-%m-%dT%H:%M:%S%:z")"
+    file="$MUTE_DIR/${target}.json"
+    effective="$new_until"
+    existing_until="$(json_field "$file" until)"
+    if [[ -n "$existing_until" ]]; then
+      existing_epoch="$(date -d "$existing_until" +%s 2>/dev/null || echo 0)"
+      new_epoch="$(date -d "$new_until" +%s)"
+      if [[ "$existing_epoch" -gt "$new_epoch" ]]; then
+        effective="$existing_until"
+      fi
+    fi
+
+    tmp="$(mktemp "$MUTE_DIR/.${target}.XXXXXX")"
+    python3 -c 'import json,sys
+print(json.dumps({"until": sys.argv[1], "reason": sys.argv[2]}, ensure_ascii=False))' \
+      "$effective" "$reason" > "$tmp"
+    chmod 0644 "$tmp"
+    mv "$tmp" "$file"
+    echo "muted: $target until $effective (reason: $reason)"
+    ;;
+
+  status)
+    now="$(date +%s)"
+    printf '%-10s %-12s %-26s %s\n' TARGET STATE UNTIL REASON
+    for t in "${ALLOWED_TARGETS[@]}"; do
+      file="$MUTE_DIR/${t}.json"
+      if [[ ! -f "$file" ]]; then
+        printf '%-10s %-12s %-26s %s\n' "$t" "-" "-" "-"
+        continue
+      fi
+      until_s="$(json_field "$file" until)"
+      reason="$(json_field "$file" reason)"
+      until_epoch="$(date -d "$until_s" +%s 2>/dev/null || echo 0)"
+      if [[ "$until_epoch" -gt "$now" ]]; then
+        rem_min=$(( (until_epoch - now + 59) / 60 ))
+        printf '%-10s %-12s %-26s %s\n' "$t" "MUTED(${rem_min}m)" "$until_s" "$reason"
+      else
+        printf '%-10s %-12s %-26s %s\n' "$t" "expired" "$until_s" "$reason"
+      fi
+    done
+    ;;
+
+  clear)
+    [[ $# -eq 1 ]] || usage
+    target="$1"
+    validate_target "$target"
+    require_root clear
+    if [[ -f "$MUTE_DIR/${target}.json" ]]; then
+      rm -f "$MUTE_DIR/${target}.json"
+      echo "cleared: $target"
+    else
+      echo "not muted: $target"
+    fi
+    ;;
+
+  *)
+    usage
+    ;;
+esac

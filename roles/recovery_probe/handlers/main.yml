@@ -1,0 +1,8 @@
+---
+- name: Restart recovery-probe
+  ansible.builtin.systemd:
+    name: recovery-probe
+    daemon_reload: true
+    state: restarted
+  become: true
+  when: recovery_probe_service_enabled | bool

@@ -1,0 +1,64 @@
+---
+# recovery-probe の配置。開発(ansy)は配置のみ、本番(quory)は
+# -e recovery_probe_service_enabled=true で enable + start する。
+
+- name: Install dig (dnsutils) for DNS probe
+  ansible.builtin.apt:
+    name: dnsutils
+    state: present
+  become: true
+
+- name: Ensure config directory exists
+  ansible.builtin.file:
+    path: /etc/homelab-recovery
+    state: directory
+    mode: "0755"
+  become: true
+
+- name: Ensure probe state directories exist
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ recovery_probe_user }}"
+    group: "{{ recovery_probe_user }}"
+    mode: "0755"
+  loop:
+    - /var/lib/homelab-recovery/probe
+    - /var/lib/homelab-recovery/probe/notify-queue
+    - /var/lib/homelab-recovery/probe/drill
+  become: true
+
+- name: Deploy probe config
+  ansible.builtin.template:
+    src: recovery-probe.json.j2
+    dest: /etc/homelab-recovery/recovery-probe.json
+    mode: "0644"
+  become: true
+  notify: Restart recovery-probe
+
+- name: Deploy probe daemon
+  ansible.builtin.copy:
+    src: recovery-probe.py
+    dest: /usr/local/sbin/recovery-probe.py
+    mode: "0755"
+    owner: root
+    group: root
+  become: true
+  notify: Restart recovery-probe
+
+- name: Deploy systemd unit
+  ansible.builtin.template:
+    src: recovery-probe.service.j2
+    dest: /etc/systemd/system/recovery-probe.service
+    mode: "0644"
+  become: true
+  notify: Restart recovery-probe
+
+- name: Enable and start recovery-probe (production only)
+  ansible.builtin.systemd:
+    name: recovery-probe
+    daemon_reload: true
+    enabled: true
+    state: started
+  become: true
+  when: recovery_probe_service_enabled | bool

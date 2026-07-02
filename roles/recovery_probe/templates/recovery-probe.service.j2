@@ -1,0 +1,16 @@
+[Unit]
+Description=Homelab recovery probe (pull detection for autonomous recovery)
+Documentation=file://{{ recovery_probe_repo_dir }}/docs/ai/reviews/autonomous_recovery/2026-07-02_001_requirement.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User={{ recovery_probe_user }}
+Environment=RECOVERY_PROBE_CONFIG=/etc/homelab-recovery/recovery-probe.json
+ExecStart=/usr/bin/python3 /usr/local/sbin/recovery-probe.py
+Restart=on-failure
+RestartSec=30
+
+[Install]
+WantedBy=multi-user.target

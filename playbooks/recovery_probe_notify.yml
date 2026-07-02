@@ -1,0 +1,36 @@
+---
+# tester-gate: role-guarded — 副作用は Slack 通知のみで、common_slack notify.yml の tester_mode ガードで抑止される
+#
+# recovery-probe の通知キュー flush から呼ばれる(1 通知 = 1 実行)。
+# キューファイルをそのまま extra-vars として渡す:
+#   ansible-playbook playbooks/recovery_probe_notify.yml -e @<queue-file.json>
+#
+# Required extra vars:
+#   nt_status  — ok / warning / error / critical
+#   nt_title   — 通知タイトル
+#   nt_message — 通知本文
+#   nt_queued_at — キュー投入時刻(遅延送信の明示用)
+
+- name: Send recovery probe notification
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Assert required vars are defined
+      ansible.builtin.assert:
+        that:
+          - nt_status is defined
+          - nt_title is defined
+          - nt_message is defined
+
+    - name: Send Slack notification
+      ansible.builtin.include_tasks: "{{ playbook_dir }}/../roles/common_slack/tasks/notify.yml"
+      vars:
+        slack_channel: "alerts"
+        slack_status: "{{ nt_status }}"
+        slack_title: "{{ nt_title }}"
+        slack_message: |
+          {{ nt_message }}
+
+          検知時刻: {{ nt_queued_at | default('(unknown)') }}
+          送信時刻: {{ lookup('pipe', "TZ='Asia/Tokyo' date '+%Y-%m-%dT%H:%M:%S+09:00'") }}
+          (検知と送信の時刻差は、インターネット断中のキュー保留によるもの)

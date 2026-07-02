@@ -1,0 +1,40 @@
+---
+# Deploy recovery-probe (pull detection daemon) + homelab-mute CLI.
+#
+# Development (ansy):
+#   ansible-playbook playbooks/recovery_probe_setup.yml -l ansy
+#   # service is deployed but NOT enabled/auto-started
+#
+# Production (quory):
+#   ansible-playbook playbooks/recovery_probe_setup.yml -l quory \
+#     -e recovery_probe_service_enabled=true
+#
+# 設計: docs/ai/reviews/autonomous_recovery/2026-07-02_001_requirement.md
+
+- name: Deploy recovery-probe and homelab-mute CLI
+  hosts: dev_nodes:control_nodes
+  gather_facts: true
+  become: true
+  vars:
+    skip_notifications: "{{ tester_mode | default(false) | bool }}"
+  pre_tasks:
+    - name: "[tester_mode] Plan-only: show intended probe setup and stop"
+      ansible.builtin.include_role:
+        name: tester_gate
+      when: tester_mode | default(false) | bool
+      vars:
+        tester_gate_end: host
+        tester_gate_plan:
+          - "操作 : recovery-probe daemon 配置 + homelab-mute CLI 配置 + systemd unit"
+          - "対象 : {{ inventory_hostname }}"
+          - "起動 : recovery_probe_service_enabled={{ recovery_probe_service_enabled | default(false) }}"
+
+  tasks:
+    - name: Deploy homelab-mute CLI
+      ansible.builtin.include_role:
+        name: recovery_mute
+        tasks_from: deploy_cli
+
+    - name: Deploy recovery-probe
+      ansible.builtin.include_role:
+        name: recovery_probe
