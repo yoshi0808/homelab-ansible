@@ -147,6 +147,25 @@
   loop: "{{ recovery_exec_targets }}"
   become: true
 
+- name: Deploy homelab-mute-exec wrapper
+  ansible.builtin.copy:
+    src: homelab-mute-exec
+    dest: /usr/local/bin/homelab-mute-exec
+    owner: root
+    group: root
+    mode: "0755"
+  become: true
+
+- name: Deploy sudoers for recovery-exec mute operations (quory-local)
+  ansible.builtin.template:
+    src: sudoers-recovery-exec-mute.j2
+    dest: /etc/sudoers.d/recovery-exec-mute
+    owner: root
+    group: root
+    mode: "0440"
+    validate: /usr/sbin/visudo -cf %s
+  become: true
+
 # ---------------------------------------------------------------------------
 # Target node setup (authy/monnie)
 # ---------------------------------------------------------------------------

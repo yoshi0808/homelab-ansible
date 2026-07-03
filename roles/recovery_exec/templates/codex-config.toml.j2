@@ -20,3 +20,6 @@ command = "homelab-recover-{{ target.name }}"
 policy = "allow"
 
 {% endfor %}
+[[execpolicy.rules]]
+command = "homelab-mute-exec"
+policy = "allow"

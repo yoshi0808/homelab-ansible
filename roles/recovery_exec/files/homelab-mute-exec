@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# homelab-mute-exec: Codex-callable wrapper for homelab-mute.
+# Runs homelab-mute as root via sudo (see /etc/sudoers.d/recovery-exec-mute).
+# set/clear require root; status is read-only but sudo is harmless here.
+exec sudo /usr/local/bin/homelab-mute "$@"
