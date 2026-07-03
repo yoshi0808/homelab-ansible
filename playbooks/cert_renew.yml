@@ -114,10 +114,20 @@
         name: homelab_cert_renew
         tasks_from: issue
 
+    - name: Mute monnie push trigger before grafana-server restart
+      ansible.builtin.command: "homelab-mute set monnie 5 'cert_renew: grafana-server restart'"
+      delegate_to: localhost
+      when: cert_needs_renewal | default(false) | bool
+
     - name: Run deploy_grafana tasks
       ansible.builtin.import_role:
         name: homelab_cert_renew
         tasks_from: deploy_grafana
+
+    - name: Clear monnie push trigger mute after grafana restart
+      ansible.builtin.command: homelab-mute clear monnie
+      delegate_to: localhost
+      when: cert_needs_renewal | default(false) | bool
 
 - name: cert_renew - cleanup CA key from quory
   hosts: localhost
