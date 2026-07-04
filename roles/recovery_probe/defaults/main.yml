@@ -29,17 +29,29 @@ recovery_probe_pve_host: pve1
 # 開発(ansy)では配置のみで起動しない(recovery_io_setup と同じ流儀)
 recovery_probe_service_enabled: false
 
-# 検知対象。action: ladder = 決定論ラダー(E-1 は sophos-fw のみ)/
-# notify = 通知のみ(authy / monnie は E-2 でラダー統合予定)
+# 検知対象。action: ladder = 決定論ラダー(VM reboot → hacritical なら failover)/
+# notify = 通知のみ
+#
+# ladder は「ping 無応答 = VM/ネットワークスタック自体が無応答」を検知して
+# 対応するもので、対象 VM 上でどのサービスが動いているかは問わない
+# (VM reboot → 必要なら failover のみ、サービス種別non依存)。
+# 個別サービス(freeradius/grafana-server 等)のクラッシュはこの経路では
+# 扱わない — それは各 VM 内部の自己回復の話であり、recovery_push の
+# OnFailure 経由(サービス restart のみ)で別途カバーする。
 recovery_probe_targets:
   sophos-fw:
+    host: sophos-fw.internal
     probes: ["icmp", "dns"]
     dns_check_name: quory.internal
     action: ladder
     failover: true
   authy:
+    host: authy.internal
     probes: ["icmp", "tcp:22"]
-    action: notify
+    action: ladder
+    failover: true
   monnie:
+    host: monnie.internal
     probes: ["icmp", "tcp:3000"]
-    action: notify
+    action: ladder
+    failover: false
