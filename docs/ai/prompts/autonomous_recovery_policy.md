@@ -63,6 +63,22 @@ authy/monnieのauthorized_keysは、この2エントリ(investigate/action)の�
 
 対象ホストの`/usr/local/sbin/recovery-investigate-dispatch.sh`が`$SSH_ORIGINAL_COMMAND`をcase文で照合する。許可される値は`roles/recovery_exec/defaults/main.yml`の`recovery_exec_targets[].investigate_services`(サービス名 / `journal-<service>`)と`investigate_extra`(ノード別の固定コマンド)、および共通システムチェック(`failed`/`disk`/`memory`/`load`/`network`/`ports`/`journal-system`)。一致しない値は`denied`で拒否する。
 
+#### 4.1.1 調査バリエーションの追加手順
+
+新しい調査コマンド(読み取り専用の確認のみ。復旧コマンドの追加は§4.2の対象外)を増やす場合、原則`roles/recovery_exec/defaults/main.yml`の`recovery_exec_targets[]`を編集するだけでよい。
+
+- **既存サービスの状態確認を増やす**: 該当ノードの`investigate_services`にサービス名を追加する。`<svc>`/`journal-<svc>`のcase分岐と`status`集計表示に自動反映される。
+- **任意の読み取り専用コマンドを追加する**: 該当ノードの`investigate_extra`に`{name, cmd}`を追加する。コマンドが`sudo`を必要とする場合は、`roles/recovery_exec/templates/sudoers-recovery-exec-target.j2`にも対応するNOPASSWDエントリを追加する(`investigate_extra`から自動生成されないため個別対応が必要)。
+
+`recovery_exec_targets`は、quory側wrapper(`roles/recovery_exec/templates/homelab-investigate.sh.j2`)と対象ホスト側dispatch(`recovery-investigate-dispatch.sh.j2`)両方の許可リストを同時にレンダリングする単一のソースであり、この2ファイルを直接編集する必要はない。
+
+追加後に行うこと:
+
+1. `roles/recovery_exec/templates/AGENTS.md.j2`の該当ノードのセクションに説明を追記する(手書きのドキュメントで自動生成されないため、追記しないとCodexがそのチェックの存在を認識しない)
+2. `ansible-playbook playbooks/recovery_exec_setup.yml -l quory`を再実行する(wrapper・dispatch script・AGENTS.mdが同じroleで配備されるため1回で反映される)
+
+全ノード共通のチェック種別自体(`failed`/`disk`/`memory`等と同格の新カテゴリ)を新設する場合に限り、`recovery-investigate-dispatch.sh.j2`と`homelab-investigate.sh.j2`の両方のcase文に直接追記が必要(この部分のみデータ駆動ではない)。
+
 ### 4.2 action系コマンド(復旧)
 
 対象ホストの`/usr/local/sbin/recovery-action.sh`は引数を受け取らず、接続されただけで`recovery_exec_targets[].action_services`に列挙された全サービスを`systemctl reset-failed <svc> || true` → `systemctl restart <svc>`で一括再起動する(個別サービス指定はしない)。`reset-failed`は、OnFailure発火直後の`StartLimitIntervalSec`ウィンドウ内でのrestartがsystemdのstart-limitに拒否されるレースを避けるためのもの。
