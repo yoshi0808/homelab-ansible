@@ -30,7 +30,7 @@ authy / monnie / sophos-fw の業務継続を、人間の承認を待たずに�
 この2つの経路は独立した別の障害クラスを扱う。
 
 - **自己回復(サービスrestart)はVM内部の出来事**であり、個別サービスのクラッシュを検知して直す。sophos-fwには自己回復対象サービスが無いため、この経路自体が存在しない。
-- **pingベースのラダーはVM単位の生死判定**であり、対象VM上でどのサービスが動いているかを問わない。ping無応答は常にVM reboot、hacriticalタグがあれば追加でfailover、という一律の対応になる。
+- **pingベースのラダーはVM単位の生死判定**であり、対象VM上でどのサービスが動いているかを問わない。pveshで状態を確証したうえで、runningのまま無応答ならVM reboot、hacriticalかつ未復旧ならfailoverへ進む(詳細な分岐は§5.1)。
 
 ---
 
@@ -110,13 +110,13 @@ Codexは`AGENTS.md`の手順(investigate → 判定 → recover → 再investiga
 
 ### 5.3 Slack — `recovery-io.service`(quory常駐)
 
-Slack(`@Homelab`メンション、Socket Mode)からのリクエストを受け、`sudo -u recovery-exec codex-exec-wrapper exec --cd <workspace> "<メッセージ>"`でCodexへジョブとして渡す。結果はSlackスレッドに日本語で返信される。
+Slack(`@Homelab`メンション、Socket Mode)からのリクエストを受け、`sudo -H -u recovery-exec codex-exec-wrapper exec --cd <workspace> "<メッセージ>"`でCodexへジョブとして渡す。`-H`はrecovery-execの`~/.codex`を使うために必要。結果はSlackスレッドに日本語で返信される。
 
 ---
 
 ## 6. Codex実行環境の安全設計
 
-- LLM(Codex)にはBash/Write/Edit/Read等のツールを渡さない。execpolicy(`default_policy="deny"`)で、呼べるコマンドを以下のみに絞る:
+- Codex側で任意コマンドを実行できないよう、execpolicy(`default_policy="deny"`)とし、許可する外部コマンドを以下のwrapperのみに限定する:
   - `homelab-investigate-{authy,monnie}`
   - `homelab-recover-{authy,monnie}`
   - `homelab-monitoring-{pause,resume,status}`
@@ -153,7 +153,7 @@ Codexの判断を介さず、3つのレイヤーをそれぞれ独立したplayb
 | `recovery_vm_reboot.yml` | `authy` / `monnie` / `sophos-fw` |
 | `recovery_ha_failover.yml` | `authy` / `sophos-fw`(monnieは対象外) |
 
-いずれも対象の健全性を問わず、`target=`が指定されれば無条件に実行する(発火判断の責任は人間側にある)。タグ再検証・レポート保存・Slack通知(best-effort)は自動経路と共通。
+いずれもprobeの現在状態やサービス健全性を発火条件にはせず、`target=`が妥当なら人間判断で直接起動できる(発火判断の責任は人間側にある)。ただし対象allowlist・タグ再検証・VM存在確認・HA登録確認などのsafety gateは実装側で維持される。レポート保存・Slack通知(best-effort)は自動経路と共通。
 
 ---
 

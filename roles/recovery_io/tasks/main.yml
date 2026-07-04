@@ -145,4 +145,5 @@
   ansible.builtin.systemd:
     name: recovery-io
     enabled: "{{ recovery_io_service_enabled }}"
+    state: "{{ 'started' if recovery_io_service_enabled | bool else omit }}"
   become: true
