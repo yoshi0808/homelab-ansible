@@ -10,16 +10,29 @@ network_access = true
 [execpolicy]
 default_policy = "deny"
 
+# --- Investigation (read-only) ---
 {% for target in recovery_exec_targets %}
 [[execpolicy.rules]]
 command = "homelab-investigate-{{ target.name }}"
 policy = "allow"
 
+{% endfor %}
+[[execpolicy.rules]]
+command = "homelab-reports"
+policy = "allow"
+
+[[execpolicy.rules]]
+command = "homelab-semaphore-query"
+policy = "allow"
+
+# --- Recovery (service restart) ---
+{% for target in recovery_exec_targets %}
 [[execpolicy.rules]]
 command = "homelab-recover-{{ target.name }}"
 policy = "allow"
 
 {% endfor %}
+# --- Monitoring control ---
 [[execpolicy.rules]]
 command = "homelab-monitoring-pause"
 policy = "allow"

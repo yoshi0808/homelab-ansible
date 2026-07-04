@@ -10,7 +10,7 @@ KNOWN=/home/recovery-exec/.ssh/known_hosts
 
 # Allowlist mirrors the dispatch script on {{ target.name }}.
 case "${1:-status}" in
-  {% for svc in target.investigate_services %}{{ svc }}|journal-{{ svc }}|{% endfor %}failed|disk|memory|load|network|ports|journal-system|status{% for extra in target.investigate_extra | default([]) %}|{{ extra.name }}{% endfor %})
+  {% for svc in target.investigate_services %}{{ svc }}|journal-{{ svc }}|journal-{{ svc }}-1h|journal-{{ svc }}-24h|journal-{{ svc }}-err|journal-{{ svc }}-warn|{% endfor %}failed|disk|memory|load|network|ports|journal-system|dmesg|status{% for extra in target.investigate_extra | default([]) %}|{{ extra.name }}{% endfor %})
     exec ssh -T \
         -F /dev/null \
         -i "$KEY" \

@@ -61,7 +61,7 @@ authy/monnieのauthorized_keysは、この2エントリ(investigate/action)の�
 
 ### 4.1 調査系コマンド(investigate)
 
-対象ホストの`/usr/local/sbin/recovery-investigate-dispatch.sh`が`$SSH_ORIGINAL_COMMAND`をcase文で照合する。許可される値は`roles/recovery_exec/defaults/main.yml`の`recovery_exec_targets[].investigate_services`(サービス名 / `journal-<service>`)と`investigate_extra`(ノード別の固定コマンド)、および共通システムチェック(`failed`/`disk`/`memory`/`load`/`network`/`ports`/`journal-system`)。一致しない値は`denied`で拒否する。
+対象ホストの`/usr/local/sbin/recovery-investigate-dispatch.sh`が`$SSH_ORIGINAL_COMMAND`をcase文で照合する。許可される値は`roles/recovery_exec/defaults/main.yml`の`recovery_exec_targets[].investigate_services`(サービス名 / `journal-<service>`、および期間・優先度指定の`journal-<service>-{1h,24h,err,warn}`)と`investigate_extra`(ノード別の固定コマンド)、および共通システムチェック(`failed`/`disk`/`memory`/`load`/`network`/`ports`/`journal-system`/`dmesg`)。一致しない値は`denied`で拒否する。
 
 #### 4.1.1 調査バリエーションの追加手順
 
@@ -77,11 +77,28 @@ authy/monnieのauthorized_keysは、この2エントリ(investigate/action)の�
 1. `roles/recovery_exec/templates/AGENTS.md.j2`の該当ノードのセクションに説明を追記する(手書きのドキュメントで自動生成されないため、追記しないとCodexがそのチェックの存在を認識しない)
 2. `ansible-playbook playbooks/recovery_exec_setup.yml -l quory`を再実行する(wrapper・dispatch script・AGENTS.mdが同じroleで配備されるため1回で反映される)
 
-全ノード共通のチェック種別自体(`failed`/`disk`/`memory`等と同格の新カテゴリ)を新設する場合に限り、`recovery-investigate-dispatch.sh.j2`と`homelab-investigate.sh.j2`の両方のcase文に直接追記が必要(この部分のみデータ駆動ではない)。
+全ノード共通のチェック種別自体(`failed`/`disk`/`memory`等と同格の新カテゴリ)を新設する場合に限り、`recovery-investigate-dispatch.sh.j2`と`homelab-investigate.sh.j2`の両方のcase文に直接追記が必要(この部分のみデータ駆動ではない)。`dmesg`共通チェックと、`investigate_services`の各サービスに対する`journal-<svc>-{1h,24h,err,warn}`(期間・優先度指定)は、この方式でテンプレート側に直接実装している(defaults/main.ymlの編集だけでは増えない)。
 
 ### 4.2 action系コマンド(復旧)
 
 対象ホストの`/usr/local/sbin/recovery-action.sh`は引数を受け取らず、接続されただけで`recovery_exec_targets[].action_services`に列挙された全サービスを`systemctl reset-failed <svc> || true` → `systemctl restart <svc>`で一括再起動する(個別サービス指定はしない)。`reset-failed`は、OnFailure発火直後の`StartLimitIntervalSec`ウィンドウ内でのrestartがsystemdのstart-limitに拒否されるレースを避けるためのもの。
+
+### 4.3 reportsレポート調査(`homelab-reports`)
+
+quoryローカルの`~/homelab-ansible/reports/<playbook>/`配下のJSONレポート(healthcheck等の実行結果)を参照するための調査コマンド。SSHホップは無く、quory上で完結する。
+
+- `list-playbooks` / `list-reports <playbook> [target]` / `show-report <playbook> [target] <filename>`の3コマンドのみ。`target`は`recovery_investigations/<target>/`のようなネスト構造(自律復旧パイプライン自身の調査ログ)向けの追加path segmentを1つだけ許可するもので、ほとんどのplaybook(フラット構造)では使わない。
+- ベースパス(`~/homelab-ansible/reports`)は固定。`playbook`/`target`/`filename`は`[a-zA-Z0-9_-]+`(filenameは末尾`.json`必須)のみ許可し、スラッシュ・ドットを含む値はトラバーサル防止のため拒否する。`list-reports`は`*.json`のみを列挙する(非JSONファイルが混在するplaybookディレクトリがあるため)。
+- `reports/`は`/home/yoshi`(quory実機実測: `0711`/`drwx--x--x`)配下にあり、recovery-execは直接読めない。`recovery-exec ALL=(yoshi) NOPASSWD: /usr/local/sbin/recovery-reports-helper *`のsudoersで、ファイル所有者`yoshi`にのみ昇格する(rootへは昇格しない)。`/home/yoshi`の実際のモードに関わらず正しく動作するよう、明示的なsudo昇格を用いている。
+- `homelab-reports`(引数検証)→ sudo → `recovery-reports-helper`(再検証してから読む)の2層構成。investigate系のローカルwrapper→SSH forced commandの2層検証と同じ考え方。
+
+### 4.4 Semaphore失敗タスク調査(`homelab-semaphore-query`)
+
+quoryの`/var/lib/semaphore/semaphore.db`(SQLite、`yoshi:yoshi 0600`)を read-only で参照し、Semaphoreタスクの失敗原因を調査するコマンド。
+
+- Codexは`recent-failed <n>` / `task-errors <id>` / `task-hosts <id>` / `task-output <id>`の4種の定型クエリ名と、整数パラメータ(`n`は1-200、`id`)のみを選択する。SQL本文は`homelab-semaphore-query`内に固定文字列として持ち、自由なSQLは受け付けない。
+- `sudoers`は`recovery-exec ALL=(root) NOPASSWD: /usr/bin/sqlite3 -readonly /var/lib/semaphore/semaphore.db *`のみを許可する(DBパス・`-readonly`固定)。`-readonly`により、末尾`*`に何が来ても書き込みはSQLiteエンジン側で拒否される。
+- 完成したSQL文字列は配列(`exec ... "$sql"`)としてsqlite3へ渡し、シェル経由の文字列連結・再解釈を行わない。
 
 ---
 
@@ -133,9 +150,11 @@ Slack(`@Homelab`メンション、Socket Mode)からのリクエストを受け�
 ## 6. Codex実行環境の安全設計
 
 - Codex側で任意コマンドを実行できないよう、execpolicy(`default_policy="deny"`)とし、許可する外部コマンドを以下のwrapperのみに限定する:
-  - `homelab-investigate-{authy,monnie}`
-  - `homelab-recover-{authy,monnie}`
-  - `homelab-monitoring-{pause,resume,status}`
+  - `homelab-investigate-{authy,monnie}`(調査)
+  - `homelab-reports`(調査。`reports/`配下のJSONレポート参照。§4.3)
+  - `homelab-semaphore-query`(調査。Semaphore失敗タスクの原因解析。§4.4)
+  - `homelab-recover-{authy,monnie}`(復旧)
+  - `homelab-monitoring-{pause,resume,status}`(監視制御)
 - VM reboot(`qm reboot`相当)・HA failover(`ha-manager crm-command relocate`)はCodexのexecpolicyに含まれない。これらは§5.1のpull経路からのみ、決定論的に(target固定の`ansible-playbook`呼び出しとして)実行される。
 - `codex-exec-wrapper`は引数を`exec` / `--cd` / 固定workspaceパス / メッセージ本文の4つに厳密に限定し、個数・各位置の値が一致しなければ拒否する。sandbox・approval・execpolicyに関わるCLIオプションは呼び出し元から一切受け取らず、wrapper内部で固定する(`--sandbox workspace-write`, `approval_policy="never"`, `network_access=true`)。
 - sandboxは実行後の動作(書き込み・ネットワーク到達)を制御する層、execpolicyは「そもそも呼べるコマンドの範囲」を制御する層であり、別物として扱う。sandboxは読み取りを制限しないため、機密ファイル(Slackトークン・SSH鍵)の保護は常にOSファイル権限(0600 + 専用ユーザー所有)が担う。

@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+# homelab-reports: Codex-facing wrapper for read-only reports/ JSON lookup.
+#
+# reports/ lives under /home/yoshi, owned by yoshi and not readable by
+# recovery-exec directly (measured on quory: 0711 / drwx--x--x). This
+# wrapper validates arguments, then elevates via sudo to yoshi (the report
+# file owner) to run the privileged helper, which re-validates everything
+# independently before touching the filesystem (§4.4: no single layer is
+# trusted blindly; no eval/variable expansion of unvalidated input).
+# Elevating explicitly via sudo (rather than relying on whatever traversal
+# bits /home/yoshi happens to have for "other") keeps this correct even if
+# that mode is tightened later.
+set -euo pipefail
+
+NAME_RE='^[a-zA-Z0-9_-]+$'
+FILE_RE='^[a-zA-Z0-9_-]+\.json$'
+
+usage() {
+  echo "usage: homelab-reports <list-playbooks|list-reports <playbook> [target]|show-report <playbook> [target] <filename>>" >&2
+  exit 1
+}
+
+# [target] is one optional extra path segment for nested report layouts
+# (e.g. reports/recovery_investigations/<target>/*.json). Most playbooks are
+# flat and never use it.
+case "${1:-}" in
+  list-playbooks)
+    [[ $# -eq 1 ]] || usage
+    ;;
+  list-reports)
+    case $# in
+      2) [[ "$2" =~ $NAME_RE ]] || usage ;;
+      3) [[ "$2" =~ $NAME_RE && "$3" =~ $NAME_RE ]] || usage ;;
+      *) usage ;;
+    esac
+    ;;
+  show-report)
+    case $# in
+      3) [[ "$2" =~ $NAME_RE && "$3" =~ $FILE_RE ]] || usage ;;
+      4) [[ "$2" =~ $NAME_RE && "$3" =~ $NAME_RE && "$4" =~ $FILE_RE ]] || usage ;;
+      *) usage ;;
+    esac
+    ;;
+  *)
+    usage
+    ;;
+esac
+
+exec sudo -n -u yoshi /usr/local/sbin/recovery-reports-helper "$@"

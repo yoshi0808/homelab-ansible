@@ -18,10 +18,13 @@ Connects to authy via SSH and reports status.
 Allowed values for `<check>`:
 
 Service checks:
-- `freeradius` — systemctl status freeradius
-- `sshd` — systemctl status sshd
-- `journal-freeradius` — last 100 log lines for freeradius
-- `journal-sshd` — last 100 log lines for sshd
+- `freeradius` — systemctl status freeradius (full output)
+- `sshd` — systemctl status sshd (full output)
+- `journal-freeradius` / `journal-sshd` — last 100 log lines
+- `journal-freeradius-1h` / `journal-sshd-1h` — log lines from the last 1 hour
+- `journal-freeradius-24h` / `journal-sshd-24h` — log lines from the last 24 hours
+- `journal-freeradius-err` / `journal-sshd-err` — priority err and above, last 24h
+- `journal-freeradius-warn` / `journal-sshd-warn` — priority warning and above, last 24h
 - `status` — all services combined
 
 System checks:
@@ -32,6 +35,7 @@ System checks:
 - `network` — IP addresses, routes, DNS
 - `ports` — listening ports (ss -ltnup)
 - `journal-system` — recent OS-level warnings/errors
+- `dmesg` — last 50 kernel log lines (OOM killer etc., via journalctl -k)
 
 Node-specific checks:
 - `radius-port` — RADIUS UDP port binding (1812/1813)
@@ -48,7 +52,11 @@ Service checks:
 - `grafana-server` — systemctl status grafana-server
 - `loki` — systemctl status loki
 - `unpoller` — systemctl status unpoller
-- `journal-prometheus`, `journal-grafana-server`, `journal-loki`, `journal-unpoller`
+- `journal-prometheus`, `journal-grafana-server`, `journal-loki`, `journal-unpoller` — last 100 log lines
+- `journal-<service>-1h` — log lines from the last 1 hour (e.g. `journal-prometheus-1h`)
+- `journal-<service>-24h` — log lines from the last 24 hours
+- `journal-<service>-err` — priority err and above, last 24h
+- `journal-<service>-warn` — priority warning and above, last 24h
 - `status` — all services combined
 
 System checks:
@@ -59,12 +67,52 @@ System checks:
 - `network` — IP addresses, routes, DNS
 - `ports` — listening ports
 - `journal-system` — recent OS-level warnings/errors
+- `dmesg` — last 50 kernel log lines (OOM killer etc., via journalctl -k)
 
 Node-specific checks:
 - `prometheus-targets` — Prometheus target health (HTTP API)
 - `grafana-health` — Grafana health endpoint (HTTPS)
 - `loki-health` — Loki metrics endpoint
 - `unpoller-config` — unpoller ExecStart + port binding
+
+### Reports lookup (homelab-reports)
+
+Use to review past healthcheck / playbook run reports (JSON) saved under
+`~/homelab-ansible/reports/<playbook>/` — useful for checking whether a
+problem is recurring or was already flagged by a scheduled healthcheck.
+This also covers the autonomous recovery pipeline's own investigation
+reports (`recovery_investigations`, one level deeper per target).
+
+```
+homelab-reports list-playbooks
+homelab-reports list-reports <playbook> [target]
+homelab-reports show-report <playbook> [target] <filename>
+```
+
+- `list-playbooks` — list report subdirectories (one per playbook).
+- `list-reports <playbook>` — list `.json` report filenames directly under that playbook, newest first. Subdirectories (nested layouts) are shown with a trailing `/` — drill down with `list-reports <playbook> <target>`.
+- `list-reports <playbook> <target>` — e.g. `list-reports recovery_investigations sophos-fw` — list `.json` reports under that nested target.
+- `show-report <playbook> <filename>` / `show-report <playbook> <target> <filename>` — print one report's raw JSON. Use a `filename` (and `target` if the playbook is nested) exactly as returned by `list-reports`.
+- `<playbook>`, `<target>`, and `<filename>` are restricted to `[a-zA-Z0-9_-]+` (plus a mandatory `.json` suffix for filename); anything else is denied before any file is touched. `target` is at most one extra path segment — there is no deeper nesting.
+
+### Semaphore failure lookup (homelab-semaphore-query)
+
+Use to investigate why a Semaphore-run playbook failed — e.g. when a push/pull
+recovery trigger itself came from a failed Semaphore task, or when asked to
+check recent automation failures. Read-only against `semaphore.db`.
+
+```
+homelab-semaphore-query recent-failed <n>
+homelab-semaphore-query task-errors <id>
+homelab-semaphore-query task-hosts <id>
+homelab-semaphore-query task-output <id>
+```
+
+- `recent-failed <n>` — last `n` (1-200) tasks with status error/stopped: id, template name, playbook, status, start time.
+- `task-errors <id>` — ansible error messages for that task id.
+- `task-hosts <id>` — per-host result rows for that task id.
+- `task-output <id>` — full task output log, chronological.
+- `<n>` / `<id>` must be plain integers; there is no free-form SQL access.
 
 ### Monitoring control (homelab-monitoring-*)
 
@@ -104,7 +152,7 @@ Restarts prometheus, grafana-server, loki, unpoller on monnie (no arguments).
 
 - Do NOT take recovery action without prior investigation confirming failure.
 - Do NOT run homelab-recover-* more than once per session on the same target. If re-investigation after recovery still shows failure, escalate immediately — do not restart again.
-- Do NOT call tools other than homelab-investigate-*, homelab-recover-*, and homelab-monitoring-*.
+- Do NOT call tools other than homelab-investigate-*, homelab-recover-*, homelab-monitoring-*, homelab-reports, and homelab-semaphore-query.
 - Wrappers have hardcoded hosts; never try to construct SSH commands manually.
 
 ## Response Language

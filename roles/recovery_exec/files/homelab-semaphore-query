@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+# homelab-semaphore-query: read-only Semaphore failed-task lookup (SQLite).
+#
+# Codex selects a fixed query name plus an integer parameter only. The SQL
+# text is fixed in this script and never built from caller-supplied strings.
+# The finished SQL is passed to sqlite3 as a single argv element via exec
+# (no shell string concatenation / no `sh -c`), so shell metacharacters in
+# an argument can never be reinterpreted (same lesson as the Sophos expect
+# script: build the argv array in-process, don't hand a string to a shell).
+set -euo pipefail
+
+DB=/var/lib/semaphore/semaphore.db
+SQLITE=/usr/bin/sqlite3
+
+usage() {
+  echo "usage: homelab-semaphore-query <recent-failed <n>|task-errors <id>|task-hosts <id>|task-output <id>>" >&2
+  exit 1
+}
+
+is_uint() {
+  [[ "$1" =~ ^[0-9]+$ ]]
+}
+
+query="${1:-}"
+param="${2:-}"
+
+case "$query" in
+  recent-failed)
+    is_uint "$param" || usage
+    # 10# forces base-10 so a leading zero (e.g. "008") isn't read as octal.
+    if (( 10#$param < 1 || 10#$param > 200 )); then
+      echo "denied: n out of range (1-200)" >&2
+      exit 1
+    fi
+    sql="SELECT t.id, tpl.name AS template, tpl.playbook, t.status, substr(t.start,1,19) AS start FROM task t LEFT JOIN project__template tpl ON t.template_id = tpl.id WHERE t.status IN ('error','stopped') ORDER BY t.id DESC LIMIT ${param};"
+    ;;
+  task-errors)
+    is_uint "$param" || usage
+    sql="SELECT task, host, substr(error,1,500) AS error_head FROM task__ansible_error WHERE task_id = ${param};"
+    ;;
+  task-hosts)
+    is_uint "$param" || usage
+    sql="SELECT * FROM task__ansible_host WHERE task_id = ${param};"
+    ;;
+  task-output)
+    is_uint "$param" || usage
+    sql="SELECT time, output FROM task__output WHERE task_id = ${param} ORDER BY time;"
+    ;;
+  *)
+    usage
+    ;;
+esac
+
+exec sudo -n "$SQLITE" -readonly "$DB" "$sql"

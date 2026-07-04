@@ -1,0 +1,94 @@
+#!/usr/bin/env bash
+# recovery-reports-helper: privileged (sudo -u yoshi) read-only viewer for
+# ~/homelab-ansible/reports/ JSON reports. Invoked only via homelab-reports;
+# re-validates all arguments independently rather than trusting the caller
+# (§4.4). Base path is a fixed constant, never taken from arguments.
+#
+# Layout: most playbooks write reports/<playbook>/<file>.json (flat), but
+# the recovery pipeline itself writes a nested reports/<playbook>/<target>/
+# <file>.json (recovery_investigations/{sophos-fw,authy,monnie}/...). Both
+# list-reports and show-report accept exactly one optional path segment
+# (`target`) to reach the nested layout; it is validated with the same
+# NAME_RE as playbook and is never taken from anywhere but this one slot.
+set -euo pipefail
+
+BASE=/home/yoshi/homelab-ansible/reports
+NAME_RE='^[a-zA-Z0-9_-]+$'
+FILE_RE='^[a-zA-Z0-9_-]+\.json$'
+
+usage() {
+  echo "usage: recovery-reports-helper <list-playbooks|list-reports <playbook> [target]|show-report <playbook> [target] <filename>>" >&2
+  exit 1
+}
+
+# Defense-in-depth: even though NAME_RE/FILE_RE forbid '/' (so traversal is
+# structurally impossible), confirm the resolved path still lives under
+# BASE before reading anything.
+under_base() {
+  local resolved
+  resolved="$(realpath -e -- "$1")" || return 1
+  [[ "$resolved" == "$BASE" || "$resolved" == "$BASE"/* ]]
+}
+
+case "${1:-}" in
+  list-playbooks)
+    [[ $# -eq 1 ]] || usage
+    find "$BASE" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort
+    ;;
+  list-reports)
+    playbook="${2:-}"
+    [[ "$playbook" =~ $NAME_RE ]] || { echo "denied: bad playbook name" >&2; exit 1; }
+    dir="$BASE/$playbook"
+    [[ -d "$dir" ]] || { echo "not found: $playbook" >&2; exit 1; }
+    case $# in
+      2)
+        under_base "$dir" || { echo "denied: path escapes reports/" >&2; exit 1; }
+        # List *.json files directly here, plus subdirectories (suffixed
+        # with '/') so a nested layout like recovery_investigations/<target>/
+        # is discoverable without hardcoding any playbook name.
+        {
+          find "$dir" -mindepth 1 -maxdepth 1 -type f -name '*.json' -printf '%f\n'
+          find "$dir" -mindepth 1 -maxdepth 1 -type d -printf '%f/\n'
+        } | sort -r
+        ;;
+      3)
+        target="${3:-}"
+        [[ "$target" =~ $NAME_RE ]] || { echo "denied: bad target name" >&2; exit 1; }
+        dir="$dir/$target"
+        [[ -d "$dir" ]] || { echo "not found: $playbook/$target" >&2; exit 1; }
+        under_base "$dir" || { echo "denied: path escapes reports/" >&2; exit 1; }
+        find "$dir" -mindepth 1 -maxdepth 1 -type f -name '*.json' -printf '%f\n' | sort -r
+        ;;
+      *)
+        usage
+        ;;
+    esac
+    ;;
+  show-report)
+    playbook="${2:-}"
+    [[ "$playbook" =~ $NAME_RE ]] || { echo "denied: bad playbook name" >&2; exit 1; }
+    case $# in
+      3)
+        filename="${3:-}"
+        [[ "$filename" =~ $FILE_RE ]] || { echo "denied: bad filename" >&2; exit 1; }
+        file="$BASE/$playbook/$filename"
+        ;;
+      4)
+        target="${3:-}"
+        filename="${4:-}"
+        [[ "$target" =~ $NAME_RE ]] || { echo "denied: bad target name" >&2; exit 1; }
+        [[ "$filename" =~ $FILE_RE ]] || { echo "denied: bad filename" >&2; exit 1; }
+        file="$BASE/$playbook/$target/$filename"
+        ;;
+      *)
+        usage
+        ;;
+    esac
+    [[ -f "$file" ]] || { echo "not found: $file" >&2; exit 1; }
+    under_base "$file" || { echo "denied: path escapes reports/" >&2; exit 1; }
+    cat -- "$file"
+    ;;
+  *)
+    usage
+    ;;
+esac

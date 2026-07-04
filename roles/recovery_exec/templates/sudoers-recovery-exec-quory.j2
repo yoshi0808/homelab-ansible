@@ -1,0 +1,15 @@
+# recovery-exec (quory): narrowly-scoped read-only investigation helpers.
+# Both entries fix the command prefix; the trailing "*" only ever covers a
+# single argument that the corresponding wrapper has already validated
+# in-process (§4.4 — no eval, no free-form shell strings from Codex).
+
+# reports/ lives under /home/yoshi (measured on quory: 0711 / drwx--x--x),
+# owned by yoshi and not readable by recovery-exec directly; elevate to the
+# file owner only (not root) so this grant cannot read anything outside
+# yoshi's files.
+recovery-exec ALL=(yoshi) NOPASSWD: /usr/local/sbin/recovery-reports-helper *
+
+# semaphore.db is yoshi:yoshi 0600 and unreadable by recovery-exec directly.
+# -readonly is fixed in the sudoers pattern itself, so even a crafted SQL
+# argument cannot write to the database regardless of this rule's wildcard.
+recovery-exec ALL=(root) NOPASSWD: /usr/bin/sqlite3 -readonly /var/lib/semaphore/semaphore.db *

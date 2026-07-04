@@ -168,6 +168,48 @@
     - homelab-monitoring-status
   become: true
 
+# ---------------------------------------------------------------------------
+# Investigation helpers: reports/ JSON lookup + Semaphore failure lookup
+# (quory-local; no SSH hop to a target node).
+# ---------------------------------------------------------------------------
+
+- name: Deploy homelab-reports wrapper (Codex-facing, validates then sudos to yoshi)
+  ansible.builtin.copy:
+    src: homelab-reports
+    dest: /usr/local/bin/homelab-reports
+    owner: root
+    group: root
+    mode: "0755"
+  become: true
+
+- name: Deploy recovery-reports-helper (privileged, re-validates independently)
+  ansible.builtin.copy:
+    src: recovery-reports-helper
+    dest: /usr/local/sbin/recovery-reports-helper
+    owner: root
+    group: root
+    mode: "0755"
+  become: true
+
+- name: Deploy homelab-semaphore-query wrapper (fixed queries, sudos to root for sqlite3 -readonly)
+  ansible.builtin.copy:
+    src: homelab-semaphore-query
+    dest: /usr/local/bin/homelab-semaphore-query
+    owner: root
+    group: root
+    mode: "0755"
+  become: true
+
+- name: Deploy sudoers for recovery-exec investigation helpers (quory)
+  ansible.builtin.template:
+    src: sudoers-recovery-exec-quory.j2
+    dest: /etc/sudoers.d/recovery-exec-investigate
+    owner: root
+    group: root
+    mode: "0440"
+    validate: /usr/sbin/visudo -cf %s
+  become: true
+
 - name: Remove legacy homelab-mute-exec wrapper
   ansible.builtin.file:
     path: /usr/local/bin/homelab-mute-exec

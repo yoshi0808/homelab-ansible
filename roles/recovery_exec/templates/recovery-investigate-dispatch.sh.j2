@@ -16,6 +16,18 @@ case "$cmd" in
   journal-{{ svc }})
     journalctl -u {{ svc }} -n 100 --no-pager
     ;;
+  journal-{{ svc }}-1h)
+    journalctl -u {{ svc }} --since "-1 hour" -n 300 --no-pager
+    ;;
+  journal-{{ svc }}-24h)
+    journalctl -u {{ svc }} --since "-1 day" -n 300 --no-pager
+    ;;
+  journal-{{ svc }}-err)
+    journalctl -u {{ svc }} -p err --since "-1 day" -n 200 --no-pager
+    ;;
+  journal-{{ svc }}-warn)
+    journalctl -u {{ svc }} -p warning --since "-1 day" -n 200 --no-pager
+    ;;
 {% endfor %}
   status)
 {% for svc in target_item.investigate_services %}
@@ -51,6 +63,13 @@ case "$cmd" in
     ;;
   journal-system)
     journalctl -p warning..err -n 50 --no-pager
+    ;;
+  dmesg)
+    # dmesg(1) requires CAP_SYSLOG on this host (kernel.dmesg_restrict=1) and
+    # recovery-exec has no sudo for it; journalctl -k reads the same kernel
+    # ring buffer via journald, which recovery-exec can already read as a
+    # member of the systemd-journal group (no new privilege needed).
+    journalctl -k -n 50 --no-pager
     ;;
 
   # --- Node-specific checks ---
