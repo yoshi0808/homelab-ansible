@@ -1,3 +1,0 @@
-# recovery-exec may invoke homelab-mute as root for Slack-directed mute operations.
-# Called via homelab-mute-exec wrapper from within Codex (execpolicy allows wrapper).
-{{ recovery_exec_user }} ALL = (root) NOPASSWD: /usr/local/bin/homelab-mute

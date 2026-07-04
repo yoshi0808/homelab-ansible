@@ -21,5 +21,13 @@ policy = "allow"
 
 {% endfor %}
 [[execpolicy.rules]]
-command = "homelab-mute-exec"
+command = "homelab-monitoring-pause"
+policy = "allow"
+
+[[execpolicy.rules]]
+command = "homelab-monitoring-resume"
+policy = "allow"
+
+[[execpolicy.rules]]
+command = "homelab-monitoring-status"
 policy = "allow"

@@ -13,6 +13,10 @@ recovery_exec_codex_model: gpt-5.5
 # Set to false to skip target node setup (e.g. when target is unreachable)
 recovery_exec_setup_targets: true
 
+# Users to add to the recovery-exec group (for workspace read access).
+# recovery-probe runs as yoshi and needs to read the monitoring pause flag.
+recovery_exec_group_members: []
+
 # Per-node investigation and action configuration.
 # investigate_services: services for which check/journal-<svc>/status are allowed.
 # action_services:      services restarted by the action wrapper (all at once).

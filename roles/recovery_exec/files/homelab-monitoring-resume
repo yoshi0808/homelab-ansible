@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+set -euo pipefail
+PAUSE_FLAG=/var/lib/recovery-exec/workspace/monitoring-paused
+rm -f "$PAUSE_FLAG"
+echo "monitoring resumed"

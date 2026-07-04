@@ -382,6 +382,14 @@ def main():
 
     while True:
         for target, tconf in cfg["targets"].items():
+            # --- global monitoring pause ---
+            pause_flag = cfg.get("monitoring_pause_flag", "")
+            if pause_flag and os.path.isfile(pause_flag):
+                if counters[target] != 0:
+                    counters[target] = 0
+                log(f"PROBE {target}: monitoring paused (global) — skip")
+                continue
+
             # --- mute: 判定前に skip + カウンタリセット(第一防御) ---
             rem = mute_remaining(cfg, target)
             if rem > 0:

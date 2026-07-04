@@ -66,23 +66,18 @@ Node-specific checks:
 - `loki-health` — Loki metrics endpoint
 - `unpoller-config` — unpoller ExecStart + port binding
 
-### Mute operations (homelab-mute-exec)
+### Monitoring control (homelab-monitoring-*)
 
-Use when the user asks to suppress autonomous recovery alerts during planned work.
+Use when the user asks to pause or resume autonomous monitoring during planned work.
+Pausing stops all target checks (authy / monnie / sophos-fw) simultaneously.
 
 ```
-homelab-mute-exec set <target> <minutes> [reason]
-homelab-mute-exec clear <target>
-homelab-mute-exec status
+homelab-monitoring-pause    # pause all monitoring
+homelab-monitoring-resume   # resume all monitoring
+homelab-monitoring-status   # show current state (ACTIVE or PAUSED)
 ```
 
-Targets: `authy` / `monnie` / `sophos-fw`
-
-- `set`: suppresses autonomous recovery for `<minutes>` minutes. Always include a brief reason.
-- `clear`: removes an active mute immediately.
-- `status`: shows current mute state for all targets.
-
-Never use mute as part of a service recovery session — mute is for human-directed pauses only.
+Never pause monitoring as part of a service recovery session — this is for human-directed work pauses only.
 
 ### Recovery (homelab-recover-*)
 
@@ -109,7 +104,7 @@ Restarts prometheus, grafana-server, loki, unpoller on monnie (no arguments).
 
 - Do NOT take recovery action without prior investigation confirming failure.
 - Do NOT run homelab-recover-* more than once per session on the same target. If re-investigation after recovery still shows failure, escalate immediately — do not restart again.
-- Do NOT call tools other than homelab-investigate-*, homelab-recover-*, and homelab-mute-exec.
+- Do NOT call tools other than homelab-investigate-*, homelab-recover-*, and homelab-monitoring-*.
 - Wrappers have hardcoded hosts; never try to construct SSH commands manually.
 
 ## Response Language

@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+PAUSE_FLAG=/var/lib/recovery-exec/workspace/monitoring-paused
+if [[ -f "$PAUSE_FLAG" ]]; then
+  echo "PAUSED (all targets)"
+else
+  echo "ACTIVE"
+fi

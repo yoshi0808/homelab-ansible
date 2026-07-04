@@ -114,8 +114,8 @@
         name: homelab_cert_renew
         tasks_from: issue
 
-    - name: Mute monnie push trigger before grafana-server restart
-      ansible.builtin.command: "homelab-mute set monnie 5 'cert_renew: grafana-server restart'"
+    - name: Pause monitoring before grafana-server restart
+      ansible.builtin.command: homelab-monitoring-pause
       delegate_to: localhost
       when: cert_needs_renewal | default(false) | bool
 
@@ -124,8 +124,8 @@
         name: homelab_cert_renew
         tasks_from: deploy_grafana
 
-    - name: Clear monnie push trigger mute after grafana restart
-      ansible.builtin.command: homelab-mute clear monnie
+    - name: Resume monitoring after grafana restart
+      ansible.builtin.command: homelab-monitoring-resume
       delegate_to: localhost
       when: cert_needs_renewal | default(false) | bool
 

@@ -109,7 +109,15 @@
     state: directory
     owner: "{{ recovery_exec_user }}"
     group: "{{ recovery_exec_user }}"
-    mode: "0750"
+    mode: "0770"
+  become: true
+
+- name: Add group members to recovery-exec group (for workspace read/write)
+  ansible.builtin.user:
+    name: "{{ item }}"
+    groups: "{{ recovery_exec_user }}"
+    append: true
+  loop: "{{ recovery_exec_group_members }}"
   become: true
 
 - name: Deploy AGENTS.md (tool documentation for Codex)
@@ -147,23 +155,29 @@
   loop: "{{ recovery_exec_targets }}"
   become: true
 
-- name: Deploy homelab-mute-exec wrapper
+- name: Deploy homelab-monitoring-{pause,resume,status} scripts
   ansible.builtin.copy:
-    src: homelab-mute-exec
-    dest: /usr/local/bin/homelab-mute-exec
+    src: "{{ item }}"
+    dest: "/usr/local/bin/{{ item }}"
     owner: root
     group: root
     mode: "0755"
+  loop:
+    - homelab-monitoring-pause
+    - homelab-monitoring-resume
+    - homelab-monitoring-status
   become: true
 
-- name: Deploy sudoers for recovery-exec mute operations (quory-local)
-  ansible.builtin.template:
-    src: sudoers-recovery-exec-mute.j2
-    dest: /etc/sudoers.d/recovery-exec-mute
-    owner: root
-    group: root
-    mode: "0440"
-    validate: /usr/sbin/visudo -cf %s
+- name: Remove legacy homelab-mute-exec wrapper
+  ansible.builtin.file:
+    path: /usr/local/bin/homelab-mute-exec
+    state: absent
+  become: true
+
+- name: Remove legacy sudoers for mute-exec
+  ansible.builtin.file:
+    path: /etc/sudoers.d/recovery-exec-mute
+    state: absent
   become: true
 
 # ---------------------------------------------------------------------------
