@@ -1,15 +1,21 @@
 #!/usr/bin/env bash
 # homelab-reports: Codex-facing wrapper for read-only reports/ JSON lookup.
 #
-# reports/ lives under /home/yoshi, owned by yoshi and not readable by
-# recovery-exec directly (measured on quory: 0711 / drwx--x--x). This
-# wrapper validates arguments, then elevates via sudo to yoshi (the report
-# file owner) to run the privileged helper, which re-validates everything
+# reports/ lives under /home/yoshi, owned by yoshi. recovery-exec is not in
+# yoshi's group, so a POSIX ACL grants it direct traverse (x) on /home/yoshi
+# (see roles/recovery_exec/tasks/main.yml); reports/ and its files are
+# already world-readable below that point. No sudo/setuid elevation is used:
+# Codex invokes this wrapper inside a sandbox with no_new_privileges set,
+# which unconditionally blocks sudo regardless of sudoers config (confirmed
+# via a live Slack investigation run that failed with "sudo: The 'no new
+# privileges' flag is set..."). ACL-based direct read has no such problem
+# because it grants recovery-exec's own UID a permission bit rather than
+# escalating to another identity.
+#
+# This wrapper validates arguments, then calls the privileged-format helper
+# directly (no user switch); the helper re-validates everything
 # independently before touching the filesystem (§4.4: no single layer is
 # trusted blindly; no eval/variable expansion of unvalidated input).
-# Elevating explicitly via sudo (rather than relying on whatever traversal
-# bits /home/yoshi happens to have for "other") keeps this correct even if
-# that mode is tightened later.
 set -euo pipefail
 
 NAME_RE='^[a-zA-Z0-9_-]+$'
@@ -46,4 +52,4 @@ case "${1:-}" in
     ;;
 esac
 
-exec sudo -n -u yoshi /usr/local/sbin/recovery-reports-helper "$@"
+exec /usr/local/sbin/recovery-reports-helper "$@"

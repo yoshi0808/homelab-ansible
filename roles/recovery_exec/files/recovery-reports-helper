@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
-# recovery-reports-helper: privileged (sudo -u yoshi) read-only viewer for
-# ~/homelab-ansible/reports/ JSON reports. Invoked only via homelab-reports;
-# re-validates all arguments independently rather than trusting the caller
-# (§4.4). Base path is a fixed constant, never taken from arguments.
+# recovery-reports-helper: read-only viewer for ~/homelab-ansible/reports/
+# JSON reports. Runs as recovery-exec directly (no sudo/user-switch); a
+# POSIX ACL grants recovery-exec traverse (x) on /home/yoshi so this can
+# read reports/ without any privilege elevation (see homelab-reports for
+# why sudo isn't used here). Invoked only via homelab-reports; re-validates
+# all arguments independently rather than trusting the caller (§4.4). Base
+# path is a fixed constant, never taken from arguments.
 #
 # Layout: most playbooks write reports/<playbook>/<file>.json (flat), but
 # the recovery pipeline itself writes a nested reports/<playbook>/<target>/

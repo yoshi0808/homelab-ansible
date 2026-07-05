@@ -7,6 +7,15 @@
 # (no shell string concatenation / no `sh -c`), so shell metacharacters in
 # an argument can never be reinterpreted (same lesson as the Sophos expect
 # script: build the argv array in-process, don't hand a string to a shell).
+#
+# No sudo: Codex invokes this wrapper inside a sandbox with no_new_privileges
+# set, which blocks sudo unconditionally regardless of sudoers config
+# (confirmed via a live failure: "sudo: The 'no new privileges' flag is
+# set..."). Instead, recovery-exec gets a POSIX ACL grant (traverse on
+# /var/lib/semaphore, read on semaphore.db — see
+# roles/recovery_exec/tasks/main.yml) for direct, non-elevated read access.
+# semaphore.db uses journal_mode=delete (confirmed, not WAL), so there are
+# no -wal/-shm companion files to also grant.
 set -euo pipefail
 
 DB=/var/lib/semaphore/semaphore.db
@@ -51,4 +60,4 @@ case "$query" in
     ;;
 esac
 
-exec sudo -n "$SQLITE" -readonly "$DB" "$sql"
+exec "$SQLITE" -readonly "$DB" "$sql"

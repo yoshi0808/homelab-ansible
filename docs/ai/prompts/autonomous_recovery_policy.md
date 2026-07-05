@@ -89,16 +89,26 @@ quoryローカルの`~/homelab-ansible/reports/<playbook>/`配下のJSONレポ�
 
 - `list-playbooks` / `list-reports <playbook> [target]` / `show-report <playbook> [target] <filename>`の3コマンドのみ。`target`は`recovery_investigations/<target>/`のようなネスト構造(自律復旧パイプライン自身の調査ログ)向けの追加path segmentを1つだけ許可するもので、ほとんどのplaybook(フラット構造)では使わない。
 - ベースパス(`~/homelab-ansible/reports`)は固定。`playbook`/`target`/`filename`は`[a-zA-Z0-9_-]+`(filenameは末尾`.json`必須)のみ許可し、スラッシュ・ドットを含む値はトラバーサル防止のため拒否する。`list-reports`は`*.json`のみを列挙する(非JSONファイルが混在するplaybookディレクトリがあるため)。
-- `reports/`は`/home/yoshi`(quory実機実測: `0711`/`drwx--x--x`)配下にあり、recovery-execは直接読めない。`recovery-exec ALL=(yoshi) NOPASSWD: /usr/local/sbin/recovery-reports-helper *`のsudoersで、ファイル所有者`yoshi`にのみ昇格する(rootへは昇格しない)。`/home/yoshi`の実際のモードに関わらず正しく動作するよう、明示的なsudo昇格を用いている。
-- `homelab-reports`(引数検証)→ sudo → `recovery-reports-helper`(再検証してから読む)の2層構成。investigate系のローカルwrapper→SSH forced commandの2層検証と同じ考え方。
+- `reports/`は`/home/yoshi`配下にあり、recovery-execは直接読めない。POSIXACL(`recovery-exec:x`)で`/home/yoshi`のtraverseのみを付与し、`reports/`以下(既に0755/644)を直接読む。sudo/setuidによる昇格は使わない(§4.5参照)。
+- `homelab-reports`(引数検証)→ `recovery-reports-helper`(再検証してから読む)の2層構成。investigate系のローカルwrapper→SSH forced commandの2層検証と同じ考え方だが、ここでは権限昇格自体が発生しない。
 
 ### 4.4 Semaphore失敗タスク調査(`homelab-semaphore-query`)
 
-quoryの`/var/lib/semaphore/semaphore.db`(SQLite、`yoshi:yoshi 0600`)を read-only で参照し、Semaphoreタスクの失敗原因を調査するコマンド。
+quoryの`/var/lib/semaphore/semaphore.db`(SQLite、`yoshi:yoshi 0600`、`journal_mode=delete`。`-wal`/`-shm`副ファイルは無し)を read-only で参照し、Semaphoreタスクの失敗原因を調査するコマンド。
 
 - Codexは`recent-failed <n>` / `task-errors <id>` / `task-hosts <id>` / `task-output <id>`の4種の定型クエリ名と、整数パラメータ(`n`は1-200、`id`)のみを選択する。SQL本文は`homelab-semaphore-query`内に固定文字列として持ち、自由なSQLは受け付けない。
-- `sudoers`は`recovery-exec ALL=(root) NOPASSWD: /usr/bin/sqlite3 -readonly /var/lib/semaphore/semaphore.db *`のみを許可する(DBパス・`-readonly`固定)。`-readonly`により、末尾`*`に何が来ても書き込みはSQLiteエンジン側で拒否される。
+- `/var/lib/semaphore`のtraverseと`semaphore.db`の読み取りをPOSIX ACL(`recovery-exec:x` / `recovery-exec:r`)で付与する。sudoは使わない(§4.5参照)。`-readonly`フラグにより、万一SQL側に細工があっても書き込みはSQLiteエンジン側で拒否される。
 - 完成したSQL文字列は配列(`exec ... "$sql"`)としてsqlite3へ渡し、シェル経由の文字列連結・再解釈を行わない。
+
+### 4.5 なぜsudoを使わないか(2026-07-05判明)
+
+②③は当初sudoersベースの権限昇格(`(yoshi)`/`(root)`)で設計したが、Slackからの実運用テストで`sudo: The "no new privileges" flag is set, which prevents sudo from running as root.`により失敗することが判明した。
+
+原因は、Codexが`codex exec --sandbox workspace-write`で起動される際にサンドボックス側が`no_new_privileges`を設定するため。このフラグは sudo・setuid・ファイルcapability経由の権限昇格を**sudoersの設定に関わらず一律ブロックする**(Linuxカーネルの`no_new_privileges` prctlの仕様通り)。フラグ自体を解除するとサンドボックス全体の防御が弱まるため不採用。
+
+代わりにPOSIX ACL(`setfacl`相当、`ansible.posix.acl`で付与)を使う。ACLは対象ユーザー(`recovery-exec`)自身が最初から持つ権限ビットを増やすだけで、別ユーザーへの昇格が発生しないため`no_new_privileges`の影響を受けない。
+
+この問題はreviewer・testerのレビュー/テストでは検出されなかった。理由は、tester はAnsible ad-hocの`command`モジュール経由(通常のsudoが効く環境)で検証しており、Codexサンドボックス内の実行パスを実際には通していなかったため。**「テストが通った」ことと「本番の実行経路を通った」ことは別**という教訓であり、副次的に「sudo昇格という環境依存処理」自体が無くなったことで、tester dry-runと本番実行の挙動差も併せて解消される。
 
 ---
 
@@ -158,6 +168,7 @@ Slack(`@Homelab`メンション、Socket Mode)からのリクエストを受け�
 - VM reboot(`qm reboot`相当)・HA failover(`ha-manager crm-command relocate`)はCodexのexecpolicyに含まれない。これらは§5.1のpull経路からのみ、決定論的に(target固定の`ansible-playbook`呼び出しとして)実行される。
 - `codex-exec-wrapper`は引数を`exec` / `--cd` / 固定workspaceパス / メッセージ本文の4つに厳密に限定し、個数・各位置の値が一致しなければ拒否する。sandbox・approval・execpolicyに関わるCLIオプションは呼び出し元から一切受け取らず、wrapper内部で固定する(`--sandbox workspace-write`, `approval_policy="never"`, `network_access=true`)。
 - sandboxは実行後の動作(書き込み・ネットワーク到達)を制御する層、execpolicyは「そもそも呼べるコマンドの範囲」を制御する層であり、別物として扱う。sandboxは読み取りを制限しないため、機密ファイル(Slackトークン・SSH鍵)の保護は常にOSファイル権限(0600 + 専用ユーザー所有)が担う。
+- `--sandbox workspace-write`はプロセスに`no_new_privileges`を設定する(2026-07-05、実運用で判明)。これにより、Codexから呼ばれるwrapper内でのsudo・setuid・ファイルcapability経由の権限昇格は、sudoers等の設定に関わらず一律失敗する。**Codexが呼ぶwrapperは権限昇格を前提に設計しない**。読み取り権限が足りない場合はsudoではなくPOSIX ACL(対象ユーザー自身への直接付与)を使う(§4.5)。
 
 ---
 
