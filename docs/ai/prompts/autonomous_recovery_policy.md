@@ -24,7 +24,7 @@ authy / monnie / sophos-fw の業務継続を、人間の承認を待たずに�
 | sophos-fw | `hacritical`, `preferpve1` | 1000 | なし | VM reboot → failover |
 | authy | `hacritical`, `preferpve1` | 101 | freeradius | VM reboot → failover |
 | monnie | `ops`, `preferpve2` | 211 | prometheus / grafana-server / loki / unpoller | VM reboot(failoverなし) |
-| pve1 / pve2 | - | - | 対象外(`proxmox_patch_policy.md`の枠組みに委ねる) | - |
+| pve1 / pve2 | - | - | 対象外(`proxmox_patch_policy.md`の枠組みに委ねる) | 対象外(read-only調査のみ§4.6の対象) |
 | ansy | - | - | 対象外(開発環境) | - |
 
 この2つの経路は独立した別の障害クラスを扱う。
@@ -131,7 +131,7 @@ pve1/pve2のProxmoxクラスタ/HA状態をread-onlyで調査するコマンド�
   recovery-exec ALL=(root) NOPASSWD: /usr/bin/pvesh get /cluster/resources --output-format json
   recovery-exec ALL=(root) NOPASSWD: /usr/sbin/ha-manager status
   ```
-  このsudoはpve1/pve2上のSSHセッション内(sshd経由)で完結するため、quory側Codexサンドボックスの`no_new_privileges`問題(§4.5)には該当しない。Proxmox(Debianベース)のsudoersデフォルトがauthy/monnie(Ubuntu)と異なりforced command経由(tty無し)のsudoを`requiretty`等で拒否する可能性を事前に懸念していたが、2026-07-05にansy起点・quory起点の両方で実機確認済み: `cluster-status`/`cluster-resources`/`ha-status`とも forced command 経由(no-pty、`sudo -n`)で問題なく成功し、`requiretty`による拒否は発生しなかった。`ha-manager`のフルパスも両ノードで`/usr/sbin/ha-manager`と一致することを確認済み(sudoersの想定通り)。
+  §4.3/§4.4がACLに切り替えたのに対し、ここでは通常のsudoersを使う。理由は、このsudoがpve1/pve2上のSSHセッション内(sshd経由)で完結し、quory側Codexサンドボックスの`no_new_privileges`問題(§4.5)が発生する経路(quory上でCodexプロセス自身がsudoを呼ぶ経路)を一切通らないため。ACLに変更する必要が無い。Proxmox(Debianベース)のsudoersデフォルトがauthy/monnie(Ubuntu)と異なりforced command経由(tty無し)のsudoを`requiretty`等で拒否する可能性を事前に懸念していたが、2026-07-05にansy起点・quory起点の両方で実機確認済み: `cluster-status`/`cluster-resources`/`ha-status`とも forced command 経由(no-pty、`sudo -n`)で問題なく成功し、`requiretty`による拒否は発生しなかった。`ha-manager`のフルパスも両ノードで`/usr/sbin/ha-manager`と一致することを確認済み(sudoersの想定通り)。
 
 ---
 
