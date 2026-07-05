@@ -17,6 +17,12 @@ command = "homelab-investigate-{{ target.name }}"
 policy = "allow"
 
 {% endfor %}
+{% for target in recovery_exec_pve_targets %}
+[[execpolicy.rules]]
+command = "homelab-investigate-{{ target.name }}"
+policy = "allow"
+
+{% endfor %}
 [[execpolicy.rules]]
 command = "homelab-reports"
 policy = "allow"

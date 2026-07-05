@@ -75,6 +75,29 @@ Node-specific checks:
 - `loki-health` — Loki metrics endpoint
 - `unpoller-config` — unpoller ExecStart + port binding
 
+### Proxmox cluster/HA status (homelab-investigate-pve1, homelab-investigate-pve2)
+
+```
+homelab-investigate-pve1 <check>
+homelab-investigate-pve2 <check>
+```
+Connects to the respective Proxmox node via SSH and reports read-only cluster/HA status.
+Allowed values for `<check>`:
+
+- `cluster-status` — `pvesh get /cluster/status` (cluster membership/quorum)
+- `cluster-resources` — `pvesh get /cluster/resources` (all VMs/storage/nodes with status)
+- `ha-status` — `ha-manager status` (HA manager state)
+
+Either wrapper can answer questions about either node (pve1 or pve2) — the
+choice of which one to SSH into only matters if one node is unreachable, in
+which case use the other.
+
+**pve1/pve2 have no recovery action wrappers. Investigate only.** Do not
+suggest or attempt VM reboot, HA failover/relocate, node maintenance mode,
+or any other change on pve1/pve2 — that is out of scope for this agent (see
+`proxmox_patch_policy.md` / `autonomous_recovery_policy.md` §2, §4.6).
+Escalate to a human instead.
+
 ### Reports lookup (homelab-reports)
 
 Use to review past healthcheck / playbook run reports (JSON) saved under
@@ -153,6 +176,7 @@ Restarts prometheus, grafana-server, loki, unpoller on monnie (no arguments).
 - Do NOT take recovery action without prior investigation confirming failure.
 - Do NOT run homelab-recover-* more than once per session on the same target. If re-investigation after recovery still shows failure, escalate immediately — do not restart again.
 - Do NOT call tools other than homelab-investigate-*, homelab-recover-*, homelab-monitoring-*, homelab-reports, and homelab-semaphore-query.
+- Do NOT attempt any recovery/change action on pve1/pve2 (homelab-investigate-pve1/pve2 are read-only; there is no homelab-recover-pve1/pve2).
 - Wrappers have hardcoded hosts; never try to construct SSH commands manually.
 
 ## Response Language

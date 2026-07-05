@@ -1,0 +1,16 @@
+# recovery-exec (Proxmox investigate landing account on {{ inventory_hostname }}):
+# fixed read-only cluster/HA status checks only. No pvesh create/set/delete.
+# No wildcard arguments anywhere below — each line is the complete, fixed
+# command the dispatch script invokes; nothing else can match.
+#
+# NOTE (pre-deploy check): confirm the ha-manager path below with
+# `which ha-manager` on this node before/at first deploy — /usr/sbin is the
+# standard Proxmox VE location but has not been verified against this host.
+#
+# NOTE (pre-deploy check): forced command + no-pty means sudo runs with no
+# controlling tty. Confirm `sudo -n` succeeds here (this Proxmox/Debian host
+# may set `Defaults requiretty` unlike authy/monnie's Ubuntu default) —
+# verify with the cluster-status check first, before trusting the rest.
+recovery-exec ALL=(root) NOPASSWD: /usr/bin/pvesh get /cluster/status --output-format json
+recovery-exec ALL=(root) NOPASSWD: /usr/bin/pvesh get /cluster/resources --output-format json
+recovery-exec ALL=(root) NOPASSWD: /usr/sbin/ha-manager status

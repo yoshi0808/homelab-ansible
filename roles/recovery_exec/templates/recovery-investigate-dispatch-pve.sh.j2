@@ -1,0 +1,31 @@
+#!/bin/bash
+# recovery-investigate-dispatch-pve.sh — deployed on {{ inventory_hostname }} (Proxmox node)
+# Called via SSH forced command from recovery-exec@quory (id_recovery_investigate_pve).
+# Validates SSH_ORIGINAL_COMMAND against a fixed allowlist of read-only
+# cluster/HA status checks only. No pvesh create/set/delete; no arguments
+# accepted from the SSH client beyond the forced command key. Commands below
+# are the exact, previously-proven invocations used elsewhere in this repo
+# (roles/recovery_ha_failover, roles/proxmox_evacuate_node,
+# roles/proxmox_restore_vm_placement), not newly-guessed API paths.
+#
+# pve1/pve2 have no recovery action wrappers — investigate only (see
+# AGENTS.md / autonomous_recovery_policy.md §4.6).
+set -euo pipefail
+
+cmd="${SSH_ORIGINAL_COMMAND:-}"
+
+case "$cmd" in
+  cluster-status)
+    sudo -n /usr/bin/pvesh get /cluster/status --output-format json
+    ;;
+  cluster-resources)
+    sudo -n /usr/bin/pvesh get /cluster/resources --output-format json
+    ;;
+  ha-status)
+    sudo -n /usr/sbin/ha-manager status
+    ;;
+  *)
+    echo "denied: unknown command '${cmd}'" >&2
+    exit 1
+    ;;
+esac

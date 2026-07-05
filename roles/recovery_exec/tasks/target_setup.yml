@@ -21,6 +21,12 @@
   register: _action_pubkey
   become: true
 
+- name: Slurp PVE investigate public key
+  ansible.builtin.slurp:
+    src: "{{ recovery_exec_investigate_pve_key }}.pub"
+  register: _investigate_pve_pubkey
+  become: true
+
 # ---------------------------------------------------------------------------
 # Per-target setup
 # ---------------------------------------------------------------------------
@@ -107,6 +113,77 @@
   become: true
 
 # ---------------------------------------------------------------------------
+# Per-target setup: pve1/pve2 (investigate-only, no action key/script,
+# read-only cluster/HA status via a separate dedicated key — §4.6)
+# ---------------------------------------------------------------------------
+
+- name: Create recovery-exec user on pve target nodes
+  ansible.builtin.user:
+    name: "{{ recovery_exec_user }}"
+    shell: /bin/sh
+    create_home: true
+    password: "!"
+    comment: "Recovery SSH landing account (Proxmox cluster/HA status, read-only)"
+  loop: "{{ recovery_exec_pve_targets }}"
+  loop_control:
+    loop_var: target_item
+  delegate_to: "{{ target_item.name }}"
+  become: true
+
+- name: Create .ssh directory on pve target nodes
+  ansible.builtin.file:
+    path: "/home/{{ recovery_exec_user }}/.ssh"
+    state: directory
+    owner: "{{ recovery_exec_user }}"
+    group: "{{ recovery_exec_user }}"
+    mode: "0700"
+  loop: "{{ recovery_exec_pve_targets }}"
+  loop_control:
+    loop_var: target_item
+  delegate_to: "{{ target_item.name }}"
+  become: true
+
+- name: Deploy investigate dispatch script on pve target nodes
+  ansible.builtin.template:
+    src: recovery-investigate-dispatch-pve.sh.j2
+    dest: /usr/local/sbin/recovery-investigate-dispatch-pve.sh
+    owner: root
+    group: root
+    mode: "0755"
+  loop: "{{ recovery_exec_pve_targets }}"
+  loop_control:
+    loop_var: target_item
+  delegate_to: "{{ target_item.name }}"
+  become: true
+
+- name: Deploy sudoers for recovery-exec on pve target nodes (fixed pvesh/ha-manager status commands only)
+  ansible.builtin.template:
+    src: sudoers-recovery-exec-pve-target.j2
+    dest: /etc/sudoers.d/recovery-exec-pve
+    owner: root
+    group: root
+    mode: "0440"
+    validate: /usr/sbin/visudo -cf %s
+  loop: "{{ recovery_exec_pve_targets }}"
+  loop_control:
+    loop_var: target_item
+  delegate_to: "{{ target_item.name }}"
+  become: true
+
+- name: Deploy authorized_keys on pve target nodes (investigate key only, drift-safe)
+  ansible.builtin.template:
+    src: authorized_keys-pve.j2
+    dest: "/home/{{ recovery_exec_user }}/.ssh/authorized_keys"
+    owner: "{{ recovery_exec_user }}"
+    group: "{{ recovery_exec_user }}"
+    mode: "0600"
+  loop: "{{ recovery_exec_pve_targets }}"
+  loop_control:
+    loop_var: target_item
+  delegate_to: "{{ target_item.name }}"
+  become: true
+
+# ---------------------------------------------------------------------------
 # known_hosts on ansy/quory for both keys
 # ---------------------------------------------------------------------------
 
@@ -117,6 +194,17 @@
     path: "{{ recovery_exec_ssh_dir }}/known_hosts"
     state: present
   loop: "{{ recovery_exec_targets }}"
+  loop_control:
+    loop_var: target_item
+  become: true
+
+- name: Add pve target host keys to recovery-exec known_hosts
+  ansible.builtin.known_hosts:
+    name: "{{ target_item.host }}"
+    key: "{{ lookup('pipe', 'ssh-keyscan -H ' + target_item.host) }}"
+    path: "{{ recovery_exec_ssh_dir }}/known_hosts"
+    state: present
+  loop: "{{ recovery_exec_pve_targets }}"
   loop_control:
     loop_var: target_item
   become: true

@@ -53,6 +53,15 @@
     creates: "{{ recovery_exec_action_key }}"
   become: true
 
+- name: Generate PVE investigation SSH key (shared across pve1/pve2, read-only cluster/HA status only)
+  ansible.builtin.command:
+    cmd: >-
+      ssh-keygen -t ed25519 -N ''
+      -C "recovery-investigate-pve"
+      -f {{ recovery_exec_investigate_pve_key }}
+    creates: "{{ recovery_exec_investigate_pve_key }}"
+  become: true
+
 - name: Lock down SSH key permissions
   ansible.builtin.file:
     path: "{{ item }}"
@@ -62,6 +71,7 @@
   loop:
     - "{{ recovery_exec_investigate_key }}"
     - "{{ recovery_exec_action_key }}"
+    - "{{ recovery_exec_investigate_pve_key }}"
   become: true
 
 # ---------------------------------------------------------------------------
@@ -141,6 +151,18 @@
     group: root
     mode: "0755"
   loop: "{{ recovery_exec_targets }}"
+  loop_control:
+    loop_var: target
+  become: true
+
+- name: Deploy homelab-investigate-pve{1,2} wrapper scripts (read-only cluster/HA status)
+  ansible.builtin.template:
+    src: homelab-investigate-pve.sh.j2
+    dest: "/usr/local/bin/homelab-investigate-{{ target.name }}"
+    owner: root
+    group: root
+    mode: "0755"
+  loop: "{{ recovery_exec_pve_targets }}"
   loop_control:
     loop_var: target
   become: true
