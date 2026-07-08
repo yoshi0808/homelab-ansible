@@ -943,6 +943,21 @@ Claude Codeは、実装完了の最後のステップとしてこのコメント
 - 未確認コードを日次 timer で自動実行しない
 ```
 
+### ssh・git commit・git push の直接実行（Claude Code）
+
+```text
+- Claude Code は ssh を直接実行しない（対象ホストへの接続は ansible 経由で行う）
+- Claude Code は git commit / git push を自ら実行しない（必ずユーザーが実行する）
+```
+
+上記は `.claude/settings.json` の `deny` と、`bash -c` 等のラッパー経由の回避を
+防ぐ PreToolUse フック（`.claude/hooks/check-wrapped-denies.sh`）の二重で技術的
+に強制している。ただしフックは文字列パターンマッチである以上、変数展開・
+エンコード等による難読化までは防げない（2026-07-09、`bash -c "ssh ..."` の
+ようなラップで `Bash(ssh*)` 系の deny をすり抜けられることを実地で確認し、
+上記フックを追加した）。技術的な穴が見つかった場合でも、このルール自体を
+最後の拠り所として扱う。
+
 ### IP アドレス（リポジトリ全体）
 
 ```text
