@@ -18,25 +18,34 @@
 # - After first run, verify key permissions:
 #     ansible ansy -m command -a "sudo -u nobody stat /home/recovery-exec/.ssh/id_recovery_investigate"
 #   Expected: Permission denied
+#
+# tester-gate: risk-accepted — tester_mode/tester_gate を廃止。--check の有無に
+# かかわらず常に本実行する。理由: recovery-exec ユーザー作成・SSH鍵生成(creates:
+# で既存キーがあれば元々no-op)・wrapperスクリプト配置・sudoers・ACLのみで、
+# サービス再起動を一切伴わない(recovery-exec自体はデーモンではない)ため、
+# Yoshinobuが安全側と判断(2026-07-06)。詳細は docs/ai/prompts/core.md §18
+# "移行中の例外"。
 
 - name: Deploy recovery-exec (Codex runner + SSH key generation)
   hosts: dev_nodes:control_nodes
   gather_facts: true
   become: true
   vars:
-    skip_notifications: "{{ tester_mode | default(false) | bool }}"
+    skip_notifications: "{{ ansible_check_mode }}"
     recovery_exec_group_members:
       - yoshi
   pre_tasks:
-    - name: "[tester_mode] Plan-only: show intended recovery-exec setup and stop"
-      ansible.builtin.include_role:
-        name: tester_gate
-      when: tester_mode | default(false) | bool
-      vars:
-        tester_gate_end: host
-        tester_gate_plan:
-          - "操作 : recovery-exec ユーザー作成 + SSH 鍵生成 + wrapper スクリプト配置"
-          - "対象 : {{ inventory_hostname }}"
+    - name: "[migration] tester_mode is deprecated for this playbook — it always runs for real"
+      ansible.builtin.assert:
+        that: not (tester_mode | default(false) | bool)
+        fail_msg: >-
+          This playbook no longer supports -e tester_mode=true and has no
+          dry-run mode (--check included): recovery-exec setup always runs
+          for real. See docs/ai/prompts/core.md §18 "移行中の例外".
+        quiet: true
 
-  roles:
-    - recovery_exec
+  tasks:
+    - name: Run recovery_exec role
+      ansible.builtin.import_role:
+        name: recovery_exec
+      check_mode: false

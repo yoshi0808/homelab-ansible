@@ -1,5 +1,10 @@
 ---
-# tester-gate: gated-in-role — roles/recovery_service_restart/tasks/main.yml の Phase 1 (read-only 検証) 後に tester_gate を配置(L2)
+# tester-gate: check-mode-native — tester_mode/tester_gate を廃止。
+# roles/recovery_service_restart/tasks/main.yml の Phase 1 (read-only タグ・
+# 稼働状態検証)は --check の有無にかかわらず常に本実行し、Phase 2 (systemctl
+# restart)以降は ansible_check_mode でゲートする(tags: destructive)。
+# 自律復旧ラダーの実処理のため、--check 時に実行してはならない
+# (Yoshinobu指示、2026-07-06)。詳細は docs/ai/prompts/core.md §18 "移行中の例外"。
 # recovery_service_restart.yml
 #
 # 目的: 自律復旧ラダー第1段。対象 VM のサービスを systemctl restart し、回復を試みる。
@@ -32,8 +37,6 @@
   hosts: pve1
   gather_facts: false
   become: true
-  vars:
-    skip_notifications: "{{ tester_mode | default(false) | bool }}"
   pre_tasks:
     - name: Validate target variable (prevent path traversal)
       ansible.builtin.assert:
@@ -46,5 +49,15 @@
           target が不正です: '{{ target | default('') }}'.
           サービス restart の対象は authy / monnie のみです。
           (sophos-fw はサービス restart の対象外)
+
+    - name: "[migration] tester_mode is deprecated for this playbook — use --check instead"
+      ansible.builtin.assert:
+        that: not (tester_mode | default(false) | bool)
+        fail_msg: >-
+          This playbook no longer supports -e tester_mode=true. Re-run with
+          --check instead — tag/state verification runs for real under
+          --check, and the actual systemctl restart is gated by
+          ansible_check_mode. See docs/ai/prompts/core.md §18 "移行中の例外".
+        quiet: true
   roles:
     - recovery_service_restart

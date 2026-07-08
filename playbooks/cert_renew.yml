@@ -9,6 +9,14 @@
 #
 # このPlaybookはquoryからのみ実行すること（Semaphoreから実行）。
 # serial: 1 により1ホストずつ処理する。CA署名処理の .srl 競合を防ぐため。
+#
+# tester-gate: risk-accepted — tester_mode/tester_gate を廃止。ansy / pve1 / pve2 /
+# monnie への issue・deploy はすべて --check の有無にかかわらず常に本実行する
+# (最悪ケースは各サービスの Web UI が一時的に見えなくなる程度で、本playbookの
+# 再実行で復旧できると判断)。ただし quory 自身の semaphore 証明書更新・再起動
+# (制御平面そのもの)は cert_renew_quory.yml 側で扱っており、そちらは
+# ansible_check_mode でゲートする(check-mode-native)。詳細は
+# docs/ai/prompts/core.md §18 "移行中の例外"。
 
 - name: cert_renew - verify execution host
   hosts: localhost
@@ -24,27 +32,29 @@
           (current host: {{ ansible_facts['hostname'] }}).
           CA private key must never be placed on {{ ansible_facts['hostname'] }}.
 
+    - name: "[migration] tester_mode is deprecated for this playbook — it always runs for real"
+      ansible.builtin.assert:
+        that: not (tester_mode | default(false) | bool)
+        fail_msg: >-
+          This playbook no longer supports -e tester_mode=true and has no
+          dry-run mode (--check included): issue/deploy for ansy, pve1, pve2,
+          monnie always run for real. See docs/ai/prompts/core.md §18
+          "移行中の例外".
+        quiet: true
+
 - name: cert_renew - prepare CA key on quory
   hosts: quory
   gather_facts: false
   become: true
   connection: local
   vars:
-    skip_notifications: "{{ tester_mode | default(false) | bool }}"
+    skip_notifications: "{{ ansible_check_mode }}"
   tasks:
-    - name: "[tester_mode] Plan-only: show intended cert renewal and stop"
-      ansible.builtin.include_role:
-        name: tester_gate
-      when: tester_mode | default(false) | bool
-      vars:
-        tester_gate_plan:
-          - "操作 : TLS 証明書更新 + サービス再起動 (pveproxy, grafana, semaphore)"
-          - "対象 : ansy, pve1, pve2, monnie"
-          - "通知 : skip_notifications=true のため送信しません"
     - name: Run prepare_ca tasks
       ansible.builtin.import_role:
         name: homelab_cert_renew
         tasks_from: prepare_ca
+      check_mode: false
 
 - name: cert_renew - issue and deploy ansy cert
   hosts: ansy
@@ -52,23 +62,19 @@
   become: true
   vars:
     cert_renew_ca_host: localhost
-    skip_notifications: "{{ tester_mode | default(false) | bool }}"
+    skip_notifications: "{{ ansible_check_mode }}"
   tasks:
-    - name: "[tester_mode] Plan-only: stop before ansy cert deploy"
-      ansible.builtin.include_role:
-        name: tester_gate
-      when: tester_mode | default(false) | bool
-      vars:
-        tester_gate_end: host
     - name: Run issue tasks
       ansible.builtin.import_role:
         name: homelab_cert_renew
         tasks_from: issue
+      check_mode: false
 
     - name: Run deploy_semaphore tasks
       ansible.builtin.import_role:
         name: homelab_cert_renew
         tasks_from: deploy_semaphore
+      check_mode: false
 
 - name: cert_renew - issue and deploy proxmox certs
   hosts: proxmox
@@ -77,23 +83,19 @@
   serial: 1
   vars:
     cert_renew_ca_host: localhost
-    skip_notifications: "{{ tester_mode | default(false) | bool }}"
+    skip_notifications: "{{ ansible_check_mode }}"
   tasks:
-    - name: "[tester_mode] Plan-only: stop before proxmox cert deploy"
-      ansible.builtin.include_role:
-        name: tester_gate
-      when: tester_mode | default(false) | bool
-      vars:
-        tester_gate_end: host
     - name: Run issue tasks
       ansible.builtin.import_role:
         name: homelab_cert_renew
         tasks_from: issue
+      check_mode: false
 
     - name: Run deploy_proxmox tasks
       ansible.builtin.import_role:
         name: homelab_cert_renew
         tasks_from: deploy_proxmox
+      check_mode: false
 
 - name: cert_renew - issue and deploy monnie cert
   hosts: monnie
@@ -101,33 +103,31 @@
   become: true
   vars:
     cert_renew_ca_host: localhost
-    skip_notifications: "{{ tester_mode | default(false) | bool }}"
+    skip_notifications: "{{ ansible_check_mode }}"
   tasks:
-    - name: "[tester_mode] Plan-only: stop before monnie cert deploy"
-      ansible.builtin.include_role:
-        name: tester_gate
-      when: tester_mode | default(false) | bool
-      vars:
-        tester_gate_end: host
     - name: Run issue tasks
       ansible.builtin.import_role:
         name: homelab_cert_renew
         tasks_from: issue
+      check_mode: false
 
     - name: Pause monitoring before grafana-server restart
       ansible.builtin.command: homelab-monitoring-pause
       delegate_to: localhost
       when: cert_needs_renewal | default(false) | bool
+      check_mode: false
 
     - name: Run deploy_grafana tasks
       ansible.builtin.import_role:
         name: homelab_cert_renew
         tasks_from: deploy_grafana
+      check_mode: false
 
     - name: Resume monitoring after grafana restart
       ansible.builtin.command: homelab-monitoring-resume
       delegate_to: localhost
       when: cert_needs_renewal | default(false) | bool
+      check_mode: false
 
 - name: cert_renew - cleanup CA key from quory
   hosts: localhost
@@ -135,16 +135,13 @@
   become: false
   vars:
     cert_renew_ca_host: localhost
-    skip_notifications: "{{ tester_mode | default(false) | bool }}"
+    skip_notifications: "{{ ansible_check_mode }}"
   tasks:
-    - name: "[tester_mode] Plan-only: skip CA key cleanup"
-      ansible.builtin.include_role:
-        name: tester_gate
-      when: tester_mode | default(false) | bool
     - name: Run cleanup tasks
       ansible.builtin.import_role:
         name: homelab_cert_renew
         tasks_from: cleanup
+      check_mode: false
 
 - name: cert_renew - send completion notification
   hosts: localhost
@@ -180,17 +177,20 @@
           {% endif %}
 
     - name: Send Slack notification
-      ansible.builtin.include_tasks: "{{ playbook_dir }}/../roles/common_slack/tasks/notify.yml"
-      vars:
-        slack_channel: "{{ 'alerts' if ('FAILED' in cert_renew_summary or 'WARNING' in cert_renew_summary) else 'info' }}"
-        slack_status: "{{ 'error' if 'FAILED' in cert_renew_summary else ('warning' if 'WARNING' in cert_renew_summary else 'ok') }}"
-        slack_title: "[cert_renew] Certificate renewal completed"
-        slack_message: |
-          TLS certificate renewal run completed.
+      check_mode: false
+      block:
+        - name: Include common_slack notify tasks
+          ansible.builtin.include_tasks: "{{ playbook_dir }}/../roles/common_slack/tasks/notify.yml"
+          vars:
+            slack_channel: "{{ 'alerts' if ('FAILED' in cert_renew_summary or 'WARNING' in cert_renew_summary) else 'info' }}"
+            slack_status: "{{ 'error' if 'FAILED' in cert_renew_summary else ('warning' if 'WARNING' in cert_renew_summary else 'ok') }}"
+            slack_title: "[cert_renew] Certificate renewal completed"
+            slack_message: |
+              TLS certificate renewal run completed.
 
-          Results:
-          {{ cert_renew_summary }}
-          Executed at: {{ lookup('pipe', 'date +%Y-%m-%dT%H:%M:%S+09:00') }}
+              Results:
+              {{ cert_renew_summary }}
+              Executed at: {{ lookup('pipe', 'date +%Y-%m-%dT%H:%M:%S+09:00') }}
 
     - name: Fail if CA cleanup was not successful
       ansible.builtin.fail:

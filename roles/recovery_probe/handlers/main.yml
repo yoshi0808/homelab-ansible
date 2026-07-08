@@ -6,3 +6,4 @@
     state: restarted
   become: true
   when: recovery_probe_service_enabled | bool
+  check_mode: false

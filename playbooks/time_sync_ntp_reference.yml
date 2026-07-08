@@ -33,22 +33,29 @@
 #     --check/--diffでの確認を経ること。
 #
 # 参照: docs/ai/reviews/time_sync_check/2026-06-25_002_implement.md
+#
+# tester-gate: risk-accepted — tester_mode/tester_gate を廃止。--check の有無に
+# かかわらず常に本実行する。理由: copyモジュールのcontent差分比較による本来の
+# 意味での冪等(ca_trust_deployと同型)。chrony再起動は設定ファイルが実際に
+# 変わった時(主に初回配置時)のみ発生し、以降は真のno-op。再起動してもchrony
+# デーモンが一瞬再起動するだけで他サービス・接続には影響しないためYoshinobuが
+# 安全側と判断(2026-07-06)。詳細は docs/ai/prompts/core.md §18 "移行中の例外"。
 
 - name: Add quory as an additional NTP reference on homelab nodes
   hosts: pve1:pve2:ansy:monnie:authy
   gather_facts: false
   become: true
-  vars:
-    skip_notifications: "{{ tester_mode | default(false) | bool }}"
-  pre_tasks:
-    - name: "[tester_mode] Plan-only: show intended NTP config change and stop"
-      ansible.builtin.include_role:
-        name: tester_gate
-      when: tester_mode | default(false) | bool
-      vars:
-        tester_gate_end: host
-        tester_gate_plan:
-          - "操作 : chrony 設定に quory を NTP 参照先として追加"
-          - "対象 : {{ inventory_hostname }}"
-  roles:
-    - time_sync_ntp_reference
+  tasks:
+    - name: "[migration] tester_mode is deprecated for this playbook — it always runs for real"
+      ansible.builtin.assert:
+        that: not (tester_mode | default(false) | bool)
+        fail_msg: >-
+          This playbook no longer supports -e tester_mode=true and has no
+          dry-run mode (--check included): NTP reference config always runs
+          for real. See docs/ai/prompts/core.md §18 "移行中の例外".
+        quiet: true
+
+    - name: Run time_sync_ntp_reference role (always for real)
+      ansible.builtin.import_role:
+        name: time_sync_ntp_reference
+      check_mode: false

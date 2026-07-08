@@ -12,6 +12,7 @@
     _rsr_started_at: "{{ lookup('pipe', \"TZ='Asia/Tokyo' date '+%Y-%m-%dT%H:%M:%S+09:00'\") }}"
 
 - name: Service restart attempt (with report/notify in always)
+  check_mode: false
   block:
 
     # -----------------------------------------------------------------------
@@ -69,26 +70,17 @@
         fail_msg: "{{ target }} に対応するサービス一覧が defaults/main.yml に定義されていません"
 
     # -----------------------------------------------------------------------
-    # tester_mode gate (L2): Phase 1 の read-only 検証(タグ・稼働状態・サービス
-    # 一覧解決)は実データで実行し、変更系 Phase 2 (restart) の直前で停止する
+    # ansible_check_mode gate: Phase 1 の read-only 検証(タグ・稼働状態・
+    # サービス一覧解決)は実データで実行し、変更系 Phase 2 (restart) は
+    # --check 時には行わない
     # -----------------------------------------------------------------------
-    - name: "[tester_mode] Mark result as plan-only"
+    - name: "[check-mode] Mark result as plan-only"
       ansible.builtin.set_fact:
         _rsr_result: "plan-only"
-        _rsr_detail: "tester_mode: タグ・稼働状態・サービス一覧の read-only 検証まで実施し、restart の前で停止"
-      when: tester_mode | default(false) | bool
-
-    - name: "[tester_mode] Plan-only: show verified restart plan and stop"
-      ansible.builtin.include_role:
-        name: tester_gate
-      when: tester_mode | default(false) | bool
-      vars:
-        tester_gate_plan:
-          - "操作    : systemctl restart (SSH/become 経由)"
-          - "対象    : {{ target }} (vmid={{ _rsr_vmid }}, node={{ _rsr_vm_node }}, running 確認済み)"
-          - "タグ    : {{ _rsr_vm.tags | default('(none)') }} — 適格性検証済み"
-          - "サービス: {{ _rsr_units | join(', ') }}"
-          - "通知    : skip_notifications=true のため送信しません"
+        _rsr_detail: >-
+          --check: タグ・稼働状態・サービス一覧の read-only 検証まで実施し、
+          restart は行わずに停止しました(対象サービス: {{ _rsr_units | join(', ') }})
+      when: ansible_check_mode
 
     # -----------------------------------------------------------------------
     # Phase 2: サービス restart
@@ -102,6 +94,8 @@
         label: "{{ item }}"
       delegate_to: "{{ target }}"
       become: true
+      when: not ansible_check_mode
+      tags: [destructive]
 
     # -----------------------------------------------------------------------
     # Phase 3: 回復確認
@@ -118,12 +112,13 @@
         label: "{{ item }}"
       delegate_to: "{{ target }}"
       become: true
-      check_mode: false
+      when: not ansible_check_mode
 
     - name: Mark restart as successful
       ansible.builtin.set_fact:
         _rsr_result: "ok"
         _rsr_detail: "全サービスが active になりました: {{ _rsr_units | join(', ') }}"
+      when: not ansible_check_mode
 
   rescue:
     - name: Capture failure detail
@@ -171,8 +166,8 @@
     - name: Send Slack notification (best-effort)
       ansible.builtin.include_tasks: "{{ playbook_dir }}/../roles/common_slack/tasks/notify.yml"
       vars:
-        slack_channel: "alerts"
-        slack_status: "{{ 'ok' if _rsr_result == 'ok' else 'error' }}"
+        slack_channel: "{{ 'info' if _rsr_result == 'plan-only' else 'alerts' }}"
+        slack_status: "{{ 'info' if _rsr_result == 'plan-only' else ('ok' if _rsr_result == 'ok' else 'error') }}"
         slack_title: "[recovery_service_restart] {{ _rsr_result | upper }} - {{ target }}"
         slack_message: |
           対象    : {{ target }} (vmid {{ _rsr_vmid }}, node {{ _rsr_vm_node }})

@@ -1,11 +1,27 @@
 ---
-# tester-gate: gated-in-role — roles/sophos_trim/tasks/main.yml が tester_mode 時に fstrim --dry-run リハーサルへ差し替え(L3)
+# tester-gate: dry-run-aware — tester_mode/tester_gate を廃止。実際に破壊的な
+# fstrim コマンド自体を ansible_check_mode 下ではネイティブの --dry-run に
+# 差し替えて実行する(スキップではなく安全な引数での実行)。SSH接続・メニュー
+# 遷移・RCマーカーのパースは --check の有無にかかわらず常に本実行される。
+# 詳細は roles/sophos_trim/tasks/main.yml と docs/ai/prompts/core.md §18
+# "移行中の例外"。
 - name: Sophos Firewall SSD Trim
   hosts: sophos
   gather_facts: false
   become: false
   vars:
-    skip_notifications: "{{ tester_mode | default(false) | bool }}"
+    skip_notifications: "{{ ansible_check_mode }}"
+
+  pre_tasks:
+    - name: "[migration] tester_mode is deprecated for this playbook — use --check instead"
+      ansible.builtin.assert:
+        that: not (tester_mode | default(false) | bool)
+        fail_msg: >-
+          This playbook no longer supports -e tester_mode=true. Re-run with
+          --check instead — the fstrim command is automatically swapped to
+          --dry-run under ansible_check_mode; the SSH session itself always
+          runs for real. See docs/ai/prompts/core.md §18 "移行中の例外".
+        quiet: true
 
   roles:
     - sophos_trim

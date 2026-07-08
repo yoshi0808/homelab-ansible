@@ -1,4 +1,10 @@
 ---
+# tester-gate: check-mode-native — tester_mode/tester_gate を廃止。reboot-required
+# 判定(stat/needrestart)は --check の有無にかかわらず常に本実行し、実際の
+# reboot + reboot後検証 + 結果通知(tags: destructive)だけを ansible_check_mode
+# でゲートする。reboot_required=true かつ --check のときは「reboot予定だが未実施」
+# の軽量レポート/通知を別途出す。詳細は docs/ai/prompts/core.md §18 "移行中の例外"。
+
 - name: Ubuntu nightly - conditional reboot and service check (radius_servers)
   hosts: radius_servers
   gather_facts: true
@@ -6,9 +12,19 @@
 
   vars:
     nightly_report_dir: "{{ reports_base_dir }}/ubuntu-nightly"
-    skip_notifications: "{{ tester_mode | default(false) | bool }}"
 
   tasks:
+    - name: "[migration] tester_mode is deprecated for this playbook — use --check instead"
+      ansible.builtin.assert:
+        that: not (tester_mode | default(false) | bool)
+        fail_msg: >-
+          This playbook no longer supports -e tester_mode=true. Re-run with
+          --check instead — reboot-required detection runs for real under
+          --check, and only the actual reboot/post-reboot verification is
+          gated by ansible_check_mode. See docs/ai/prompts/core.md §18
+          "移行中の例外".
+        quiet: true
+
     - name: Check reboot-required flag
       ansible.builtin.stat:
         path: /var/run/reboot-required
@@ -26,6 +42,7 @@
       changed_when: false
       failed_when: false
       when: needrestart_bin.stat.exists
+      check_mode: false
 
     - name: Evaluate reboot requirement
       ansible.builtin.set_fact:
@@ -41,6 +58,7 @@
         mode: "0755"
       delegate_to: localhost
       become: false
+      check_mode: false
 
     - name: Build skipped report
       ansible.builtin.set_fact:
@@ -59,25 +77,46 @@
       delegate_to: localhost
       become: false
       when: not reboot_required
+      check_mode: false
 
     - name: End play if reboot is not required
       ansible.builtin.meta: end_host
       when: not reboot_required
 
-    - name: "[tester_mode] Plan-only: show intended reboot and stop"
-      ansible.builtin.include_role:
-        name: tester_gate
-      when: tester_mode | default(false) | bool
+    - name: Build check-mode report (reboot required but not performed)
+      ansible.builtin.set_fact:
+        nightly_report:
+          host: "{{ inventory_hostname }}"
+          executed_at: "{{ lookup('pipe', 'date +%Y-%m-%dT%H:%M:%S+09:00') }}"
+          reboot_required: true
+          rebooted: false
+          result: "CHECK_MODE_WOULD_REBOOT"
+      when: ansible_check_mode
+
+    - name: Save check-mode report
+      ansible.builtin.copy:
+        content: "{{ nightly_report | to_nice_json }}"
+        dest: "{{ nightly_report_dir }}/{{ inventory_hostname }}_{{ ansible_facts['date_time']['iso8601_basic_short'] }}.json"
+      delegate_to: localhost
+      become: false
+      when: ansible_check_mode
+      check_mode: false
+
+    - name: Send check-mode notification
+      ansible.builtin.include_tasks: "{{ playbook_dir }}/../roles/common_slack/tasks/notify.yml"
+      when: ansible_check_mode
       vars:
-        tester_gate_end: host
-        tester_gate_plan:
-          - "reboot_required: {{ reboot_required }}"
-          - "操作 : ansible.builtin.reboot (reboot_timeout=300)"
-          - "対象 : {{ inventory_hostname }}"
-          - "通知 : skip_notifications=true のため送信しません"
+        slack_channel: "info"
+        slack_status: "info"
+        slack_title: "[ubuntu_nightly] check-mode: reboot required - {{ inventory_hostname }}"
+        slack_message: |
+          Host: {{ inventory_hostname }}
+          check-mode: reboot is required but was not performed (--check).
+          Time: {{ ansible_facts["date_time"]["iso8601"] }}
 
     - name: Set recovery mute before reboot
       ansible.builtin.include_tasks: "{{ playbook_dir }}/../roles/recovery_mute/tasks/set.yml"
+      when: not ansible_check_mode
       vars:
         recovery_mute_target: "{{ inventory_hostname }}"
         recovery_mute_minutes: 30
@@ -85,6 +124,7 @@
 
     - name: Send reboot start notification
       ansible.builtin.include_tasks: "{{ playbook_dir }}/../roles/common_slack/tasks/notify.yml"
+      when: not ansible_check_mode
       vars:
         slack_channel: "info"
         slack_status: "info"
@@ -94,7 +134,10 @@
           Action: Reboot started
           Time: {{ ansible_facts["date_time"]["iso8601"] }}
 
-    - block:
+    - name: Reboot and post-reboot verification (radius_servers)
+      when: not ansible_check_mode
+      tags: [destructive]
+      block:
         - name: Reboot host
           ansible.builtin.reboot:
             reboot_timeout: 300
@@ -217,9 +260,19 @@
 
   vars:
     nightly_report_dir: "{{ reports_base_dir }}/ubuntu-nightly"
-    skip_notifications: "{{ tester_mode | default(false) | bool }}"
 
   tasks:
+    - name: "[migration] tester_mode is deprecated for this playbook — use --check instead"
+      ansible.builtin.assert:
+        that: not (tester_mode | default(false) | bool)
+        fail_msg: >-
+          This playbook no longer supports -e tester_mode=true. Re-run with
+          --check instead — reboot-required detection runs for real under
+          --check, and only the actual reboot/post-reboot verification is
+          gated by ansible_check_mode. See docs/ai/prompts/core.md §18
+          "移行中の例外".
+        quiet: true
+
     - name: Check reboot-required flag
       ansible.builtin.stat:
         path: /var/run/reboot-required
@@ -237,6 +290,7 @@
       changed_when: false
       failed_when: false
       when: needrestart_bin.stat.exists
+      check_mode: false
 
     - name: Evaluate reboot requirement
       ansible.builtin.set_fact:
@@ -252,6 +306,7 @@
         mode: "0755"
       delegate_to: localhost
       become: false
+      check_mode: false
 
     - name: Build skipped report
       ansible.builtin.set_fact:
@@ -270,25 +325,46 @@
       delegate_to: localhost
       become: false
       when: not reboot_required
+      check_mode: false
 
     - name: End play if reboot is not required
       ansible.builtin.meta: end_host
       when: not reboot_required
 
-    - name: "[tester_mode] Plan-only: show intended reboot and stop"
-      ansible.builtin.include_role:
-        name: tester_gate
-      when: tester_mode | default(false) | bool
+    - name: Build check-mode report (reboot required but not performed)
+      ansible.builtin.set_fact:
+        nightly_report:
+          host: "{{ inventory_hostname }}"
+          executed_at: "{{ lookup('pipe', 'date +%Y-%m-%dT%H:%M:%S+09:00') }}"
+          reboot_required: true
+          rebooted: false
+          result: "CHECK_MODE_WOULD_REBOOT"
+      when: ansible_check_mode
+
+    - name: Save check-mode report
+      ansible.builtin.copy:
+        content: "{{ nightly_report | to_nice_json }}"
+        dest: "{{ nightly_report_dir }}/{{ inventory_hostname }}_{{ ansible_facts['date_time']['iso8601_basic_short'] }}.json"
+      delegate_to: localhost
+      become: false
+      when: ansible_check_mode
+      check_mode: false
+
+    - name: Send check-mode notification
+      ansible.builtin.include_tasks: "{{ playbook_dir }}/../roles/common_slack/tasks/notify.yml"
+      when: ansible_check_mode
       vars:
-        tester_gate_end: host
-        tester_gate_plan:
-          - "reboot_required: {{ reboot_required }}"
-          - "操作 : ansible.builtin.reboot (reboot_timeout=300)"
-          - "対象 : {{ inventory_hostname }}"
-          - "通知 : skip_notifications=true のため送信しません"
+        slack_channel: "info"
+        slack_status: "info"
+        slack_title: "[ubuntu_nightly] check-mode: reboot required - {{ inventory_hostname }}"
+        slack_message: |
+          Host: {{ inventory_hostname }}
+          check-mode: reboot is required but was not performed (--check).
+          Time: {{ ansible_facts["date_time"]["iso8601"] }}
 
     - name: Set recovery mute before reboot
       ansible.builtin.include_tasks: "{{ playbook_dir }}/../roles/recovery_mute/tasks/set.yml"
+      when: not ansible_check_mode
       vars:
         recovery_mute_target: "{{ inventory_hostname }}"
         recovery_mute_minutes: 30
@@ -296,6 +372,7 @@
 
     - name: Send reboot start notification
       ansible.builtin.include_tasks: "{{ playbook_dir }}/../roles/common_slack/tasks/notify.yml"
+      when: not ansible_check_mode
       vars:
         slack_channel: "info"
         slack_status: "info"
@@ -305,7 +382,10 @@
           Action: Reboot started
           Time: {{ ansible_facts["date_time"]["iso8601"] }}
 
-    - block:
+    - name: Reboot and post-reboot verification (monitoring_servers)
+      when: not ansible_check_mode
+      tags: [destructive]
+      block:
         - name: Reboot host
           ansible.builtin.reboot:
             reboot_timeout: 300

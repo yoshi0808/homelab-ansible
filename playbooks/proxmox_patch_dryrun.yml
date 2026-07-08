@@ -1,11 +1,25 @@
 ---
 # tester-gate: safe-readonly — パッチ dry-run 収集(apt update + シミュレーション)のみで実変更なし。通知は common_slack の tester_mode ガードで抑止される
+#
+# 2026-07-06: roles/proxmox_patch_dryrun の command/copy/file タスクに
+# check_mode: false が付いていなかったため、素の --check だと自動 skip されて
+# _final_status が未定義(UNKNOWN扱い)になり、この結果に依存する
+# proxmox_patch_weekly_full.yml の続行判定が --check 実行のたびに偽のエラーで
+# 落ちるバグがあった。tasks: + check_mode: false で修正。
 - name: Proxmox patch dry-run
   hosts: proxmox
   gather_facts: true
   become: true
   any_errors_fatal: true
 
-  roles:
-    - proxmox_healthcheck
-    - proxmox_patch_dryrun
+  tasks:
+    - name: Run proxmox_healthcheck and proxmox_patch_dryrun (always for real)
+      check_mode: false
+      block:
+        - name: Run proxmox_healthcheck role
+          ansible.builtin.include_role:
+            name: proxmox_healthcheck
+
+        - name: Run proxmox_patch_dryrun role
+          ansible.builtin.include_role:
+            name: proxmox_patch_dryrun

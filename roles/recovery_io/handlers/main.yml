@@ -3,9 +3,11 @@
   ansible.builtin.systemd:
     daemon_reload: true
   become: true
+  check_mode: false
 
 - name: Restart recovery-io
   ansible.builtin.systemd:
     name: recovery-io
     state: restarted
   become: true
+  check_mode: false

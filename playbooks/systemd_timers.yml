@@ -6,23 +6,29 @@
 # Typical usage:
 #   quory: ansible-playbook playbooks/systemd_timers.yml
 #   ansy:  ansible-playbook playbooks/systemd_timers.yml -e "target_hosts=dev_nodes"
+#
+# tester-gate: risk-accepted — tester_mode/tester_gate を廃止。--check の有無に
+# かかわらず常に本実行する。理由: timer/serviceユニット配置+enable/startのみで、
+# .timerをstartしてもsystemdの仕様上スケジュールがarmedになるだけで紐づく
+# .service(Type=oneshot)は次回のOnCalendar時刻まで実行されない(即座の実行なし)。
+# Yoshinobuが安全側と判断(2026-07-06)。詳細は docs/ai/prompts/core.md §18
+# "移行中の例外"。
 - name: Configure Ansible systemd timers
   hosts: "{{ target_hosts | default('control_nodes') }}"
   gather_facts: false
   become: true
   connection: local
-  vars:
-    skip_notifications: "{{ tester_mode | default(false) | bool }}"
-  pre_tasks:
-    - name: "[tester_mode] Plan-only: show intended systemd timers config and stop"
-      ansible.builtin.include_role:
-        name: tester_gate
-      when: tester_mode | default(false) | bool
-      vars:
-        tester_gate_end: host
-        tester_gate_plan:
-          - "操作 : systemd timer/service ユニット配置 + systemctl enable/start"
-          - "対象 : {{ inventory_hostname }}"
+  tasks:
+    - name: "[migration] tester_mode is deprecated for this playbook — it always runs for real"
+      ansible.builtin.assert:
+        that: not (tester_mode | default(false) | bool)
+        fail_msg: >-
+          This playbook no longer supports -e tester_mode=true and has no
+          dry-run mode (--check included): timer configuration always runs
+          for real. See docs/ai/prompts/core.md §18 "移行中の例外".
+        quiet: true
 
-  roles:
-    - systemd_timers
+    - name: Run systemd_timers role (always for real)
+      ansible.builtin.import_role:
+        name: systemd_timers
+      check_mode: false

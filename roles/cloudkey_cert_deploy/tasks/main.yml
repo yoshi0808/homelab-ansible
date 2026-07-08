@@ -8,6 +8,12 @@
 #
 # The leaf private key only ever lives in a transient work directory that is
 # removed in `always`, and inside the API request body. It is never committed.
+#
+# tester-gate: risk-accepted — worst case of running this unconditionally (incl.
+# under --check) is a broken/unverified CloudKey Web UI TLS cert, i.e. an SSL
+# warning on the CloudKey UI only. Recoverable by re-running this playbook.
+# Yoshinobu accepted this risk, so the whole lifecycle (issue + deploy) always
+# runs for real; there is no dry-run distinction for this playbook.
 
 - name: Initialize CloudKey deploy facts
   ansible.builtin.set_fact:
@@ -21,8 +27,10 @@
     state: directory
     prefix: cloudkey_cert_deploy.
   register: cloudkey_workdir
+  check_mode: false
 
 - name: Issue leaf and run API deploy lifecycle
+  check_mode: false
   block:
     - ansible.builtin.import_tasks: issue.yml
     - ansible.builtin.import_tasks: deploy.yml

@@ -10,31 +10,38 @@
 #     -e recovery_probe_service_enabled=true
 #
 # 設計: docs/ai/reviews/autonomous_recovery/2026-07-02_001_requirement.md
+#
+# tester-gate: risk-accepted — tester_mode/tester_gate を廃止。--check の有無に
+# かかわらず常に本実行する。理由: homelab-mute CLIはただのスクリプト配置。
+# recovery-probeはdaemon本体のため内容変更時に自身のみ再起動されるが、他の
+# 本番サービス(freeradius/grafana等)には触れない。Setup自体が失敗しても
+# recovery-probeが正しく動かないだけで、直接他サービスに影響しないため
+# Yoshinobuが安全側と判断(2026-07-06、recovery_push_setupと同じ割り切り)。
+# 詳細は docs/ai/prompts/core.md §18 "移行中の例外"。
 
 - name: Deploy recovery-probe and homelab-mute CLI
   hosts: dev_nodes:control_nodes
   gather_facts: true
   become: true
-  vars:
-    skip_notifications: "{{ tester_mode | default(false) | bool }}"
   pre_tasks:
-    - name: "[tester_mode] Plan-only: show intended probe setup and stop"
-      ansible.builtin.include_role:
-        name: tester_gate
-      when: tester_mode | default(false) | bool
-      vars:
-        tester_gate_end: host
-        tester_gate_plan:
-          - "操作 : recovery-probe daemon 配置 + homelab-mute CLI 配置 + systemd unit"
-          - "対象 : {{ inventory_hostname }}"
-          - "起動 : recovery_probe_service_enabled={{ recovery_probe_service_enabled | default(false) }}"
+    - name: "[migration] tester_mode is deprecated for this playbook — it always runs for real"
+      ansible.builtin.assert:
+        that: not (tester_mode | default(false) | bool)
+        fail_msg: >-
+          This playbook no longer supports -e tester_mode=true and has no
+          dry-run mode (--check included): probe setup always runs for real.
+          See docs/ai/prompts/core.md §18 "移行中の例外".
+        quiet: true
 
   tasks:
-    - name: Deploy homelab-mute CLI
-      ansible.builtin.include_role:
-        name: recovery_mute
-        tasks_from: deploy_cli
+    - name: Deploy recovery-probe and homelab-mute CLI (always for real)
+      check_mode: false
+      block:
+        - name: Deploy homelab-mute CLI
+          ansible.builtin.include_role:
+            name: recovery_mute
+            tasks_from: deploy_cli
 
-    - name: Deploy recovery-probe
-      ansible.builtin.include_role:
-        name: recovery_probe
+        - name: Deploy recovery-probe
+          ansible.builtin.include_role:
+            name: recovery_probe

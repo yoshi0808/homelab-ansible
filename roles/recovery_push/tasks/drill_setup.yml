@@ -12,9 +12,11 @@
     mode: "0644"
   become: true
   delegate_to: "{{ drill_target.name }}"
+  check_mode: false
 
 - name: Reload systemd on {{ drill_target.name }}
   ansible.builtin.systemd:
     daemon_reload: true
   become: true
   delegate_to: "{{ drill_target.name }}"
+  check_mode: false

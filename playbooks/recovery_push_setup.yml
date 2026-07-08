@@ -8,25 +8,34 @@
 #
 # VM delegates are driven from quory play (same pattern as recovery_exec_setup.yml).
 #
-# Dev run (place only, no live services modified):
-#   ansible-playbook playbooks/recovery_push_setup.yml -l quory -e tester_mode=true
-# Production:
+# Run:
 #   ansible-playbook playbooks/recovery_push_setup.yml -l quory
+#
+# tester-gate: risk-accepted — tester_mode/tester_gate を廃止。--check の有無に
+# かかわらず常に本実行する。理由: SSH鍵生成(creates:ガード)・スクリプト配置・
+# systemd drop-in配置(中身はOnFailure=recovery-trigger@%p.serviceの1行)+
+# daemon_reloadのみで、対象サービス(freeradius/grafana-server/prometheus/loki/
+# unpoller)自体の再起動・reloadは一切発生しない(daemon_reloadはsystemdに
+# ユニット定義の変更を認識させるだけ)。デプロイした結果として将来的に
+# OnFailureフックが有効になる(=対象サービスが実際に落ちた時だけpush発火)が、
+# デプロイ自体に稼働中サービスへの影響はないためYoshinobuが安全側と判断
+# (2026-07-06、Setup系は実施しないと運用が始まらないため割り切る、との方針)。
+# 詳細は docs/ai/prompts/core.md §18 "移行中の例外"。
 
 - name: Deploy recovery push trigger (E-2)
   hosts: quory
   gather_facts: false
   pre_tasks:
-    - name: "[tester_mode] Plan-only: show scope and stop"
-      ansible.builtin.include_role:
-        name: tester_gate
-      when: tester_mode | default(false) | bool
-      vars:
-        tester_gate_plan:
-          - "操作 : OnFailure push トリガ配布"
-          - "quory: /usr/local/sbin/recovery-push-dispatch.sh"
-          - "quory: /home/recovery-exec/.ssh/authorized_keys (push 受信用 2 エントリ)"
-          - "authy: push key 生成 + recovery-push.sh + recovery-trigger@.service + freeradius drop-in"
-          - "monnie: push key 生成 + recovery-push.sh + recovery-trigger@.service + 4サービス drop-in"
-  roles:
-    - recovery_push
+    - name: "[migration] tester_mode is deprecated for this playbook — it always runs for real"
+      ansible.builtin.assert:
+        that: not (tester_mode | default(false) | bool)
+        fail_msg: >-
+          This playbook no longer supports -e tester_mode=true and has no
+          dry-run mode (--check included): push trigger setup always runs
+          for real. See docs/ai/prompts/core.md §18 "移行中の例外".
+        quiet: true
+  tasks:
+    - name: Run recovery_push role
+      ansible.builtin.import_role:
+        name: recovery_push
+      check_mode: false

@@ -13,6 +13,7 @@
     _rvr_started_at: "{{ lookup('pipe', 'date -u +%Y-%m-%dT%H:%M:%SZ') }}"
 
 - name: VM reboot attempt (with report/notify in always)
+  check_mode: false
   block:
 
     # -----------------------------------------------------------------------
@@ -57,26 +58,17 @@
         _rvr_use_guest_agent: "{{ target in recovery_vm_reboot_guest_agent_targets }}"
 
     # -----------------------------------------------------------------------
-    # tester_mode gate (L2): Phase 1 の read-only タグ再検証は実データで実行し、
-    # 変更系 Phase 2 以降の直前で停止する
+    # ansible_check_mode gate: Phase 1 の read-only タグ再検証は実データで
+    # 実行し、変更系 Phase 2 以降は --check 時には行わない
     # -----------------------------------------------------------------------
-    - name: "[tester_mode] Mark result as plan-only"
+    - name: "[check-mode] Mark result as plan-only"
       ansible.builtin.set_fact:
         _rvr_result: "plan-only"
-        _rvr_detail: "tester_mode: Phase 1 タグ再検証まで実施し、変更系操作の前で停止"
-      when: tester_mode | default(false) | bool
-
-    - name: "[tester_mode] Plan-only: show verified VM state and stop"
-      ansible.builtin.include_role:
-        name: tester_gate
-      when: tester_mode | default(false) | bool
-      vars:
-        tester_gate_plan:
-          - "操作  : VM reboot (pvesh shutdown → stop fallback → start)"
-          - "対象  : {{ target }} (vmid={{ _rvr_vmid }}, node={{ _rvr_vm_node }})"
-          - "タグ  : {{ _rvr_vm.tags | default('(none)') }} — 適格性検証済み"
-          - "手段  : {{ 'guest agent shutdown' if _rvr_use_guest_agent | bool else 'ACPI shutdown' }}"
-          - "通知  : skip_notifications=true のため送信しません"
+        _rvr_detail: >-
+          --check: Phase 1 タグ再検証まで実施し、変更系操作(shutdown/start)は
+          行わずに停止しました
+          (手段: {{ 'guest agent shutdown' if _rvr_use_guest_agent | bool else 'ACPI shutdown' }})
+      when: ansible_check_mode
 
     # -----------------------------------------------------------------------
     # Phase 2: ソフトシャットダウン
@@ -91,15 +83,18 @@
       changed_when: true
       ignore_errors: true
       register: _rvr_agent_shutdown
-      when: _rvr_use_guest_agent | bool
+      when: (_rvr_use_guest_agent | bool) and not ansible_check_mode
+      tags: [destructive]
 
     - name: Send ACPI shutdown command (sophos-fw or agent shutdown failed)
       ansible.builtin.command:
         cmd: pvesh create /nodes/{{ _rvr_vm_node }}/qemu/{{ _rvr_vmid }}/status/shutdown
       changed_when: true
       when: >-
+        (not ansible_check_mode) and (
         not (_rvr_use_guest_agent | bool) or
-        (_rvr_agent_shutdown is defined and _rvr_agent_shutdown.rc | default(0) != 0)
+        (_rvr_agent_shutdown is defined and _rvr_agent_shutdown.rc | default(0) != 0))
+      tags: [destructive]
 
     # -----------------------------------------------------------------------
     # Phase 3: 停止待機 (timeout で強制電源断にフォールバック)
@@ -109,7 +104,6 @@
         cmd: pvesh get /cluster/resources --output-format json
       register: _rvr_stop_poll
       changed_when: false
-      check_mode: false
       retries: "{{ (recovery_vm_reboot_soft_shutdown_timeout_s | int) // (recovery_vm_reboot_soft_shutdown_poll_s | int) }}"
       delay: "{{ recovery_vm_reboot_soft_shutdown_poll_s }}"
       until: >-
@@ -120,6 +114,7 @@
         selectattr('status', 'equalto', 'stopped') |
         list | length > 0
       ignore_errors: true
+      when: not ansible_check_mode
 
     - name: Check if VM actually stopped
       ansible.builtin.set_fact:
@@ -130,25 +125,26 @@
              selectattr('vmid', 'equalto', _rvr_vmid | int) |
              selectattr('status', 'equalto', 'stopped') |
              list | length > 0 }}
+      when: not ansible_check_mode
 
     - name: Force power off if soft shutdown timed out (fallback)
       ansible.builtin.command:
         cmd: pvesh create /nodes/{{ _rvr_vm_node }}/qemu/{{ _rvr_vmid }}/status/stop
       changed_when: true
       register: _rvr_force_stop
-      when: not _rvr_vm_stopped
+      when: (not ansible_check_mode) and (not _rvr_vm_stopped)
+      tags: [destructive]
 
     - name: Record forced stop
       ansible.builtin.set_fact:
         _rvr_used_force_stop: true
-      when: not _rvr_vm_stopped
+      when: (not ansible_check_mode) and (not _rvr_vm_stopped)
 
     - name: Wait for VM to stop after force stop
       ansible.builtin.command:
         cmd: pvesh get /cluster/resources --output-format json
       register: _rvr_force_stop_poll
       changed_when: false
-      check_mode: false
       retries: 12
       delay: 5
       until: >-
@@ -158,7 +154,7 @@
         selectattr('vmid', 'equalto', _rvr_vmid | int) |
         selectattr('status', 'equalto', 'stopped') |
         list | length > 0
-      when: not _rvr_vm_stopped
+      when: (not ansible_check_mode) and (not _rvr_vm_stopped)
 
     # -----------------------------------------------------------------------
     # Phase 4: 起動
@@ -167,13 +163,14 @@
       ansible.builtin.command:
         cmd: pvesh create /nodes/{{ _rvr_vm_node }}/qemu/{{ _rvr_vmid }}/status/start
       changed_when: true
+      when: not ansible_check_mode
+      tags: [destructive]
 
     - name: Wait for VM to become running
       ansible.builtin.command:
         cmd: pvesh get /cluster/resources --output-format json
       register: _rvr_start_poll
       changed_when: false
-      check_mode: false
       retries: "{{ (recovery_vm_reboot_start_timeout_s | int) // (recovery_vm_reboot_start_poll_s | int) }}"
       delay: "{{ recovery_vm_reboot_start_poll_s }}"
       until: >-
@@ -183,6 +180,7 @@
         selectattr('vmid', 'equalto', _rvr_vmid | int) |
         selectattr('status', 'equalto', 'running') |
         list | length > 0
+      when: not ansible_check_mode
 
     - name: Mark reboot as successful
       ansible.builtin.set_fact:
@@ -190,6 +188,7 @@
         _rvr_detail: >-
           VM が running になりました。
           {{ '強制電源断を使用しました。' if _rvr_used_force_stop else 'ソフトシャットダウンで停止しました。' }}
+      when: not ansible_check_mode
 
   rescue:
     - name: Capture failure detail
@@ -237,8 +236,8 @@
     - name: Send Slack notification (best-effort)
       ansible.builtin.include_tasks: "{{ playbook_dir }}/../roles/common_slack/tasks/notify.yml"
       vars:
-        slack_channel: "alerts"
-        slack_status: "{{ 'ok' if _rvr_result == 'ok' else 'error' }}"
+        slack_channel: "{{ 'info' if _rvr_result == 'plan-only' else 'alerts' }}"
+        slack_status: "{{ 'info' if _rvr_result == 'plan-only' else ('ok' if _rvr_result == 'ok' else 'error') }}"
         slack_title: "[recovery_vm_reboot] {{ _rvr_result | upper }} - {{ target }}"
         slack_message: |
           対象      : {{ target }} (vmid {{ _rvr_vmid }}, node {{ _rvr_vm_node }})

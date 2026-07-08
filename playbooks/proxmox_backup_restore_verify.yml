@@ -17,6 +17,15 @@
 #
 # Target VM selection, agent expectation and restore node are decided from
 # Proxmox tags (verify / prefer<node>) and qm config — no Ansible-side list.
+#
+# tester-gate: risk-accepted — tester_mode/tester_gate を廃止。--check の有無に
+# かかわらず常に本実行する。理由: このplaybookの存在意義そのものが「バックアップ
+# が本当にリストアできるかの実地検証」であり、実際にqmrestoreしない検証には意味
+# がない。対象は常にVMID 999固定の使い捨てVM、本番VMは設定read-onlyのみ、NIC切断
+# 起動で隔離、always:で確実に999を破棄(所有者トークンで二重チェック)されるため、
+# 本番サービスへの影響はゼロ。一時的な実ストレージI/O・実行時間を要するが、それは
+# このplaybook本来の動作でありYoshinobuが安全側と判断(2026-07-06)。詳細は
+# docs/ai/prompts/core.md §18 "移行中の例外"。
 
 # ---------------------------------------------------------------------------
 # Play 1: Decide the monthly target VM, its agent expectation, and the
@@ -29,11 +38,21 @@
   become: true
   run_once: true
   tasks:
+    - name: "[migration] tester_mode is deprecated for this playbook — it always runs for real"
+      ansible.builtin.assert:
+        that: not (tester_mode | default(false) | bool)
+        fail_msg: >-
+          This playbook no longer supports -e tester_mode=true and has no
+          dry-run mode (--check included): backup restore-verify always runs
+          for real. See docs/ai/prompts/core.md §18 "移行中の例外".
+        quiet: true
+
     - name: Get cluster resources
       ansible.builtin.command:
         cmd: pvesh get /cluster/resources --output-format json
       register: _brv_resources_raw
       changed_when: false
+      check_mode: false
 
     - name: Parse cluster resources
       ansible.builtin.set_fact:
@@ -105,6 +124,7 @@
           --output-format json
       register: _brv_target_cfg_raw
       changed_when: false
+      check_mode: false
 
     - name: Decide expected health level from agent config
       ansible.builtin.set_fact:
@@ -138,16 +158,8 @@
     verify_target_vmid: "{{ brv_target_vmid }}"
     verify_target_name: "{{ brv_target_name }}"
     verify_agent_expected: "{{ brv_agent_expected }}"
-    skip_notifications: "{{ tester_mode | default(false) | bool }}"
-  pre_tasks:
-    - name: "[tester_mode] Plan-only: show intended backup restore verify and stop"
-      ansible.builtin.include_role:
-        name: tester_gate
-      when: tester_mode | default(false) | bool
-      vars:
-        tester_gate_plan:
-          - "操作  : proxmox_backup_restore_verify (vzdump リストア → VMID 999 → 起動確認 → 破棄)"
-          - "対象  : VMID {{ brv_target_vmid | default('(TBD)') }} ({{ brv_target_name | default('(TBD)') }})"
-          - "通知  : skip_notifications=true のため送信しません"
-  roles:
-    - proxmox_backup_restore_verify
+  tasks:
+    - name: Run proxmox_backup_restore_verify role (always for real)
+      ansible.builtin.import_role:
+        name: proxmox_backup_restore_verify
+      check_mode: false

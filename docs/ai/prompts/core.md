@@ -4,7 +4,7 @@
 
 `core.md` は、環境情報・設計方針・禁止事項・AIレビュー運用・ファイル命名ルールをまとめた正本である。
 
-Playbook / Role の要求仕様は、ユーザーと ChatGPT の会話で整理する。Codex には要求仕様の作成を任せず、主に git diff のレビューを依頼する。
+Playbook / Role の要求仕様は、ユーザーと ChatGPT及びCLAUDEとの会話で整理する。Codexは要求仕様に対する実装レビュー、テスト実行を依頼する。
 
 ---
 
@@ -18,10 +18,10 @@ Playbook / Role の要求仕様は、ユーザーと ChatGPT の会話で整理�
 - Proxmox ノードのハードウェア確認
 - Proxmox ノードのパッチ前確認
 - Proxmox ノードのパッチ適用
-- RADIUS / FreeRADIUS サーバー等の稼働確認
-- RADIUS / FreeRADIUS サーバー等の再起動
+- vmの稼働確認
+- vmの再起動
 - quory 上での本番 Ansible 実行
-- 将来的な Semaphore UI による GUI 実行・自動実行
+- Semaphore UI による GUI 実行・自動実行
 
 ---
 
@@ -52,7 +52,7 @@ quory 上では、原則として直接コード編集しない。
 
 ## 3. 名前解決方針
 
-本リポジトリはパブリック GitHub への公開を予定しているため、IP アドレスを
+本リポジトリはパブリック GitHub への公開をしているため、IP アドレスを
 リポジトリ内に直接記載しない。これは inventory に限らず**全ファイル共通**の方針で、
 playbook / role / vars / group_vars / host_vars はもちろん、`docs/` 配下の
 ドキュメント（要求仕様・実装報告・ポリシー等）や `san_ip` も対象とする。
@@ -391,7 +391,7 @@ Ansible playbook:
 
 Ansible 自体には「時間になったら自分で起動する」機能はない。Semaphore UIがその処理を担う。
 
-quory 上で リブート動作や、モジュール更新が発生するplaybookについては、`systemd timer` が `ansible-playbook` を起動する。
+quory 上で リブート動作や、モジュール更新が発生するplaybookについては、SemaphoreUIが処理中断してしまうため`systemd timer` が `ansible-playbook` を起動する。
 
 ---
 
@@ -500,9 +500,9 @@ docs/ai/prompts/
 
 ## 15. Playbook 作成依頼から確定までの運用フロー
 
-Playbook / Role を作成する場合、まずユーザーが ChatGPT と会話しながら、作りたい内容を整理する。
+Playbook / Role を作成する場合、まずユーザーが Claude/ChatGPT と会話しながら、作りたい内容を整理する。
 
-ChatGPT は、ユーザーとの会話を通じて、目的・対象・確認項目・制約・初回除外範囲を整理し、Claude Code に渡せる要求仕様としてまとめる。
+AIは、ユーザーとの会話を通じて、目的・対象・確認項目・制約・初回除外範囲を整理し、Claude Code に渡せる要求仕様としてまとめる。
 
 要求仕様は、詳細な実装方法ではなく、以下を中心にまとめる。
 
@@ -819,40 +819,42 @@ implement / review の本文はファイルに書き、agmsg にはパスを載�
 - 実装内容が requirement / implement / review の意図を満たしているか検証する。
 - 実行方法の安全性を判断し、必要に応じてより安全な検証方法へ置き換える。
 - Claude Code が提示したコマンドをそのまま実行しない。対象 playbook / role / task の性質を確認し、安全な実行方法を選ぶ。
-- playbook を実行するときは必ず `-e tester_mode=true` を付ける（§18 の不変条件）。
+- playbook を実行する前に、必ずヘッダの `# tester-gate: <種別>` マーカー（§18）を確認し、
+  種別に応じた実行方法を選ぶ（`tester_mode` は廃止。判断は marker 一本）。
 - 検証結果、実行したコマンド、置き換えた理由、未検証事項を test_result に記録する。
 
 `tester` の自律境界:
 
 | 種別 | 判断基準 | tester の扱い |
 | --- | --- | --- |
-| SAFE（read-only） | healthcheck / precheck / ping / stat / `pvesh get` / `ansible-lint` / `--syntax-check` など、対象状態を読むだけ | 自律実行してよい |
-| SAFE（検証実行） | `--check` / `--check --diff` / `tester_mode=true` など、実変更を防ぐ検証実行 | 自律実行してよい |
-| CHANGE | 変更を伴う可能性がある実行。copy / template / file / package / service / command / shell / uri などを含み、実変更の可能性がある | そのまま実行しない。必ず `-e tester_mode=true` を付けて実行する（必要に応じて `--check --diff` を重ねる） |
-| APPLY | 本番変更。patch / reboot / restart / reload / migration / firewall変更 / VM操作 / 証明書有効化など | `tester` は実施しない。Yoshinobu の本番適用判断が必要 |
+| SAFE | ヘッダが `safe-readonly` / `role-guarded`。healthcheck / precheck / stat など対象状態を読むだけ、または副作用が Slack 通知のみ。リスク受容が発生しない、文字通り安全 | 自律実行してよい（`--check` は不要） |
+| SEMI-SAFE（risk-accepted） | ヘッダが `risk-accepted`。実変更を伴うが本番影響ゼロ/軽微・復旧容易と人間が判断済み。`--check` の有無で挙動は変わらない（常に本実行） | 自律実行してよい（そのまま通常実行する） |
+| UN-SAFE（--check実行） | ヘッダが `check-mode-native` / `dry-run-aware`。`--check` を付けた場合のみ安全（破壊的操作がゲートされる、またはネイティブ dry-run 引数に差し替わる）。素の実行（次行の APPLY）は本番変更を起こすため、本質的には UN-SAFE な playbook | 自律実行してよい。**ただし必ず `--check` を付ける**（`--check --diff` を重ねてもよい） |
+| UN-SAFE（APPLY） | `check-mode-native` / `dry-run-aware` の playbook を **`--check` なしで**実行し、実際に破壊的操作（patch / reboot / restart / migration / firewall変更 / VM操作等）を行わせること | `tester` は実施しない。Yoshinobu の本番適用判断が必要 |
 
 Semaphore UI 登録・運用判断用のリスク分類:
 
 | 種別 | 意味 | Semaphore UI 登録時の扱い |
 | --- | --- | --- |
 | SAFE | read-only 確認、healthcheck、status、stat、gather、precheck など。実行しても対象状態を変更しない | 自動実行に載せてよい |
-| SEMI-SAFE | 変更を伴うが、冪等で、何度実行しても状態を壊しにくい構成管理・検証実行。例: `--check` / `--check --diff` / `tester_mode=true` / 明示的な dry-run | 自動実行可否を用途ごとに判断する。初回は手動確認を推奨 |
-| UN-SAFE | patch / reboot / restart / reload / migration / firewall変更 / VM操作 / 証明書有効化など、停止・切断・本番影響を起こし得る操作 | 人間の明示判断が必要。自動実行に載せる場合は個別ポリシーと停止条件を必ず確認する |
+| SEMI-SAFE | 変更を伴うが、冪等で、何度実行しても状態を壊しにくい構成管理・検証実行。例: `risk-accepted` playbook の通常実行、`check-mode-native` / `dry-run-aware` playbook の `--check` 実行 | 自動実行可否を用途ごとに判断する。初回は手動確認を推奨 |
+| UN-SAFE | `check-mode-native` / `dry-run-aware` playbook を `--check` なしで実行する場合など、停止・切断・本番影響を起こし得る操作 | 人間の明示判断が必要。自動実行に載せる場合は個別ポリシーと停止条件を必ず確認する |
 
 この `SAFE / SEMI-SAFE / UN-SAFE` は、Yoshinobu が Semaphore UI に task を登録する際に
-リスクを認識するための運用分類である。tester の `SAFE（read-only）/ SAFE（検証実行）/
-CHANGE / APPLY` は、テスト時にどの検証方法へ置き換えるかを判断するための分類であり、
-用途が異なる。
+リスクを認識するための運用分類であり、tester の自律境界表と同じ3語を使うが指す粒度が異なる
+（Semaphore 表は playbook 自体の危険度、tester 表は「今からの1回の実行」の安全性）。
+tester の `SAFE / SEMI-SAFE（risk-accepted）/ UN-SAFE（--check実行）/ UN-SAFE（APPLY）` は、
+テスト時にどの実行方法を選ぶかを判断するための分類である。
 
 補足:
 
 - SSH 接続そのものではなく、SSH 先で実行するコマンドの性質で判断する。
-- SSH 先で read-only コマンドを実行するだけなら、SAFE（read-only）として自律実行してよい。
-- SSH 先で変更を伴うコマンドを実行する場合は、CHANGE または APPLY として扱い、そのまま実行しない。
+- SSH 先で read-only コマンドを実行するだけなら、SAFE として自律実行してよい。
 - 本番適用を `tester` に行わせないのは、§14 の人間ゲートを保ち、かつ失敗時に Claude Code が
   状況をスムーズに把握できるようにするため。
 - テスト対象は pve2 を先行する（§2: pve2 は先行検証・縮退運用）。pve1 / 本番は dry-run → 人間判断。
-- 初期運用（v1）では高度なことは求めず、まず `-e tester_mode=true` を軸に、`--syntax-check` / `--check --diff` を重ねるバリエーションテストを中心に回す。
+- 初期運用（v1）では高度なことは求めず、まずヘッダの `# tester-gate:` マーカーで実行方針を
+  判断し、`--syntax-check` / `--check --diff` を重ねるバリエーションテストを中心に回す。
 
 ### final ファイル
 
@@ -948,129 +950,178 @@ Claude Codeは、実装完了の最後のステップとしてこのコメント
 
 ---
 
-## 18. tester_mode 運用ルール
+## 18. playbook の check_mode 安全分類（tester-gate）
 
-tester_mode は「シミュレーションフラグ」ではなく、**不変条件（invariant）を宣言する安全弁変数**。
+`tester_mode` / `tester_gate` role は 2026-07-06〜07 に廃止した。理由:
+`tester_gate` が play/host 単位で `end_play` / `end_host` するため、危険操作の
+手前にある本来安全な診断ロジック（healthcheck、apt dry-run シミュレーション等）
+までテスト対象から外れ、テストの実効性が低かった。Ansible が標準で持つ
+`--check`（`ansible_check_mode`）をゲート機構として使う方式へ移行した。
+Semaphore の `--check` オプションがそのまま効くため、独自の `-e` 変数は不要。
 
-### 不変条件
+### 18.1 5つの安全分類
 
-どの playbook も `-e tester_mode=true` 付きで実行した場合、対象ホストの実変更・
-外部副作用（Slack 通知含む）を起こさない。
+どの playbook も、ヘッダに `# tester-gate: <種別> — <理由>` を1行で宣言する
+（`scripts/check-tester-gate.sh` が機械チェックする。§18.4）。
 
-- 変更系 playbook はゲート（後述の `tester_gate` role）でこの条件を満たす。
-- read-only playbook はゲートなしで自明にこの条件を満たす（tester_mode=true でも
-  通常どおり全体が実行される。それ自体が安全なため、SAFE に tester_mode を付けても
-  no-op であり不自然ではない）。
-- したがって tester は対象を選別せず、**全 playbook に一律 `-e tester_mode=true` を付けてよい**。
+| 種別 | 意味 |
+| --- | --- |
+| `safe-readonly` | 完全 read-only（収集・観測のみ）。ゲート不要、常に本実行してよい。 |
+| `role-guarded` | 副作用が Slack 通知のみで、`common_slack/tasks/notify.yml` の `skip_notifications` ガードで抑止される。 |
+| `risk-accepted` | 破壊性はあるが、下記2条件を満たすため常に本実行してよいと人間が判断した playbook。`--check` の有無で挙動は変わらない。 |
+| `check-mode-native` | read-only な診断・検証部分は `--check` でも常に本実行し、実際の破壊的操作（またはそれに依存する後続処理）だけを `ansible_check_mode` でゲートする。 |
+| `dry-run-aware` | 破壊的コマンド自体を、`ansible_check_mode` 下でネイティブの dry-run 引数に差し替えて実行する（スキップではなく安全な引数での実行）。 |
 
-不変条件に違反しない操作（許容）:
+`risk-accepted` の判断基準（2点のみ。**実行コスト＝時間・ストレージI/O等の
+大小は理由にしない**）:
 
-- コントローラ（ローカル）へのレポート出力
-- read-only 収集のための冪等な収集スクリプト配置（healthcheck 系）
-- `apt update` 等、収集に必要なキャッシュ更新
+1. 本番サービス・他システムへの実害がない（隔離されている / 影響範囲が
+   自己完結 / 最悪ケースが軽微で復旧が容易）
+2. 破壊的な本体操作を省いた検証には意味がない、または省く価値が乏しい
+   （バックアップのリストア検証など、本体操作自体が検証の目的そのものであるケース）
 
-### 発動条件
+いずれか一方でも成立しない場合は `check-mode-native` または `dry-run-aware` を選ぶ。
 
-```yaml
-ansible-playbook playbooks/xxx.yml -e tester_mode=true
-```
+### 18.2 実装パターン
 
-- デフォルト値: `false`（`inventories/homelab/group_vars/all.yml` で定義。
-  指定なし = 通常実行、Semaphore/手動運用に影響なし。`-e` は変数優先順位が最強のため
-  group_vars のデフォルトを確実に上書きする）
-- `tester_mode=true` のとき `skip_notifications` も自動で `true` になる
-
-### tester_mode=true の挙動
-
-| 操作カテゴリ | tester_mode=true での動作 |
-|---|---|
-| 読み取り専用タスク（stat, pvesh get 等） | 通常通り実行 |
-| 変更タスク（reboot, restart, pvesh create, ha-manager 等） | 実行前に debug 表示して停止（`meta: end_play` / `meta: end_host`） |
-| Slack 通知（common_slack/tasks/notify.yml） | 送信しない、予定内容を debug 表示 |
-
-### ゲート対象モジュール（Ansible check mode では保護されないもの）
-
-```text
-command / shell / uri / expect / reboot
-systemd(state=restarted) / pvesh create
-qm migrate / pct migrate / ha-manager crm-command
-```
-
-### playbook 実装パターン
-
-ゲート実装は共通 role `roles/tester_gate/tasks/main.yml` に集約している
-（plan 表示 + `end_play` / `end_host`）。インラインの block を書かず、
-変更処理の直前に include を置く（コピペ drift 防止）:
+**risk-accepted: 常時本実行。** 呼び出し元（playbook または role の import
+箇所）に `check_mode: false` を1つ置けば、配下の task・block・rescue・
+always・ネストされた `include_tasks`/`include_role`（`loop:` 付きも含む）まで
+一括でカスケードする（実地検証済み）。
 
 ```yaml
-- name: "[tester_mode] Plan-only: show intended action and stop"
-  ansible.builtin.include_role:
-    name: tester_gate
-  when: tester_mode | default(false) | bool
-  vars:
-    tester_gate_end: host        # 省略時は play（end_play）。host は 1 ホストだけ停止
-    tester_gate_plan:
-      - "操作 : <操作内容>"
-      - "対象 : <対象>"
+tasks:
+  - name: Run <role> (always for real)
+    ansible.builtin.import_role:
+      name: <role>
+    check_mode: false
 ```
 
-- 停止のみでよい後続 play のゲートでは `tester_gate_plan` を省略する（表示なしで停止）。
-- 呼び出し側の `when` は通常運用時のログを skip 1 行に抑えるためのもの。
-  ゲート発火条件は role 内でも判定するため、when を忘れても安全側に倒れる。
-- `tester_gate_end: continue`（L3 dry-run リハーサル用。plan 表示のみで停止しない）は、
-  **後続の全変更操作を dry-run または read-only に差し替えた場合のみ**使用できる。
-  不変条件の担保が呼び出し側に移るため、`continue` の使用箇所はレビューで
-  「後続に実変更が残っていないか」を必ず確認対象とする（例: sophos_trim の `fstrim -n`）。
-
-各 play の vars に以下を追加:
+`ansible.builtin.include_role` / `ansible.builtin.include_tasks`（動的include）
+は**`check_mode:` を直接付けられない**（`'check_mode' is not a valid attribute
+for a IncludeRole/TaskInclude` エラー）。`import_role` / `import_tasks`
+（静的）に置き換えるか、block で包んで block 側に `check_mode: false` を置く:
 
 ```yaml
-vars:
-  skip_notifications: "{{ tester_mode | default(false) | bool }}"
+- name: Run something (always for real)
+  check_mode: false
+  block:
+    - ansible.builtin.include_role:
+        name: <role>
 ```
 
-### 複数 play / import_playbook 構成での注意
+呼び出し元の `include_tasks` に **`loop:` が付いている場合は block 化できない**
+（Ansible は `block:` に `loop:` を許可しない）。この場合は include 先の
+タスクファイル自身に `check_mode: false` を個別に付ける
+（例: `roles/recovery_push/tasks/drill_setup.yml`）。
 
-`meta: end_play` は **現在の play だけ** を停止する。playbook 全体は止まらない。
+**check-mode-native: 破壊的操作だけゲート。** 読み取り専用の診断タスクには
+`check_mode: false`、破壊的タスク（またはそれをまとめた block）には
+`when: not ansible_check_mode` + `tags: [destructive]` を付ける:
 
-```text
-- 単一 play playbook: end_play / end_host で十分
-- 複数 play / import_playbook 構成: 危険操作を持つすべての play にゲートを置く
-- 二重防御推奨: 入口 play のゲート + 危険 role 先頭のゲート
+```yaml
+- name: Get cluster resources
+  ansible.builtin.command: ...
+  check_mode: false          # --check でも実データで実行
+
+- name: Apply patches
+  ansible.builtin.command: ...
+  when: not ansible_check_mode
+  tags: [destructive]
 ```
 
-具体例 (`proxmox_patch_apply_node.yml` の 2 play 構成):
-- Play 1 (validate/mute): ゲートで `end_play` → Play 2 はまだ実行される
-- Play 2 (patch apply): 追加ゲートで `end_play` → ここで確実に停止
+複数の破壊的 task が相互依存する場合（reboot→post-reboot検証→報告、
+migrate→maintenance mode→HA待機→強制停止 等）は、個別 task に `when` を
+付けるより、**一連をまとめて1つの named block にし block 単位でゲート**する
+方が壊れにくい:
 
-### 機械チェック（lint）
+```yaml
+- name: Reboot and post-reboot verification
+  when: not ansible_check_mode
+  tags: [destructive]
+  block:
+    - name: Reboot host
+      ansible.builtin.reboot: ...
+    - name: Check service status
+      ansible.builtin.command: ...
+```
 
-「全 playbook が不変条件を満たす」は規約ではなく lint で保証する。
+**dry-run-aware: ネイティブ dry-run へ差し替え。** 破壊的コマンド自体の引数を
+`ansible_check_mode` で切り替える（例: `roles/sophos_trim/tasks/main.yml`）:
+
+```yaml
+- name: Set fstrim options (dry-run under --check)
+  ansible.builtin.set_fact:
+    fstrim_opts: "{{ '--dry-run -v' if ansible_check_mode else '-v' }}"
+```
+
+この方式では、コマンドを実行するタスク自体（`expect` や `command` など
+check_mode 非対応モジュール）に `check_mode: false` を付けないと、`--check`
+時にタスクごと auto-skip され、フラグの切り替えが無意味になる（§18.3）。
+
+**import_playbook で束ねるオーケストレータの注意。** import 先が既に
+`check-mode-native` 化されている場合、オーケストレータ側の `when:` 条件に
+`ansible_check_mode` を追加しない（`proxmox_patch_weekly_full.yml` の設計）。
+追加すると、import 先で意図的に残した「read-only 部分は `--check` でも
+本実行する」設計を上位で握りつぶし、テスト網羅性が落ちる。オーケストレータ
+自身の preflight・完了通知等は別途 `--check` 対応が必要（§18.3 参照）。
+
+### 18.3 Ansible check_mode の落とし穴
+
+実装時に繰り返し踏んだ／踏みかけた問題。新しい playbook を書く・レビューする
+際は毎回意識する:
+
+1. **モジュールごとに check_mode 挙動が3パターンに分かれる。**
+   - 非対応・auto-skip: `command` / `shell` / `expect` / `uri`
+     （`ansible-doc <module>` の `attributes.check_mode.support: none` で
+     確認できる）
+   - 対応・simulate: `copy` / `template` / `file` / `systemd` / `apt` 等
+     （`--check` 下では実際に書き込まず `changed` だけ返す）
+   - `command`/`shell` + `creates:`/`removes:`: ファイル存在チェックの結果に
+     応じて「`changed: true` と報告しつつ実行しない」という第3パターンを取る
+   - `risk-accepted` で「初回でも必ず実データを作りたい」場合は、上記いずれの
+     モジュールでも `check_mode: false` を明示しないと、実行されない・
+     simulate されるだけで終わる。
+2. **ハンドラは通知元タスクの `check_mode: false` を継承しない。** ハンドラ
+   自身に個別で `check_mode: false` を付ける必要がある（実地検証済み）。
+3. **`meta: end_play` / `end_host` は、それが属する block の `always:` を
+   丸ごとスキップする**（通常の task 失敗による rescue/always フローとは
+   異なる）。これに依存した旧ゲート実装は、実は停止時にレポート保存も通知も
+   一切残らない「無音停止」になっていた。
+4. **2値分岐（`ok`/`error` 等）の通知・レポートに plan-only/check-mode の
+   分岐を追加し忘れると、dry-run の成功が `error`（最悪 `critical`）として
+   誤通知される。** `--check` 実行時は必ず結果分岐にも check_mode を考慮する。
+5. **`block:` に `loop:` は付けられない。** `include_tasks`/`include_role` に
+   `loop:` が付いている呼び出しは block 化でのカスケードが使えないため、
+   include 先のタスクファイル自身に `check_mode: false` を個別に付ける。
+
+### 18.4 機械チェック（lint）
+
+「全 playbook が上記5分類のいずれかに分類されている」は規約ではなく lint で
+保証する。
 
 - `scripts/check-tester-gate.sh` が playbooks/ 配下の全 playbook を検査する
   （pre-commit フックから自動実行）。
-- 判定: `tester_gate` role の include（`name: tester_gate` 行）がある、または以下の
-  ヘッダマーカーがあること。単なる `tester_mode` 文字列やコメントでは通らない。
+- 判定: 以下のいずれかのヘッダマーカーがあること。
 
 ```text
-# tester-gate: safe-readonly — <理由>      read-only playbook。ゲート不要
-# tester-gate: role-guarded — <理由>       副作用が通知のみで、common_slack notify.yml の
-                                           tester_mode ガードで抑止される playbook
-# tester-gate: gated-in-role — <role パス> ゲートが playbook ではなく role のタスク先頭にある
-                                           playbook（例: sophos_trim）
+# tester-gate: safe-readonly — <理由>       完全 read-only、ゲート不要
+# tester-gate: role-guarded — <理由>        副作用が Slack 通知のみ
+# tester-gate: risk-accepted — <理由>       常に本実行してよいと人間が判断
+                                            （許容した最悪ケースを理由に明記）
+# tester-gate: check-mode-native — <理由>   ansible_check_mode で破壊的操作をゲート
+# tester-gate: dry-run-aware — <理由>       破壊的コマンドをネイティブ dry-run に差し替え
 ```
 
-新規 playbook は、ゲートを入れるかマーカーを付けない限り commit できない。
+新規 playbook は、上記いずれかのマーカーを付けない限り commit できない。
 
-### tester の実行義務
+### 18.5 tester の実行義務
 
-- tester は Claude Code から渡されたコマンドをそのまま実行しない。対象 playbook / role / task の性質を確認する。
-- **playbook を実行するときは必ず `-e tester_mode=true` を付ける。** どの検証方法を選ぶかに
-  かかわらず、これが安全性の下限を保証する（検証方法の選択ミスが事故に直結しない）。
-- `--syntax-check` / `--check` / `--check --diff` は置き換えではなく、情報を増やすために
-  tester_mode と**重ねて**使う追加手段。
-  - 注意: `--check` は `command` / `shell` / `uri` / `expect` を skip するため、収集系が動かず
-    plan 表示や判定が意図通り出ないことがある（§「ゲート対象モジュール」）。
-    ゲート自体は tester_mode 変数のみで判定するため、停止は保証される。
-- 通常実行による APPLY は Yoshinobu の本番適用判断後の運用手順で行う。tester は APPLY を行わない。
-- `allow_unsafe=true` は今回実装しない（将来のオプション）
+- tester は Claude Code から渡されたコマンドをそのまま実行しない。対象
+  playbook のヘッダマーカーを必ず確認する。
+- マーカーが `safe-readonly` / `role-guarded` / `risk-accepted`: 通常実行で
+  よい（`--check` は不要。付けても `risk-accepted` は挙動が変わらない）。
+- マーカーが `check-mode-native` / `dry-run-aware`: **必ず `--check` を付ける**
+  （`--check --diff` を重ねてもよい）。`--check` を付けない実行は APPLY
+  （本番適用）であり、tester は行わない。
+- `allow_unsafe=true` は今回実装しない（将来のオプション）。

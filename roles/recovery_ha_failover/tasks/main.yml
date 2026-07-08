@@ -13,6 +13,7 @@
     _rhf_started_at: "{{ lookup('pipe', 'date -u +%Y-%m-%dT%H:%M:%SZ') }}"
 
 - name: HA failover attempt (with report/notify in always)
+  check_mode: false
   block:
 
     # -----------------------------------------------------------------------
@@ -105,26 +106,17 @@
           現在のノード {{ _rhf_source_node }} 以外のオンラインノードが必要です。
 
     # -----------------------------------------------------------------------
-    # tester_mode gate (L2): Phase 1-2 の read-only 検証(タグ・HA 登録・移行先
-    # 選定)は実データで実行し、変更系 Phase 3 (relocate) の直前で停止する
+    # ansible_check_mode gate: Phase 1-2 の read-only 検証(タグ・HA 登録・
+    # 移行先選定)は実データで実行し、変更系 Phase 3 (relocate) 以降は
+    # --check 時には行わない
     # -----------------------------------------------------------------------
-    - name: "[tester_mode] Mark result as plan-only"
+    - name: "[check-mode] Mark result as plan-only"
       ansible.builtin.set_fact:
         _rhf_result: "plan-only"
-        _rhf_detail: "tester_mode: タグ・HA 登録・移行先の read-only 検証まで実施し、relocate の前で停止"
-      when: tester_mode | default(false) | bool
-
-    - name: "[tester_mode] Plan-only: show verified failover plan and stop"
-      ansible.builtin.include_role:
-        name: tester_gate
-      when: tester_mode | default(false) | bool
-      vars:
-        tester_gate_plan:
-          - "操作  : ha-manager crm-command relocate vm:{{ _rhf_vmid }} {{ _rhf_target_node }}"
-          - "対象  : {{ target }} (vmid={{ _rhf_vmid }})"
-          - "タグ  : {{ _rhf_vm.tags | default('(none)') }} — hacritical 検証済み・HA 登録確認済み"
-          - "移行  : {{ _rhf_source_node }} → {{ _rhf_target_node }}"
-          - "通知  : skip_notifications=true のため送信しません"
+        _rhf_detail: >-
+          --check: タグ・HA 登録・移行先の read-only 検証まで実施し、
+          relocate は行わずに停止しました({{ _rhf_source_node }} → {{ _rhf_target_node }})
+      when: ansible_check_mode
 
     # -----------------------------------------------------------------------
     # Phase 3: HA マネージャーに relocate を指示
@@ -133,6 +125,8 @@
       ansible.builtin.command:
         cmd: ha-manager crm-command relocate vm:{{ _rhf_vmid }} {{ _rhf_target_node }}
       changed_when: true
+      when: not ansible_check_mode
+      tags: [destructive]
 
     # -----------------------------------------------------------------------
     # Phase 4: 移行完了待機 (target-node で running になるまで)
@@ -142,7 +136,6 @@
         cmd: pvesh get /cluster/resources --output-format json
       register: _rhf_migrate_poll
       changed_when: false
-      check_mode: false
       retries: "{{ (recovery_ha_failover_timeout_s | int) // (recovery_ha_failover_poll_s | int) }}"
       delay: "{{ recovery_ha_failover_poll_s }}"
       until: >-
@@ -153,6 +146,7 @@
         selectattr('node', 'equalto', _rhf_target_node) |
         selectattr('status', 'equalto', 'running') |
         list | length > 0
+      when: not ansible_check_mode
 
     - name: Mark HA failover as successful
       ansible.builtin.set_fact:
@@ -160,6 +154,7 @@
         _rhf_detail: >-
           {{ target }}(vmid {{ _rhf_vmid }}) が {{ _rhf_source_node }} から
           {{ _rhf_target_node }} へ移行し、running になりました。
+      when: not ansible_check_mode
 
   rescue:
     - name: Capture failure detail
@@ -209,8 +204,8 @@
     - name: Send Slack notification (best-effort)
       ansible.builtin.include_tasks: "{{ playbook_dir }}/../roles/common_slack/tasks/notify.yml"
       vars:
-        slack_channel: "alerts"
-        slack_status: "{{ 'ok' if _rhf_result == 'ok' else 'critical' }}"
+        slack_channel: "{{ 'info' if _rhf_result == 'plan-only' else 'alerts' }}"
+        slack_status: "{{ 'info' if _rhf_result == 'plan-only' else ('ok' if _rhf_result == 'ok' else 'critical') }}"
         slack_title: "[recovery_ha_failover] {{ _rhf_result | upper }} - {{ target }}"
         slack_message: |
           対象      : {{ target }} (vmid {{ _rhf_vmid }})
@@ -219,6 +214,6 @@
           移行元    : {{ _rhf_source_node }}
           移行先    : {{ _rhf_target_node }}
           開始時刻  : {{ _rhf_started_at }}
-          {% if _rhf_result != 'ok' %}
+          {% if _rhf_result not in ['ok', 'plan-only'] %}
           ⚠️ 自動対応の限界です。人間による確認・対応が必要です。
           {% endif %}

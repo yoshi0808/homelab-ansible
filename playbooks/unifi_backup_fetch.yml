@@ -10,25 +10,34 @@
 # 詳細は docs/ai/reviews/unifi_backup_fetch/2026-06-15_001_requirement.md を参照。
 #
 # 通知: 結果を Slack へ通知する(取得・保存 OK = info/ok、失敗 = alerts/error)。
+#
+# tester-gate: risk-accepted — tester_mode/tester_gate を廃止。--check の有無に
+# かかわらず常に本実行する。理由: CloudKey側の設定変更は行わずバックアップ生成
+# API(UIの「バックアップ取得」ボタンと同等)を叩くのみで本番サービスへの影響は
+# ゼロ。バックアップ生成・ダウンロード・鮮度検証を省いた検証には意味がない
+# (proxmox_backup_restore_verifyと同じ理由)ためYoshinobuが安全側と判断
+# (2026-07-06)。注意: 世代ローテーションは件数基準(既定8世代)のため、
+# 頻繁なテスト実行は本番バックアップの実質的な保持期間を縮める可能性がある。
+# 詳細は docs/ai/prompts/core.md §18 "移行中の例外"。
 
 - name: unifi_backup_fetch
   hosts: pve1
   become: true
   gather_facts: true
-  vars:
-    skip_notifications: "{{ tester_mode | default(false) | bool }}"
   vars_files:
     - "{{ playbook_dir }}/../inventories/vars/cloudkey.yml"
   tasks:
-    - name: "[tester_mode] Plan-only: show intended UniFi backup fetch and stop"
-      ansible.builtin.include_role:
-        name: tester_gate
-      when: tester_mode | default(false) | bool
-      vars:
-        tester_gate_plan:
-          - "操作 : CloudKey バックアップ生成 + NFS 保存 + ローテーション (uri モジュール)"
-          - "通知 : skip_notifications=true のため送信しません"
+    - name: "[migration] tester_mode is deprecated for this playbook — it always runs for real"
+      ansible.builtin.assert:
+        that: not (tester_mode | default(false) | bool)
+        fail_msg: >-
+          This playbook no longer supports -e tester_mode=true and has no
+          dry-run mode (--check included): backup fetch always runs for
+          real. See docs/ai/prompts/core.md §18 "移行中の例外".
+        quiet: true
+
     - name: Fetch UniFi OS backup
+      check_mode: false
       block:
         - name: Run unifi_backup_fetch role
           ansible.builtin.include_role:
