@@ -1125,3 +1125,7 @@ check_mode 非対応モジュール）に `check_mode: false` を付けないと
   （`--check --diff` を重ねてもよい）。`--check` を付けない実行は APPLY
   （本番適用）であり、tester は行わない。
 - `allow_unsafe=true` は今回実装しない（将来のオプション）。
+- `ansible-playbook` 実行時は、`--check` / `-e` 等のフラグを playbook パスより
+  前に書く（例: `ansible-playbook --check -e target=authy playbooks/foo.yml`）。
+  Codex 側の承認ルール（`~/.codex/rules/default.rules`）はフラグが先に来る
+  並びしか自動許可しないため、この書き方をしないと毎回確認プロンプトが出る。
