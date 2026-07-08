@@ -821,6 +821,9 @@ implement / review の本文はファイルに書き、agmsg にはパスを載�
 - Claude Code が提示したコマンドをそのまま実行しない。対象 playbook / role / task の性質を確認し、安全な実行方法を選ぶ。
 - playbook を実行する前に、必ずヘッダの `# tester-gate: <種別>` マーカー（§18）を確認し、
   種別に応じた実行方法を選ぶ（`tester_mode` は廃止。判断は marker 一本）。
+- Codex が `--check` 付き playbook を実行する場合は、原則として
+  `scripts/safe-ansible-check.sh` を使う（§18.6）。`--check` なしの
+  `ansible-playbook` は人間確認の対象であり、tester は APPLY として扱う。
 - 検証結果、実行したコマンド、置き換えた理由、未検証事項を test_result に記録する。
 
 `tester` の自律境界:
@@ -1125,7 +1128,30 @@ check_mode 非対応モジュール）に `check_mode: false` を付けないと
   （`--check --diff` を重ねてもよい）。`--check` を付けない実行は APPLY
   （本番適用）であり、tester は行わない。
 - `allow_unsafe=true` は今回実装しない（将来のオプション）。
-- `ansible-playbook` 実行時は、`--check` / `-e` 等のフラグを playbook パスより
-  前に書く（例: `ansible-playbook --check -e target=authy playbooks/foo.yml`）。
-  Codex 側の承認ルール（`~/.codex/rules/default.rules`）はフラグが先に来る
-  並びしか自動許可しないため、この書き方をしないと毎回確認プロンプトが出る。
+
+### 18.6 Codex 用 `--check` 実行 wrapper
+
+Codex の承認ルール（`~/.codex/rules/default.rules`）は prefix ベースで判定するため、
+`ansible-playbook playbooks/foo.yml --check` のように `--check` が後方にある
+コマンドを「安全な check 実行」として一般判定できない。
+
+そのため、Codex が `check-mode-native` / `dry-run-aware` の playbook を
+`--check` 実行する場合は、原則として以下の wrapper を使う。
+
+```bash
+scripts/safe-ansible-check.sh playbooks/foo.yml --check
+scripts/safe-ansible-check.sh playbooks/foo.yml -e target=authy --check
+```
+
+この wrapper は argv に `--check` が含まれない場合は即終了し、含まれる場合のみ
+`ansible-playbook "$@"` に委譲する。
+
+運用ルール:
+
+- `check-mode-native` / `dry-run-aware` の検証実行は
+  `scripts/safe-ansible-check.sh ... --check` を使う。
+- `--check` なしの `ansible-playbook` は wrapper を使わない。APPLY または
+  `risk-accepted` の通常実行として扱い、必要に応じて人間確認を通す。
+- `risk-accepted` は常時本実行が前提なので、この wrapper の対象ではない。
+- wrapper は Codex の承認プロンプト削減のための補助であり、安全性の最終判断は
+  playbook header の `# tester-gate:` マーカーと test_plan に基づいて行う。
