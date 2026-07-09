@@ -1,0 +1,46 @@
+---
+# codex_update_check.yml - Codex CLI(npm globalパッケージ)の週次バージョン
+# 確認・自動更新。
+#
+# 対象ホスト: ansy, quory。実行元: quory(systemd timer、金曜17:00、
+# 17:30のProxmoxパッチドライランより前)。
+#
+# tester-gate: risk-accepted — 常に本実行する。理由: (1) 更新対象は
+# Codex CLIというツール自体であり、homelabの本番サービス(freeradius/
+# grafana等)には直接触れない。quory上ではrecovery-execのcodex-exec-wrapper
+# が内部でCodex CLIを呼ぶため波及の可能性はあるが、金曜夕方(平日最終日)の
+# 実行のため問題が出ても週末で対応できる、とYoshinobuが判断(2026-07-09)。
+# (2) npm installを省略した検証には意味がなく、バージョン比較・実更新まで
+# 含めて検証する価値がある。詳細は
+# docs/ai/reviews/codex_update_check/2026-07-09_001_requirement.md。
+
+- name: codex_update_check - verify execution host
+  hosts: localhost
+  gather_facts: true
+  connection: local
+  tasks:
+    - name: Ensure this playbook is running on quory
+      ansible.builtin.assert:
+        that:
+          - ansible_facts['hostname'] == 'quory'
+        fail_msg: >-
+          codex_update_check.yml must be run on quory only
+          (current host: {{ ansible_facts['hostname'] }}).
+
+    - name: "[migration] tester_mode is deprecated for this playbook — it always runs for real"
+      ansible.builtin.assert:
+        that: not (tester_mode | default(false) | bool)
+        fail_msg: >-
+          This playbook no longer supports -e tester_mode=true and has no
+          dry-run mode (--check included): Codex CLI update check always
+          runs for real. See docs/ai/prompts/core.md §18.
+        quiet: true
+
+- name: Check and update Codex CLI on ansy and quory
+  hosts: ansy:quory
+  gather_facts: false
+  tasks:
+    - name: Run codex_update_check role (always for real)
+      ansible.builtin.import_role:
+        name: codex_update_check
+      check_mode: false

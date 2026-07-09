@@ -1,0 +1,127 @@
+---
+# codex_update_check: Codex CLI(npm globalパッケージ)のバージョン確認・
+# 差分があれば更新する。バージョン取得はcommandモジュールで収集のみ行い、
+# 判定(比較・changed/failed)はAnsible側(本ファイル)で行う(core.md §7)。
+# 参照: docs/ai/reviews/codex_update_check/2026-07-09_001_requirement.md
+
+# ---------------------------------------------------------------------------
+# Phase 1: 現在インストールされているバージョンを取得する
+# ---------------------------------------------------------------------------
+- name: Get currently installed Codex CLI version
+  ansible.builtin.command:
+    cmd: "npm list -g {{ codex_update_check_package }} --depth=0 --json"
+  register: codex_update_check_current_raw
+  changed_when: false
+  failed_when: false
+
+- name: Parse currently installed version
+  ansible.builtin.set_fact:
+    codex_update_check_current_version: >-
+      {{ (codex_update_check_current_raw.stdout | default('{}') | from_json)
+         .get('dependencies', {}).get(codex_update_check_package, {}).get('version', '') }}
+  when: codex_update_check_current_raw.rc == 0
+
+# ---------------------------------------------------------------------------
+# Phase 2: npmレジストリの最新バージョンを取得する
+# ---------------------------------------------------------------------------
+- name: Get latest Codex CLI version from npm registry
+  ansible.builtin.command:
+    cmd: "npm view {{ codex_update_check_package }} version"
+  register: codex_update_check_latest_raw
+  changed_when: false
+  failed_when: false
+
+- name: Parse latest version
+  ansible.builtin.set_fact:
+    codex_update_check_latest_version: "{{ codex_update_check_latest_raw.stdout | trim }}"
+  when: codex_update_check_latest_raw.rc == 0
+
+# ---------------------------------------------------------------------------
+# Phase 3: バージョン比較(shellでは判定しない。Ansible側で判定する)
+# ---------------------------------------------------------------------------
+- name: Judge collection status and whether an update is needed
+  ansible.builtin.set_fact:
+    codex_update_check_collected: "{{ _collected }}"
+    codex_update_check_needs_update: "{{ _collected and (codex_update_check_current_version != codex_update_check_latest_version) }}"
+  vars:
+    _collected: >-
+      {{ (codex_update_check_current_raw.rc == 0) and (codex_update_check_latest_raw.rc == 0)
+         and (codex_update_check_current_version | default('', true) | length > 0)
+         and (codex_update_check_latest_version | default('', true) | length > 0) }}
+
+# ---------------------------------------------------------------------------
+# Phase 4: 差分があるホストのみ更新する
+# ---------------------------------------------------------------------------
+- name: Update Codex CLI to the latest version
+  ansible.builtin.command:
+    cmd: "npm install -g {{ codex_update_check_package }}@latest"
+  become: true
+  register: codex_update_check_install_result
+  changed_when: true
+  when: codex_update_check_needs_update | default(false)
+
+- name: Record per-host update status
+  ansible.builtin.set_fact:
+    codex_update_check_status: >-
+      {{ 'update_failed' if (codex_update_check_needs_update | default(false)) and (codex_update_check_install_result.rc | default(1)) != 0
+         else 'updated' if (codex_update_check_needs_update | default(false)) and (codex_update_check_install_result.rc | default(1)) == 0
+         else 'up_to_date' if (codex_update_check_collected | default(false))
+         else 'collection_failed' }}
+
+# ---------------------------------------------------------------------------
+# Phase 5: 結果集約・Slack通知
+# ---------------------------------------------------------------------------
+- name: Aggregate results and notify
+  run_once: true
+  delegate_to: localhost
+  block:
+    - name: Build per-host summary
+      ansible.builtin.set_fact:
+        codex_update_check_results: >-
+          {{ (codex_update_check_results | default([])) + [{
+            'host': item,
+            'status': hostvars[item].codex_update_check_status | default('collection_failed'),
+            'current': hostvars[item].codex_update_check_current_version | default('?'),
+            'latest': hostvars[item].codex_update_check_latest_version | default('?'),
+          }] }}
+      loop: "{{ ansible_play_hosts_all }}"
+      loop_control:
+        label: "{{ item }}"
+
+    - name: Classify updated / failed hosts
+      ansible.builtin.set_fact:
+        codex_update_check_updated_hosts: "{{ codex_update_check_results | selectattr('status', 'equalto', 'updated') | list }}"
+        codex_update_check_failed_hosts: "{{ codex_update_check_results | selectattr('status', 'in', ['update_failed', 'collection_failed']) | list }}"
+
+    - name: Print codex_update_check summary
+      ansible.builtin.debug:
+        msg: "{{ codex_update_check_results }}"
+
+    - name: Send Slack notification (update performed and/or failures)
+      ansible.builtin.include_tasks: "{{ playbook_dir }}/../roles/common_slack/tasks/notify.yml"
+      vars:
+        slack_channel: "{{ 'alerts' if codex_update_check_failed_hosts | length > 0 else 'info' }}"
+        slack_status: "{{ 'error' if codex_update_check_failed_hosts | length > 0 else 'info' }}"
+        slack_title: >-
+          [codex_update_check] {{ 'ERROR' if codex_update_check_failed_hosts | length > 0 else 'Codex CLI updated' }}
+        slack_message: |
+          更新実施:
+          {% for r in codex_update_check_updated_hosts %}
+          - {{ r.host }}: {{ r.current }} → {{ r.latest }}
+          {% else %}
+          (なし)
+          {% endfor %}
+          失敗:
+          {% for r in codex_update_check_failed_hosts %}
+          - {{ r.host }}: status={{ r.status }} (current={{ r.current }}, latest={{ r.latest }})
+          {% else %}
+          (なし)
+          {% endfor %}
+      when: (codex_update_check_updated_hosts | length > 0) or (codex_update_check_failed_hosts | length > 0)
+
+    - name: Fail if any host failed collection or update
+      ansible.builtin.fail:
+        msg: >-
+          codex_update_check: 以下のホストで失敗しました:
+          {{ codex_update_check_failed_hosts | map(attribute='host') | join(', ') }}
+      when: codex_update_check_failed_hosts | length > 0
