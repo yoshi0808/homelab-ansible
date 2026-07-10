@@ -2,8 +2,10 @@
 # codex_update_check.yml - Codex CLI(npm globalパッケージ)の週次バージョン
 # 確認・自動更新。
 #
-# 対象ホスト: ansy, quory。実行元: quory(systemd timer、金曜17:00、
-# 17:30のProxmoxパッチドライランより前)。
+# 対象ホスト: ansy, quory。実行元: quory。スケジュールはSemaphore UIで登録する
+# (17:30のProxmoxパッチドライランより前、金曜17:00を想定)。単なるモジュール
+# 更新でSemaphoreUIプロセス自体やジョブ実行環境には影響しないため、systemd
+# timerではなくSemaphoreUIのスケジュール機能を使う(core.md §12、2026-07-10)。
 #
 # tester-gate: risk-accepted — 常に本実行する。理由: (1) 更新対象は
 # Codex CLIというツール自体であり、homelabの本番サービス(freeradius/

@@ -35,13 +35,13 @@ systemd_ansible_timers:
   #   schedule: "*-*-* 05:35:00"
   #   playbook: playbooks/monitoring_healthcheck.yml
   #   persistent: true
+  # - name: codex-update-check
+  #   description: Check and update Codex CLI on ansy and quory
+  #   schedule: "Fri *-*-* 17:00:00"
+  #   playbook: playbooks/codex_update_check.yml
+  #   persistent: false
   - name: cert-renew-quory
     description: Renew quory semaphore TLS certificate
     schedule: "*-*-01 00:35:00"
     playbook: playbooks/cert_renew_quory.yml
-    persistent: false
-  - name: codex-update-check
-    description: Check and update Codex CLI on ansy and quory
-    schedule: "Fri *-*-* 17:00:00"
-    playbook: playbooks/codex_update_check.yml
     persistent: false

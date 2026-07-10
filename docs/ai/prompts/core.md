@@ -391,7 +391,16 @@ Ansible playbook:
 
 Ansible 自体には「時間になったら自分で起動する」機能はない。Semaphore UIがその処理を担う。
 
-quory 上で リブート動作や、モジュール更新が発生するplaybookについては、SemaphoreUIが処理中断してしまうため`systemd timer` が `ansible-playbook` を起動する。
+quory 上で SemaphoreUI 自体を再起動・停止させる（例: `cert_renew_quory.yml` の
+semaphore 再起動）、またはホストの再起動を伴いジョブ実行そのものが中断してしまう
+（例: `proxmox_patch_apply_node.yml`、`ubuntu_nightly.yml`）playbook については、
+SemaphoreUI が自身の処理を道連れに中断してしまうため `systemd timer` が
+`ansible-playbook` を起動する。
+
+単にモジュール／パッケージを更新するだけで、SemaphoreUI プロセス自体やジョブ実行
+環境そのものには影響しない playbook（例: `codex_update_check.yml`）は、上記に該当
+しないため SemaphoreUI のスケジュール機能で問題ない（2026-07-10、モジュール更新を
+一律 systemd timer 対象としていたのを訂正）。
 
 ---
 
