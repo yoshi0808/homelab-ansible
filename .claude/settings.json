@@ -3,6 +3,14 @@
     "allow": [
       "Bash(*)"
     ],
+    "ask": [
+      "Bash(rm*)",
+      "Bash(ansible-playbook*)",
+      "Bash(ansible *)",
+      "Bash(sudo *)",
+      "Bash(python3 *)",
+      "Bash(ssh*)"
+    ],
     "deny": [
       "Bash(git commit*)",
       "Bash(git push*)"

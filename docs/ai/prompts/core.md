@@ -472,17 +472,26 @@ AI が patch / reboot / migration / inventory 変更などの危険操作を、�
 AI の役割分担は以下とする。
 
 ```text
-要求仕様整理: ChatGPT/Claude
-実装: Claude Code
-レビュー: Codex
-追加実装: Claude Code
-再レビュー: Codex
+要求仕様整理: ChatGPT / Claude Code（要件定義・ハブ役）
+実装: Claude Code（implementer ロール）
+レビュー: Codex（reviewer ロール）
+追加実装: Claude Code（implementer ロール）
+再レビュー: Codex（reviewer ロール）
 テスト: Codex（tester ロール。安全な検証方法を選択し、品質を保証する QA 担当。本番適用はしない）
 運用判断: Yoshinobu
 本番実行判断: Yoshinobu
 確定判断: Yoshinobu
 コミット: Yoshinobu
 ```
+
+Claude Code は agmsg 上で2ロールに分かれる（詳細は §15）。
+
+- 要件定義・ハブ役（agmsg 名 `claude`）: ユーザーとの対話、requirement 整理・保存、
+  implementer / reviewer / tester との受け渡し仲介、レビュー指摘のトリアージ、
+  test_plan 起案、テスト結果と requirement の突合。
+- 実装担当（agmsg 名 `implementer`）: `claude` から受け取った requirement /
+  review をもとに実装し、implement ファイルを保存する。reviewer / tester とは
+  直接やり取りせず、常に `claude` 経由で受け渡しする。
 
 ### prompts/ の考え方
 
@@ -558,7 +567,7 @@ YYYY-MM-DD_008_final.md
 - `requirement`: 要求仕様
 - `implement`: 実装内容、またはレビュー後の追加実装内容
 - `review`: レビュー結果
-- `test_plan`: テスト計画（Claude Code が起案し、Yoshinobu が承認）
+- `test_plan`: テスト計画（`claude`(要件定義・ハブ役)が起案し、Yoshinobu が承認）
 - `test_result`: テスト実行結果（tester が保存）
 - `final`: 最終確認
 
@@ -568,21 +577,23 @@ YYYY-MM-DD_008_final.md
 ### 基本フロー
 
 ```text
-1. ユーザーが作りたい Playbook / Role を ChatGPT に相談する
+1. ユーザーが作りたい Playbook / Role を ChatGPT、または要件定義・ハブ役の
+   Claude Code（agmsg 名 `claude`）に相談する
 
-2. ChatGPT が会話を通じて要求仕様を整理する
+2. ChatGPT / `claude` が会話を通じて要求仕様を整理する
 
 3. ユーザーが要求仕様を確認する
 
-4. ユーザーが Claude Code に要求仕様を渡す
-
-5. Claude Code は、ユーザーから受け取った要求仕様を以下に保存する
+4. `claude` は、ユーザーから受け取った要求仕様を以下に保存する
 
    docs/ai/reviews/<target>/YYYY-MM-DD_001_requirement.md
 
-6. Claude Code が playbook / role / shell を実装する
+5. `claude` が `implementer` に requirement のパスと implement の保存先パスを
+   agmsg で送る（§「エージェント間メッセージング（agmsg）」）
 
-7. Claude Code は、実装完了後に作成・更新した内容を以下に保存する
+6. `implementer` が playbook / role / shell を実装する
+
+7. `implementer` は、実装完了後に作成・更新した内容を以下に保存する
 
    docs/ai/reviews/<target>/YYYY-MM-DD_002_implement.md
 
@@ -596,29 +607,37 @@ YYYY-MM-DD_008_final.md
    - 未対応事項
    - 注意点
 
-8. Codex が git diff、requirement、implement をもとにレビューする
+   `implementer` は保存後、implement ファイルのパスを `claude` に agmsg で返す。
 
-   保存先例:
+8. `claude` が reviewer に requirement / implement のパスと review の保存先を送る
+
+9. Codex（`reviewer`）が git diff、requirement、implement をもとにレビューし、
+   以下に保存する
 
    docs/ai/reviews/<target>/YYYY-MM-DD_003_review.md
 
-9. 修正が必要な場合、ユーザーが Claude Code に review ファイルを渡して追加実装を依頼する
+10. `reviewer` が review ファイルのパスを `claude` に返す。`claude` は指摘を
+    トリアージし（後述）、修正要否をユーザーに提示する
 
-10. Claude Code は、追加実装後の内容を次の implement として保存する
+11. 修正が必要な場合、`claude` が `implementer` に review ファイルのパスを渡して
+    追加実装を依頼する
+
+12. `implementer` は、追加実装後の内容を次の implement として保存し、
+    `claude` に返す
 
     保存先例:
 
     docs/ai/reviews/<target>/YYYY-MM-DD_004_implement.md
 
-11. Codex が再レビューする
+13. `claude` が reviewer に再レビューを依頼する
 
     保存先例:
 
     docs/ai/reviews/<target>/YYYY-MM-DD_005_review.md
 
-12. ユーザーが最終判断する
+14. ユーザーが最終判断する
 
-13. 問題なければ commit する
+15. 問題なければ Yoshinobu が commit する
 ```
 
 ### レビュー依頼時の注意
@@ -660,20 +679,20 @@ Codex にレビューを依頼する場合は、対象となる requirement / im
 
 誰が何を保存し、何を次に渡すかを明確にする。
 
-| 工程             | 担当        | 保存するファイル                                             | 次に参照する主なファイル                                     |
-| ---------------- | ----------- | ------------------------------------------------------------ | ------------------------------------------------------------ |
-| 要求仕様の整理   | ChatGPT     | 直接ファイル保存はしない。ユーザーに Claude Code へ渡す要求仕様を提示する。 | ChatGPT が提示した要求仕様本文                               |
-| requirement 保存 | Claude Code | `YYYY-MM-DD_001_requirement.md`                              | `YYYY-MM-DD_001_requirement.md`                              |
-| 初回実装         | Claude Code | `YYYY-MM-DD_002_implement.md`                                | `YYYY-MM-DD_001_requirement.md`, `YYYY-MM-DD_002_implement.md` |
-| レビュー         | Codex       | `YYYY-MM-DD_003_review.md`                                   | `YYYY-MM-DD_001_requirement.md`, `YYYY-MM-DD_002_implement.md`, `YYYY-MM-DD_003_review.md` |
-| 追加実装         | Claude Code | `YYYY-MM-DD_004_implement.md`                                | `YYYY-MM-DD_001_requirement.md`, `YYYY-MM-DD_003_review.md`, `YYYY-MM-DD_004_implement.md` |
-| 再レビュー       | Codex       | `YYYY-MM-DD_005_review.md`                                   | `YYYY-MM-DD_001_requirement.md`, `YYYY-MM-DD_004_implement.md`, `YYYY-MM-DD_005_review.md` |
+| 工程             | 担当                          | 保存するファイル                                             | 次に参照する主なファイル                                     |
+| ---------------- | ----------------------------- | ------------------------------------------------------------ | ------------------------------------------------------------ |
+| 要求仕様の整理   | ChatGPT / `claude`（ハブ）    | ChatGPT の場合は直接ファイル保存はせず要求仕様本文を提示する。`claude` の場合は次行の requirement 保存まで行う。 | ChatGPT が提示した要求仕様本文、または requirement ファイル  |
+| requirement 保存 | `claude`（ハブ）              | `YYYY-MM-DD_001_requirement.md`                              | `YYYY-MM-DD_001_requirement.md`                              |
+| 初回実装         | `implementer`                 | `YYYY-MM-DD_002_implement.md`                                | `YYYY-MM-DD_001_requirement.md`, `YYYY-MM-DD_002_implement.md` |
+| レビュー         | Codex（`reviewer`）           | `YYYY-MM-DD_003_review.md`                                   | `YYYY-MM-DD_001_requirement.md`, `YYYY-MM-DD_002_implement.md`, `YYYY-MM-DD_003_review.md` |
+| 追加実装         | `implementer`                 | `YYYY-MM-DD_004_implement.md`                                | `YYYY-MM-DD_001_requirement.md`, `YYYY-MM-DD_003_review.md`, `YYYY-MM-DD_004_implement.md` |
+| 再レビュー       | Codex（`reviewer`）           | `YYYY-MM-DD_005_review.md`                                   | `YYYY-MM-DD_001_requirement.md`, `YYYY-MM-DD_004_implement.md`, `YYYY-MM-DD_005_review.md` |
 
-Claude Code は、ユーザーから受け取った要求仕様を `requirement` ファイルとして保存する。
+`claude`（要件定義・ハブ役）は、ユーザーから受け取った要求仕様を `requirement` ファイルとして保存する。
 ユーザーが手作業で requirement ファイルを作る運用ではない。
 
-Claude Code は、実装完了後に実装内容・作成/更新ファイル・確認結果を `implement` ファイルとして保存する。
-Codex は、レビュー完了後にレビュー内容を `review` ファイルとして保存する。
+`implementer` は、実装完了後に実装内容・作成/更新ファイル・確認結果を `implement` ファイルとして保存する。
+Codex（`reviewer`）は、レビュー完了後にレビュー内容を `review` ファイルとして保存する。
 
 各工程の出力末尾には、次のように `Next step files` を明記する。
 
@@ -685,7 +704,7 @@ Next step files:
 - docs/ai/reviews/radius_healthcheck/2026-05-06_002_implement.md
 ```
 
-ユーザーは、この一覧をそのまま次の Claude Code / Codex への依頼に含める。
+ユーザーは、この一覧をそのまま次の `claude` / `implementer` / Codex への依頼に含める。
 
 agmsg を使う場合の受け渡しは、次の「エージェント間メッセージング（agmsg）」に従う。
 
@@ -695,11 +714,12 @@ agmsg を使う場合の受け渡しは、次の「エージェント間メッ�
 工程間の受け渡しは、agmsg（team `homelab`）のメッセージで行ってよい。
 これは従来の VS Code 拡張による手動コピペ運用の代替である。
 
-| ロール     | エージェント | 種別                         |
-| ---------- | ------------ | ---------------------------- |
-| `claude`   | Claude Code  | 実装担当                     |
-| `reviewer` | Codex        | レビュー担当                 |
-| `tester`   | Codex        | テスト担当（on-demand 起動） |
+| ロール        | エージェント | 種別                                                         |
+| ------------- | ------------ | ------------------------------------------------------------ |
+| `claude`      | Claude Code  | 要件定義・ハブ担当（ユーザー対話、requirement 作成、implementer/reviewer/tester との受け渡し仲介、トリアージ、test_plan 起案、結果突合） |
+| `implementer` | Claude Code  | 実装担当（`claude` から requirement / review を受け取り実装、implement ファイル作成） |
+| `reviewer`    | Codex        | レビュー担当                                                 |
+| `tester`      | Codex        | テスト担当（on-demand 起動）                                 |
 
 受け渡しの原則:
 
@@ -707,26 +727,32 @@ agmsg を使う場合の受け渡しは、次の「エージェント間メッ�
   対象となる requirement / implement / review の**ファイルパス**を載せる。
 - 実装内容・レビュー内容の本文は、これまで通り `docs/ai/reviews/<target>/`
   配下のファイルに書く。ファイルが正本であり、git にコミットされる監査証跡である。
-- 両エージェントは同じ作業ディレクトリ（`ansy` 上のリポジトリ）を共有するため、
+- 全エージェントは同じ作業ディレクトリ（`ansy` 上のリポジトリ）を共有するため、
   受け取った側は、メッセージのパスから実体ファイルを読む。
+- `implementer` は `reviewer` / `tester` と直接やり取りしない。受け渡しは常に
+  `claude` を経由する（`claude` がハブ）。
 
 流れ:
 
 ```text
-1. Claude Code が実装し、implement ファイルを書く
-2. Claude Code が reviewer に agmsg で
+1. claude が requirement を書き、implementer に
+   requirement / implement 保存先のパスを送る
+2. implementer が実装し、implement ファイルを書いて claude に返す
+3. claude が reviewer に agmsg で
    requirement / implement のパスと、review の保存先パスを送る
-3. Codex がファイルを読み、レビューして review ファイルを書く
-4. Codex が claude に agmsg で、結果サマリと review ファイルのパスを返す
-5. 必要なら 2〜4 を繰り返す
-6. Yoshinobu が判断し、commit する
+4. Codex（reviewer）がファイルを読み、レビューして review ファイルを書く
+5. reviewer が claude に agmsg で、結果サマリと review ファイルのパスを返す
+6. claude が指摘をトリアージし、修正が必要なら review のパスを添えて
+   implementer に追加実装を依頼する
+7. 必要なら 2〜6 を繰り返す
+8. Yoshinobu が判断し、commit する
 ```
 
 注意:
 
-- Codex（`reviewer`）は Monitor を持たず、agmsg を自動受信しない。
+- Codex（`reviewer` / `tester`）は Monitor を持たず、agmsg を自動受信しない。
   Claude Code 側から agmsg をキックして、受信・処理させる。
-  Claude Code（`claude`）は monitor モードで自動受信する。
+  Claude Code（`claude` / `implementer`）はどちらも monitor モードで自動受信する。
 - agmsg はあくまで受け渡し手段であり、運用判断・本番実行判断・commit 判断は
   §14 の通り Yoshinobu が行う。agmsg ループは Yoshinobu の判断待ちで止まる。
   AI が agmsg 経由で自律的に commit や危険操作を行う構成は採用しない。
@@ -758,10 +784,11 @@ Codex にレビューを依頼する場合は、主に以下を確認する。
 
 ### レビュー指摘のトリアージと仲裁
 
-Claude Code は、Codex のレビュー結果を鵜呑みにして全指摘を機械的に反映しない。
-各指摘を自分で評価し、分類したうえで Yoshinobu に提示し、採否の判断を仰ぐ。
+要件定義・ハブ役の `claude` は、Codex のレビュー結果を鵜呑みにして全指摘を機械的に
+implementer へ流さない。各指摘を自分で評価し、分類したうえで Yoshinobu に提示し、
+採否の判断を仰ぐ。
 
-| 分類                                                        | Claude Code の対応                                           |
+| 分類                                                        | `claude` の対応                                               |
 | ----------------------------------------------------------- | ------------------------------------------------------------ |
 | must-fix（バグ / 安全性 / `core.md` 違反 / 要求仕様の欠落） | 「要修正」と明示して提示する。原則、反映する前提で確認する。 |
 | 妥当な改善（suggestion）                                    | 価値を説明して提示し、採否の判断を仰ぐ。                     |
@@ -769,9 +796,10 @@ Claude Code は、Codex のレビュー結果を鵜呑みにして全指摘を�
 | 的外れ / 誤り                                               | どこを誤解しているか根拠を示し、「反論して棄却を推奨」と提示する。 |
 | スコープ外                                                  | 「妥当だが今回の範囲外。次イテレーション送りを推奨」と提示する。 |
 
-採否の最終判断は Yoshinobu が行う（§14）。Claude Code は自分の実装を盲目的に庇わず、
-Codex を盲目的に追従もしない。「Codex が正しい（見落とし）」「Codex が誤り（根拠あり）」の
-いずれも正直に報告する。
+採否の最終判断は Yoshinobu が行う（§14）。反映が決まった指摘は、review ファイルの
+パスを添えて `claude` から `implementer` に追加実装を依頼する。`claude` は
+implementer の実装を盲目的に庇わず、Codex を盲目的に追従もしない。
+「Codex が正しい（見落とし）」「Codex が誤り（根拠あり）」のいずれも正直に報告する。
 
 指摘を棄却する場合は、棄却理由を監査証跡（次の implement、または final）に記録する。
 黙って握りつぶさない。必要に応じて、Codex に agmsg で根拠を返し、再レビューで合意させる。
@@ -786,21 +814,22 @@ Codex を盲目的に追従もしない。「Codex が正しい（見落とし�
 実装後は以下の流れで進める。
 
 ```text
-1. Claude Code が実装する
-2. Claude Code が implement ファイルに実装内容を記録する
-3. Codex（reviewer）が git diff / requirement / implement を確認する
-4. Codex（reviewer）が review ファイルにレビューを書く
-5. Claude Code がレビュー指摘をトリアージし（§15 参照）、採否を Yoshinobu に提示する
-6. 修正する指摘について、Claude Code が追加実装する
-7. Claude Code が次の implement ファイルに追加実装内容を記録する（棄却した指摘は理由も記録する）
-8. Codex（reviewer）が再レビューする
-9. 必要に応じて 3〜8 を繰り返す
-10. Claude Code がテスト計画（test_plan）を起案し、Yoshinobu が承認する
-11. Codex（tester）が安全な検証方法を選択してテストを実行し、test_result に保存する
-12. Claude Code がテスト結果を意図（requirement の確認項目 / host_vars 期待値）と突合し、違和感や本番適用の要否を Yoshinobu に提示する
-13. Yoshinobu が「これで確定」と判断する
-14. 必要に応じて final ファイルを作る
-15. Yoshinobu が commit する
+1. implementer が実装する
+2. implementer が implement ファイルに実装内容を記録し、claude に返す
+3. claude が reviewer に requirement / implement を渡す
+4. Codex（reviewer）が git diff / requirement / implement を確認する
+5. Codex（reviewer）が review ファイルにレビューを書き、claude に返す
+6. claude がレビュー指摘をトリアージし（§15 参照）、採否を Yoshinobu に提示する
+7. 修正する指摘について、claude が review のパスを添えて implementer に追加実装を依頼する
+8. implementer が次の implement ファイルに追加実装内容を記録する（棄却した指摘は理由も記録する）
+9. claude が reviewer に再レビューを依頼する
+10. 必要に応じて 3〜9 を繰り返す
+11. claude がテスト計画（test_plan）を起案し、Yoshinobu が承認する
+12. Codex（tester）が安全な検証方法を選択してテストを実行し、test_result に保存する
+13. claude がテスト結果を意図（requirement の確認項目 / host_vars 期待値）と突合し、違和感や本番適用の要否を Yoshinobu に提示する
+14. Yoshinobu が「これで確定」と判断する
+15. 必要に応じて final ファイルを作る
+16. Yoshinobu が commit する
 ```
 
 工程間（2→3、4→5 など）の受け渡しに agmsg を使う場合は、
@@ -817,17 +846,19 @@ implement / review の本文はファイルに書き、agmsg にはパスを載�
 
 受け渡しと判定:
 
-- Claude Code が、requirement の確認項目とレビュー指摘から **test_plan** を起案する。
+- `claude`(要件定義・ハブ役)が、requirement の確認項目とレビュー指摘から **test_plan** を起案する。
 - Yoshinobu が test_plan を承認する（テスト方針の判断は人間に残す）。
 - `tester` が test_plan に沿って安全な検証方法を選択し、結果を **test_result** に保存する。
-- Claude Code がテスト結果を requirement の確認項目 / host_vars 期待値と突合し、
+- `claude` がテスト結果を requirement の確認項目 / host_vars 期待値と突合し、
   「意図通り / 違和感」を判定する。違和感、または本番適用の要否は Yoshinobu に提示する。
+- `implementer` はテスト工程には関与しない。test_result を踏まえた追加実装が必要な場合、
+  `claude` が指示を添えて依頼する。
 
 `tester` の責務:
 
 - 実装内容が requirement / implement / review の意図を満たしているか検証する。
 - 実行方法の安全性を判断し、必要に応じてより安全な検証方法へ置き換える。
-- Claude Code が提示したコマンドをそのまま実行しない。対象 playbook / role / task の性質を確認し、安全な実行方法を選ぶ。
+- `claude` が提示したコマンドをそのまま実行しない。対象 playbook / role / task の性質を確認し、安全な実行方法を選ぶ。
 - playbook を実行する前に、必ずヘッダの `# tester-gate: <種別>` マーカー（§18）を確認し、
   種別に応じた実行方法を選ぶ（`tester_mode` は廃止。判断は marker 一本）。
 - Codex が `--check` 付き playbook を実行する場合は、原則として
@@ -862,7 +893,7 @@ tester の `SAFE / SEMI-SAFE（risk-accepted）/ UN-SAFE（--check実行）/ UN-
 
 - SSH 接続そのものではなく、SSH 先で実行するコマンドの性質で判断する。
 - SSH 先で read-only コマンドを実行するだけなら、SAFE として自律実行してよい。
-- 本番適用を `tester` に行わせないのは、§14 の人間ゲートを保ち、かつ失敗時に Claude Code が
+- 本番適用を `tester` に行わせないのは、§14 の人間ゲートを保ち、かつ失敗時に `claude` が
   状況をスムーズに把握できるようにするため。
 - テスト対象は pve2 を先行する（§2: pve2 は先行検証・縮退運用）。pve1 / 本番は dry-run → 人間判断。
 - 初期運用（v1）では高度なことは求めず、まずヘッダの `# tester-gate:` マーカーで実行方針を
@@ -920,7 +951,7 @@ docs/ai/reviews/proxmox_healthcheck/2026-05-06_006_final.md
 - 重要な前提・制約（認証方式、設計上のキー判断の理由）
 - 詳細経緯を追う場合の参照先（docs/ai/reviews/<target>/の最新implement）
 
-Claude Codeは、実装完了の最後のステップとしてこのコメントを書く。
+`implementer` は、実装完了の最後のステップとしてこのコメントを書く。
 
 ---
 
@@ -955,6 +986,8 @@ Claude Codeは、実装完了の最後のステップとしてこのコメント
 
 ### ssh・git commit・git push・ansible-playbook 素実行の直接実行（Claude Code）
 
+`claude`（要件定義・ハブ役）・`implementer`（実装担当）どちらのロールにも適用される。
+
 ```text
 - Claude Code は ssh を直接実行しない（対象ホストへの接続は ansible 経由で行う）
 - Claude Code は git commit / git push を自ら実行しない（必ずユーザーが実行する）
@@ -963,6 +996,13 @@ Claude Codeは、実装完了の最後のステップとしてこのコメント
   を自分の判断で実行しない。read-only な調査であっても例外にせず、tester に
   依頼するか Yoshinobu に実行してもらう
 ```
+
+例外（2026-07-10 Yoshinobu 承認）: `hosts: localhost` + `connection: local` かつ
+副作用のないロジック検証用の使い捨て playbook（set_fact / assert 等による
+Jinja 式・判定ロジックの検証）は、事前確認なしで実行してよい。
+実ホストに触れる可能性のあるもの、ファイル変更・通知等の副作用を持つものは
+この例外に含まれない。使い捨て playbook は検証後に削除し、実行した事実と
+検証内容を implement ファイルに記録する。
 
 `git commit` / `git push` は `.claude/settings.json` の `deny` で技術的に塞ぐ。
 `ssh` / `ansible-playbook` / 実ホストへの `ansible` ad-hoc コマンドは
@@ -1160,7 +1200,7 @@ check_mode 非対応モジュール）に `check_mode: false` を付けないと
 
 ### 18.5 tester の実行義務
 
-- tester は Claude Code から渡されたコマンドをそのまま実行しない。対象
+- tester は `claude` から渡されたコマンドをそのまま実行しない。対象
   playbook のヘッダマーカーを必ず確認する。
 - マーカーが `safe-readonly` / `role-guarded` / `risk-accepted`: 通常実行で
   よい（`--check` は不要。付けても `risk-accepted` は挙動が変わらない）。

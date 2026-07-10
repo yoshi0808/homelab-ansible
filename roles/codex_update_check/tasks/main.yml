@@ -2,7 +2,11 @@
 # codex_update_check: Codex CLI(npm globalパッケージ)のバージョン確認・
 # 差分があれば更新する。バージョン取得はcommandモジュールで収集のみ行い、
 # 判定(比較・changed/failed)はAnsible側(本ファイル)で行う(core.md §7)。
-# 参照: docs/ai/reviews/codex_update_check/2026-07-09_001_requirement.md
+# npm本体についても同様にバージョンを確認し、メジャーバージョンが上がって
+# いる場合のみ更新する(マイナー/パッチ差分は静かにスキップ)。
+# 参照:
+#   docs/ai/reviews/codex_update_check/2026-07-09_001_requirement.md
+#   docs/ai/reviews/codex_update_check/2026-07-10_005_requirement.md
 
 # ---------------------------------------------------------------------------
 # Phase 1: 現在インストールされているバージョンを取得する
@@ -57,7 +61,8 @@
     cmd: "npm install -g {{ codex_update_check_package }}@latest"
   become: true
   register: codex_update_check_install_result
-  changed_when: true
+  changed_when: codex_update_check_install_result.rc == 0
+  failed_when: false
   when: codex_update_check_needs_update | default(false)
 
 - name: Record per-host update status
@@ -66,6 +71,98 @@
       {{ 'update_failed' if (codex_update_check_needs_update | default(false)) and (codex_update_check_install_result.rc | default(1)) != 0
          else 'updated' if (codex_update_check_needs_update | default(false)) and (codex_update_check_install_result.rc | default(1)) == 0
          else 'up_to_date' if (codex_update_check_collected | default(false))
+         else 'collection_failed' }}
+
+# ---------------------------------------------------------------------------
+# Phase 1n: npm本体 - 現在バージョン取得
+# ---------------------------------------------------------------------------
+- name: Get currently installed npm version
+  ansible.builtin.command:
+    cmd: "npm --version"
+  register: codex_update_check_npm_current_raw
+  changed_when: false
+  failed_when: false
+
+- name: Parse currently installed npm version
+  ansible.builtin.set_fact:
+    codex_update_check_npm_current_version: "{{ codex_update_check_npm_current_raw.stdout | trim }}"
+  when: codex_update_check_npm_current_raw.rc == 0
+
+# 情報収集のみ(判定・更新可否には使わない)。npm本体がdpkg管理下にある場合、
+# npm自身のself-updateがdpkg管理ファイルと競合し得るため(要求仕様の制約事項)、
+# 実ホストでの管理主体をtest_planで確認できるよう記録だけ残す。
+- name: Locate npm binary path (for dpkg ownership check, informational)
+  ansible.builtin.command:
+    cmd: "which npm"
+  register: codex_update_check_npm_path_raw
+  changed_when: false
+  failed_when: false
+
+- name: Check whether npm binary is managed by dpkg (informational only; does not gate the update)
+  ansible.builtin.command:
+    cmd: "dpkg -S {{ codex_update_check_npm_path_raw.stdout | trim }}"
+  register: codex_update_check_npm_dpkg_raw
+  changed_when: false
+  failed_when: false
+  when: (codex_update_check_npm_path_raw.rc == 0) and (codex_update_check_npm_path_raw.stdout | trim | length > 0)
+
+- name: Record npm dpkg-managed fact (informational)
+  ansible.builtin.set_fact:
+    codex_update_check_npm_dpkg_managed: "{{ (codex_update_check_npm_dpkg_raw is defined) and (codex_update_check_npm_dpkg_raw.rc | default(1) == 0) }}"
+
+# ---------------------------------------------------------------------------
+# Phase 2n: npmレジストリの最新バージョンを取得する
+# ---------------------------------------------------------------------------
+- name: Get latest npm version from npm registry
+  ansible.builtin.command:
+    cmd: "npm view {{ codex_update_check_npm_package }} version"
+  register: codex_update_check_npm_latest_raw
+  changed_when: false
+  failed_when: false
+
+- name: Parse latest npm version
+  ansible.builtin.set_fact:
+    codex_update_check_npm_latest_version: "{{ codex_update_check_npm_latest_raw.stdout | trim }}"
+  when: codex_update_check_npm_latest_raw.rc == 0
+
+# ---------------------------------------------------------------------------
+# Phase 3n: メジャーバージョン判定(shellでは判定しない。Ansible側で判定する)
+# 「上昇」判定であること(latest_major > current_major の場合のみ true)。
+# メジャー部が数値として検証できない出力は collection_failed 扱いにする。
+# マイナー/パッチのみの差分・ダウングレードは「差分あり」として扱わない
+# (更新もしない・通知もしない)。
+# ---------------------------------------------------------------------------
+- name: Judge npm collection status and whether a major version bump is available
+  ansible.builtin.set_fact:
+    codex_update_check_npm_collected: "{{ _collected }}"
+    codex_update_check_npm_needs_update: "{{ _collected and ((_latest_major | int) > (_current_major | int)) }}"
+  vars:
+    _current_major: "{{ (codex_update_check_npm_current_version | default('', true)).split('.')[0] }}"
+    _latest_major: "{{ (codex_update_check_npm_latest_version | default('', true)).split('.')[0] }}"
+    _collected: >-
+      {{ (codex_update_check_npm_current_raw.rc == 0) and (codex_update_check_npm_latest_raw.rc == 0)
+         and (_current_major is match('^[0-9]+$'))
+         and (_latest_major is match('^[0-9]+$')) }}
+
+# ---------------------------------------------------------------------------
+# Phase 4n: メジャーバージョンが上がっている場合のみnpm本体を更新する
+# ---------------------------------------------------------------------------
+- name: Update npm itself to the latest major version
+  ansible.builtin.command:
+    cmd: "npm install -g {{ codex_update_check_npm_package }}@latest"
+  become: true
+  register: codex_update_check_npm_install_result
+  changed_when: codex_update_check_npm_install_result.rc == 0
+  failed_when: false
+  when: codex_update_check_npm_needs_update | default(false)
+
+- name: Record per-host npm update status
+  ansible.builtin.set_fact:
+    codex_update_check_npm_status: >-
+      {{ 'update_failed' if (codex_update_check_npm_needs_update | default(false)) and (codex_update_check_npm_install_result.rc | default(1)) != 0
+         else 'updated' if (codex_update_check_npm_needs_update | default(false)) and (codex_update_check_npm_install_result.rc | default(1)) == 0
+         else 'up_to_date' if (codex_update_check_npm_collected | default(false)) and (codex_update_check_npm_current_version == codex_update_check_npm_latest_version)
+         else 'minor_patch_skip' if (codex_update_check_npm_collected | default(false))
          else 'collection_failed' }}
 
 # ---------------------------------------------------------------------------
@@ -93,35 +190,77 @@
         codex_update_check_updated_hosts: "{{ codex_update_check_results | selectattr('status', 'equalto', 'updated') | list }}"
         codex_update_check_failed_hosts: "{{ codex_update_check_results | selectattr('status', 'in', ['update_failed', 'collection_failed']) | list }}"
 
+    - name: Build per-host npm summary
+      ansible.builtin.set_fact:
+        codex_update_check_npm_results: >-
+          {{ (codex_update_check_npm_results | default([])) + [{
+            'host': item,
+            'status': hostvars[item].codex_update_check_npm_status | default('collection_failed'),
+            'current': hostvars[item].codex_update_check_npm_current_version | default('?'),
+            'latest': hostvars[item].codex_update_check_npm_latest_version | default('?'),
+            'dpkg_managed': hostvars[item].codex_update_check_npm_dpkg_managed | default(false),
+          }] }}
+      loop: "{{ ansible_play_hosts_all }}"
+      loop_control:
+        label: "{{ item }}"
+
+    - name: Classify updated / failed npm hosts
+      ansible.builtin.set_fact:
+        codex_update_check_npm_updated_hosts: "{{ codex_update_check_npm_results | selectattr('status', 'equalto', 'updated') | list }}"
+        codex_update_check_npm_failed_hosts: "{{ codex_update_check_npm_results | selectattr('status', 'in', ['update_failed', 'collection_failed']) | list }}"
+
+    - name: Combine failed hosts across Codex CLI and npm checks
+      ansible.builtin.set_fact:
+        codex_update_check_all_failed_hosts: "{{ codex_update_check_failed_hosts + codex_update_check_npm_failed_hosts }}"
+
     - name: Print codex_update_check summary
       ansible.builtin.debug:
-        msg: "{{ codex_update_check_results }}"
+        msg:
+          codex: "{{ codex_update_check_results }}"
+          npm: "{{ codex_update_check_npm_results }}"
 
     - name: Send Slack notification (update performed and/or failures)
       ansible.builtin.include_tasks: "{{ playbook_dir }}/../roles/common_slack/tasks/notify.yml"
       vars:
-        slack_channel: "{{ 'alerts' if codex_update_check_failed_hosts | length > 0 else 'info' }}"
-        slack_status: "{{ 'error' if codex_update_check_failed_hosts | length > 0 else 'info' }}"
+        slack_channel: "{{ 'alerts' if codex_update_check_all_failed_hosts | length > 0 else 'info' }}"
+        slack_status: "{{ 'error' if codex_update_check_all_failed_hosts | length > 0 else 'info' }}"
         slack_title: >-
-          [codex_update_check] {{ 'ERROR' if codex_update_check_failed_hosts | length > 0 else 'Codex CLI updated' }}
+          [codex_update_check] {{ 'ERROR' if codex_update_check_all_failed_hosts | length > 0 else 'Codex CLI / npm updated' }}
         slack_message: |
-          更新実施:
+          Codex CLI 更新実施:
           {% for r in codex_update_check_updated_hosts %}
+          - {{ r.host }}: {{ r.current }} → {{ r.latest }}
+          {% else %}
+          (なし)
+          {% endfor %}
+          npm本体 メジャー更新実施:
+          {% for r in codex_update_check_npm_updated_hosts %}
           - {{ r.host }}: {{ r.current }} → {{ r.latest }}
           {% else %}
           (なし)
           {% endfor %}
           失敗:
           {% for r in codex_update_check_failed_hosts %}
-          - {{ r.host }}: status={{ r.status }} (current={{ r.current }}, latest={{ r.latest }})
-          {% else %}
-          (なし)
+          - {{ r.host }}: Codex CLI status={{ r.status }} (current={{ r.current }}, latest={{ r.latest }})
           {% endfor %}
-      when: (codex_update_check_updated_hosts | length > 0) or (codex_update_check_failed_hosts | length > 0)
+          {% for r in codex_update_check_npm_failed_hosts %}
+          - {{ r.host }}: npm status={{ r.status }} (current={{ r.current }}, latest={{ r.latest }})
+          {% endfor %}
+          {% if (codex_update_check_failed_hosts | length == 0) and (codex_update_check_npm_failed_hosts | length == 0) %}
+          (なし)
+          {% endif %}
+          {% if codex_update_check_npm_updated_hosts | length > 0 %}
+
+          注意: npm本体はNodeSource(nodejs)dpkgパッケージ配下のため、self-updateは
+          dpkg管理ファイルを上書きします。今後のapt upgrade(nodejsパッケージ更新)で
+          バンドル版に巻き戻る可能性があります。巻き戻った場合は次回週次実行で
+          メジャー差分を再検知し自動的に再更新します(自己修復)。
+          {% endif %}
+      when: (codex_update_check_updated_hosts | length > 0) or (codex_update_check_npm_updated_hosts | length > 0) or (codex_update_check_all_failed_hosts | length > 0)
 
     - name: Fail if any host failed collection or update
       ansible.builtin.fail:
         msg: >-
           codex_update_check: 以下のホストで失敗しました:
-          {{ codex_update_check_failed_hosts | map(attribute='host') | join(', ') }}
-      when: codex_update_check_failed_hosts | length > 0
+          {{ codex_update_check_all_failed_hosts | map(attribute='host') | join(', ') }}
+      when: codex_update_check_all_failed_hosts | length > 0
