@@ -1,7 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "Bash(*)"
+      "Bash(*)",
+      "Write(docs/ai/reviews/**)"
     ],
     "ask": [
       "Bash(rm*)",
