@@ -4,7 +4,6 @@
       "Bash(*)"
     ],
     "deny": [
-      "Bash(ssh*)",
       "Bash(git commit*)",
       "Bash(git push*)"
     ]

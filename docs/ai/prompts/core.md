@@ -858,6 +858,7 @@ tester の `SAFE / SEMI-SAFE（risk-accepted）/ UN-SAFE（--check実行）/ UN-
 - テスト対象は pve2 を先行する（§2: pve2 は先行検証・縮退運用）。pve1 / 本番は dry-run → 人間判断。
 - 初期運用（v1）では高度なことは求めず、まずヘッダの `# tester-gate:` マーカーで実行方針を
   判断し、`--syntax-check` / `--check --diff` を重ねるバリエーションテストを中心に回す。
+- quory 上での確認が必要な場合、tester はまず`ssh -i ~/.ssh/id_ann ann@quory.internal` を使う。鍵指定なしの SSH 失敗をもって quory へ SSH 不可と判断しない
 
 ### final ファイル
 
@@ -943,20 +944,35 @@ Claude Codeは、実装完了の最後のステップとしてこのコメント
 - 未確認コードを日次 timer で自動実行しない
 ```
 
-### ssh・git commit・git push の直接実行（Claude Code）
+### ssh・git commit・git push・ansible-playbook 素実行の直接実行（Claude Code）
 
 ```text
 - Claude Code は ssh を直接実行しない（対象ホストへの接続は ansible 経由で行う）
 - Claude Code は git commit / git push を自ら実行しない（必ずユーザーが実行する）
+- Claude Code は ansible-playbook を確認なしに実行しない
+- Claude Code は実ホストに触れる ansible ad-hoc コマンド（`ansible <host> -m ...`）
+  を自分の判断で実行しない。read-only な調査であっても例外にせず、tester に
+  依頼するか Yoshinobu に実行してもらう
 ```
 
-上記は `.claude/settings.json` の `deny` と、`bash -c` 等のラッパー経由の回避を
-防ぐ PreToolUse フック（`.claude/hooks/check-wrapped-denies.sh`）の二重で技術的
-に強制している。ただしフックは文字列パターンマッチである以上、変数展開・
-エンコード等による難読化までは防げない（2026-07-09、`bash -c "ssh ..."` の
-ようなラップで `Bash(ssh*)` 系の deny をすり抜けられることを実地で確認し、
-上記フックを追加した）。技術的な穴が見つかった場合でも、このルール自体を
-最後の拠り所として扱う。
+`git commit` / `git push` は `.claude/settings.json` の `deny` で技術的に塞ぐ。
+`ssh` / `ansible-playbook` / 実ホストへの `ansible` ad-hoc コマンドは
+`.claude/settings.local.json` の `ask` で毎回確認を挟む。
+
+2026-07-08〜09、`bash -c "ssh ..."` のようなラップで `Bash(ssh*)` 系の deny を
+すり抜けられることを発見し、一時的に文字列パターンマッチの PreToolUse フックで
+対策した。しかしその後、`ansible <host> -m ansible.builtin.command -a "<任意の
+コマンド>"` 自体が ssh と同等（あるいはそれ以上）に強力な実行手段であり、これは
+`ask` で許可さえ通れば通ってしまうことに気づいた。フックを増やして塞いでも、
+`python3 -c` や別のラップ手段など、Turing-complete な実行手段がある限りいたちご
+っこが終わらない——文字列パターンマッチでは原理的に勝てないと判断し、フックは
+全廃した（旧 `.claude/hooks/check-ansible-playbook-flags.sh` /
+`check-wrapped-denies.sh` は削除済み）。
+
+代わりに、ここに書かれたルール自体と、実行前に必ず人間の確認（`ask`）を挟む
+運用、そして Yoshinobu 自身のレビュー（実際にこのラウンドで ad-hoc コマンドの
+使用を指摘され気づいた）を安全網として扱う。技術的な壁を過信せず、ここに
+書かれた約束を守ることそのものが最後の拠り所である。
 
 ### IP アドレス（リポジトリ全体）
 
