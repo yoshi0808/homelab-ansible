@@ -285,6 +285,61 @@
 # Target node setup (authy/monnie)
 # ---------------------------------------------------------------------------
 
-- name: Setup recovery-exec on target nodes
+# Structural guard against lateral clobber (2026-07-08 incident: a restricted
+# `-l ansy` run, with recovery_exec_setup_targets left at its true default,
+# pushed ansy's own investigate/action keys to authy/monnie/pve1/pve2's
+# authorized_keys and locked out quory's production recovery-exec SSH access
+# for 3 days. authorized_keys.j2 / authorized_keys-pve.j2 are drift-safe
+# templates that slurp *whichever host is currently running this role* and
+# replace the target's authorized_keys with exactly that host's keys — so any
+# non-authoritative controller running this role with targets enabled would
+# overwrite the production controller's keys.
+#
+# Two-stage guard (2026-07-11, revised after 2 rounds of review): the sole
+# authoritative distributor is `quory` — hardcoded as a literal below, not a
+# variable, and not control_nodes group membership. Two things were tried and
+# rejected first:
+#   - group membership (`inventory_hostname in groups['control_nodes']`): a
+#     future second control_nodes member would inherit distribution rights
+#     just by being added to the group, reopening this incident class.
+#   - a role-default variable (`recovery_exec_setup_authoritative_host`,
+#     defaulting to quory): role defaults are overridable by extra vars,
+#     which have higher CLI precedence. `-e
+#     recovery_exec_setup_authoritative_host=ansy` would pass both checks
+#     below and let ansy distribute — reproducing the original incident
+#     through the safety mechanism itself (caught in review).
+# The literal `quory` below is the only form that can't be redirected by any
+# combination of -l/-e at invocation time.
+#
+# 1. Assert quory is part of *this run's* host set whenever targets=true, so
+#    `-l ansy` alone (quory excluded) fails here, before any target is
+#    touched.
+# 2. Gate the actual target_setup.yml include to quory only, so an
+#    unrestricted run (both ansy and quory in the play) still succeeds
+#    end-to-end — ansy completes its local setup and simply does not
+#    distribute to targets, only quory does.
+#
+# See docs/ai/reviews/autonomous_recovery/2026-07-11_002_ssh_key_investigation.md.
+- name: Assert quory is part of this run when target distribution is enabled
+  ansible.builtin.assert:
+    that:
+      - (not (recovery_exec_setup_targets | default(true) | bool)) or ('quory' in ansible_play_hosts_all)
+    fail_msg: >-
+      recovery_exec_setup_targets is true, but quory (the sole authoritative
+      distributor of target authorized_keys — hardcoded, not a variable; see
+      the comment above this task) is not part of this run's host set
+      ({{ ansible_play_hosts_all | join(', ') }}). Running with a restricted
+      -l scope that excludes quory would let this host's own keys reach
+      target nodes instead, overwriting the production controller's key on
+      authy/monnie/pve1/pve2 and locking out its recovery-exec SSH access
+      (2026-07-08 incident, see
+      docs/ai/reviews/autonomous_recovery/2026-07-11_002_ssh_key_investigation.md).
+      Re-run with -e recovery_exec_setup_targets=false to set up this host's
+      local recovery-exec user/keys without touching target nodes.
+    quiet: true
+
+- name: Setup recovery-exec on target nodes (quory only)
   ansible.builtin.include_tasks: target_setup.yml
-  when: recovery_exec_setup_targets | default(true) | bool
+  when:
+    - recovery_exec_setup_targets | default(true) | bool
+    - inventory_hostname == 'quory'

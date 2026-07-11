@@ -23,8 +23,29 @@
 # かかわらず常に本実行する。理由: recovery-exec ユーザー作成・SSH鍵生成(creates:
 # で既存キーがあれば元々no-op)・wrapperスクリプト配置・sudoers・ACLのみで、
 # サービス再起動を一切伴わない(recovery-exec自体はデーモンではない)ため、
-# Yoshinobuが安全側と判断(2026-07-06)。詳細は docs/ai/prompts/core.md §18
-# "移行中の例外"。
+# Yoshinobuが安全側と判断(2026-07-06)。
+#
+# 2026-07-11追記: 上記判断は「本番影響ゼロ/軽微」を単一ホストへの影響のみで
+# 評価しており、target(authy/monnie/pve1/pve2)のauthorized_keysを実行元
+# ホストの鍵で排他上書きする横方向の影響を見落としていた。2026-07-08、
+# `-l ansy`の通常実行(recovery_exec_setup_targets既定true)がtargetsを
+# ansy鍵で上書きし、quoryの本番investigate/action SSH経路を3日間切断する
+# インシデントが発生(詳細:
+# docs/ai/reviews/autonomous_recovery/2026-07-11_002_ssh_key_investigation.md)。
+# 再発防止として、target側への鍵配布は正規配布元quoryからの実行時のみ許可する
+# assertをrecovery_execロールに追加した(2026-07-11、2ラウンドのレビューを経て
+# 確定: 許可主体をcontrol_nodesグループ所属にすると将来のグループ変更で再発し
+# 得るため却下、変数化(recovery_exec_setup_authoritative_host)も-eで上書き
+# 可能なため却下し、最終的にtasks/main.yml内でquoryをリテラル固定した。詳細:
+# docs/ai/reviews/autonomous_recovery/2026-07-11_009_implement.md)。
+#
+# 保証範囲の補足: このガードが防ぐのは target authorized_keys の排他的
+# 横方向上書きのみである。recovery-execユーザー作成・SSH鍵生成・wrapper配置・
+# sudoers・ACLといった単一ホスト内のローカル変更は、guardの前段で従来どおり
+# 実行される(ガードはtargetsへの配布直前にのみ効く)。この限定的なローカル
+# 変更こそが元々のrisk-accepted判断(2026-07-06)の対象であり、そこにサービス
+# 再起動を伴わないという前提は変わらない。両者を合わせてrisk-acceptedの分類は
+# 継続する。詳細は docs/ai/prompts/core.md §18 "移行中の例外"。
 
 - name: Deploy recovery-exec (Codex runner + SSH key generation)
   hosts: dev_nodes:control_nodes

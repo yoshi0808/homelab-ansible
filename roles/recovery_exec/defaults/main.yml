@@ -16,7 +16,25 @@ recovery_exec_codex_bin: /usr/bin/codex
 recovery_exec_codex_wrapper: /usr/local/bin/codex-exec-wrapper
 recovery_exec_codex_model: gpt-5.5
 
-# Set to false to skip target node setup (e.g. when target is unreachable)
+# Set to false to skip target node setup (e.g. when target is unreachable, or
+# when running from a non-production controller like ansy for local-only
+# verification). Left true, target distribution is still gated in
+# tasks/main.yml to quory only — a restricted -l ansy run cannot clobber the
+# production controller's key on targets even if this stays at its true
+# default (2026-07-08 incident, see
+# docs/ai/reviews/autonomous_recovery/2026-07-11_002_ssh_key_investigation.md).
+#
+# NOTE: the identity of the one host allowed to distribute target
+# authorized_keys is intentionally NOT a variable here (there is no
+# recovery_exec_setup_authoritative_host default). A role default — like any
+# variable — can be overridden by an extra var at the CLI (-e ...), which
+# has higher precedence than role defaults. A 2026-07-11 review caught that
+# exact gap: `-e recovery_exec_setup_authoritative_host=ansy` would have let
+# ansy pass both the assert and the include guard in tasks/main.yml,
+# reproducing the original incident through the "fix" itself. The trust
+# anchor for who may overwrite this shared credential must not be something
+# the invoker can change with a flag, so it is hardcoded as the literal
+# `quory` at both check sites in tasks/main.yml instead.
 recovery_exec_setup_targets: true
 
 # Users to add to the recovery-exec group (for workspace read access).
