@@ -1,0 +1,73 @@
+---
+# ubuntu_vm_full_upgrade.yml - Monthly full-upgrade judgement + notification
+# for ansy/monnie/authy/quory, plus manual single-node apply. Ubuntu Pro +
+# unattended-upgrades already auto-applies security/ESM/ESM Apps patches
+# (docs/ai/prompts/ubuntu_vm_patch_policy.md); this playbook covers the
+# non-security main/updates/universe packages that accumulate untouched
+# otherwise. Apply is never automatic — always a deliberate manual run.
+#
+# Monthly judgement (all 4 nodes, read-only, from Semaphore/quory):
+#   ansible-playbook playbooks/ubuntu_vm_full_upgrade.yml -e dry_run=true
+#
+# Manual apply (single node, destructive — requires typing the node name
+# twice as a safety device, not a Status pre-declaration):
+#   ansible-playbook playbooks/ubuntu_vm_full_upgrade.yml \
+#     -e dry_run=false -e node=authy -e ubuntu_vm_full_upgrade_confirm=authy
+#
+# Validate the apply path without changing anything (--check skips the
+# actual full-upgrade/reboot; everything else, including the
+# BLOCKED/MAJOR_UPGRADE_DETECTED rejection check, still runs for real):
+#   ansible-playbook playbooks/ubuntu_vm_full_upgrade.yml --check \
+#     -e dry_run=false -e node=authy -e ubuntu_vm_full_upgrade_confirm=authy
+#
+# Notes:
+# - BLOCKED / MAJOR_UPGRADE_DETECTED can never be applied, confirmation or not.
+# - quory's reboot (if required) is scheduled ~60s after this playbook
+#   finishes (systemd-run) so the Semaphore job that runs this playbook is
+#   not interrupted by quory rebooting itself mid-run. Post-reboot
+#   verification for quory happens outside Ansible — see
+#   scripts/quory_post_upgrade_check/.
+# - ansy/monnie/authy reboot (if required) in the same Ansible session and
+#   are verified before this playbook finishes.
+#
+# tester-gate: check-mode-native — the common judgement path (healthcheck,
+# apt-get update/check/-s full-upgrade simulation, important-component/
+# remove classification, Status determination, notification) never mutates
+# installed packages (apt-get update/check/-s full-upgrade only touch the
+# package index cache and print a plan — same semi-safe classification
+# proxmox_patch_dryrun.yml already uses for the equivalent Proxmox step), so
+# it always runs for real regardless of --check (roles/ubuntu_vm_full_upgrade/
+# tasks/main.yml sets check_mode: false at that block). The only genuinely
+# destructive step — actual `apt-get full-upgrade` + reboot — is a separate
+# include (tasks/apply.yml) gated on `not ansible_check_mode`, so --check
+# with -e dry_run=false exercises the full apply-mode validation path
+# (confirmation string, healthcheck abort, Status re-determination,
+# BLOCKED/MAJOR_UPGRADE_DETECTED rejection) and stops there, sending a
+# "would apply" notification instead of touching packages. See
+# docs/ai/reviews/ubuntu_vm_full_upgrade/2026-07-11_002_implement.md for the
+# full design rationale, including why --check does not simply force
+# dry_run=true wholesale (it still validates apply-mode argument handling,
+# which a blanket dry_run override would skip).
+
+- name: "[migration] tester_mode is deprecated for this playbook — use --check instead"
+  hosts: localhost
+  gather_facts: false
+  connection: local
+  tasks:
+    - name: Assert tester_mode is not used
+      ansible.builtin.assert:
+        that: not (tester_mode | default(false) | bool)
+        fail_msg: >-
+          This playbook does not support -e tester_mode=true. Use --check
+          instead — see the header of this file for the check-mode-native
+          behavior. See docs/ai/prompts/core.md §18 "移行中の例外".
+        quiet: true
+
+- name: Ubuntu VM full-upgrade judgement / manual apply (ansy, monnie, authy, quory)
+  hosts: dev_nodes:control_nodes:radius_servers:monitoring_servers
+  gather_facts: true
+  become: true
+  tasks:
+    - name: Run ubuntu_vm_full_upgrade role
+      ansible.builtin.import_role:
+        name: ubuntu_vm_full_upgrade

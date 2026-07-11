@@ -1,0 +1,148 @@
+---
+# ubuntu_vm_full_upgrade: monthly full-upgrade judgement/notification + manual
+# apply for ansy/monnie/authy/quory. See:
+#   docs/ai/reviews/ubuntu_vm_full_upgrade/2026-07-11_001_requirement.md
+#   docs/ai/reviews/ubuntu_vm_full_upgrade/2026-07-11_002_implement.md
+
+ubuntu_vm_full_upgrade_report_dir: "{{ reports_base_dir }}/ubuntu-vm-full-upgrade"
+
+# ---------------------------------------------------------------------------
+# Important-component patterns (requirement §5.2). Stored as UNANCHORED regex
+# fragments (not glob, no leading ^ / trailing $) — classify.yml combines all
+# applicable fragments for a host into one alternation and wraps it in
+# ^(?:...)$ once at match time, so a package name must match a fragment over
+# its *entire* length. `.` in a real package name is escaped; `.*` is the
+# intentional wildcard.
+# ---------------------------------------------------------------------------
+ubuntu_vm_full_upgrade_important_common:
+  - 'linux-image-.*'
+  - 'linux-generic'
+  - 'systemd.*'
+  - 'udev'
+  - 'netplan\.io'
+  - 'network-manager'
+  - 'openssh-server'
+  - 'openssh-client'
+  - 'sudo'
+  - 'libc6.*'
+
+# Node-specific additions layered on top of the common list, keyed by
+# inventory_hostname. Final package-name confirmation against each host's
+# actual installed set is deferred to the tester (requirement §5.2: "実装時に
+# CCが対象ホストの実インストール状況を確認して行ってよい" — implementer does
+# not touch real hosts, core.md §17).
+ubuntu_vm_full_upgrade_important_per_node:
+  authy:
+    - 'freeradius.*'
+    - 'libssl.*'
+    - 'openssl'
+    - 'sssd.*'
+    - 'wpa.*'
+  monnie:
+    - 'prometheus.*'
+    - 'grafana.*'
+    - 'loki.*'
+    - 'docker.*'
+  ansy:
+    - 'python3.*'
+    - 'ansible.*'
+  quory:
+    - 'python3.*'
+    - 'ansible.*'
+    - 'chrony'
+    - 'ntp.*'
+    - 'corosync-qdevice'
+    - 'corosync'
+
+# Node -> primary product label(s), for the "主力プロダクトへの影響明示"
+# requirement (§5.2.1). quory intentionally lists 3 separate products (not
+# merged) per requirement. Each product's patterns are the same unanchored
+# fragment style as above.
+#
+# `managed_by_note: true` marks the Ansible-related product entries on
+# ansy/quory (requirement §5.2 + 2026-07-11 review must-fix 5): whether
+# `ansible`/`python3` matches are apt full-upgrade candidates at all depends
+# on how Ansible itself is installed there (apt vs pip venv). classify.yml
+# attaches a `note` field to these entries so the report/Slack message can
+# say "apt管理: 判定対象" / "pip管理: apt full-upgrade判定対象外" /
+# "管理方式未確認" instead of silently rendering an ambiguous "該当なし" that
+# can't be told apart from "checked, apt-managed, nothing matched this run".
+ubuntu_vm_full_upgrade_products:
+  authy:
+    - label: "FreeRADIUS/WPA3認証基盤"
+      patterns: "{{ ubuntu_vm_full_upgrade_important_per_node.authy }}"
+  monnie:
+    - label: "Prometheus/Grafana/Loki監視基盤"
+      patterns: "{{ ubuntu_vm_full_upgrade_important_per_node.monnie }}"
+  ansy:
+    - label: "Ansible開発環境"
+      patterns: "{{ ubuntu_vm_full_upgrade_important_per_node.ansy }}"
+      managed_by_note: true
+  quory:
+    - label: "本番Ansible実行基盤"
+      patterns:
+        - 'python3.*'
+        - 'ansible.*'
+      managed_by_note: true
+    - label: "QDevice"
+      patterns:
+        - 'corosync-qdevice'
+        - 'corosync'
+    - label: "NTP基準"
+      patterns:
+        - 'chrony'
+        - 'ntp.*'
+
+# How Ansible itself is installed on this host: "apt" (apt full-upgrade
+# candidate), "pip" (installed in a venv/pip — not an apt full-upgrade
+# candidate at all), or "unknown" (not yet confirmed). Defaults to
+# "unknown" because the implementer cannot inspect real hosts (core.md §17)
+# — override per host once the tester confirms, e.g. in
+# inventories/homelab/host_vars/ansy.yml:
+#   ubuntu_vm_full_upgrade_ansible_managed_by: apt
+ubuntu_vm_full_upgrade_ansible_managed_by: unknown
+
+# ---------------------------------------------------------------------------
+# MAJOR_UPGRADE_DETECTED thresholds (requirement §5.4: "閾値はimplement時に
+# CCが提案"). A routine monthly full-upgrade on a lightly-maintained Ubuntu VM
+# is expected to touch on the order of 10s of packages; a release upgrade
+# (do-release-upgrade / edited sources.list) touches 100s and typically
+# removes dozens of obsolete packages as a side effect of the suite change.
+# These are intentionally conservative starting points — tune after
+# observing a few real monthly runs (see implement.md "未対応事項").
+# ---------------------------------------------------------------------------
+ubuntu_vm_full_upgrade_major_total_threshold: 100
+ubuntu_vm_full_upgrade_major_remove_threshold: 30
+
+# Expected distribution codename per host (e.g. "noble"), used to detect an
+# unexpected codename drift (requirement §5.4 "codename変化疑い"). Left empty
+# by default (check skipped) because the implementer cannot confirm the
+# actual installed codename on real hosts (core.md §17) — populate via
+# host_vars/<node>.yml once the tester confirms current codenames.
+ubuntu_vm_full_upgrade_expected_codename: ""
+
+# ---------------------------------------------------------------------------
+# Manual apply (dry_run=false) safety
+# ---------------------------------------------------------------------------
+# Confirmation required for manual apply: the caller must pass
+# -e ubuntu_vm_full_upgrade_confirm=<node> where <node> matches -e node=<node>
+# exactly (typing the node name twice, once as the target and once as
+# confirmation, guards against copy-pasted/stale -e sets targeting the wrong
+# node — see implement.md design rationale). Left empty by default so a run
+# without this var fails closed.
+ubuntu_vm_full_upgrade_confirm: ""
+
+# ---------------------------------------------------------------------------
+# quory delayed-reboot (requirement §7.2)
+# ---------------------------------------------------------------------------
+ubuntu_vm_full_upgrade_quory_reboot_delay_seconds: 60
+ubuntu_vm_full_upgrade_quory_flag_file: /var/lib/ubuntu-vm-full-upgrade/quory-reboot-pending.flag
+
+# Root-only secrets file read directly by the Ansible-external post-reboot
+# check script on quory (scripts/quory_post_upgrade_check/). Not deployed by
+# this role (requirement §9 excludes Ansible-managed deployment of that
+# script this round) — documented for manual placement in implement.md,
+# following the same "quory-local file, not git-managed, mode 0600" pattern
+# already used for the cert_renew intermediate CA key
+# (docs/ai/prompts/cert_renew_policy.md §4.4).
+ubuntu_vm_full_upgrade_quory_postcheck_webhook_conf: /etc/ubuntu-vm-full-upgrade/slack-webhook-quory.conf

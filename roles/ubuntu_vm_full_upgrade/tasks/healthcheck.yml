@@ -1,0 +1,72 @@
+---
+# Phase 1: node healthcheck. Reuses existing healthcheck task files where
+# they exist (authy -> radius_healthcheck, monnie -> monitoring_healthcheck)
+# rather than duplicating service-check logic in this new role (requirement
+# §3). Both check.yml files only collect + classify + build a report; they do
+# NOT send Slack notifications or fail — this role decides what to do with
+# the result (requirement §5.1 item 1 + this role's own abort/notify flow).
+#
+# Reused via include_role (tasks_from: check), NOT include_tasks with an
+# absolute path (2026-07-11 tester Phase A found this the hard way, on real
+# authy/monnie): include_tasks does not switch Ansible's role file-lookup
+# context, so a bare `copy: src: radius-healthcheck.sh` inside check.yml
+# resolved against ubuntu_vm_full_upgrade's own files/ (which doesn't have
+# it) instead of radius_healthcheck's files/ — "Could not find or access
+# 'radius-healthcheck.sh'" on both hosts, blocking the entire monthly
+# dry-run. include_role actually enters the target role's context, so
+# files/templates resolve against roles/radius_healthcheck/files/ and
+# roles/monitoring_healthcheck/files/ as intended. tasks_from: check keeps
+# the same "collect + classify only, no notify/report/fail" behavior as
+# before — it still only runs check.yml, not that role's full main.yml.
+#
+# ansy/quory have no existing dedicated healthcheck role. A minimal generic
+# check (root filesystem usage + systemd failed units) is used instead —
+# this is an implementer design choice, not a requirement-specified check
+# list; see docs/ai/reviews/ubuntu_vm_full_upgrade/2026-07-11_002_implement.md.
+
+- name: Run radius healthcheck (authy)
+  ansible.builtin.include_role:
+    name: radius_healthcheck
+    tasks_from: check
+  when: inventory_hostname == 'authy'
+
+- name: Run monitoring healthcheck (monnie)
+  ansible.builtin.include_role:
+    name: monitoring_healthcheck
+    tasks_from: check
+  when: inventory_hostname == 'monnie'
+
+- name: Generic healthcheck (ansy/quory)
+  when: inventory_hostname in ['ansy', 'quory']
+  block:
+    - name: Check root filesystem usage
+      ansible.builtin.set_fact:
+        ubuntu_vm_full_upgrade_disk_used_percent: >-
+          {{ (((_root_mount.size_total - _root_mount.size_available) / _root_mount.size_total * 100) | round | int) }}
+      vars:
+        _root_mount: "{{ ansible_facts['mounts'] | selectattr('mount', 'equalto', '/') | first }}"
+
+    - name: Check systemd failed units
+      ansible.builtin.command:
+        cmd: systemctl --failed --no-legend --plain
+      register: ubuntu_vm_full_upgrade_systemd_failed_raw
+      changed_when: false
+      failed_when: false
+
+    - name: Build generic healthcheck report
+      ansible.builtin.set_fact:
+        ubuntu_vm_full_upgrade_generic_health:
+          disk_used_percent: "{{ ubuntu_vm_full_upgrade_disk_used_percent }}"
+          systemd_failed_units: "{{ ubuntu_vm_full_upgrade_systemd_failed_raw.stdout_lines | default([]) }}"
+          criticals: >-
+            {{ ([] if ubuntu_vm_full_upgrade_disk_used_percent | int < 90
+                   else ['root filesystem usage is ' + (ubuntu_vm_full_upgrade_disk_used_percent | string) + '%'])
+               + (ubuntu_vm_full_upgrade_systemd_failed_raw.stdout_lines | default([])
+                  | map('regex_replace', '^(.*)$', 'systemd failed unit: \\1') | list) }}
+
+- name: Consolidate healthcheck criticals across all node types
+  ansible.builtin.set_fact:
+    ubuntu_vm_full_upgrade_healthcheck_criticals: >-
+      {{ (radius_criticals | default([]))
+         + (monitoring_criticals | default([]))
+         + (ubuntu_vm_full_upgrade_generic_health.criticals | default([])) }}

@@ -10,3 +10,12 @@
 # Same controller-identity pattern as playbooks/proxmox_patch_weekly_full.yml's
 # preflight check (lookup('pipe', 'hostname -s')).
 ansible_connection: "{{ 'local' if lookup('pipe', 'hostname -s') == 'quory' else 'ssh' }}"
+
+# ubuntu_vm_full_upgrade (roles/ubuntu_vm_full_upgrade/defaults/main.yml):
+# how Ansible itself is installed here, so the role's important-component
+# report/Slack output can say "apt管理: 判定対象" instead of leaving it
+# ambiguous ("該当なし" vs "not yet confirmed"). Confirmed 2026-07-11 by
+# tester (Phase A): ansible-core is dpkg-owned, /usr/bin/ansible is owned by
+# the ansible-core package. See
+# docs/ai/reviews/ubuntu_vm_full_upgrade/2026-07-11_009_test_result.md.
+ubuntu_vm_full_upgrade_ansible_managed_by: apt

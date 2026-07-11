@@ -1,0 +1,88 @@
+---
+# Same-session reboot + post-reboot verification for ansy/monnie/authy
+# (requirement §7.1). Reuses radius_healthcheck/monitoring_healthcheck
+# check.yml for authy/monnie's post-reboot service confirmation instead of
+# duplicating the freeradius/prometheus-grafana-loki checks a third time
+# (requirement §3 "共通化を検討する" — ubuntu_nightly.yml already duplicates
+# the authy check inline; that pre-existing duplication is left as-is since
+# ubuntu_nightly.yml is outside this requirement's file scope).
+
+- name: Reboot and post-reboot verification
+  tags: [destructive]
+  block:
+    - name: Reboot host
+      ansible.builtin.reboot:
+        reboot_timeout: 300
+      when: ubuntu_vm_full_upgrade_reboot_required
+
+    # include_role (tasks_from: check), not include_tasks with an absolute
+    # path — include_tasks does not switch role file-lookup context, so the
+    # bare `copy: src:` filenames inside check.yml would fail to resolve
+    # (2026-07-11 tester finding; same root cause and fix as healthcheck.yml).
+    - name: Run radius healthcheck (authy, post-reboot)
+      ansible.builtin.include_role:
+        name: radius_healthcheck
+        tasks_from: check
+      when: inventory_hostname == 'authy'
+
+    - name: Run monitoring healthcheck (monnie, post-reboot)
+      ansible.builtin.include_role:
+        name: monitoring_healthcheck
+        tasks_from: check
+      when: inventory_hostname == 'monnie'
+
+    - name: Check uptime (ansy — SSH recovery via the reboot module already confirms reachability)
+      ansible.builtin.command:
+        cmd: uptime
+      register: ubuntu_vm_full_upgrade_ansy_uptime
+      changed_when: false
+      when: inventory_hostname == 'ansy'
+
+    - name: Consolidate post-reboot criticals
+      ansible.builtin.set_fact:
+        ubuntu_vm_full_upgrade_postreboot_criticals: >-
+          {{ (radius_criticals | default([])) + (monitoring_criticals | default([])) }}
+
+    - name: Send apply summary notification
+      ansible.builtin.include_tasks: "{{ playbook_dir }}/../roles/common_slack/tasks/notify.yml"
+      vars:
+        slack_channel: "{{ 'alerts' if ubuntu_vm_full_upgrade_postreboot_criticals | length > 0 else 'info' }}"
+        slack_status: "{{ 'critical' if ubuntu_vm_full_upgrade_postreboot_criticals | length > 0 else 'ok' }}"
+        slack_title: >-
+          [ubuntu_vm_full_upgrade] apply {{ 'CRITICAL' if ubuntu_vm_full_upgrade_postreboot_criticals | length > 0 else 'OK' }} - {{ inventory_hostname }}
+        slack_message: |
+          Host: {{ inventory_hostname }}
+          full-upgrade 実施完了。
+          reboot: {{ '実施' if ubuntu_vm_full_upgrade_reboot_required else '不要' }}
+          {% if inventory_hostname == 'ansy' and ubuntu_vm_full_upgrade_reboot_required %}
+          uptime: {{ ubuntu_vm_full_upgrade_ansy_uptime.stdout | default('?') }}
+          {% endif %}
+
+          Criticals:
+          {% for item in ubuntu_vm_full_upgrade_postreboot_criticals %}
+          - {{ item }}
+          {% else %}
+          (なし)
+          {% endfor %}
+
+    - name: Fail if post-reboot criticals found
+      ansible.builtin.fail:
+        msg: "ubuntu_vm_full_upgrade: post-reboot CRITICAL on {{ inventory_hostname }}: {{ ubuntu_vm_full_upgrade_postreboot_criticals | join(', ') }}"
+      when: ubuntu_vm_full_upgrade_postreboot_criticals | length > 0
+
+  rescue:
+    - name: Send reboot failure notification
+      ansible.builtin.include_tasks: "{{ playbook_dir }}/../roles/common_slack/tasks/notify.yml"
+      vars:
+        slack_channel: "alerts"
+        slack_status: "critical"
+        slack_title: "[ubuntu_vm_full_upgrade] reboot FAILED - {{ inventory_hostname }}"
+        slack_message: |
+          Host: {{ inventory_hostname }}
+          reboot タイムアウトまたは SSH 接続不能。full-upgrade自体は完了している可能性があるため、
+          手動確認が必要。
+          Time: {{ lookup('pipe', 'date -u +%Y-%m-%dT%H:%M:%SZ') }}
+
+    - name: Re-raise reboot failure
+      ansible.builtin.fail:
+        msg: "ubuntu_vm_full_upgrade: reboot or post-reboot check failed on {{ inventory_hostname }}"

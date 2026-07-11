@@ -1,0 +1,129 @@
+---
+# Phase 5-7: important-component judgement, remove judgement, Status
+# determination. All judgement happens here in Ansible tasks — the shell
+# script (ubuntu-full-upgrade-simulate.sh) only extracted raw Inst/Remv
+# package names (requirement §11 / core.md §7).
+
+- name: Build combined important-component regex for this host
+  ansible.builtin.set_fact:
+    ubuntu_vm_full_upgrade_important_patterns: >-
+      {{ ubuntu_vm_full_upgrade_important_common
+         + (ubuntu_vm_full_upgrade_important_per_node[inventory_hostname] | default([])) }}
+
+- name: Compile combined important-component regex
+  ansible.builtin.set_fact:
+    ubuntu_vm_full_upgrade_important_regex: "^(?:{{ ubuntu_vm_full_upgrade_important_patterns | join('|') }})$"
+
+- name: Classify install-candidate packages (important vs not)
+  ansible.builtin.set_fact:
+    ubuntu_vm_full_upgrade_inst_important: "{{ ubuntu_vm_full_upgrade_sim.simulation.inst | select('match', ubuntu_vm_full_upgrade_important_regex) | list }}"
+
+- name: Classify remove-candidate packages (important vs not)
+  ansible.builtin.set_fact:
+    ubuntu_vm_full_upgrade_remv_important: "{{ ubuntu_vm_full_upgrade_sim.simulation.remv | select('match', ubuntu_vm_full_upgrade_important_regex) | list }}"
+
+# ---------------------------------------------------------------------------
+# Remove/replacement heuristic (requirement §5.3): a removed package is
+# treated as "has a visible successor" if an installed-candidate package
+# shares the same base name after stripping a trailing SONAME/version suffix
+# (e.g. libssl1.1 -> libssl, libicu70 -> libicu, python3.10 -> python). This
+# is a coarse heuristic with no Codex-based changelog analysis this round
+# (requirement explicitly excludes that from v1) — see implement.md for the
+# rationale and known limitations, and confirm against real removes once the
+# tester observes actual monthly full-upgrade output.
+# ---------------------------------------------------------------------------
+- name: Compute stripped base names for successor matching
+  ansible.builtin.set_fact:
+    ubuntu_vm_full_upgrade_inst_stripped: "{{ ubuntu_vm_full_upgrade_sim.simulation.inst | map('regex_replace', '[0-9][0-9.]*$', '') | list }}"
+
+- name: Classify each removed package's successor visibility
+  ansible.builtin.set_fact:
+    ubuntu_vm_full_upgrade_remv_classified: >-
+      {{ (ubuntu_vm_full_upgrade_remv_classified | default([])) + [{
+        'name': item,
+        'important': item in ubuntu_vm_full_upgrade_remv_important,
+        'successor_visible': (item | regex_replace('[0-9][0-9.]*$', '')) in ubuntu_vm_full_upgrade_inst_stripped,
+      }] }}
+  loop: "{{ ubuntu_vm_full_upgrade_sim.simulation.remv }}"
+
+- name: Identify important removes with no visible successor (blocking condition)
+  ansible.builtin.set_fact:
+    ubuntu_vm_full_upgrade_remv_blocking: >-
+      {{ (ubuntu_vm_full_upgrade_remv_classified | default([]))
+         | selectattr('important', 'equalto', true)
+         | rejectattr('successor_visible', 'equalto', true)
+         | list }}
+
+# ---------------------------------------------------------------------------
+# Per-product impact (requirement §5.2.1): always include every product,
+# marking "該当なし" explicitly when nothing matches, so a blank section is
+# never ambiguous with "not checked".
+# ---------------------------------------------------------------------------
+- name: Build per-product impact summary
+  ansible.builtin.set_fact:
+    ubuntu_vm_full_upgrade_product_impact: >-
+      {{ (ubuntu_vm_full_upgrade_product_impact | default([])) + [{
+        'label': item.label,
+        'packages': ((ubuntu_vm_full_upgrade_sim.simulation.inst + ubuntu_vm_full_upgrade_sim.simulation.remv)
+                      | select('match', '^(?:' + (item.patterns | join('|')) + ')$') | unique | list),
+        'note': (
+          ('apt管理: 判定対象' if ubuntu_vm_full_upgrade_ansible_managed_by == 'apt'
+           else 'pip管理: apt full-upgrade判定対象外' if ubuntu_vm_full_upgrade_ansible_managed_by == 'pip'
+           else '管理方式未確認')
+          if (item.managed_by_note | default(false))
+          else ''
+        ),
+      }] }}
+  loop: "{{ ubuntu_vm_full_upgrade_products[inventory_hostname] | default([]) }}"
+  loop_control:
+    label: "{{ item.label }}"
+
+# ---------------------------------------------------------------------------
+# MAJOR_UPGRADE_DETECTED signals (requirement §5.4, thresholds in defaults)
+# ---------------------------------------------------------------------------
+- name: Evaluate MAJOR_UPGRADE_DETECTED signals
+  ansible.builtin.set_fact:
+    ubuntu_vm_full_upgrade_major_signals: >-
+      {{ []
+         + (['codename drift: expected ' + ubuntu_vm_full_upgrade_expected_codename
+             + ', actual ' + ansible_facts['distribution_release']]
+            if (ubuntu_vm_full_upgrade_expected_codename | length > 0)
+               and (ansible_facts['distribution_release'] != ubuntu_vm_full_upgrade_expected_codename)
+            else [])
+         + (['total install+remove candidates (' + (_total | string) + ') exceeds threshold ('
+             + (ubuntu_vm_full_upgrade_major_total_threshold | string) + ')']
+            if _total > ubuntu_vm_full_upgrade_major_total_threshold else [])
+         + (['remove candidates (' + (_remv_count | string) + ') exceeds threshold ('
+             + (ubuntu_vm_full_upgrade_major_remove_threshold | string) + ')']
+            if _remv_count > ubuntu_vm_full_upgrade_major_remove_threshold else [])
+      }}
+  vars:
+    _total: "{{ (ubuntu_vm_full_upgrade_sim.simulation.inst | length) + (ubuntu_vm_full_upgrade_sim.simulation.remv | length) }}"
+    _remv_count: "{{ ubuntu_vm_full_upgrade_sim.simulation.remv | length }}"
+
+# ---------------------------------------------------------------------------
+# Status determination (requirement §5.4). Precedence: BLOCKED (untrustworthy
+# simulation) > MAJOR_UPGRADE_DETECTED > NO_UPDATES > REVIEW_REQUIRED (or
+# BLOCKED for an important remove with no successor) > UPGRADE_READY.
+# ---------------------------------------------------------------------------
+- name: Determine Status
+  ansible.builtin.set_fact:
+    ubuntu_vm_full_upgrade_status: >-
+      {{ 'BLOCKED' if (ubuntu_vm_full_upgrade_sim.apt_update.rc != 0 or ubuntu_vm_full_upgrade_sim.apt_check.rc != 0 or ubuntu_vm_full_upgrade_sim.simulation.rc != 0)
+         else 'MAJOR_UPGRADE_DETECTED' if (ubuntu_vm_full_upgrade_major_signals | length > 0)
+         else 'NO_UPDATES' if ((ubuntu_vm_full_upgrade_sim.simulation.inst | length) == 0 and (ubuntu_vm_full_upgrade_sim.simulation.remv | length) == 0)
+         else 'BLOCKED' if (ubuntu_vm_full_upgrade_remv_blocking | length > 0)
+         else 'REVIEW_REQUIRED' if ((ubuntu_vm_full_upgrade_sim.simulation.remv | length) > 0 or (ubuntu_vm_full_upgrade_inst_important | length) > 0)
+         else 'UPGRADE_READY' }}
+    ubuntu_vm_full_upgrade_status_reason: >-
+      {{ ('apt-get update/check または apt-get -s full-upgrade が失敗した(rc: update=' + (ubuntu_vm_full_upgrade_sim.apt_update.rc | string) + ', check=' + (ubuntu_vm_full_upgrade_sim.apt_check.rc | string) + ', sim=' + (ubuntu_vm_full_upgrade_sim.simulation.rc | string) + ')。パッケージindexが最新でない可能性があり、この結果に基づくapplyは行わない')
+         if (ubuntu_vm_full_upgrade_sim.apt_update.rc != 0 or ubuntu_vm_full_upgrade_sim.apt_check.rc != 0 or ubuntu_vm_full_upgrade_sim.simulation.rc != 0)
+         else ('メジャーアップグレード疑い: ' + (ubuntu_vm_full_upgrade_major_signals | join('; ')))
+         if (ubuntu_vm_full_upgrade_major_signals | length > 0)
+         else '更新候補なし'
+         if ((ubuntu_vm_full_upgrade_sim.simulation.inst | length) == 0 and (ubuntu_vm_full_upgrade_sim.simulation.remv | length) == 0)
+         else ('重要コンポーネントのremoveで後継が確認できない: ' + (ubuntu_vm_full_upgrade_remv_blocking | map(attribute='name') | join(', ')))
+         if (ubuntu_vm_full_upgrade_remv_blocking | length > 0)
+         else ('重要コンポーネント更新あり、またはremoveあり(後継確認可)。人間判断のうえ手動apply')
+         if ((ubuntu_vm_full_upgrade_sim.simulation.remv | length) > 0 or (ubuntu_vm_full_upgrade_inst_important | length) > 0)
+         else '重要コンポーネント該当なし、removeなし。手動apply可' }}

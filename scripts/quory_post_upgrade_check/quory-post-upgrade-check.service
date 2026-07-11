@@ -1,0 +1,15 @@
+[Unit]
+Description=ubuntu_vm_full_upgrade post-reboot check on quory (Ansible-external)
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=/var/lib/ubuntu-vm-full-upgrade/quory-reboot-pending.flag
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/quory-post-upgrade-check.sh
+# Read-only checks + a single outbound Slack POST; a slow/hanging network
+# should not leave this unit running indefinitely at boot.
+TimeoutStartSec=120
+
+[Install]
+WantedBy=multi-user.target

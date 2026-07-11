@@ -1,0 +1,271 @@
+---
+# ubuntu_vm_full_upgrade: monthly full-upgrade judgement/notification (§5.1)
+# + manual apply (§6/§7). See
+# docs/ai/reviews/ubuntu_vm_full_upgrade/2026-07-11_002_implement.md for the
+# full Phase design rationale.
+#
+# Phase 0    : argument validation
+# Phase 0.5  : manual-apply confirmation string check (apply target only)
+# Phase 1-8  : common processing (healthcheck / simulate / classify / notify)
+#              — runs on all 4 hosts when dry_run=true, or on the single
+#              apply target only when dry_run=false. check_mode: false below
+#              makes this always run for real even under --check, because
+#              none of it mutates installed packages (apt-get update/check/
+#              -s full-upgrade only touch the package index cache, matching
+#              proxmox_patch_dryrun's semi-safe classification precedent).
+# Phase 9-13 : manual apply (tasks/apply.yml) — apply target only, and only
+#              when NOT ansible_check_mode (this is the actual destructive
+#              boundary; tester-gate: check-mode-native, see the playbook
+#              header for the full classification rationale).
+
+- name: Assert dry_run is defined
+  ansible.builtin.assert:
+    that: dry_run is defined
+    fail_msg: >-
+      dry_run must be specified explicitly: -e dry_run=true (monthly
+      judgement, all nodes, read-only) or -e dry_run=false -e node=<node>
+      (manual apply, single node). See playbooks/ubuntu_vm_full_upgrade.yml.
+    quiet: true
+
+- name: Assert node is a known target when performing a manual apply
+  ansible.builtin.assert:
+    that:
+      - node is defined
+      - node in ['ansy', 'monnie', 'authy', 'quory']
+    fail_msg: >-
+      Manual apply (dry_run=false) requires -e node=<ansy|monnie|authy|quory>
+      (single node only — requirement §4). Got node={{ node | default('undefined') }}.
+    quiet: true
+  when: not (dry_run | bool)
+
+- name: Determine whether this host is the manual-apply target
+  ansible.builtin.set_fact:
+    ubuntu_vm_full_upgrade_is_apply_target: "{{ (not (dry_run | bool)) and (inventory_hostname == (node | default(''))) }}"
+
+- name: Determine whether this host participates in this run
+  ansible.builtin.set_fact:
+    ubuntu_vm_full_upgrade_participates: "{{ (dry_run | bool) or ubuntu_vm_full_upgrade_is_apply_target }}"
+
+# Confirmation string is a safety device against accidental apply, not a
+# Status pre-declaration (requirement §4). It must match `node` exactly —
+# typing the target twice (once as -e node, once as -e ...confirm) guards
+# against a copy-pasted/stale -e set silently targeting the wrong host.
+# Checked before any other processing, per requirement §6 step 1, and
+# regardless of --check (it's a pure validation, not a mutation) so testers
+# can verify the rejection path under --check too.
+- name: Abort manual apply if confirmation string does not match node
+  ansible.builtin.assert:
+    that:
+      - (ubuntu_vm_full_upgrade_confirm | default('')) == node
+    fail_msg: >-
+      Manual apply requires -e ubuntu_vm_full_upgrade_confirm=<node> matching
+      -e node={{ node }} exactly. Got
+      ubuntu_vm_full_upgrade_confirm={{ ubuntu_vm_full_upgrade_confirm | default('') }}
+      (empty means not supplied).
+    quiet: true
+  when: ubuntu_vm_full_upgrade_is_apply_target
+
+- name: Common processing (healthcheck, simulation, classification)
+  when: ubuntu_vm_full_upgrade_participates
+  check_mode: false
+  block:
+    - name: Run node healthcheck
+      ansible.builtin.include_tasks: healthcheck.yml
+
+    - name: Abort if healthcheck reported criticals (send alert first)
+      when: ubuntu_vm_full_upgrade_healthcheck_criticals | length > 0
+      block:
+        - name: Send healthcheck-failure notification
+          ansible.builtin.include_tasks: "{{ playbook_dir }}/../roles/common_slack/tasks/notify.yml"
+          vars:
+            slack_channel: "alerts"
+            slack_status: "critical"
+            slack_title: "[ubuntu_vm_full_upgrade] healthcheck FAILED - {{ inventory_hostname }}"
+            slack_message: |
+              Host: {{ inventory_hostname }}
+              full-upgrade判定を中止しました(healthcheck失敗)。
+
+              Criticals:
+              {% for item in ubuntu_vm_full_upgrade_healthcheck_criticals %}
+              - {{ item }}
+              {% endfor %}
+
+        - name: Fail this host
+          ansible.builtin.fail:
+            msg: >-
+              ubuntu_vm_full_upgrade: healthcheck failed on {{ inventory_hostname }},
+              aborting before touching apt: {{ ubuntu_vm_full_upgrade_healthcheck_criticals | join(', ') }}
+
+    - name: Deploy full-upgrade simulation script
+      ansible.builtin.copy:
+        src: ubuntu-full-upgrade-simulate.sh
+        dest: /usr/local/sbin/ubuntu-full-upgrade-simulate.sh
+        owner: root
+        group: root
+        mode: "0750"
+
+    - name: Run full-upgrade simulation (apt-get update + check + -s full-upgrade; collection only)
+      ansible.builtin.command:
+        cmd: /usr/local/sbin/ubuntu-full-upgrade-simulate.sh
+      register: ubuntu_vm_full_upgrade_sim_raw
+      changed_when: false
+
+    - name: Parse simulation JSON
+      ansible.builtin.set_fact:
+        ubuntu_vm_full_upgrade_sim: "{{ ubuntu_vm_full_upgrade_sim_raw.stdout | from_json }}"
+
+    - name: Classify packages and determine Status
+      ansible.builtin.include_tasks: classify.yml
+
+    - name: Ensure report directory exists
+      ansible.builtin.file:
+        path: "{{ ubuntu_vm_full_upgrade_report_dir }}"
+        state: directory
+        mode: "0755"
+      delegate_to: localhost
+      become: false
+
+    - name: Save per-host report
+      ansible.builtin.copy:
+        content: >-
+          {{ {
+            'host': inventory_hostname,
+            'collected_at': ubuntu_vm_full_upgrade_sim.collected_at,
+            'status': ubuntu_vm_full_upgrade_status,
+            'status_reason': ubuntu_vm_full_upgrade_status_reason,
+            'inst': ubuntu_vm_full_upgrade_sim.simulation.inst,
+            'remv': ubuntu_vm_full_upgrade_sim.simulation.remv,
+            'inst_important': ubuntu_vm_full_upgrade_inst_important,
+            'remv_classified': ubuntu_vm_full_upgrade_remv_classified | default([]),
+            'product_impact': ubuntu_vm_full_upgrade_product_impact,
+            'reboot_expected': ubuntu_vm_full_upgrade_sim.reboot_required_flag,
+          } | to_nice_json }}
+        dest: "{{ ubuntu_vm_full_upgrade_report_dir }}/{{ inventory_hostname }}_{{ ansible_facts['date_time']['iso8601_basic_short'] }}.json"
+      delegate_to: localhost
+      become: false
+
+# ---------------------------------------------------------------------------
+# Phase 8: aggregated Slack notification (one message per run, all
+# participating hosts — mirrors codex_update_check's aggregation pattern
+# rather than sending up to 4 separate per-host messages for the monthly
+# batch run). Anchored to the first host in `ansible_play_hosts` — NOT
+# `ansible_play_hosts_all` — because `ansible_play_hosts` dynamically
+# shrinks as hosts fail earlier in the play, while `..._all` is the static
+# full list regardless of failures. Anchoring to the static list meant that
+# if the conventional first host (ansy) itself failed healthcheck and
+# dropped out, no host was left satisfying `inventory_hostname ==
+# ansible_play_hosts_all|first`, so the aggregation task — and therefore the
+# rollup notification for every OTHER host too — silently never ran
+# (2026-07-11 review). Any host still reaching this task is, by definition,
+# still present in `ansible_play_hosts`, so its own first entry is always a
+# safe, reachable anchor. `run_once: true` was not used instead because its
+# implicit host-selection has the same "picks a possibly-already-skipped
+# host" pitfall as the static-list approach did — see implement.md.
+# ---------------------------------------------------------------------------
+- name: Aggregate results and notify
+  when: inventory_hostname == (ansible_play_hosts | default([]) | first)
+  delegate_to: localhost
+  check_mode: false
+  block:
+    # A participating host whose healthcheck failed never reaches
+    # classify.yml (it fails out earlier in "Common processing" — see the
+    # healthcheck-abort block above), so ubuntu_vm_full_upgrade_status is
+    # left undefined for it even though ubuntu_vm_full_upgrade_participates
+    # is still true. Checking `... is defined` here (not just `participates`)
+    # avoids a hard Jinja error on that host's hostvars breaking aggregation
+    # for every OTHER host too; such hosts get an explicit HEALTHCHECK_FAILED
+    # entry instead of being silently dropped or crashing this task
+    # (2026-07-11 review suggestion 7). The individual healthcheck-failure
+    # alert was already sent per-host before that host failed, so this is a
+    # rollup marker, not the first notice.
+    - name: Build per-host status summary
+      ansible.builtin.set_fact:
+        ubuntu_vm_full_upgrade_results: "{{ (ubuntu_vm_full_upgrade_results | default([])) + _entry }}"
+      loop: "{{ ansible_play_hosts_all }}"
+      loop_control:
+        label: "{{ item }}"
+      vars:
+        _participates: "{{ hostvars[item].ubuntu_vm_full_upgrade_participates | default(false) }}"
+        _has_status: "{{ hostvars[item].ubuntu_vm_full_upgrade_status is defined }}"
+        _entry: >-
+          {{ ([{
+            'host': item,
+            'status': hostvars[item].ubuntu_vm_full_upgrade_status,
+            'status_reason': hostvars[item].ubuntu_vm_full_upgrade_status_reason,
+            'inst_count': hostvars[item].ubuntu_vm_full_upgrade_sim.simulation.inst | length,
+            'remv_count': hostvars[item].ubuntu_vm_full_upgrade_sim.simulation.remv | length,
+            'product_impact': hostvars[item].ubuntu_vm_full_upgrade_product_impact,
+          }] if (_participates | bool) and (_has_status | bool)
+          else [{
+            'host': item,
+            'status': 'HEALTHCHECK_FAILED',
+            'status_reason': ((hostvars[item].ubuntu_vm_full_upgrade_healthcheck_criticals | default([])) | join('; '))
+                              or '詳細不明(個別のhealthcheck失敗通知を確認)',
+            'inst_count': 0,
+            'remv_count': 0,
+            'product_impact': [],
+          }] if (_participates | bool)
+          else []) }}
+
+    - name: Determine overall notification channel/status
+      ansible.builtin.set_fact:
+        ubuntu_vm_full_upgrade_notify_channel: >-
+          {{ 'alerts' if (ubuntu_vm_full_upgrade_results | selectattr('status', 'in', ['REVIEW_REQUIRED', 'BLOCKED', 'MAJOR_UPGRADE_DETECTED', 'HEALTHCHECK_FAILED']) | list | length > 0)
+             else 'info' }}
+        ubuntu_vm_full_upgrade_notify_status: >-
+          {{ 'critical' if (ubuntu_vm_full_upgrade_results | selectattr('status', 'in', ['BLOCKED', 'HEALTHCHECK_FAILED']) | list | length > 0)
+             else 'warning' if (ubuntu_vm_full_upgrade_results | selectattr('status', 'in', ['REVIEW_REQUIRED', 'MAJOR_UPGRADE_DETECTED']) | list | length > 0)
+             else 'ok' }}
+
+    - name: Send status notification
+      ansible.builtin.include_tasks: "{{ playbook_dir }}/../roles/common_slack/tasks/notify.yml"
+      vars:
+        slack_channel: "{{ ubuntu_vm_full_upgrade_notify_channel }}"
+        slack_status: "{{ ubuntu_vm_full_upgrade_notify_status }}"
+        slack_title: >-
+          [ubuntu_vm_full_upgrade] {{ 'dry-run (monthly)' if (dry_run | bool) else 'apply target: ' + node }}
+        slack_message: |
+          {% for r in ubuntu_vm_full_upgrade_results %}
+          {{ r.host }}: {{ r.status }}
+            {{ r.status_reason }}
+            候補: install={{ r.inst_count }} remove={{ r.remv_count }}
+          {% for p in r.product_impact %}
+            {{ p.label }}{{ '(' + p.note + ')' if p.note | default('') else '' }}: {{ (p.packages | join(', ')) if p.packages | length > 0 else '該当なし' }}
+          {% endfor %}
+          {% endfor %}
+
+- name: Reject manual apply if Status forbids it (BLOCKED / MAJOR_UPGRADE_DETECTED)
+  ansible.builtin.assert:
+    that:
+      - ubuntu_vm_full_upgrade_status not in ['BLOCKED', 'MAJOR_UPGRADE_DETECTED']
+    fail_msg: >-
+      ubuntu_vm_full_upgrade: apply rejected on {{ inventory_hostname }} —
+      Status={{ ubuntu_vm_full_upgrade_status }} ({{ ubuntu_vm_full_upgrade_status_reason }}).
+      BLOCKED / MAJOR_UPGRADE_DETECTED can never be applied, regardless of
+      confirmation (requirement §6 step 3).
+    quiet: true
+  when: ubuntu_vm_full_upgrade_is_apply_target
+
+- name: Send check-mode "would apply" notification (destructive steps skipped under --check)
+  when: ubuntu_vm_full_upgrade_is_apply_target and ansible_check_mode
+  check_mode: false
+  block:
+    # include_tasks (dynamic include) cannot take check_mode: directly
+    # ("'check_mode' is not a valid attribute for a TaskInclude") — wrapping
+    # in a block and setting check_mode: false at the block level is the
+    # documented workaround (core.md §18.2) and cascades to the included
+    # tasks.
+    - name: Send notification
+      ansible.builtin.include_tasks: "{{ playbook_dir }}/../roles/common_slack/tasks/notify.yml"
+      vars:
+        slack_channel: "info"
+        slack_status: "info"
+        slack_title: "[ubuntu_vm_full_upgrade] check-mode: would apply - {{ inventory_hostname }}"
+        slack_message: |
+          Host: {{ inventory_hostname }}
+          Status: {{ ubuntu_vm_full_upgrade_status }} ({{ ubuntu_vm_full_upgrade_status_reason }})
+          check-mode: apply条件を満たしていますが --check のため実行していません。
+
+- name: Manual apply (skipped under --check; destructive)
+  ansible.builtin.include_tasks: apply.yml
+  when: ubuntu_vm_full_upgrade_is_apply_target and not ansible_check_mode

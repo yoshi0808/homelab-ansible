@@ -1,0 +1,53 @@
+---
+# Phase 9-13 (requirement §6 steps 4-7): actual apt full-upgrade, reboot
+# handling. Only ever included from tasks/main.yml when
+# ubuntu_vm_full_upgrade_is_apply_target and not ansible_check_mode — that
+# outer gate is the actual check-mode safety boundary for this whole file
+# (see tasks/main.yml Phase 9-13 comment), so tasks here do not repeat
+# `when: not ansible_check_mode` individually. `tags: [destructive]` on the
+# reboot blocks is kept for discoverability/convention only
+# (core.md §18.2 style), not as the enforcement mechanism.
+#
+# Muting recovery alerts before touching apt (not just before reboot):
+# full-upgrade's post-install maintainer scripts can restart services on
+# their own even without a host reboot (ubuntu_vm_patch_policy.md §3.2), so
+# the mute window needs to cover the apply itself, not only the reboot.
+#
+# authy/monnie only: these are the only autonomous-recovery mute targets
+# (recovery_mute is consumed by the autonomous recovery pipeline, which only
+# monitors authy/monnie/sophos-fw — sophos-fw is out of scope for this
+# playbook). ansy/quory are not recovery targets; muting them would just
+# write an unconsumed /var/lib/homelab-recovery/mute/<host>.json (2026-07-11
+# review).
+- name: Set recovery mute before full-upgrade (authy/monnie only)
+  ansible.builtin.include_tasks: "{{ playbook_dir }}/../roles/recovery_mute/tasks/set.yml"
+  when: inventory_hostname in ['authy', 'monnie']
+  vars:
+    recovery_mute_target: "{{ inventory_hostname }}"
+    recovery_mute_minutes: 45
+    recovery_mute_reason: "ubuntu_vm_full_upgrade: {{ inventory_hostname }} full-upgrade + reboot in progress"
+
+- name: Run apt full-upgrade
+  ansible.builtin.command:
+    cmd: apt-get -y full-upgrade
+  environment:
+    DEBIAN_FRONTEND: noninteractive
+  register: ubuntu_vm_full_upgrade_apply_result
+  changed_when: true
+
+- name: Check reboot-required flag (post-apply, authoritative — dry-run's reboot_expected was only a prediction)
+  ansible.builtin.stat:
+    path: /var/run/reboot-required
+  register: ubuntu_vm_full_upgrade_reboot_flag
+
+- name: Determine reboot requirement
+  ansible.builtin.set_fact:
+    ubuntu_vm_full_upgrade_reboot_required: "{{ ubuntu_vm_full_upgrade_reboot_flag.stat.exists }}"
+
+- name: quory reboot handling (delayed, does not block this Semaphore job)
+  ansible.builtin.include_tasks: reboot_quory.yml
+  when: inventory_hostname == 'quory'
+
+- name: ansy/monnie/authy reboot handling (same-session, waits for reboot + post-check)
+  ansible.builtin.include_tasks: reboot_local.yml
+  when: inventory_hostname != 'quory'

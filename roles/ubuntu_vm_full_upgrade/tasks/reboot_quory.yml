@@ -1,0 +1,188 @@
+---
+# quory reboot handling (requirement §7.2): schedule a delayed one-shot
+# reboot via systemd-run so this Semaphore job — which itself runs on quory —
+# completes and reports success BEFORE the reboot fires. Rebooting quory
+# mid-job would kill the Semaphore process running this very playbook.
+#
+# Post-reboot verification is intentionally NOT done here: quory's
+# Semaphore/Ansible session is reset by the reboot, so the check runs from a
+# boot-time systemd unit instead (Ansible-external, see
+# scripts/quory_post_upgrade_check/ and requirement §7.2 "post-reboot確認").
+#
+# Idempotency (2026-07-11, revised after 2 rounds of review):
+#
+# `systemd-run --on-active=<N> --unit=ubuntu-vm-full-upgrade-reboot /sbin/reboot`
+# schedules the reboot via a transient **.timer** unit paired with a
+# same-named **.service** unit. While waiting, the *timer* is
+# active/waiting and the *service* is still inactive (hasn't fired yet) —
+# checking only the service (as the first fix attempt did) always reads
+# "inactive" during the wait window, wrongly concluding "no reservation" and
+# recreating a fresh 60s reservation on every re-run, pushing the actual
+# reboot back indefinitely. The correct signal is the **timer's**
+# ActiveState (falling back to the service for the case where the timer has
+# already fired and the service is now running the reboot itself).
+#
+# On a first-ever run neither unit has ever existed, so `systemctl show`
+# must be treated as non-fatal (`failed_when: false`) and its output parsed
+# for "not-found" as the normal/expected state on a fresh quory, not as an
+# error.
+#
+# Reservation semantics:
+#   - existing timer/service already active/activating -> reservation
+#     already in effect: leave it alone (don't touch reboot timing).
+#   - otherwise (not-found / inactive / failed leftover) -> clear it
+#     (best-effort stop + reset-failed) and create a fresh reservation.
+# `ubuntu_vm_full_upgrade_quory_reservation_confirmed` tracks whether *some*
+# valid reservation is known to exist at each point, so the rescue block
+# below can tell "no reservation was ever established -> delete the flag,
+# a later unrelated reboot must not trigger the post-upgrade check" apart
+# from "a reservation exists but something downstream (flag refresh,
+# notify) failed -> keep the flag, the scheduled reboot is still real."
+
+- name: quory - assert minimum reboot delay safety margin
+  ansible.builtin.assert:
+    that:
+      - ubuntu_vm_full_upgrade_quory_reboot_delay_seconds | int >= 30
+    fail_msg: >-
+      ubuntu_vm_full_upgrade_quory_reboot_delay_seconds must be at least 30
+      seconds — this is the safety margin for the current Semaphore job
+      (notification send, Ansible/Semaphore job finalization) to finish
+      before the reboot fires. Got
+      {{ ubuntu_vm_full_upgrade_quory_reboot_delay_seconds }}.
+    quiet: true
+  when: ubuntu_vm_full_upgrade_reboot_required
+
+- name: quory - schedule reboot (idempotent) and notify
+  when: ubuntu_vm_full_upgrade_reboot_required
+  block:
+    - name: quory - check existing scheduled-reboot timer state (unit may not exist yet — not an error)
+      ansible.builtin.command:
+        cmd: systemctl show ubuntu-vm-full-upgrade-reboot.timer --property=ActiveState --value
+      register: ubuntu_vm_full_upgrade_quory_timer_check
+      changed_when: false
+      failed_when: false
+
+    - name: quory - check existing scheduled-reboot service state (unit may not exist yet — not an error)
+      ansible.builtin.command:
+        cmd: systemctl show ubuntu-vm-full-upgrade-reboot.service --property=ActiveState --value
+      register: ubuntu_vm_full_upgrade_quory_service_check
+      changed_when: false
+      failed_when: false
+
+    - name: quory - parse existing unit states (a never-loaded unit reports as inactive; treat any non-zero rc / empty output the same way)
+      ansible.builtin.set_fact:
+        ubuntu_vm_full_upgrade_quory_timer_state: >-
+          {{ (ubuntu_vm_full_upgrade_quory_timer_check.stdout | default('') | trim) or 'inactive' }}
+        ubuntu_vm_full_upgrade_quory_service_state: >-
+          {{ (ubuntu_vm_full_upgrade_quory_service_check.stdout | default('') | trim) or 'inactive' }}
+
+    - name: quory - determine whether an equivalent reservation is already active (timer waiting, or service already firing)
+      ansible.builtin.set_fact:
+        ubuntu_vm_full_upgrade_quory_reservation_active: >-
+          {{ (ubuntu_vm_full_upgrade_quory_timer_state in ['active', 'activating', 'reloading'])
+             or (ubuntu_vm_full_upgrade_quory_service_state in ['active', 'activating', 'reloading']) }}
+
+    # Initial value: an already-active reservation counts as confirmed
+    # immediately. Updated to true again after a fresh systemd-run succeeds
+    # (below) — stays false across that point only if systemd-run itself
+    # fails, which is exactly the signal the rescue block needs.
+    - name: quory - record initial reservation-confirmed state
+      ansible.builtin.set_fact:
+        ubuntu_vm_full_upgrade_quory_reservation_confirmed: "{{ ubuntu_vm_full_upgrade_quory_reservation_active }}"
+
+    - name: quory - clear leftover non-active scheduled-reboot unit before recreating (best-effort, safe no-op on a fresh quory with nothing to clear)
+      ansible.builtin.command:
+        cmd: "{{ item }}"
+      loop:
+        - systemctl stop ubuntu-vm-full-upgrade-reboot.timer ubuntu-vm-full-upgrade-reboot.service
+        - systemctl reset-failed ubuntu-vm-full-upgrade-reboot.timer ubuntu-vm-full-upgrade-reboot.service
+      loop_control:
+        label: "{{ item }}"
+      changed_when: false
+      failed_when: false
+      when: not ubuntu_vm_full_upgrade_quory_reservation_active
+
+    - name: quory - ensure flag file directory exists
+      ansible.builtin.file:
+        path: "{{ ubuntu_vm_full_upgrade_quory_flag_file | dirname }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: quory - create/refresh full-upgrade reboot-pending flag file
+      ansible.builtin.copy:
+        content: |
+          ubuntu_vm_full_upgrade completed at {{ lookup('pipe', 'date -u +%Y-%m-%dT%H:%M:%SZ') }}
+          reboot {{ 'already scheduled (idempotent re-run, existing timer kept)' if ubuntu_vm_full_upgrade_quory_reservation_active else 'about to be scheduled in ' + (ubuntu_vm_full_upgrade_quory_reboot_delay_seconds | string) + 's' }} via systemd-run (unit: ubuntu-vm-full-upgrade-reboot)
+        dest: "{{ ubuntu_vm_full_upgrade_quory_flag_file }}"
+        owner: root
+        group: root
+        mode: "0644"
+
+    # --on-active=<seconds> is a monotonic-clock delay relative to "now" —
+    # not a wall-clock time — so it cannot be affected by NTP/chrony
+    # adjustments during the delay window. This is the one-shot analogue of
+    # `at now + 60 seconds` without depending on the `at` package.
+    - name: "quory - schedule delayed one-shot reboot ({{ ubuntu_vm_full_upgrade_quory_reboot_delay_seconds }}s, systemd-run; does not block this Semaphore job)"
+      ansible.builtin.command:
+        cmd: >-
+          systemd-run --on-active={{ ubuntu_vm_full_upgrade_quory_reboot_delay_seconds }}
+          --unit=ubuntu-vm-full-upgrade-reboot
+          --description="ubuntu_vm_full_upgrade delayed reboot ({{ ubuntu_vm_full_upgrade_quory_reboot_delay_seconds }}s)"
+          /sbin/reboot
+      when: not ubuntu_vm_full_upgrade_quory_reservation_active
+      changed_when: true
+
+    - name: quory - record successful new reservation
+      ansible.builtin.set_fact:
+        ubuntu_vm_full_upgrade_quory_reservation_confirmed: true
+      when: not ubuntu_vm_full_upgrade_quory_reservation_active
+
+    - name: quory - send summary notification (only reached once scheduling has actually succeeded or was already in effect)
+      ansible.builtin.include_tasks: "{{ playbook_dir }}/../roles/common_slack/tasks/notify.yml"
+      vars:
+        slack_channel: "info"
+        slack_status: "info"
+        slack_title: "[ubuntu_vm_full_upgrade] apply complete - quory (reboot scheduled)"
+        slack_message: |
+          Host: quory
+          full-upgrade 実施完了。
+          reboot: {{ '既存の予約を維持(冪等な再実行、reboot時刻は変更されていません)' if ubuntu_vm_full_upgrade_quory_reservation_active else (ubuntu_vm_full_upgrade_quory_reboot_delay_seconds | string) + '秒後に自動rebootを予約済み' }}
+
+          reboot後の確認はquoryローカルのsystemd unit(quory-post-upgrade-check、Ansible管理外)が
+          起動時に実施し、corosync-qdevice / chrony同期 / Semaphore稼働状態を確認後、
+          別途Slack通知します。このplaybook自体はreboot発火後の状態を待たず、ここで正常終了します。
+
+  rescue:
+    - name: "quory - remove pending flag if no reservation was ever confirmed (prevents a later unrelated reboot from misfiring the post-upgrade check)"
+      ansible.builtin.file:
+        path: "{{ ubuntu_vm_full_upgrade_quory_flag_file }}"
+        state: absent
+      when: not (ubuntu_vm_full_upgrade_quory_reservation_confirmed | default(false))
+
+    - name: quory - send scheduling-failure alert
+      ansible.builtin.include_tasks: "{{ playbook_dir }}/../roles/common_slack/tasks/notify.yml"
+      vars:
+        _reservation_confirmed: "{{ ubuntu_vm_full_upgrade_quory_reservation_confirmed | default(false) }}"
+        slack_channel: "alerts"
+        slack_status: "critical"
+        slack_title: "[ubuntu_vm_full_upgrade] quory reboot scheduling {{ 'partially FAILED (reboot still scheduled)' if _reservation_confirmed else 'FAILED' }}"
+        slack_message: |
+          Host: quory
+          full-upgrade 実施完了。
+          {% if _reservation_confirmed %}
+          reboot予約は有効です(冪等に維持、または新規予約に成功済み) — reboot自体は実施されます。
+          ただしその後の処理(flag更新・通知等)で失敗が発生しました。post-upgrade checkは
+          予定通り発火します。
+          {% else %}
+          reboot予約処理に失敗し、有効な予約は確認できませんでした。reboot は**未予約**です。
+          手動での reboot 要否確認・実施が必要です。pending flagは削除済みのため、今後
+          別理由でquoryがrebootしてもpost-upgrade checkは誤発火しません。
+          {% endif %}
+          エラー: {{ ansible_failed_result.msg | default('不明') }}
+          Time: {{ lookup('pipe', 'date -u +%Y-%m-%dT%H:%M:%SZ') }}
+
+    - name: quory - re-raise reboot scheduling failure
+      ansible.builtin.fail:
+        msg: "ubuntu_vm_full_upgrade: quory reboot scheduling failed"
