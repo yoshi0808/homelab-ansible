@@ -48,6 +48,7 @@ stop-tester.sh
 swap-right.sh
 
 .codex
+.claude/settings.local.json
 
 # テスト出力（ローカル。スクショ等を含むため public リポジトリに入れない）
 test-output/
