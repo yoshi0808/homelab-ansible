@@ -2,9 +2,16 @@
   "permissions": {
     "allow": [
       "Bash(*)",
+      "Edit(docs/ai/reviews/**)",
+      "Edit(prompts/**)",
+      "Edit(playbooks/**)",
+      "Edit(roles/**)",
+      "Edit(scripts/**)",
       "Write(docs/ai/reviews/**)",
       "Write(prompts/**)",
-      "Write(playbooks/**)"      
+      "Write(playbooks/**)",
+      "Write(roles/**)",
+      "Write(scripts/**)"
     ],
     "ask": [
       "Bash(rm*)",
