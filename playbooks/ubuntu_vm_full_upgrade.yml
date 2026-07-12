@@ -30,6 +30,34 @@
 # - ansy/monnie/authy reboot (if required) in the same Ansible session and
 #   are verified before this playbook finishes.
 #
+# Notifications (final spec, 2026-07-12 — 通知改修第1弾+第2弾確定):
+# - Per-node reports: each participating node sends its own message
+#   ("... - <host>: <STATUS>"); the former 4-node aggregated message was
+#   abolished (too long once per-package lines were added).
+# - Channels mirror proxmox_patch_dryrun: only BLOCKED goes to #alerts;
+#   every other Status (NO_UPDATES / UPGRADE_READY / REVIEW_REQUIRED /
+#   MAJOR_UPGRADE_DETECTED), the apply summaries and the --check
+#   "would apply" message go to #patches. Abnormal per-host paths
+#   (healthcheck failure, post-reboot criticals, reboot/scheduling
+#   failures) stay on #alerts.
+# - Bodies show status_reason, counts (install / remove / 保留(phasing))
+#   and a monospaced per-package block: "pkg old → new" (upgrades,
+#   "(新規)" for fresh installs) / "pkg ver (remove)" /
+#   "pkg installed → candidate (phasing保留)". Phased versions come from a
+#   read-only apt-cache policy lookup inside the collection script (apt -s
+#   prints no versions for phased-back packages); phased packages are
+#   display/reconciliation only — never inputs to Status / important /
+#   threshold judgement — so candidates + phased matches
+#   `apt list --upgradable` (the monnie 23-vs-25 mismatch fix). With zero
+#   candidates but phased pending, the NO_UPDATES reason reads
+#   適用候補なし(phasing保留あり).
+# - Display cap: ubuntu_vm_full_upgrade_notify_detail_max_lines (default
+#   100, aligned with the MAJOR_UPGRADE total threshold) — normal months
+#   render fully in Slack; overflow collapses to 他N件 and the per-host
+#   report JSON is a troubleshooting artifact, not the normal reading path.
+# - Design history: docs/ai/reviews/ubuntu_vm_full_upgrade/
+#   (latest implement: 2026-07-12_022_implement.md).
+#
 # tester-gate: check-mode-native — the common judgement path (healthcheck,
 # apt-get update/check/-s full-upgrade simulation, important-component/
 # remove classification, Status determination, notification) never mutates

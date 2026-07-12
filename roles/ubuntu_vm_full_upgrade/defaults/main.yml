@@ -122,6 +122,24 @@ ubuntu_vm_full_upgrade_major_remove_threshold: 30
 ubuntu_vm_full_upgrade_expected_codename: ""
 
 # ---------------------------------------------------------------------------
+# Per-package version detail in notifications (2026-07-12_014 + _019): the
+# per-node report and the apply summaries (reboot_local.yml /
+# reboot_quory.yml) all embed the same pre-rendered block (built once per
+# host in tasks/main.yml). Each node's Inst/Remv/phased candidates are
+# rendered one per line ("pkg  old → new" / "pkg  ver (remove)" /
+# "pkg  installed → candidate (phasing保留)") inside a ``` code fence. This caps the rendered
+# lines per node; the excess collapses to "…他N件(レポートJSON参照)".
+# Default 100 = ubuntu_vm_full_upgrade_major_total_threshold (below): any
+# month that stays under the MAJOR_UPGRADE threshold renders in full, so
+# normal operation never needs the report JSON (which is repositioned as a
+# troubleshooting artifact — 019: Yoshinobu cannot SSH to it while out).
+# Anything larger is MAJOR_UPGRADE territory (abnormal, apply-forbidden)
+# where truncation is acceptable as a safety valve. If the MAJOR thresholds
+# are ever tuned, consider keeping this aligned.
+# ---------------------------------------------------------------------------
+ubuntu_vm_full_upgrade_notify_detail_max_lines: 100
+
+# ---------------------------------------------------------------------------
 # Manual apply (dry_run=false) safety
 # ---------------------------------------------------------------------------
 # Confirmation required for manual apply: the caller must pass

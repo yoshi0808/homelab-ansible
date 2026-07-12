@@ -139,16 +139,22 @@
         ubuntu_vm_full_upgrade_quory_reservation_confirmed: true
       when: not ubuntu_vm_full_upgrade_quory_reservation_active
 
+    # #patches like the other normal patch-cycle reports; the rescue-path
+    # scheduling-failure alert below stays on #alerts (2026-07-12_019 §実施2).
     - name: quory - send summary notification (only reached once scheduling has actually succeeded or was already in effect)
       ansible.builtin.include_tasks: "{{ playbook_dir }}/../roles/common_slack/tasks/notify.yml"
       vars:
-        slack_channel: "info"
+        slack_channel: "patches"
         slack_status: "info"
         slack_title: "[ubuntu_vm_full_upgrade] apply complete - quory (reboot scheduled)"
         slack_message: |
           Host: quory
           full-upgrade 実施完了。
           reboot: {{ '既存の予約を維持(冪等な再実行、reboot時刻は変更されていません)' if ubuntu_vm_full_upgrade_quory_reservation_active else (ubuntu_vm_full_upgrade_quory_reboot_delay_seconds | string) + '秒後に自動rebootを予約済み' }}
+          適用: install={{ ubuntu_vm_full_upgrade_sim.simulation.inst | length }} remove={{ ubuntu_vm_full_upgrade_sim.simulation.remv | length }} / 保留(phasing)={{ ubuntu_vm_full_upgrade_sim.simulation.phased_detail | length }} (直前のsimulation結果)
+          {% if ubuntu_vm_full_upgrade_notify_detail_block %}
+          {{ ubuntu_vm_full_upgrade_notify_detail_block }}
+          {% endif %}
 
           reboot後の確認はquoryローカルのsystemd unit(quory-post-upgrade-check、Ansible管理外)が
           起動時に実施し、corosync-qdevice / chrony同期 / Semaphore稼働状態を確認後、
