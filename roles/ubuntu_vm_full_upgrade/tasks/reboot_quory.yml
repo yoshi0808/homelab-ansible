@@ -113,7 +113,7 @@
     - name: quory - create/refresh full-upgrade reboot-pending flag file
       ansible.builtin.copy:
         content: |
-          ubuntu_vm_full_upgrade completed at {{ lookup('pipe', 'date -u +%Y-%m-%dT%H:%M:%SZ') }}
+          ubuntu_vm_full_upgrade completed at {{ lookup('pipe', "TZ='Asia/Tokyo' date '+%Y-%m-%dT%H:%M:%S+09:00'") }}
           reboot {{ 'already scheduled (idempotent re-run, existing timer kept)' if ubuntu_vm_full_upgrade_quory_reservation_active else 'about to be scheduled in ' + (ubuntu_vm_full_upgrade_quory_reboot_delay_seconds | string) + 's' }} via systemd-run (unit: ubuntu-vm-full-upgrade-reboot)
         dest: "{{ ubuntu_vm_full_upgrade_quory_flag_file }}"
         owner: root
@@ -187,7 +187,7 @@
           別理由でquoryがrebootしてもpost-upgrade checkは誤発火しません。
           {% endif %}
           エラー: {{ ansible_failed_result.msg | default('不明') }}
-          Time: {{ lookup('pipe', 'date -u +%Y-%m-%dT%H:%M:%SZ') }}
+          Time: {{ lookup('pipe', "TZ='Asia/Tokyo' date '+%Y-%m-%dT%H:%M:%S+09:00'") }}
 
     - name: quory - re-raise reboot scheduling failure
       ansible.builtin.fail:

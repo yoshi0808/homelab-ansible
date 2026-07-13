@@ -10,7 +10,7 @@
     _rvr_vmid: "(unknown)"
     _rvr_vm_node: "(unknown)"
     _rvr_used_force_stop: false
-    _rvr_started_at: "{{ lookup('pipe', 'date -u +%Y-%m-%dT%H:%M:%SZ') }}"
+    _rvr_started_at: "{{ lookup('pipe', \"TZ='Asia/Tokyo' date '+%Y-%m-%dT%H:%M:%S+09:00'\") }}"
 
 - name: VM reboot attempt (with report/notify in always)
   check_mode: false
@@ -227,7 +227,7 @@
           action: "vm_reboot"
           used_force_stop: "{{ _rvr_used_force_stop }}"
           started_at: "{{ _rvr_started_at }}"
-          completed_at: "{{ lookup('pipe', 'date -u +%Y-%m-%dT%H:%M:%SZ') }}"
+          completed_at: "{{ lookup('pipe', \"TZ='Asia/Tokyo' date '+%Y-%m-%dT%H:%M:%S+09:00'\") }}"
           result: "{{ _rvr_result }}"
           detail: "{{ _rvr_detail }}"
       delegate_to: localhost

@@ -93,7 +93,7 @@
           Host: {{ inventory_hostname }}
           reboot タイムアウトまたは SSH 接続不能。full-upgrade自体は完了している可能性があるため、
           手動確認が必要。
-          Time: {{ lookup('pipe', 'date -u +%Y-%m-%dT%H:%M:%SZ') }}
+          Time: {{ lookup('pipe', "TZ='Asia/Tokyo' date '+%Y-%m-%dT%H:%M:%S+09:00'") }}
 
     - name: Re-raise reboot failure
       ansible.builtin.fail:

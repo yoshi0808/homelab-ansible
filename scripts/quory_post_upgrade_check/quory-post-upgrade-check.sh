@@ -129,7 +129,7 @@ fi
 body=$(cat <<EOF
 Host: quory
 Result: ${overall}
-Time: $(date -u +%Y-%m-%dT%H:%M:%SZ)
+Time: $(TZ='Asia/Tokyo' date '+%Y-%m-%dT%H:%M:%S+09:00')
 
 corosync-qnetd  : ${qnetd_status}
 chrony          : ${chrony_status} (${chrony_detail:-no detail})

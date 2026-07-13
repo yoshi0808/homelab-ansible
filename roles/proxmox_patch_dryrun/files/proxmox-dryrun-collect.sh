@@ -5,7 +5,7 @@
 
 set -uo pipefail
 
-collected_at=$(date +"%Y-%m-%dT%H:%M:%SZ")
+collected_at=$(date +"%Y-%m-%dT%H:%M:%S%z")
 node_name=$(hostname -s)
 
 # apt-get update (refresh package lists only, no package installation)

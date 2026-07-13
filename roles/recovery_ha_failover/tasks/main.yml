@@ -10,7 +10,7 @@
     _rhf_vmid: "(unknown)"
     _rhf_source_node: "(unknown)"
     _rhf_target_node: "(unknown)"
-    _rhf_started_at: "{{ lookup('pipe', 'date -u +%Y-%m-%dT%H:%M:%SZ') }}"
+    _rhf_started_at: "{{ lookup('pipe', \"TZ='Asia/Tokyo' date '+%Y-%m-%dT%H:%M:%S+09:00'\") }}"
 
 - name: HA failover attempt (with report/notify in always)
   check_mode: false
@@ -195,7 +195,7 @@
           target_node: "{{ _rhf_target_node }}"
           action: "ha_failover"
           started_at: "{{ _rhf_started_at }}"
-          completed_at: "{{ lookup('pipe', 'date -u +%Y-%m-%dT%H:%M:%SZ') }}"
+          completed_at: "{{ lookup('pipe', \"TZ='Asia/Tokyo' date '+%Y-%m-%dT%H:%M:%S+09:00'\") }}"
           result: "{{ _rhf_result }}"
           detail: "{{ _rhf_detail }}"
       delegate_to: localhost
