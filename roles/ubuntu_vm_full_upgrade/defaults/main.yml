@@ -51,7 +51,10 @@ ubuntu_vm_full_upgrade_important_per_node:
     - 'ansible.*'
     - 'chrony'
     - 'ntp.*'
-    - 'corosync-qdevice'
+    # quory runs the QDevice *server* daemon corosync-qnetd; corosync-qdevice
+    # is the cluster-node-side daemon (pve1/pve2) and is not installed on
+    # quory (2026-07-12_027_test_result.md quory §5).
+    - 'corosync-qnetd'
     - 'corosync'
 
 # Node -> primary product label(s), for the "主力プロダクトへの影響明示"
@@ -86,7 +89,7 @@ ubuntu_vm_full_upgrade_products:
       managed_by_note: true
     - label: "QDevice"
       patterns:
-        - 'corosync-qdevice'
+        - 'corosync-qnetd'
         - 'corosync'
     - label: "NTP基準"
       patterns:

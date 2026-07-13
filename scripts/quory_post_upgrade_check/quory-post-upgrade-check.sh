@@ -3,8 +3,14 @@
 #
 # Ansible-external (not deployed/managed by this repo's Ansible automation —
 # requirement §9/§11). Runs at boot via quory-post-upgrade-check.service.
-# Read-only: checks corosync-qdevice / chrony sync / Semaphore, notifies
+# Read-only: checks corosync-qnetd / chrony sync / Semaphore, notifies
 # Slack, then removes the flag file. Does not change any configuration.
+#
+# QDevice unit name (2026-07-12_027_test_result.md quory §5/§6): quory is
+# the QDevice *server* (arbiter), so the daemon running here is
+# corosync-qnetd (TCP 5403). corosync-qdevice is the cluster-node-side
+# daemon (pve1/pve2) and does not exist on quory — checking it would
+# always report a false CRITICAL.
 #
 # Only acts if the flag file exists (i.e. the last reboot was caused by
 # ubuntu_vm_full_upgrade's apply, not some other reboot) — see
@@ -45,16 +51,16 @@ fi
 
 # ---------------------------------------------------------------------------
 # Checks (read-only). `After=network-online.target` in the .service only
-# guarantees network reachability at unit start, not that corosync-qdevice
+# guarantees network reachability at unit start, not that corosync-qnetd
 # or Semaphore have finished starting yet (both are also started around
 # boot and can race this unit) — a single `systemctl is-active` right after
 # boot can catch them mid-"activating" and falsely report CRITICAL
 # (2026-07-11 review). wait_for_active polls with a bounded retry+interval
 # instead of checking once or sleeping blindly.
 #
-# Ordering (2026-07-11 review): corosync-qdevice is checked AFTER chrony,
+# Ordering (2026-07-11 review): corosync-qnetd is checked AFTER chrony,
 # not before. Checking it first (as an earlier version of this script did)
-# freezes its value at ~10s into boot and never re-evaluates it — if qdevice
+# freezes its value at ~10s into boot and never re-evaluates it — if qnetd
 # only finishes starting at, say, 15s, the stale "inactive" reading from the
 # first check would wrongly report CRITICAL even though it's fine by the
 # time this script actually finishes. Placing it after chrony's up-to-50s
@@ -63,7 +69,7 @@ fi
 #
 # Timeout budget (must fit inside the .service's TimeoutStartSec=120):
 #   chrony waitsync :  <= 10 tries x 5s = 50s  (chronyc's own retry/timeout)
-#   corosync-qdevice: <= 3 tries x 5s  = 15s (2 sleeps between 3 tries)
+#   corosync-qnetd  : <= 3 tries x 5s  = 15s (2 sleeps between 3 tries)
 #   semaphore       : <= 3 tries x 5s  = 15s (2 sleeps between 3 tries)
 #   curl (Slack)    : <= 10s
 #   worst-case total: ~90s, leaving a margin under 120s for process
@@ -99,11 +105,11 @@ fi
 chrony_detail=$(tail -1 /tmp/quory-post-upgrade-chrony.$$ 2>/dev/null)
 rm -f /tmp/quory-post-upgrade-chrony.$$
 
-qdevice_status=$(wait_for_active corosync-qdevice 3 5) || true
+qnetd_status=$(wait_for_active corosync-qnetd 3 5) || true
 semaphore_status=$(wait_for_active semaphore 3 5) || true
 
 criticals=()
-[ "$qdevice_status" = "active" ] || criticals+=("corosync-qdevice is not active: ${qdevice_status}")
+[ "$qnetd_status" = "active" ] || criticals+=("corosync-qnetd is not active: ${qnetd_status}")
 [ "$chrony_status" = "synced" ] || criticals+=("chrony did not sync in time: ${chrony_detail:-no detail}")
 [ "$semaphore_status" = "active" ] || criticals+=("semaphore service is not active: ${semaphore_status}")
 
@@ -125,7 +131,7 @@ Host: quory
 Result: ${overall}
 Time: $(date -u +%Y-%m-%dT%H:%M:%SZ)
 
-corosync-qdevice: ${qdevice_status}
+corosync-qnetd  : ${qnetd_status}
 chrony          : ${chrony_status} (${chrony_detail:-no detail})
 semaphore       : ${semaphore_status}
 

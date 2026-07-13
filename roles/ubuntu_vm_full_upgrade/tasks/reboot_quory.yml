@@ -157,7 +157,7 @@
           {% endif %}
 
           reboot後の確認はquoryローカルのsystemd unit(quory-post-upgrade-check、Ansible管理外)が
-          起動時に実施し、corosync-qdevice / chrony同期 / Semaphore稼働状態を確認後、
+          起動時に実施し、corosync-qnetd / chrony同期 / Semaphore稼働状態を確認後、
           別途Slack通知します。このplaybook自体はreboot発火後の状態を待たず、ここで正常終了します。
 
   rescue:
