@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+# homelab-mute-status — Codex 経由の対象別 mute 状態表示(recovery-exec、read-only)
+#
+# mute ファイル(0644)を読むだけで書き込み・sudo は不要。表示は人間 CLI
+# `homelab-mute status` と同じ体裁(policy §7)。
+set -euo pipefail
+
+MUTE_DIR=/var/lib/homelab-recovery/mute
+ALLOWED_TARGETS=("authy" "monnie" "sophos-fw")
+
+json_field() {  # $1=file $2=field → prints value or empty
+  python3 -c 'import json,sys
+try:
+    print(json.load(open(sys.argv[1])).get(sys.argv[2], ""))
+except Exception:
+    pass' "$1" "$2" 2>/dev/null || true
+}
+
+now="$(date +%s)"
+printf '%-10s %-12s %-26s %s\n' TARGET STATE UNTIL REASON
+for t in "${ALLOWED_TARGETS[@]}"; do
+  file="$MUTE_DIR/${t}.json"
+  if [[ ! -f "$file" ]]; then
+    printf '%-10s %-12s %-26s %s\n' "$t" "-" "-" "-"
+    continue
+  fi
+  until_s="$(json_field "$file" until)"
+  reason="$(json_field "$file" reason)"
+  until_epoch="$(date -d "$until_s" +%s 2>/dev/null || echo 0)"
+  if [[ "$until_epoch" -gt "$now" ]]; then
+    rem_min=$(( (until_epoch - now + 59) / 60 ))
+    printf '%-10s %-12s %-26s %s\n' "$t" "MUTED(${rem_min}m)" "$until_s" "$reason"
+  else
+    printf '%-10s %-12s %-26s %s\n' "$t" "expired" "$until_s" "$reason"
+  fi
+done

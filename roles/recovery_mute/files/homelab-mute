@@ -56,6 +56,21 @@ except Exception:
     pass' "$1" "$2" 2>/dev/null || true
 }
 
+# Serialize read → max() → write / clear across all mute writers (this CLI, the
+# Codex wrappers homelab-mute-{set,clear}, and the Ansible auto-mute
+# recovery_mute/tasks/set.yml) via a shared per-target lock so concurrent writers
+# cannot lose-update and shorten an active mute (review 2026-07-14_005 F2).
+# Create the lock file if absent, open it read-only on fd 9, and take an exclusive
+# flock on that fd — granted regardless of open mode on a local fs, so root and
+# recovery-exec both lock it. Setup normally pre-creates it 0644 root; a fallback
+# create here makes it recovery-exec-owned instead. Held until fd 9 closes on exit.
+acquire_lock() {  # $1=target
+  local lf="$MUTE_DIR/.$1.lock"
+  [[ -e "$lf" ]] || ( umask 022; : > "$lf" ) 2>/dev/null || true
+  exec 9<"$lf" || { echo "ERROR: cannot open mute lock $lf" >&2; exit 1; }
+  flock 9
+}
+
 cmd="${1:-}"
 shift || true
 
@@ -72,8 +87,12 @@ case "$cmd" in
       exit 1
     fi
     require_root set
-    mkdir -p "$MUTE_DIR"
-    chmod 0755 "$MUTE_DIR"
+    # Create-only 0755; never chmod an existing dir so we neither reset the ACL
+    # mask on quory nor widen the owning group on ACL-less hosts (review
+    # 2026-07-14_008 F1). recovery_exec setup adds the recovery-exec ACL mask.
+    mkdir -m 0755 -p "$MUTE_DIR"
+
+    acquire_lock "$target"
 
     new_until="$(date -d "+${minutes} minutes" +"%Y-%m-%dT%H:%M:%S%:z")"
     file="$MUTE_DIR/${target}.json"
@@ -122,6 +141,7 @@ print(json.dumps({"until": sys.argv[1], "reason": sys.argv[2]}, ensure_ascii=Fal
     target="$1"
     validate_target "$target"
     require_root clear
+    acquire_lock "$target"
     if [[ -f "$MUTE_DIR/${target}.json" ]]; then
       rm -f "$MUTE_DIR/${target}.json"
       echo "cleared: $target"

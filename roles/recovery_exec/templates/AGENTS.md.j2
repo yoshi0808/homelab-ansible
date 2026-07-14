@@ -81,12 +81,34 @@ Node-specific checks:
 homelab-investigate-pve1 <check>
 homelab-investigate-pve2 <check>
 ```
-Connects to the respective Proxmox node via SSH and reports read-only cluster/HA status.
-Allowed values for `<check>`:
+Connects to the respective Proxmox node via SSH and reports read-only
+cluster / HA / replication / storage / ZFS / journal status.
+Allowed values for `<check>` (all read-only, no parameters):
 
+Cluster / HA:
 - `cluster-status` — `pvesh get /cluster/status` (cluster membership/quorum)
 - `cluster-resources` — `pvesh get /cluster/resources` (all VMs/storage/nodes with status)
+- `cluster-quorum` — `pvecm status` (corosync quorum / node membership, transport-level view)
 - `ha-status` — `ha-manager status` (HA manager state)
+
+Replication (pve1↔pve2 pairwise — check from both nodes):
+- `replication-status` — `pvesr status` (replication jobs: state, last sync, errors)
+- `replication-list` — `pvesr list` (configured replication jobs)
+
+Storage / ZFS:
+- `storage-status` — `pvesm status` (all storages: enabled, type, capacity)
+- `zpool-health` — `zpool status -x` (only unhealthy pools; "all pools are healthy" when OK)
+- `zfs-list` — `zfs list` (datasets/volumes; useful to confirm a replication target exists)
+
+Recent logs (fixed sources, capped):
+- `journal-replication` — last 200 lines of each per-job replication log in `/var/log/pve/replicate/` (despite the retained check name, this reads the fixed log files directly, not the systemd journal)
+- `journal-cluster` — recent logs for `pve-cluster` / `corosync` / `pvedaemon` (quorum/membership triage)
+- `journal-system` — recent node-wide warnings/errors (priority warning..err)
+
+When a VM's replication is failing (e.g. after a backup restore), start with
+`replication-status` (and `journal-replication`) from both pve1 and pve2, then
+use `cluster-quorum` / `zpool-health` / `zfs-list` to localize the cause.
+These are diagnosis only — do not attempt any repair on pve1/pve2 (below).
 
 Either wrapper can answer questions about either node (pve1 or pve2) — the
 choice of which one to SSH into only matters if one node is unreachable, in
@@ -150,6 +172,34 @@ homelab-monitoring-status   # show current state (ACTIVE or PAUSED)
 
 Never pause monitoring as part of a service recovery session — this is for human-directed work pauses only.
 
+### Per-target mute with TTL (homelab-mute-*)
+
+Use when the user asks to mute (silence autonomous recovery for) a **single target**
+for a limited time — e.g. during a planned evacuate/patch on one node — rather than
+pausing everything. Muting one target does not affect the others.
+
+```
+homelab-mute-set <target> <minutes> [reason...]   # mute one target for N minutes
+homelab-mute-status                               # show mute state of all targets
+homelab-mute-clear <target>                       # remove a target's mute
+```
+
+- `<target>` is one of `authy` / `monnie` / `sophos-fw`.
+- `<minutes>` must be an integer within **1..240** (max 4h via this path). Out-of-range
+  or non-integer input is rejected — report the error to the user; do not retry with a
+  clamped value.
+- `set` never shortens an already-active mute: it applies `max(existing, now + N)`, so a
+  longer window (e.g. a 2h evacuate mute) wins over a shorter N. The command prints the
+  **effective** remaining minutes after this rule, not the N you passed — read that
+  number back to the user so the real window is not misunderstood. To shorten, `clear`
+  then `set`.
+- `[reason...]` is optional free text stored verbatim; if omitted a default reason is used.
+
+Difference from global pause: `homelab-monitoring-pause` stops **all** targets with **no
+TTL** (until an explicit resume). `homelab-mute-*` targets **one** node with a **required
+TTL** that auto-expires. Prefer per-target mute for planned work on a single node; use
+global pause only when the user explicitly wants everything paused.
+
 ### Recovery (homelab-recover-*)
 
 ```
@@ -175,7 +225,7 @@ Restarts prometheus, grafana-server, loki, unpoller on monnie (no arguments).
 
 - Do NOT take recovery action without prior investigation confirming failure.
 - Do NOT run homelab-recover-* more than once per session on the same target. If re-investigation after recovery still shows failure, escalate immediately — do not restart again.
-- Do NOT call tools other than homelab-investigate-*, homelab-recover-*, homelab-monitoring-*, homelab-reports, and homelab-semaphore-query.
+- Do NOT call tools other than homelab-investigate-*, homelab-recover-*, homelab-monitoring-*, homelab-mute-*, homelab-reports, and homelab-semaphore-query.
 - Do NOT attempt any recovery/change action on pve1/pve2 (homelab-investigate-pve1/pve2 are read-only; there is no homelab-recover-pve1/pve2).
 - Wrappers have hardcoded hosts; never try to construct SSH commands manually.
 

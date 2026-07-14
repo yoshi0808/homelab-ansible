@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+# homelab-mute-clear — Codex 経由の対象別 mute 解除(recovery-exec、sudo 無し)
+#
+# mute ファイルを削除するだけ。rm はディレクトリの write+exec で可能で、
+# ファイル所有者(root or recovery-exec)を問わない(mute dir は sticky なし、
+# recovery-exec に rwx ACL 付与済み)。playbook 自動 mute の解除にも使える。
+set -euo pipefail
+
+MUTE_DIR=/var/lib/homelab-recovery/mute
+ALLOWED_TARGETS=("authy" "monnie" "sophos-fw")
+
+usage() {
+  cat >&2 <<EOF
+Usage: homelab-mute-clear <target>
+Targets: ${ALLOWED_TARGETS[*]}
+EOF
+  exit 2
+}
+
+validate_target() {
+  local t="$1" a
+  for a in "${ALLOWED_TARGETS[@]}"; do
+    [[ "$t" == "$a" ]] && return 0
+  done
+  echo "ERROR: unknown target '$t' (allowed: ${ALLOWED_TARGETS[*]})" >&2
+  exit 1
+}
+
+# Same shared per-target lock as homelab-mute-set / the human CLI / set.yml so a
+# clear cannot interleave with another writer's read → max() → write
+# (review 2026-07-14_005 F2). Create the lock if absent, open it read-only on fd 9,
+# and take an exclusive flock on that fd (granted regardless of open mode on a local fs).
+acquire_lock() {  # $1=target
+  local lf="$MUTE_DIR/.$1.lock"
+  [[ -e "$lf" ]] || ( umask 022; : > "$lf" ) 2>/dev/null || true
+  exec 9<"$lf" || { echo "ERROR: cannot open mute lock $lf" >&2; exit 1; }
+  flock 9
+}
+
+[[ $# -eq 1 ]] || usage
+target="$1"
+validate_target "$target"
+
+acquire_lock "$target"
+
+file="$MUTE_DIR/${target}.json"
+if [[ -f "$file" ]]; then
+  rm -f "$file"
+  echo "cleared: ${target}"
+else
+  echo "not muted: ${target}"
+fi

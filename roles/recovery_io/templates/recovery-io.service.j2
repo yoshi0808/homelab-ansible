@@ -21,8 +21,14 @@ ProtectSystem=strict
 # read-only + ReadWritePaths: Codex (child process via sudo) needs to write
 # to ~/.codex/ for its in-process app-server state. DAC (0700 recovery-exec)
 # still prevents recovery-io user from accessing those files.
+# /var/lib/homelab-recovery/mute is also listed: this unit's ProtectSystem=strict
+# mount namespace is the one Codex's own bwrap sandbox binds writable roots
+# from, so even with sandbox_workspace_write.writable_roots set in
+# codex-config.toml.j2 (§ mute wrapper), a Slack-triggered mute set/clear
+# under this service would still hit a read-only filesystem without also
+# opening it here (test_result 2026-07-14_012 T1).
 ProtectHome=read-only
-ReadWritePaths={{ recovery_io_exec_home }} {{ recovery_io_exec_workspace }}
+ReadWritePaths={{ recovery_io_exec_home }} {{ recovery_io_exec_workspace }} /var/lib/homelab-recovery/mute
 RestrictSUIDSGID=yes
 LockPersonality=yes
 PrivateDevices=yes

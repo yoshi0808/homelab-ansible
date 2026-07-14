@@ -2,11 +2,21 @@
 # recovery-investigate-dispatch-pve.sh — deployed on {{ inventory_hostname }} (Proxmox node)
 # Called via SSH forced command from recovery-exec@quory (id_recovery_investigate_pve).
 # Validates SSH_ORIGINAL_COMMAND against a fixed allowlist of read-only
-# cluster/HA status checks only. No pvesh create/set/delete; no arguments
-# accepted from the SSH client beyond the forced command key. Commands below
-# are the exact, previously-proven invocations used elsewhere in this repo
-# (roles/recovery_ha_failover, roles/proxmox_evacuate_node,
-# roles/proxmox_restore_vm_placement), not newly-guessed API paths.
+# cluster / HA / replication / storage / ZFS / journal status checks only.
+# No pvesh create/set/delete; no arguments accepted from the SSH client
+# beyond the forced command key (Phase 1: no parameters — parameterized
+# checks such as `pvesr read <job-id>` are deferred to Phase 2 with argument
+# validation, see autonomous_recovery_policy.md §4.6).
+#
+# Privileged arms run `sudo -n <absolute path> <fixed args>`; every such
+# invocation is listed 1:1 (no wildcards) in
+# sudoers-recovery-exec-pve-target.j2. The replication-log arm reads the
+# world-readable fixed Proxmox log directory directly without sudo. Commands
+# are standard Proxmox / ZFS / journalctl read-only status invocations; the
+# journalctl time-window idiom (`--since "-2 hours"`) mirrors the proven
+# authy/monnie dispatch (recovery-investigate-dispatch.sh.j2). Absolute binary
+# paths and journalctl target units are pre-deploy check items — see the NOTE
+# blocks in the sudoers template.
 #
 # pve1/pve2 have no recovery action wrappers — investigate only (see
 # AGENTS.md / autonomous_recovery_policy.md §4.6).
@@ -23,6 +33,47 @@ case "$cmd" in
     ;;
   ha-status)
     sudo -n /usr/sbin/ha-manager status
+    ;;
+  # --- Replication (pvesr) ---
+  replication-status)
+    sudo -n /usr/bin/pvesr status
+    ;;
+  replication-list)
+    sudo -n /usr/bin/pvesr list
+    ;;
+  # --- Cluster quorum / storage (corosync view + storage inventory) ---
+  cluster-quorum)
+    sudo -n /usr/bin/pvecm status
+    ;;
+  storage-status)
+    sudo -n /usr/sbin/pvesm status
+    ;;
+  # --- ZFS pool / dataset health ---
+  zpool-health)
+    sudo -n /usr/sbin/zpool status -x
+    ;;
+  zfs-list)
+    sudo -n /usr/sbin/zfs list
+    ;;
+  # --- Replication logs (fixed directory, fixed per-job line cap) ---
+  journal-replication)
+    replication_log_found=false
+    for replication_log in /var/log/pve/replicate/*; do
+      [[ -f "$replication_log" ]] || continue
+      replication_log_found=true
+      printf '==> %s <==\n' "$replication_log"
+      /usr/bin/tail -n 200 -- "$replication_log"
+    done
+    if [[ "$replication_log_found" == false ]]; then
+      printf '%s\n' 'No replication logs found in /var/log/pve/replicate/'
+    fi
+    ;;
+  # --- Journals (fixed units, fixed 2h window, fixed line cap) ---
+  journal-system)
+    sudo -n /usr/bin/journalctl -p warning..err --since "-2 hours" -n 300 --no-pager
+    ;;
+  journal-cluster)
+    sudo -n /usr/bin/journalctl -u pve-cluster -u corosync -u pvedaemon --since "-2 hours" -n 200 --no-pager
     ;;
   *)
     echo "denied: unknown command '${cmd}'" >&2

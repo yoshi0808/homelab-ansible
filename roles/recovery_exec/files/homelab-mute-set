@@ -1,0 +1,118 @@
+#!/usr/bin/env bash
+# homelab-mute-set — Codex 経由の対象別 mute 設定(recovery-exec、sudo 無し)
+#
+# 人間用 CLI(root 必須の `homelab-mute set`)とは別コマンドに分離している。
+# execpolicy の command 名一致で「Codex が触れてよい mute 経路」と「人間 sudo 経路」
+# を物理的に分離するため(requirement docs/ai/reviews/autonomous_recovery/
+# 2026-07-14_001_requirement.md、policy §7)。
+#
+# 書き込み権限は sudo/setuid ではなく POSIX ACL(mute dir への recovery-exec rwx)で
+# 付与される。Codex サンドボックスの no_new_privileges で sudo は一律失敗するため
+# (policy §4.5 / §6)。
+#
+# mute ファイル形式は roles/recovery_mute/tasks/set.yml / files/homelab-mute と完全互換:
+#   /var/lib/homelab-recovery/mute/<target>.json
+#   { "until": "<ISO8601 %:z>", "reason": "..." }
+#
+# 使い方: homelab-mute-set <target> <minutes> [reason...]
+#
+# セマンティクス:
+#   - max(既存 until, now + minutes) で有効な mute 窓を短縮しない(延長のみ)。
+#     短縮したい場合は homelab-mute-clear → homelab-mute-set。
+#   - minutes は 1..240 の正整数。範囲外・非整数は拒否して理由を返す
+#     (Codex 経由手動 mute の上限。playbook 自動 mute は従来どおり無制限)。
+#   - 書き込みは mktemp → chmod 0644 → mv の atomic 置換(readers を壊さない)。
+#   - 実行後、指定 N ではなく max 適用後の実効残り分数を返す(status と同一ロジック)。
+set -euo pipefail
+
+MUTE_DIR=/var/lib/homelab-recovery/mute
+ALLOWED_TARGETS=("authy" "monnie" "sophos-fw")
+MAX_MINUTES=240
+DEFAULT_REASON="Slack manual mute (Codex)"
+
+usage() {
+  cat >&2 <<EOF
+Usage: homelab-mute-set <target> <minutes> [reason...]
+Targets: ${ALLOWED_TARGETS[*]}
+Minutes: 1..${MAX_MINUTES}
+EOF
+  exit 2
+}
+
+validate_target() {
+  local t="$1" a
+  for a in "${ALLOWED_TARGETS[@]}"; do
+    [[ "$t" == "$a" ]] && return 0
+  done
+  echo "ERROR: unknown target '$t' (allowed: ${ALLOWED_TARGETS[*]})" >&2
+  exit 1
+}
+
+json_field() {  # $1=file $2=field → prints value or empty
+  python3 -c 'import json,sys
+try:
+    print(json.load(open(sys.argv[1])).get(sys.argv[2], ""))
+except Exception:
+    pass' "$1" "$2" 2>/dev/null || true
+}
+
+# Serialize read → max() → write against all other mute writers (this wrapper,
+# homelab-mute-clear, the human CLI homelab-mute, and the Ansible auto-mute
+# recovery_mute/tasks/set.yml) so a concurrent long auto-mute is never shortened
+# by a short manual mute's stale read (review 2026-07-14_005 F2). Create the lock
+# file if absent, open it read-only on fd 9, and take an exclusive flock on that
+# fd — granted regardless of open mode on a local fs, so recovery-exec can lock a
+# root-owned 0644 lock file. Held until fd 9 closes on exit.
+acquire_lock() {  # $1=target
+  local lf="$MUTE_DIR/.$1.lock"
+  [[ -e "$lf" ]] || ( umask 022; : > "$lf" ) 2>/dev/null || true
+  exec 9<"$lf" || { echo "ERROR: cannot open mute lock $lf" >&2; exit 1; }
+  flock 9
+}
+
+[[ $# -ge 2 ]] || usage
+target="$1"
+minutes="$2"
+shift 2
+reason="${*:-$DEFAULT_REASON}"
+
+validate_target "$target"
+
+if ! [[ "$minutes" =~ ^[0-9]+$ ]]; then
+  echo "ERROR: minutes must be a positive integer (got '$minutes')" >&2
+  exit 1
+fi
+if [[ "$minutes" -lt 1 || "$minutes" -gt "$MAX_MINUTES" ]]; then
+  echo "ERROR: minutes must be within 1..${MAX_MINUTES} (got ${minutes}). Codex 経由手動 mute の上限は ${MAX_MINUTES} 分です。より長い mute が必要な場合は人間が 'sudo homelab-mute set' を使ってください。" >&2
+  exit 1
+fi
+
+file="$MUTE_DIR/${target}.json"
+
+acquire_lock "$target"
+
+new_until="$(date -d "+${minutes} minutes" +"%Y-%m-%dT%H:%M:%S%:z")"
+effective="$new_until"
+existing_until="$(json_field "$file" until)"
+if [[ -n "$existing_until" ]]; then
+  existing_epoch="$(date -d "$existing_until" +%s 2>/dev/null || echo 0)"
+  new_epoch="$(date -d "$new_until" +%s)"
+  if [[ "$existing_epoch" -gt "$new_epoch" ]]; then
+    effective="$existing_until"
+  fi
+fi
+
+# Atomic replace: recovery-exec owns the tmp it creates; rename over an existing
+# (possibly root-owned) file only needs write+exec on the dir, granted by ACL.
+tmp="$(mktemp "$MUTE_DIR/.${target}.XXXXXX")"
+python3 -c 'import json,sys
+print(json.dumps({"until": sys.argv[1], "reason": sys.argv[2]}, ensure_ascii=False))' \
+  "$effective" "$reason" > "$tmp"
+chmod 0644 "$tmp"
+mv "$tmp" "$file"
+
+now="$(date +%s)"
+eff_epoch="$(date -d "$effective" +%s 2>/dev/null || echo "$now")"
+rem_min=$(( (eff_epoch - now + 59) / 60 ))
+(( rem_min < 0 )) && rem_min=0
+echo "muted: ${target} 残り ${rem_min} 分 (until ${effective}, reason: ${reason})"

@@ -190,6 +190,23 @@
     - homelab-monitoring-status
   become: true
 
+# Per-target mute wrappers (Codex-facing). Separate command names from the
+# root-only human CLI (roles/recovery_mute/files/homelab-mute) so execpolicy can
+# allow the Codex path (sudo-less, ACL-backed) while the human sudo path stays
+# distinct. Write access is granted below via POSIX ACL, not sudo (§4.5 / §6).
+- name: Deploy homelab-mute-{set,status,clear} wrapper scripts (Codex-facing, sudo-less)
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: "/usr/local/bin/{{ item }}"
+    owner: root
+    group: root
+    mode: "0755"
+  loop:
+    - homelab-mute-set
+    - homelab-mute-status
+    - homelab-mute-clear
+  become: true
+
 # ---------------------------------------------------------------------------
 # Investigation helpers: reports/ JSON lookup + Semaphore failure lookup
 # (quory-local; no SSH hop to a target node).
@@ -234,6 +251,67 @@
     etype: user
     permissions: r
     state: present
+  become: true
+
+# Per-target mute write access for the homelab-mute-{set,clear} wrappers.
+# Granted via POSIX ACL (recovery-exec's own uid gains rwx on the mute dir),
+# not sudo — Codex's no_new_privileges sandbox blocks sudo/setuid regardless of
+# sudoers (§4.5 / §6). Scope is the mute directory ONLY; no other write is
+# added. Files stay 0644/world-readable so readers (recovery-probe as yoshi,
+# recovery-push-dispatch) keep reading them. The dir has no sticky bit, so
+# recovery-exec can atomically rename/rm over root-owned auto-mute files.
+#
+# Permission model (reworked per review 2026-07-14_008 F1): the dir is created
+# ONCE at 0755 (create-only via `mkdir -m 0755 -p` + `creates:`, never re-chmod'd),
+# and the named-user ACL below raises the ACL mask to rwx while group::/other::
+# stay r-x. A blanket 0775 was wrong: on a host/time WITHOUT the ACL (e.g. ansy,
+# which runs deploy_cli.yml via recovery_probe_setup but has no recovery_exec ACL,
+# or quory before this ACL task) the group bits map to ACL_GROUP_OBJ, so 0775 would
+# grant the owning group (root) real write. Creating at 0755 and never re-chmod'ing
+# keeps group::r-x everywhere, and setfacl adds mask::rwx only where recovery-exec
+# is set up. Final states:
+#   ansy (no ACL): root:root 0755 — group r-x, other r-x, no group write.
+#   quory (ACL):   group::r-x, mask::rwx, user:recovery-exec:rwx (effective rwx),
+#                  other::r-x.
+# All other writers (deploy_cli.yml, set.yml, human CLI) are likewise create-only
+# and never re-chmod, so none of them resets the mask or widens the group.
+- name: Ensure mute directory exists at 0755 (create-only; ACL below adds the mask)
+  ansible.builtin.command:
+    cmd: mkdir -m 0755 -p /var/lib/homelab-recovery/mute
+    creates: /var/lib/homelab-recovery/mute
+  become: true
+
+- name: Grant recovery-exec ACL rwx on mute dir (no sudo; mask becomes rwx, group/other stay r-x)
+  ansible.posix.acl:
+    path: /var/lib/homelab-recovery/mute
+    entity: "{{ recovery_exec_user }}"
+    etype: user
+    permissions: rwx
+    state: present
+  become: true
+
+# Shared per-target flock targets (review 2026-07-14_005 F2). All mute writers
+# (Codex wrappers, human CLI, Ansible auto-mute) take an exclusive flock on these
+# before their read → max() → write, so a concurrent long auto-mute is never
+# shortened by a short manual mute's stale read. Each writer opens the lock file
+# read-only on fd 9 and flock's that fd; on a local fs an exclusive flock is
+# granted regardless of the fd's open mode, so no write permission on the lock file
+# is needed. This task pre-creates them 0644 root:root; if a wrapper's fallback
+# create runs first the lock is recovery-exec-owned instead — both work, since
+# locking does not depend on ownership. access/modification_time preserved for idempotence.
+- name: Ensure per-target mute lock files exist (shared flock targets)
+  ansible.builtin.file:
+    path: "/var/lib/homelab-recovery/mute/.{{ item }}.lock"
+    state: touch
+    owner: root
+    group: root
+    mode: "0644"
+    access_time: preserve
+    modification_time: preserve
+  loop:
+    - authy
+    - monnie
+    - sophos-fw
   become: true
 
 - name: Deploy homelab-reports wrapper (Codex-facing, validates then reads directly)

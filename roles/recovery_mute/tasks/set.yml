@@ -10,43 +10,63 @@
 #   { "until": "<ISO8601>", "reason": "..." }
 # Update rule: max(existing until, now + minutes) — never shortens an active window.
 # All tasks delegate to localhost (quory), regardless of the calling play's hosts.
+#
+# The read → max() → write is serialized against every other mute writer (the
+# human CLI homelab-mute, the Codex wrappers homelab-mute-{set,clear}) via a
+# shared per-target flock, so a concurrent short manual mute can't lose-update
+# and shorten this (typically longer) auto-mute window (review 2026-07-14_005 F2).
+# The former slurp/set_fact/copy sequence was reader-atomic (copy writes then
+# renames) but NOT writer-atomic across processes, so it is replaced by one
+# flock'd shell task that also does the temp-file + rename atomic write.
 
-- name: "Recovery mute | ensure mute directory exists"
+# Create-only 0755, never re-chmod (review 2026-07-14_008 F1): avoids granting the
+# owning group write on ACL-less hosts and avoids resetting the recovery-exec ACL
+# mask on quory. recovery_exec setup adds the mask where recovery-exec exists.
+- name: "Recovery mute | ensure mute directory exists at 0755 (create-only)"
+  ansible.builtin.command:
+    cmd: mkdir -m 0755 -p /var/lib/homelab-recovery/mute
+    creates: /var/lib/homelab-recovery/mute
+  delegate_to: localhost
+  become: true
+
+- name: "Recovery mute | ensure per-target lock file exists ({{ recovery_mute_target }})"
   ansible.builtin.file:
-    path: /var/lib/homelab-recovery/mute
-    state: directory
-    mode: "0755"
-  delegate_to: localhost
-  become: true
-
-- name: "Recovery mute | read existing mute file ({{ recovery_mute_target }})"
-  ansible.builtin.slurp:
-    src: "/var/lib/homelab-recovery/mute/{{ recovery_mute_target }}.json"
-  register: _recovery_mute_existing
-  delegate_to: localhost
-  become: false
-  ignore_errors: true
-
-- name: "Recovery mute | calculate effective until ({{ recovery_mute_target }})"
-  ansible.builtin.set_fact:
-    _recovery_mute_until_new: >-
-      {{ lookup('pipe',
-         'date -d "+' + (recovery_mute_minutes | string) + ' minutes" +"%Y-%m-%dT%H:%M:%S%:z"') }}
-    _recovery_mute_until_existing: >-
-      {{ (_recovery_mute_existing.content | b64decode | from_json).until
-         if _recovery_mute_existing is not failed
-         else '' }}
-
-- name: "Recovery mute | write mute file ({{ recovery_mute_target }})"
-  ansible.builtin.copy:
-    content: >-
-      {{ {
-           'until': ([_recovery_mute_until_new, _recovery_mute_until_existing]
-                     | select | list | max),
-           'reason': recovery_mute_reason
-         } | to_nice_json }}
-
-    dest: "/var/lib/homelab-recovery/mute/{{ recovery_mute_target }}.json"
+    path: "/var/lib/homelab-recovery/mute/.{{ recovery_mute_target }}.lock"
+    state: touch
     mode: "0644"
+    access_time: preserve
+    modification_time: preserve
   delegate_to: localhost
   become: true
+
+- name: "Recovery mute | set/extend mute atomically under flock ({{ recovery_mute_target }})"
+  ansible.builtin.shell:
+    executable: /bin/bash
+    cmd: |
+      set -euo pipefail
+      MUTE_DIR=/var/lib/homelab-recovery/mute
+      target={{ recovery_mute_target | quote }}
+      minutes={{ recovery_mute_minutes | string | quote }}
+      reason={{ recovery_mute_reason | quote }}
+      file="$MUTE_DIR/${target}.json"
+      # Serialize the whole read-modify-write: open the lock read-only on fd 9 and
+      # take an exclusive flock on that fd (granted regardless of open mode on a
+      # local fs); held until fd 9 closes. Lock file is ensured by the previous task.
+      exec 9<"$MUTE_DIR/.${target}.lock"
+      flock 9
+      new_until="$(date -d "+${minutes} minutes" +"%Y-%m-%dT%H:%M:%S%:z")"
+      effective="$new_until"
+      existing="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("until",""))' "$file" 2>/dev/null || true)"
+      if [[ -n "$existing" ]]; then
+        e="$(date -d "$existing" +%s 2>/dev/null || echo 0)"
+        n="$(date -d "$new_until" +%s)"
+        [[ "$e" -gt "$n" ]] && effective="$existing"
+      fi
+      tmp="$(mktemp "$MUTE_DIR/.${target}.XXXXXX")"
+      python3 -c 'import json,sys; print(json.dumps({"until":sys.argv[1],"reason":sys.argv[2]},ensure_ascii=False))' "$effective" "$reason" > "$tmp"
+      chmod 0644 "$tmp"
+      mv "$tmp" "$file"
+      echo "mute set: $target until $effective"
+  delegate_to: localhost
+  become: true
+  changed_when: true

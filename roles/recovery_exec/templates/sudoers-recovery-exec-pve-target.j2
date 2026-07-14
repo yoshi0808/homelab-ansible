@@ -1,11 +1,40 @@
 # recovery-exec (Proxmox investigate landing account on {{ inventory_hostname }}):
-# fixed read-only cluster/HA status checks only. No pvesh create/set/delete.
-# No wildcard arguments anywhere below — each line is the complete, fixed
-# command the dispatch script invokes; nothing else can match.
+# fixed privileged read-only cluster / HA / replication / storage / ZFS /
+# journal status checks only. The world-readable replication job logs are
+# read directly by the dispatch script and need no sudo rule. No pvesh
+# create/set/delete. No wildcard arguments anywhere below — each line is the
+# complete, fixed privileged command the dispatch script invokes; nothing
+# else can match.
+#
+# On sudo argument matching: sudo compares the command's arguments as a single
+# space-joined string (fnmatch), NOT token-by-token. So the journalctl
+# `--since "-2 hours"` invocation in the dispatch script (one argv element
+# containing a space) matches the unquoted `--since -2 hours` below — the two
+# join to the identical string. Do NOT "fix" this by adding double quotes:
+# sudoers does not shell-dequote, so a literal `"` here would only match a
+# literal `"` in argv and break the match. No wildcard is involved.
 #
 # NOTE (pre-deploy check): confirm the ha-manager path below with
 # `which ha-manager` on this node before/at first deploy — /usr/sbin is the
 # standard Proxmox VE location but has not been verified against this host.
+#
+# NOTE (pre-deploy check): confirm the absolute paths of the new binaries on
+# this node match the paths below (they must match EXACTLY for sudoers to
+# match): `command -v pvesr pvecm pvesm zpool zfs journalctl`. Expected paths,
+# fixed here and in recovery-investigate-dispatch-pve.sh.j2:
+#   /usr/bin/pvesr    /usr/bin/pvecm      (pve-manager/pve-cluster, like pvesh)
+#   /usr/sbin/pvesm                       (pve-storage; NOT /usr/bin — see below)
+#   /usr/sbin/zpool   /usr/sbin/zfs       (zfsutils; may be /sbin on some hosts)
+#   /usr/bin/journalctl
+# pvesm was corrected /usr/bin -> /usr/sbin after review F3 (2026-07-14_005):
+# Proxmox VE ships pvesm in /usr/sbin, so the earlier "all pve CLIs in /usr/bin"
+# assumption was wrong for pvesm. If tester's `command -v` finds any other
+# path, update the matching line here and in the dispatch script.
+#
+# NOTE (pre-deploy check): confirm the remaining journalctl target units below
+# exist on this node (`systemctl list-units --all 'pve-cluster*' 'corosync*'
+# 'pvedaemon*'`). journalctl with `-u <nonexistent>` still exits 0 (empty
+# output), so a wrong/removed unit fails silently rather than erroring.
 #
 # NOTE (pre-deploy check): forced command + no-pty means sudo runs with no
 # controlling tty. Confirm `sudo -n` succeeds here (this Proxmox/Debian host
@@ -14,3 +43,11 @@
 recovery-exec ALL=(root) NOPASSWD: /usr/bin/pvesh get /cluster/status --output-format json
 recovery-exec ALL=(root) NOPASSWD: /usr/bin/pvesh get /cluster/resources --output-format json
 recovery-exec ALL=(root) NOPASSWD: /usr/sbin/ha-manager status
+recovery-exec ALL=(root) NOPASSWD: /usr/bin/pvesr status
+recovery-exec ALL=(root) NOPASSWD: /usr/bin/pvesr list
+recovery-exec ALL=(root) NOPASSWD: /usr/bin/pvecm status
+recovery-exec ALL=(root) NOPASSWD: /usr/sbin/pvesm status
+recovery-exec ALL=(root) NOPASSWD: /usr/sbin/zpool status -x
+recovery-exec ALL=(root) NOPASSWD: /usr/sbin/zfs list
+recovery-exec ALL=(root) NOPASSWD: /usr/bin/journalctl -p warning..err --since -2 hours -n 300 --no-pager
+recovery-exec ALL=(root) NOPASSWD: /usr/bin/journalctl -u pve-cluster -u corosync -u pvedaemon --since -2 hours -n 200 --no-pager
