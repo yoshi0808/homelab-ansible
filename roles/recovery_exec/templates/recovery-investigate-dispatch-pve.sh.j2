@@ -2,21 +2,20 @@
 # recovery-investigate-dispatch-pve.sh — deployed on {{ inventory_hostname }} (Proxmox node)
 # Called via SSH forced command from recovery-exec@quory (id_recovery_investigate_pve).
 # Validates SSH_ORIGINAL_COMMAND against a fixed allowlist of read-only
-# cluster / HA / replication / storage / ZFS / journal status checks only.
-# No pvesh create/set/delete; no arguments accepted from the SSH client
-# beyond the forced command key (Phase 1: no parameters — parameterized
-# checks such as `pvesr read <job-id>` are deferred to Phase 2 with argument
-# validation, see autonomous_recovery_policy.md §4.6).
+# cluster / HA / replication / VM / task / storage / ZFS / journal checks.
+# Phase 2 parameterized checks accept at most two independently validated
+# operands. The wrapper on quory is only a first-line filter; this forced-
+# command dispatch is the authorization boundary and repeats every check.
+# No pvesh create/set/delete or other write operation is exposed.
 #
-# Privileged arms run `sudo -n <absolute path> <fixed args>`; every such
-# invocation is listed 1:1 (no wildcards) in
-# sudoers-recovery-exec-pve-target.j2. The replication-log arm reads the
-# world-readable fixed Proxmox log directory directly without sudo. Commands
-# are standard Proxmox / ZFS / journalctl read-only status invocations; the
-# journalctl time-window idiom (`--since "-2 hours"`) mirrors the proven
-# authy/monnie dispatch (recovery-investigate-dispatch.sh.j2). Absolute binary
-# paths and journalctl target units are pre-deploy check items — see the NOTE
-# blocks in the sudoers template.
+# Privileged arms run `sudo -n <absolute path> <fixed verb> <validated
+# operand>` with argv assembled positionally (never eval). Phase 1 commands
+# remain listed 1:1 without wildcards. Phase 2 sudoers wildcards appear only
+# in operand positions after a fixed read-only verb; this dispatch's regex /
+# allowlist validation is the primary security gate. The replication-log arm
+# reads the world-readable fixed Proxmox log directory directly without sudo.
+# Absolute binary paths and journalctl target units are pre-deploy check items
+# — see the NOTE blocks in the sudoers template.
 #
 # pve1/pve2 have no recovery action wrappers — investigate only (see
 # AGENTS.md / autonomous_recovery_policy.md §4.6).
@@ -24,39 +23,136 @@ set -euo pipefail
 
 cmd="${SSH_ORIGINAL_COMMAND:-}"
 
-case "$cmd" in
+if [[ "$cmd" == *$'\n'* || "$cmd" == *$'\r'* ]]; then
+  echo "denied: command contains a line break" >&2
+  exit 1
+fi
+
+# Parse no more than check + two declared parameters. `extra` receives all
+# remaining fields, so any fourth or later token is rejected before dispatch.
+read -r check p1 p2 extra <<<"$cmd"
+if [[ -n "$extra" ]]; then
+  echo "denied: too many parameters for '${check:-unknown}'" >&2
+  exit 1
+fi
+
+deny_count() {
+  echo "denied: invalid parameter count for '$check'" >&2
+  exit 1
+}
+
+deny_invalid() {
+  local param_name="$1"
+  echo "denied: invalid ${param_name} for ${check}" >&2
+  exit 1
+}
+
+valid_vmid() {
+  [[ "$1" =~ ^[1-9][0-9]{2,8}$ ]]
+}
+
+valid_job_id() {
+  [[ "$1" =~ ^[1-9][0-9]{2,8}-[0-9]{1,3}$ ]]
+}
+
+valid_upid() {
+  [[ "$1" =~ ^UPID:[A-Za-z0-9._-]+:[0-9A-Fa-f]{8}:[0-9A-Fa-f]{8}:[0-9A-Fa-f]{8}:[A-Za-z0-9_-]+:[0-9]*:[A-Za-z0-9._-]+@[A-Za-z0-9._-]+:$ ]]
+}
+
+valid_storage() {
+  [[ "$1" =~ ^[a-zA-Z][a-zA-Z0-9._-]{0,31}$ ]]
+}
+
+valid_limit() {
+  [[ "$1" =~ ^[0-9]{1,4}$ ]] && (( 10#$1 >= 1 && 10#$1 <= 2000 ))
+}
+
+case "$check" in
   cluster-status)
+    [[ -z "$p1" && -z "$p2" ]] || deny_count
     sudo -n /usr/bin/pvesh get /cluster/status --output-format json
     ;;
   cluster-resources)
+    [[ -z "$p1" && -z "$p2" ]] || deny_count
     sudo -n /usr/bin/pvesh get /cluster/resources --output-format json
     ;;
   ha-status)
+    [[ -z "$p1" && -z "$p2" ]] || deny_count
     sudo -n /usr/sbin/ha-manager status
     ;;
   # --- Replication (pvesr) ---
   replication-status)
+    [[ -z "$p1" && -z "$p2" ]] || deny_count
     sudo -n /usr/bin/pvesr status
     ;;
   replication-list)
+    [[ -z "$p1" && -z "$p2" ]] || deny_count
     sudo -n /usr/bin/pvesr list
+    ;;
+  replication-read)
+    [[ -n "$p1" && -z "$p2" ]] || deny_count
+    valid_job_id "$p1" || deny_invalid job-id
+    sudo -n /usr/bin/pvesr read "$p1"
+    ;;
+  # --- VM / task detail ---
+  vm-status)
+    [[ -n "$p1" && -z "$p2" ]] || deny_count
+    valid_vmid "$p1" || deny_invalid vmid
+    sudo -n /usr/sbin/qm status "$p1"
+    ;;
+  vm-config)
+    [[ -n "$p1" && -z "$p2" ]] || deny_count
+    valid_vmid "$p1" || deny_invalid vmid
+    sudo -n /usr/sbin/qm config "$p1"
+    ;;
+  vm-tasks)
+    [[ -n "$p1" && -n "$p2" ]] || deny_count
+    valid_vmid "$p1" || deny_invalid vmid
+    valid_limit "$p2" || deny_invalid limit
+    sudo -n /usr/bin/pvenode task list --vmid "$p1" --limit "$p2"
+    ;;
+  task-log)
+    [[ -n "$p1" && -z "$p2" ]] || deny_count
+    valid_upid "$p1" || deny_invalid UPID
+    sudo -n /usr/bin/pvenode task log "$p1"
     ;;
   # --- Cluster quorum / storage (corosync view + storage inventory) ---
   cluster-quorum)
+    [[ -z "$p1" && -z "$p2" ]] || deny_count
     sudo -n /usr/bin/pvecm status
     ;;
   storage-status)
+    [[ -z "$p1" && -z "$p2" ]] || deny_count
     sudo -n /usr/sbin/pvesm status
+    ;;
+  storage-status-one)
+    [[ -n "$p1" && -z "$p2" ]] || deny_count
+    valid_storage "$p1" || deny_invalid storage
+    sudo -n /usr/sbin/pvesm status --storage "$p1"
     ;;
   # --- ZFS pool / dataset health ---
   zpool-health)
+    [[ -z "$p1" && -z "$p2" ]] || deny_count
     sudo -n /usr/sbin/zpool status -x
     ;;
   zfs-list)
+    [[ -z "$p1" && -z "$p2" ]] || deny_count
     sudo -n /usr/sbin/zfs list
+    ;;
+  zfs-list-vm)
+    [[ -n "$p1" && -z "$p2" ]] || deny_count
+    valid_vmid "$p1" || deny_invalid vmid
+    zfs_output="$(sudo -n /usr/sbin/zfs list)"
+    /usr/bin/grep -E -- "[-/]vm-${p1}-|[-/]subvol-${p1}-" <<<"$zfs_output" || true
+    ;;
+  vm-conf-stat)
+    [[ -n "$p1" && -z "$p2" ]] || deny_count
+    valid_vmid "$p1" || deny_invalid vmid
+    sudo -n /usr/bin/stat "/etc/pve/qemu-server/${p1}.conf"
     ;;
   # --- Replication logs (fixed directory, fixed per-job line cap) ---
   journal-replication)
+    [[ -z "$p1" && -z "$p2" ]] || deny_count
     replication_log_found=false
     for replication_log in /var/log/pve/replicate/*; do
       [[ -f "$replication_log" ]] || continue
@@ -70,13 +166,45 @@ case "$cmd" in
     ;;
   # --- Journals (fixed units, fixed 2h window, fixed line cap) ---
   journal-system)
+    [[ -z "$p1" && -z "$p2" ]] || deny_count
     sudo -n /usr/bin/journalctl -p warning..err --since "-2 hours" -n 300 --no-pager
     ;;
   journal-cluster)
+    [[ -z "$p1" && -z "$p2" ]] || deny_count
     sudo -n /usr/bin/journalctl -u pve-cluster -u corosync -u pvedaemon --since "-2 hours" -n 200 --no-pager
     ;;
+  journal-unit)
+    [[ -n "$p1" && -n "$p2" ]] || deny_count
+    case "$p2" in
+      30m) since_value="-30 min" ;;
+      1h) since_value="-1 hours" ;;
+      2h) since_value="-2 hours" ;;
+      6h) since_value="-6 hours" ;;
+      12h) since_value="-12 hours" ;;
+      24h) since_value="-24 hours" ;;
+      *) deny_invalid window ;;
+    esac
+    case "$p1" in
+      pvescheduler)
+        sudo -n /usr/bin/journalctl -u pvescheduler --since "$since_value" -n 300 --no-pager
+        ;;
+      pvestatd)
+        sudo -n /usr/bin/journalctl -u pvestatd --since "$since_value" -n 300 --no-pager
+        ;;
+      pve-cluster)
+        sudo -n /usr/bin/journalctl -u pve-cluster --since "$since_value" -n 300 --no-pager
+        ;;
+      corosync)
+        sudo -n /usr/bin/journalctl -u corosync --since "$since_value" -n 300 --no-pager
+        ;;
+      pvedaemon)
+        sudo -n /usr/bin/journalctl -u pvedaemon --since "$since_value" -n 300 --no-pager
+        ;;
+      *) deny_invalid unit ;;
+    esac
+    ;;
   *)
-    echo "denied: unknown command '${cmd}'" >&2
+    echo "denied: unknown command '${check:-}'" >&2
     exit 1
     ;;
 esac

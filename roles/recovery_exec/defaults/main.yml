@@ -6,7 +6,8 @@ recovery_exec_codex_dir: /home/recovery-exec/.codex
 recovery_exec_workspace: /var/lib/recovery-exec/workspace
 recovery_exec_investigate_key: /home/recovery-exec/.ssh/id_recovery_investigate
 recovery_exec_action_key: /home/recovery-exec/.ssh/id_recovery_action
-# Separate dedicated key for pve1/pve2 (read-only cluster/HA status only).
+# Separate dedicated key for pve1/pve2 (read-only cluster/HA/replication/
+# VM/task/storage/ZFS/journal investigation only).
 # Kept apart from recovery_exec_investigate_key: the allowlist contents are
 # completely different (pvesh/ha-manager vs freeradius/journal checks), so a
 # distinct key prevents mixing up which host a compromised/misused key could
@@ -79,11 +80,11 @@ recovery_exec_targets:
       - loki
       - unpoller
 
-# Proxmox cluster/HA status investigate-only targets (read-only; pve1/pve2
+# Proxmox investigate-only targets (read-only; pve1/pve2
 # are out of scope for autonomous recovery actions — see
 # autonomous_recovery_policy.md §2/§4.6). No investigate_extra, no
-# action_services: only the 3 fixed named checks in
-# recovery-investigate-dispatch-pve.sh.j2 are ever allowed.
+# action_services: only the fixed 12 and validated parameterized 9 named
+# checks in recovery-investigate-dispatch-pve.sh.j2 are ever allowed.
 recovery_exec_pve_targets:
   - name: pve1
     host: pve1.internal

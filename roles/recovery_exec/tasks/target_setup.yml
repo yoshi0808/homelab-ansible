@@ -114,7 +114,7 @@
 
 # ---------------------------------------------------------------------------
 # Per-target setup: pve1/pve2 (investigate-only, no action key/script,
-# read-only cluster/HA status via a separate dedicated key — §4.6)
+# read-only Proxmox investigation via a separate dedicated key — §4.6)
 # ---------------------------------------------------------------------------
 
 - name: Create recovery-exec user on pve target nodes
@@ -123,7 +123,7 @@
     shell: /bin/sh
     create_home: true
     password: "!"
-    comment: "Recovery SSH landing account (Proxmox cluster/HA status, read-only)"
+    comment: "Recovery SSH landing account (Proxmox investigation, read-only)"
   loop: "{{ recovery_exec_pve_targets }}"
   loop_control:
     loop_var: target_item
@@ -156,7 +156,7 @@
   delegate_to: "{{ target_item.name }}"
   become: true
 
-- name: Deploy sudoers for recovery-exec on pve target nodes (fixed pvesh/ha-manager status commands only)
+- name: Deploy sudoers for recovery-exec read-only investigation on pve target nodes
   ansible.builtin.template:
     src: sudoers-recovery-exec-pve-target.j2
     dest: /etc/sudoers.d/recovery-exec-pve

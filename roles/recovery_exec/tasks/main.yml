@@ -53,7 +53,7 @@
     creates: "{{ recovery_exec_action_key }}"
   become: true
 
-- name: Generate PVE investigation SSH key (shared across pve1/pve2, read-only cluster/HA status only)
+- name: Generate PVE investigation SSH key (shared across pve1/pve2, read-only Proxmox investigation only)
   ansible.builtin.command:
     cmd: >-
       ssh-keygen -t ed25519 -N ''
@@ -155,7 +155,7 @@
     loop_var: target
   become: true
 
-- name: Deploy homelab-investigate-pve{1,2} wrapper scripts (read-only cluster/HA status)
+- name: Deploy homelab-investigate-pve{1,2} wrapper scripts (read-only Proxmox investigation)
   ansible.builtin.template:
     src: homelab-investigate-pve.sh.j2
     dest: "/usr/local/bin/homelab-investigate-{{ target.name }}"

@@ -116,22 +116,47 @@ quoryの`/var/lib/semaphore/semaphore.db`(SQLite、`yoshi:yoshi 0600`、`journal
 
 ### 4.6 Proxmoxクラスタ状態調査(`homelab-investigate-pve1` / `homelab-investigate-pve2`)
 
-pve1/pve2のProxmoxクラスタ/HA状態をread-onlyで調査するコマンド。pve1/pve2は自律復旧アクションの対象外(§2)であり、これは変更しない。追加するのは調査のみで、`action_services`に相当する復旧手段は一切追加しない。
+pve1/pve2のProxmoxクラスタ/HA、レプリケーション、VM/task、storage/ZFS、journalを
+read-onlyで調査するコマンド。pve1/pve2は自律復旧アクションの対象外(§2)であり、
+これは変更しない。追加するのは調査のみで、`action_services`に相当する復旧手段は
+一切追加しない。
 
 - 鍵は`id_recovery_investigate`(authy/monnie用)とは別に、pve専用の`id_recovery_investigate_pve`を新規に1本用意する。許可リストの中身が全く違う(pvesh/ha-manager系 vs freeradius/journal系)ため、目的別に鍵を分け取り違えを防止する。この1本をpve1・pve2両方の`authorized_keys`に登録する(片方が落ちていてももう片方から調査できるようにするため)。
 - `ann`の鍵・権限は使わない(§10)。pve1/pve2にも`ann`とは別の、forced command専用の`recovery-exec`着地アカウントを新設する(authy/monnieと同じ構成)。
-- named checkは3種のみ: `cluster-status` / `cluster-resources` / `ha-status`。対応する実行コマンドは、このリポジトリ内で既に実績のある呼び出しをそのまま流用する(新規のAPIパスを推測しない):
-  - `cluster-status` → `pvesh get /cluster/status --output-format json`(`roles/recovery_ha_failover/tasks/main.yml`で実績)
-  - `cluster-resources` → `pvesh get /cluster/resources --output-format json`(多数のroleで実績)
-  - `ha-status` → `ha-manager status`(`roles/proxmox_evacuate_node`, `roles/proxmox_restore_vm_placement`で実績)
-- `pvesh create`/`set`/`delete`は許可リストに存在しないため構造的に実行できない。`/nodes/<node>/status`相当の個別ノード状態(node-status)は、このリポジトリ内に実績が無く、かつ`cluster-resources`のレスポンス(`type=node`のエントリ)で代替できるため、今回は追加しない。
-- sudoersは完成形3本を1:1で列挙し、ワイルドカードは使わない:
-  ```
-  recovery-exec ALL=(root) NOPASSWD: /usr/bin/pvesh get /cluster/status --output-format json
-  recovery-exec ALL=(root) NOPASSWD: /usr/bin/pvesh get /cluster/resources --output-format json
-  recovery-exec ALL=(root) NOPASSWD: /usr/sbin/ha-manager status
-  ```
-  §4.3/§4.4がACLに切り替えたのに対し、ここでは通常のsudoersを使う。理由は、このsudoがpve1/pve2上のSSHセッション内(sshd経由)で完結し、quory側Codexサンドボックスの`no_new_privileges`問題(§4.5)が発生する経路(quory上でCodexプロセス自身がsudoを呼ぶ経路)を一切通らないため。ACLに変更する必要が無い。Proxmox(Debianベース)のsudoersデフォルトがauthy/monnie(Ubuntu)と異なりforced command経由(tty無し)のsudoを`requiretty`等で拒否する可能性を事前に懸念していたが、2026-07-05にansy起点・quory起点の両方で実機確認済み: `cluster-status`/`cluster-resources`/`ha-status`とも forced command 経由(no-pty、`sudo -n`)で問題なく成功し、`requiretty`による拒否は発生しなかった。`ha-manager`のフルパスも両ノードで`/usr/sbin/ha-manager`と一致することを確認済み(sudoersの想定通り)。
+- named check は、引数なしの固定 12 種と、検証済みパラメータを取る 9 種に限定する。
+  - 固定 12 種: `cluster-status` / `cluster-resources` / `ha-status` /
+    `replication-status` / `replication-list` / `cluster-quorum` /
+    `storage-status` / `zpool-health` / `zfs-list` / `journal-replication` /
+    `journal-system` / `journal-cluster`
+  - パラメータ付き 9 種: `replication-read <job-id>` / `vm-status <vmid>` /
+    `vm-config <vmid>` / `vm-tasks <vmid> <limit>` / `task-log <UPID>` /
+    `storage-status-one <storage>` / `zfs-list-vm <vmid>` /
+    `vm-conf-stat <vmid>` / `journal-unit <unit> <window>`
+- セキュリティ境界は二段にする。quory側の`homelab-investigate-pveN` wrapper は
+  allowlist / regex による一次フィルタ(利便性と早期拒否)であり、権限境界ではない。
+  pve側authorized_keysのforced commandで起動する
+  `recovery-investigate-dispatch-pve.sh`が本ゲートであり、`SSH_ORIGINAL_COMMAND`を
+  独立に再パースしてcheck名、exact arity、各パラメータを再検証する。過剰トークン、
+  option化し得る値、shell metachar、範囲外値、非allowlist値はsudo到達前に拒否する。
+- パラメータ検証はdispatchを正本とし、wrapperにも同じ条件をミラーする。vmid /
+  job-id / UPID / storageは完全一致regex、limitは数値形式と1..2000の範囲、unitは
+  `pvescheduler` / `pvestatd` / `pve-cluster` / `corosync` / `pvedaemon`、windowは
+  `30m` / `1h` / `2h` / `6h` / `12h` / `24h`の固定allowlistで検証する。
+  windowはdispatch内部で固定の`--since`値へ変換し、journal出力は300行に固定する。
+- dispatchはsudo argvを、絶対path、固定read-only動詞、検証済みオペランドの順に
+  位置固定で組み立てる。`eval`、sudoコマンド文字列の連結・再shell解釈は行わない。
+  `pvesh create`/`set`/`delete`、`qm set`/`destroy`等の書き込み系動詞はallowlistにも
+  sudoersにも存在させない。
+- sudoersは固定checkを完成形で1:1列挙する。パラメータ付きcheckに限り、read-only
+  動詞を固定したうえで検証済みオペランド位置だけをwildcard化してよい
+  (`qm status *`は可、`qm *`や`pvenode task *`は不可)。journalctlのunitはunitごとに
+  1行ずつ固定し、`journalctl -u *`は禁止する。sudoのwildcardは空白を跨いで一致し得る
+  ため、それ単独を権限境界とせず、dispatchのexact arity / regex / allowlistと固定argvを
+  必須とする。`zfs-list-vm`は既存の固定`zfs list` ruleを使い、非特権grepで絞り込む。
+- `pvesh create`/`set`/`delete`は許可リストに存在しないため構造的に実行できない。
+  `/nodes/<node>/status`相当の個別ノード状態(node-status)は`cluster-resources`の
+  レスポンス(`type=node`のエントリ)で代替する。
+- §4.3/§4.4がACLに切り替えたのに対し、ここでは通常のsudoersを使う。理由は、このsudoがpve1/pve2上のSSHセッション内(sshd経由)で完結し、quory側Codexサンドボックスの`no_new_privileges`問題(§4.5)が発生する経路(quory上でCodexプロセス自身がsudoを呼ぶ経路)を一切通らないため。ACLに変更する必要が無い。Proxmox(Debianベース)のsudoersデフォルトがauthy/monnie(Ubuntu)と異なりforced command経由(tty無し)のsudoを`requiretty`等で拒否する可能性を事前に懸念していたが、2026-07-05にansy起点・quory起点の両方で実機確認済み: 初期3 check (`cluster-status`/`cluster-resources`/`ha-status`) は forced command 経由(no-pty、`sudo -n`)で問題なく成功し、`requiretty`による拒否は発生しなかった。`ha-manager`のフルパスも両ノードで`/usr/sbin/ha-manager`と一致することを確認済み(sudoersの想定通り)。追加checkの絶対path、unit実在、target側sudoers grammar、forced-command経路は配備前/ tester工程で確認する。
 
 ---
 
@@ -184,12 +209,14 @@ Slack(`@Homelab`メンション、Socket Mode)からのリクエストを受け�
 
 - Codex側で任意コマンドを実行できないよう、execpolicy(`default_policy="deny"`)とし、許可する外部コマンドを以下のwrapperのみに限定する:
   - `homelab-investigate-{authy,monnie}`(調査)
-  - `homelab-investigate-{pve1,pve2}`(調査。Proxmoxクラスタ/HA状態、read-only。§4.6)
+  - `homelab-investigate-{pve1,pve2}`(調査。Proxmoxクラスタ/HA・レプリケーション・VM/task・storage/ZFS・journal、read-only。§4.6)
   - `homelab-reports`(調査。`reports/`配下のJSONレポート参照。§4.3)
   - `homelab-semaphore-query`(調査。Semaphore失敗タスクの原因解析。§4.4)
   - `homelab-recover-{authy,monnie}`(復旧)
   - `homelab-monitoring-{pause,resume,status}`(監視制御)
-- pve1/pve2には`homelab-recover-*`に相当する復旧wrapperを一切用意しない。Codexが呼べるのは§4.6の3つのread-only named checkのみ。
+- pve1/pve2には`homelab-recover-*`に相当する復旧wrapperを一切用意しない。Codexが
+  呼べるのは§4.6に列挙した固定12種 + パラメータ付き9種のread-only named checkのみで、
+  wrapperとforced-command dispatchの二段検証を通らないコマンドは実行できない。
 - VM reboot(`qm reboot`相当)・HA failover(`ha-manager crm-command relocate`)はCodexのexecpolicyに含まれない。これらは§5.1のpull経路からのみ、決定論的に(target固定の`ansible-playbook`呼び出しとして)実行される。
 - `codex-exec-wrapper`は引数を`exec` / `--cd` / 固定workspaceパス / メッセージ本文の4つに厳密に限定し、個数・各位置の値が一致しなければ拒否する。sandbox・approval・execpolicyに関わるCLIオプションは呼び出し元から一切受け取らず、wrapper内部で固定する(`--sandbox workspace-write`, `approval_policy="never"`, `network_access=true`)。
 - sandboxは実行後の動作(書き込み・ネットワーク到達)を制御する層、execpolicyは「そもそも呼べるコマンドの範囲」を制御する層であり、別物として扱う。sandboxは読み取りを制限しないため、機密ファイル(Slackトークン・SSH鍵)の保護は常にOSファイル権限(0600 + 専用ユーザー所有)が担う。

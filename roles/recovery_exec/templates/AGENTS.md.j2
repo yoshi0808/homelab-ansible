@@ -75,15 +75,18 @@ Node-specific checks:
 - `loki-health` — Loki metrics endpoint
 - `unpoller-config` — unpoller ExecStart + port binding
 
-### Proxmox cluster/HA status (homelab-investigate-pve1, homelab-investigate-pve2)
+### Proxmox read-only investigation (homelab-investigate-pve1, homelab-investigate-pve2)
 
 ```
 homelab-investigate-pve1 <check>
 homelab-investigate-pve2 <check>
+homelab-investigate-pve1 <check> <param1> [<param2>]
+homelab-investigate-pve2 <check> <param1> [<param2>]
 ```
 Connects to the respective Proxmox node via SSH and reports read-only
 cluster / HA / replication / storage / ZFS / journal status.
-Allowed values for `<check>` (all read-only, no parameters):
+Allowed values for `<check>` (all read-only). Checks shown with operands
+require exactly those operands; all other checks take no parameters:
 
 Cluster / HA:
 - `cluster-status` — `pvesh get /cluster/status` (cluster membership/quorum)
@@ -94,20 +97,39 @@ Cluster / HA:
 Replication (pve1↔pve2 pairwise — check from both nodes):
 - `replication-status` — `pvesr status` (replication jobs: state, last sync, errors)
 - `replication-list` — `pvesr list` (configured replication jobs)
+- `replication-read <job-id>` — details for one replication job; `<job-id>` is `<vmid>-<index>` (for example `211-0`)
+
+VM / task detail:
+- `vm-status <vmid>` — runtime status for one VM
+- `vm-config <vmid>` — read-only configuration for one VM
+- `vm-tasks <vmid> <limit>` — recent tasks for one VM; `<limit>` is 1..2000
+- `task-log <UPID>` — log for one exact Proxmox task UPID
+- `vm-conf-stat <vmid>` — metadata for `/etc/pve/qemu-server/<vmid>.conf` (does not print or change the config)
 
 Storage / ZFS:
 - `storage-status` — `pvesm status` (all storages: enabled, type, capacity)
+- `storage-status-one <storage>` — status for one storage ID
 - `zpool-health` — `zpool status -x` (only unhealthy pools; "all pools are healthy" when OK)
 - `zfs-list` — `zfs list` (datasets/volumes; useful to confirm a replication target exists)
+- `zfs-list-vm <vmid>` — `zfs list` filtered to datasets/volumes belonging to one VM
 
 Recent logs (fixed sources, capped):
 - `journal-replication` — last 200 lines of each per-job replication log in `/var/log/pve/replicate/` (despite the retained check name, this reads the fixed log files directly, not the systemd journal)
 - `journal-cluster` — recent logs for `pve-cluster` / `corosync` / `pvedaemon` (quorum/membership triage)
 - `journal-system` — recent node-wide warnings/errors (priority warning..err)
+- `journal-unit <unit> <window>` — up to 300 lines for one approved unit and window. Units: `pvescheduler`, `pvestatd`, `pve-cluster`, `corosync`, `pvedaemon`; windows: `30m`, `1h`, `2h`, `6h`, `12h`, `24h`
+
+Parameterized checks reject extra arguments, options, shell metacharacters,
+and malformed identifiers before SSH and again at the pve forced-command
+boundary. VMIDs are decimal integers from 100 with at most 9 digits; storage
+IDs start with a letter and contain only letters, digits, `.`, `_`, or `-`.
 
 When a VM's replication is failing (e.g. after a backup restore), start with
 `replication-status` (and `journal-replication`) from both pve1 and pve2, then
-use `cluster-quorum` / `zpool-health` / `zfs-list` to localize the cause.
+use `replication-read <job-id>`, `vm-status <vmid>`, `vm-tasks <vmid>
+<limit>`, and (when a UPID is returned) `task-log <UPID>` for the affected VM.
+Use `cluster-quorum` / `zpool-health` / `zfs-list-vm <vmid>` to localize the
+cause further.
 These are diagnosis only — do not attempt any repair on pve1/pve2 (below).
 
 Either wrapper can answer questions about either node (pve1 or pve2) — the
