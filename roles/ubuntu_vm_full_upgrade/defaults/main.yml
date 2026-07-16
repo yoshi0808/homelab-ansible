@@ -42,6 +42,7 @@ ubuntu_vm_full_upgrade_important_per_node:
     - 'prometheus.*'
     - 'grafana.*'
     - 'loki.*'
+    - 'alloy.*'
     - 'docker.*'
   ansy:
     - 'python3.*'

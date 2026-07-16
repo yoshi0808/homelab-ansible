@@ -1,0 +1,37 @@
+---
+# alloy_setup.yml
+#
+# Purpose: replace EOL Promtail on monnie with Grafana Alloy while preserving
+# the three existing Loki streams and leaving rsyslog, Loki, and Grafana
+# unchanged.
+#
+# Target/executor: monitoring_servers (currently monnie), run from ansy/quory.
+#
+# Flow: verify the existing Grafana apt repo and source-file permissions;
+# install Alloy without package auto-start; verify the apt unit/CLI contract;
+# deploy and validate /etc/alloy/config.alloy; stop+disable Promtail; then
+# enable+start Alloy. A failed Alloy start restores Promtail automatically.
+#
+# Important: Promtail positions are not imported. New Alloy file readers use
+# tail_from_end=true to avoid a full replay; a small cutover gap/overlap is an
+# accepted Phase 1 tradeoff. Promtail remains installed for rollback.
+#
+# Pre-deploy verification and implementation details:
+# docs/ai/reviews/promtail_to_alloy/2026-07-16_003_implement.md
+#
+# tester-gate: check-mode-native — apt uses native check mode and the candidate
+# config is always rendered/contract-checked. On a fresh host, package-owned
+# user/path validation waits for APPLY because --check does not create them;
+# once installed, file/template changes use native check mode. The actual
+# Promtail stop+disable and Alloy enable+start block is skipped under --check
+# and tagged destructive. APPLY performs a production log-agent cutover and
+# requires Yoshinobu's explicit decision.
+
+- name: Install and cut over Grafana Alloy on monitoring servers
+  hosts: monitoring_servers
+  gather_facts: false
+  become: true
+  serial: 1
+
+  roles:
+    - alloy

@@ -1,0 +1,7 @@
+## Managed by Ansible (roles/alloy).
+## The package systemd unit supplies --storage.path; target preflight verifies
+## it before cutover. Keep the HTTP/UI endpoint bound to localhost only.
+CONFIG_FILE="{{ alloy_config_path }}"
+CUSTOM_ARGS="--server.http.listen-addr={{ alloy_http_listen_address }}"
+RESTART_ON_UPGRADE=true
+

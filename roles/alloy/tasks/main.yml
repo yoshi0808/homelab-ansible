@@ -1,0 +1,368 @@
+---
+# Pre-deploy NOTE (must be confirmed on monnie before APPLY):
+# - `apt-cache policy alloy` returns a candidate from the existing Grafana repo.
+# - the apt unit uses User=alloy, /etc/default/alloy, /etc/alloy/config.alloy,
+#   the expected --storage.path, and the explicitly managed localhost HTTP bind.
+# - `/usr/bin/alloy validate <path>` exists and returns non-zero for bad config.
+# - alloy can read journald (systemd-journal membership) and both rsyslog files.
+# These are collected/asserted here where safe. First-install --check cannot
+# inspect files or run a binary that the simulated package has not created.
+# It still renders/checks the candidate below; tester must repeat the package
+# contract and Alloy-native validation against the installed candidate before
+# approving APPLY.
+
+- name: Validate Alloy role inputs
+  ansible.builtin.assert:
+    that:
+      - alloy_file_sources | length > 0
+      - alloy_journal_sources | length > 0
+      - alloy_http_listen_address == "localhost:12345"
+      - alloy_loki_push_url == "http://localhost:3100/loki/api/v1/push"
+      - item.name is match('^[A-Za-z_][A-Za-z0-9_]*$')
+      - item.path is match('^/')
+      - item.labels.job is defined
+    fail_msg: "Invalid Alloy file source definition: {{ item }}"
+    quiet: true
+  loop: "{{ alloy_file_sources }}"
+  loop_control:
+    label: "{{ item.name | default('undefined') }}"
+
+- name: Validate Alloy journal source inputs
+  ansible.builtin.assert:
+    that:
+      - item.name is match('^[A-Za-z_][A-Za-z0-9_]*$')
+      - item.max_age is match('^[0-9]+[smhdw]$')
+      - item.labels.job is defined
+      - item.labels.host is defined
+      - item.source_unit_label == "__journal__systemd_unit"
+      - item.target_unit_label == "unit"
+    fail_msg: "Invalid Alloy journal source definition: {{ item }}"
+    quiet: true
+  loop: "{{ alloy_journal_sources }}"
+  loop_control:
+    label: "{{ item.name | default('undefined') }}"
+
+- name: Render the candidate Alloy configuration without writing it
+  ansible.builtin.set_fact:
+    alloy_candidate_config: "{{ lookup('ansible.builtin.template', 'config.alloy.j2') }}"
+
+- name: Check the rendered Phase 1 pipeline contract
+  ansible.builtin.assert:
+    that:
+      - "'loki.source.file \"unifi\"' in alloy_candidate_config"
+      - "'loki.source.file \"network_devices\"' in alloy_candidate_config"
+      - "'loki.process \"network_devices_host\"' in alloy_candidate_config"
+      - "'loki.source.journal \"system\"' in alloy_candidate_config"
+      - "'loki.write \"local\"' in alloy_candidate_config"
+      - alloy_loki_push_url in alloy_candidate_config
+      - "'tail_from_end = true' in alloy_candidate_config"
+    fail_msg: "Rendered Alloy config is missing a required Phase 1 pipeline."
+    quiet: true
+
+- name: Check existing Grafana apt repository file
+  ansible.builtin.stat:
+    path: "{{ alloy_grafana_repo_file }}"
+  register: alloy_grafana_repo_stat
+  check_mode: false
+
+- name: Read existing Grafana apt repository definition
+  ansible.builtin.slurp:
+    path: "{{ alloy_grafana_repo_file }}"
+  register: alloy_grafana_repo_definition
+  when: alloy_grafana_repo_stat.stat.exists
+  check_mode: false
+
+- name: Require the existing Grafana apt repository
+  ansible.builtin.assert:
+    that:
+      - alloy_grafana_repo_stat.stat.exists
+      - "'https://apt.grafana.com' in (alloy_grafana_repo_definition.content | default('') | b64decode)"
+    fail_msg: >-
+      Existing Grafana repository {{ alloy_grafana_repo_file }} is missing or
+      unexpected. Phase 1 must not add or replace an apt repository.
+    quiet: true
+
+- name: Check Alloy package candidate in the existing repository
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/apt-cache
+      - policy
+      - "{{ alloy_package_name }}"
+  register: alloy_apt_policy
+  changed_when: false
+  check_mode: false
+
+- name: Require an Alloy package candidate
+  ansible.builtin.assert:
+    that:
+      - alloy_apt_policy.stdout is search('Candidate:\s+\S+')
+      - not (alloy_apt_policy.stdout is search('Candidate:\s+\(none\)'))
+    fail_msg: >-
+      No {{ alloy_package_name }} candidate is available from the existing
+      Grafana repository. Do not add another repository automatically.
+    quiet: true
+
+- name: Check rsyslog output files
+  ansible.builtin.stat:
+    path: "{{ item.path }}"
+  loop: "{{ alloy_file_sources }}"
+  loop_control:
+    label: "{{ item.path }}"
+  register: alloy_source_file_stats
+  check_mode: false
+
+- name: Require readable rsyslog output files
+  ansible.builtin.assert:
+    that:
+      - item.stat.exists
+      - item.stat.isreg
+      - item.stat.mode[-1] in ['4', '5', '6', '7']
+    fail_msg: >-
+      {{ item.item.path }} must already exist and be world-readable. The Alloy
+      role does not change rsyslog-owned files or their routing.
+    quiet: true
+  loop: "{{ alloy_source_file_stats.results }}"
+  loop_control:
+    label: "{{ item.item.path }}"
+
+- name: Check whether Alloy is installed before this run
+  ansible.builtin.stat:
+    path: "{{ alloy_binary_path }}"
+  register: alloy_binary_before
+  check_mode: false
+
+- name: Install Grafana Alloy without auto-starting the package service
+  ansible.builtin.apt:
+    name: "{{ alloy_package_name }}"
+    state: present
+    policy_rc_d: 101
+  register: alloy_package_result
+
+# On a fresh --check run the apt task is simulated, so the binary/user/unit do
+# not exist yet. These package-contract checks run during APPLY, or during
+# --check once Alloy has previously been installed.
+- name: Inspect the installed Alloy service unit
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/systemctl
+      - cat
+      - "{{ alloy_service_unit }}"
+  register: alloy_service_unit_content
+  changed_when: false
+  check_mode: false
+  when: not ansible_check_mode or alloy_binary_before.stat.exists
+
+- name: Inspect the installed Alloy service properties
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/systemctl
+      - show
+      - "{{ alloy_service_unit }}"
+      - --property=User
+      - --property=FragmentPath
+      - --property=ExecStart
+      - --property=EnvironmentFiles
+  register: alloy_service_properties
+  changed_when: false
+  check_mode: false
+  when: not ansible_check_mode or alloy_binary_before.stat.exists
+
+- name: Confirm the Alloy validate subcommand exists
+  ansible.builtin.command:
+    argv:
+      - "{{ alloy_binary_path }}"
+      - validate
+      - --help
+  register: alloy_validate_help
+  changed_when: false
+  check_mode: false
+  when: not ansible_check_mode or alloy_binary_before.stat.exists
+
+- name: Inspect Alloy run flags
+  ansible.builtin.command:
+    argv:
+      - "{{ alloy_binary_path }}"
+      - run
+      - --help
+  register: alloy_run_help
+  changed_when: false
+  check_mode: false
+  when: not ansible_check_mode or alloy_binary_before.stat.exists
+
+- name: Inspect Promtail rollback service
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/systemctl
+      - show
+      - "{{ alloy_promtail_service_name }}.service"
+      - --property=LoadState
+      - --property=ActiveState
+      - --property=UnitFileState
+  register: alloy_promtail_service_properties
+  changed_when: false
+  check_mode: false
+
+- name: Require Promtail to remain available for rollback
+  ansible.builtin.assert:
+    that:
+      - "'LoadState=loaded' in alloy_promtail_service_properties.stdout"
+    fail_msg: >-
+      Promtail service is not loaded. Phase 1 keeps the package/service
+      available so a failed Alloy cutover can restore it.
+    quiet: true
+
+- name: Require the expected apt service contract before cutover
+  ansible.builtin.assert:
+    that:
+      - "'User=' + alloy_user in alloy_service_properties.stdout"
+      - alloy_environment_path in alloy_service_unit_content.stdout
+      - alloy_binary_path in alloy_service_unit_content.stdout
+      - "'$CONFIG_FILE' in alloy_service_unit_content.stdout or alloy_config_path in alloy_service_unit_content.stdout"
+      - alloy_expected_storage_path in alloy_service_unit_content.stdout
+      - alloy_validate_help.rc == 0
+      - alloy_run_help.rc == 0
+      - "'--server.http.listen-addr' in (alloy_run_help.stdout + alloy_run_help.stderr)"
+    fail_msg: >-
+      Installed Alloy package contract differs from the Phase 1 assumptions.
+      Verify User, environment/config paths, --storage.path, HTTP flags, and
+      validate CLI before changing the role or approving cutover.
+    quiet: true
+  when: not ansible_check_mode or alloy_binary_before.stat.exists
+
+- name: Read the package-created Alloy account
+  ansible.builtin.getent:
+    database: passwd
+    key: "{{ alloy_user }}"
+    fail_key: false
+  when: not ansible_check_mode or alloy_binary_before.stat.exists
+
+- name: Read the journal access group
+  ansible.builtin.getent:
+    database: group
+    key: "{{ alloy_journal_group }}"
+    fail_key: false
+  when: not ansible_check_mode or alloy_binary_before.stat.exists
+
+- name: Require package account and journal group
+  ansible.builtin.assert:
+    that:
+      - alloy_user in ansible_facts.getent_passwd
+      - alloy_journal_group in ansible_facts.getent_group
+    fail_msg: >-
+      The Alloy package account or systemd journal reader group is missing.
+      Do not create a replacement account with guessed package defaults.
+    quiet: true
+  when: not ansible_check_mode or alloy_binary_before.stat.exists
+
+- name: Add Alloy user to the journal reader group
+  ansible.builtin.user:
+    name: "{{ alloy_user }}"
+    groups: "{{ alloy_journal_group }}"
+    append: true
+  register: alloy_journal_group_result
+  when: not ansible_check_mode or alloy_binary_before.stat.exists
+
+- name: Ensure Alloy configuration directory permissions
+  ansible.builtin.file:
+    path: "{{ alloy_config_dir }}"
+    state: directory
+    owner: root
+    group: "{{ alloy_group }}"
+    mode: "0750"
+  when: not ansible_check_mode or alloy_binary_before.stat.exists
+
+- name: Ensure Alloy storage directory permissions
+  ansible.builtin.file:
+    path: "{{ alloy_expected_storage_path }}"
+    state: directory
+    owner: "{{ alloy_user }}"
+    group: "{{ alloy_group }}"
+    mode: "0750"
+  when: not ansible_check_mode or alloy_binary_before.stat.exists
+
+- name: Configure Alloy package environment
+  ansible.builtin.template:
+    src: alloy.default.j2
+    dest: "{{ alloy_environment_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+  register: alloy_environment_result
+  when: not ansible_check_mode or alloy_binary_before.stat.exists
+
+- name: Deploy and validate Alloy configuration
+  ansible.builtin.template:
+    src: config.alloy.j2
+    dest: "{{ alloy_config_path }}"
+    owner: root
+    group: "{{ alloy_group }}"
+    mode: "0640"
+    validate: "{{ alloy_binary_path }} validate %s"
+  register: alloy_config_result
+  when: not ansible_check_mode or alloy_binary_before.stat.exists
+
+- name: Validate the deployed Alloy configuration before cutover
+  ansible.builtin.command:
+    argv:
+      - "{{ alloy_binary_path }}"
+      - validate
+      - "{{ alloy_config_path }}"
+  changed_when: false
+  when: not ansible_check_mode
+
+- name: Select Alloy start action for this cutover
+  ansible.builtin.set_fact:
+    alloy_start_state: >-
+      {{ 'restarted' if
+         (alloy_package_result.changed or
+          alloy_journal_group_result.changed or
+          alloy_environment_result.changed or
+          alloy_config_result.changed)
+         else 'started' }}
+  when: not ansible_check_mode
+
+- name: Cut over from Promtail to Alloy
+  when: not ansible_check_mode
+  tags:
+    - destructive
+  block:
+    - name: Stop and disable Promtail before Alloy starts
+      ansible.builtin.systemd_service:
+        name: "{{ alloy_promtail_service_name }}"
+        state: stopped
+        enabled: false
+
+    - name: Enable and start Alloy with the validated configuration
+      ansible.builtin.systemd_service:
+        name: "{{ alloy_service_name }}"
+        state: "{{ alloy_start_state }}"
+        enabled: true
+        daemon_reload: true
+
+    - name: Confirm Alloy is active after cutover
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/systemctl
+          - is-active
+          - "{{ alloy_service_unit }}"
+      changed_when: false
+
+  rescue:
+    - name: Stop and disable Alloy after a failed cutover
+      ansible.builtin.systemd_service:
+        name: "{{ alloy_service_name }}"
+        state: stopped
+        enabled: false
+      failed_when: false
+
+    - name: Restore Promtail after a failed cutover
+      ansible.builtin.systemd_service:
+        name: "{{ alloy_promtail_service_name }}"
+        state: started
+        enabled: true
+
+    - name: Fail after restoring Promtail
+      ansible.builtin.fail:
+        msg: >-
+          Alloy cutover failed. Alloy was stopped/disabled and Promtail was
+          restored to started/enabled. Review the preceding failure.

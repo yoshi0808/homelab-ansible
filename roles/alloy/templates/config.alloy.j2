@@ -1,0 +1,67 @@
+// Managed by Ansible (roles/alloy). Do not edit on the host.
+// Phase 1 preserves the existing Promtail contract while rsyslog and Loki
+// remain unchanged. New files start at EOF to avoid replaying full histories.
+
+loki.write "local" {
+  endpoint {
+    url = {{ alloy_loki_push_url | to_json }}
+  }
+}
+
+{% for source in alloy_file_sources %}
+{% if source.extract_second_token_as_host | bool %}
+loki.process "{{ source.name }}_host" {
+  forward_to = [loki.write.local.receiver]
+
+  stage.regex {
+    expression = "^\\S+ (?P<host>\\S+) "
+  }
+
+  stage.labels {
+    values = {
+      "host" = "host",
+    }
+  }
+}
+
+{% endif %}
+loki.source.file {{ source.name | to_json }} {
+  targets = [
+    {
+      "__path__" = {{ source.path | to_json }},
+{% for label in source.labels | dictsort %}
+      {{ label.0 | to_json }} = {{ label.1 | to_json }},
+{% endfor %}
+    },
+  ]
+  tail_from_end = {{ source.tail_from_end | bool | lower }}
+{% if source.extract_second_token_as_host | bool %}
+  forward_to = [loki.process.{{ source.name }}_host.receiver]
+{% else %}
+  forward_to = [loki.write.local.receiver]
+{% endif %}
+}
+
+{% endfor %}
+{% for source in alloy_journal_sources %}
+loki.relabel "{{ source.name }}_unit" {
+  forward_to = []
+
+  rule {
+    source_labels = [{{ source.source_unit_label | to_json }}]
+    target_label  = {{ source.target_unit_label | to_json }}
+  }
+}
+
+loki.source.journal {{ source.name | to_json }} {
+  max_age       = {{ source.max_age | to_json }}
+  relabel_rules = loki.relabel.{{ source.name }}_unit.rules
+  labels = {
+{% for label in source.labels | dictsort %}
+    {{ label.0 | to_json }} = {{ label.1 | to_json }},
+{% endfor %}
+  }
+  forward_to = [loki.write.local.receiver]
+}
+
+{% endfor %}

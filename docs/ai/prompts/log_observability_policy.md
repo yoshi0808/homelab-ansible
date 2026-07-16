@@ -1,0 +1,80 @@
+# Log / Observability Policy v1.0
+
+- 対象システム: monnie を中心とする集中ログ基盤（UniFi/ネットワーク機器の syslog → Loki → Grafana）と、その将来拡張（pve/Sophos 等のログ収集、エラーフック/アラート）。
+- 起案: 2026-07-16（claude 設計・Yoshinobu 承認）。Phase 1 実機 PASS。
+- 監査証跡: `docs/ai/reviews/promtail_to_alloy/`（現状調査・要件・実装・レビュー・テスト）。
+
+## 変更履歴
+
+- v1.0 (2026-07-16): 新規。promtail(EOL)→Grafana Alloy 移行 Phase 1 完了を機に、ログ観測基盤の方針を正本化。
+
+## 1. 位置づけ
+
+本書は monnie を中心とするログ収集・観測基盤の正本。`autonomous_recovery_policy.md`（サービス障害の検知→復旧ラダー）とは目的が異なる。本書は「ログの収集・保全・検索」と「（将来の）ログベースのエラーアラート」を扱う。core.md §10 に従い、本システムを扱う AI は core.md に加えて本書を必ず参照する。
+
+## 2. アーキテクチャ（2平面）
+
+- **収集平面**: 全ソース → Loki。ラベルで区別。DRY のため収集経路は1本に統一する（目的別に別パイプラインを建てない）。
+- **監視/フック平面（将来 Phase 3）**: Loki/Grafana のルールでエラーを拾い Slack へ。別パイプラインではなく、ラベル＋アラートルールとして収集平面の上に薄く載せる。
+
+エージェントは **Grafana Alloy に統一**（promtail は EOL）。
+
+### 2.1 ソースクラス（能力別）
+
+- **アプライアンス（syslog しか出せない）**: UniFi(AP/switch)、Sophos、他ネット機器 → syslog(UDP514) → monnie の集約点。
+- **Linux ホスト（エージェント可）**: monnie、(将来) pve1/pve2 等 → ローカル Alloy が journald を直接 Loki push（syslog 転送より severity メタデータが豊富）。
+
+### 2.2 syslog 集約の方式（D1 決定 2026-07-16）
+
+**rsyslog を syslog 集約役（UDP514 受信・source-IP allowlist・振り分け）に残し、Alloy が生成ファイルを tail する。** 理由: rsyslog は多ソースの受信・allowlist・RFC3164/5424 混在を堅牢にこなす。Alloy 直受信（`loki.source.syslog`）で rsyslog を廃止する案は採らない（受信層の作り直しリスクが高い）。
+
+## 3. 現状構成（monnie、Phase 1 完了時点）
+
+```
+UniFi機器/コントローラ → UDP514 → monnie rsyslog(imudp, /etc/rsyslog.d/10-unifi.conf)
+  → source-IP allowlist で振り分け
+     ├ CloudKey源  → /var/log/unifi.log
+     └ switch/AP源 → /var/log/unifi-devices.log
+  → Alloy(loki.source.file ×2) + Alloy(loki.source.journal)
+  → loki.write localhost:3100/loki/api/v1/push → Loki → Grafana
+```
+
+- CloudKey の送信先設定: `ace.setting` の key=`rsyslogd`（サイト単位、enabled、宛先 monnie:514/UDP）。UniFi GUI 管理（Ansible 直接編集はしない）。
+- **収集3系統のラベル契約（移行後も不変にすべき）**:
+  - `unifi`: `/var/log/unifi.log` → `job=unifi`, `host=uckg2`
+  - `network-devices`: `/var/log/unifi-devices.log` → `job=network-devices`、log 行の2番目トークンを `host` に抽出
+  - `system`(journal): `job=system`, `host=monnie`、`__journal__systemd_unit` → `unit` relabel
+- Loki push: `http://localhost:3100/loki/api/v1/push`（認証なし）。
+
+## 対応するPlaybook
+
+- `playbooks/alloy_setup.yml`（role: `alloy`）: monnie(`monitoring_servers`) に Alloy を導入し promtail から cutover する。tester-gate: `check-mode-native`。**APPLY は本番ログエージェント cutover のため人間ゲート（Yoshinobu の明示判断）必須**。
+
+## 4. Alloy 運用方針
+
+- **導入**: apt（既存 Grafana Labs リポ `apt.grafana.com stable main`）。手動運用でなく role 管理（config は git 正本、ホスト直編集禁止）。role の apt は `state: present`（版上げしない）。
+- **版上げ**: 月次 `ubuntu_vm_full_upgrade`（apt）が担う。`alloy_setup.yml` は版上げ用ではなく、冪等な cutover/再プロビジョン用（再実行しても版は上がらない）。**Alloy はメジャー更新で River config 構文が変わり得る**ため、monnie の重要パターン（`ubuntu_vm_full_upgrade_important_per_node.monnie`）に `alloy.*` を登録し、月次更新時に REVIEW_REQUIRED（人間レビュー）へ上げる。
+- **config**: `/etc/alloy/config.alloy`（`root:alloy 0640`）。収集ソースは role defaults の `alloy_file_sources` / `alloy_journal_sources` 変数。storage: `/var/lib/alloy/data`（実 unit を正本とする）。HTTP listen: loopback `localhost:12345`。
+- **cutover 安全則**: install は auto-start 抑止(`policy_rc_d: 101`) → 実 unit/user/storage/CLI contract と `alloy validate` を assert → 合格時のみ promtail stop+disable → alloy start。二重 tail を残さない。start 失敗時は rescue で promtail を復元。promtail の package/config/positions は削除せず rollback 用に維持する。
+- **positions**: Alloy 自身の storage で管理（promtail positions は移植しない）。file source は `tail_from_end=true`。cutover 境界の小さな gap/overlap は許容。
+- **journald 読取**: alloy user は `adm` + `systemd-journal` 所属が必要。alloy active だけでなく、Loki に journal stream の実データが出ることを検証する（active だけを成功条件にしない）。
+- **本番変更前の mute**: monnie は自律復旧対象（recovery_probe が pull 監視）。cutover 等の本番変更前は `homelab-mute set monnie <分>` で mute する（promtail 自体は復旧対象外だが monnie ノードとして念のため）。
+
+## 5. Phase ロードマップ
+
+- **Phase 1（完了 2026-07-16）**: monnie の promtail → Alloy 1:1 移植。rsyslog/Loki/Grafana 不変。
+- **Phase 2**: ソース拡張（pve1/pve2 にローカル Alloy=journald→Loki、Sophos を rsyslog 集約へ）+ 全ソースの **severity(`level`) ラベル標準化**（syslog PRI / journald `_PRIORITY` → 共通 `level`）。role の `alloy_file_sources` に「動的 host 抽出（`extract_second_token_as_host`）と静的 `host` ラベルの同時指定を禁止する assert」を追加（reviewer suggestion `2026-07-16_004`）。
+- **Phase 3**: エラーフック（Grafana 管理アラート、必要なら Loki ruler + Alertmanager）→ Slack。既存 recovery/Slack 経路と統合し二重化しない（例: `pve replication error` ログ → Slack → recovery 調査の入口）。
+
+## 6. 制約・禁止事項
+
+- 収集は Loki 一本に統一。目的別の別収集パイプラインを建てない。
+- rsyslog を syslog 集約役として維持する（Alloy 直受信で置換しない）。
+- Alloy config はホスト直編集禁止（role/git を正本とする）。
+- 本番 cutover/変更を伴う APPLY は人間ゲート（Yoshinobu）。tester は既定で APPLY しない。
+- 秘密・IP をリポジトリに書かない。実機検証は tester 工程。
+
+## 7. 実機検証状況
+
+- **2026-07-16 Phase 1**: monnie で APPLY PASS（alloy `1.17.1-1`、`ok=33 changed=7 failed=0`、rescue なし）。3系統の Loki 実データ（cutover 後 timestamp）・journald 実読・service 排他（promtail inactive/disabled・二重 tail 無し）・rsyslog 非回帰（UDP514 継続・2ファイル増加）を確認。監査: `docs/ai/reviews/promtail_to_alloy/2026-07-16_001..006`。
+- **既知の非ブロッキング**: 起動時に `remotecfg "noop client"` の error 1行（remote config 未使用の local deploy では正常。以降 ready・全 component 評価・3-stream push・positions 生成が成功）。将来の継続監視で反復しないか確認する価値あり。

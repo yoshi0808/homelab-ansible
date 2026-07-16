@@ -1,0 +1,49 @@
+---
+alloy_package_name: alloy
+alloy_binary_path: /usr/bin/alloy
+alloy_service_name: alloy
+alloy_service_unit: alloy.service
+alloy_user: alloy
+alloy_group: alloy
+alloy_journal_group: systemd-journal
+
+alloy_grafana_repo_file: /etc/apt/sources.list.d/grafana.list
+alloy_config_dir: /etc/alloy
+alloy_config_path: /etc/alloy/config.alloy
+alloy_environment_path: /etc/default/alloy
+
+# The apt unit owns the --storage.path argument. This is the path expected by
+# the package version current when Phase 1 was designed; target preflight must
+# confirm the installed unit before cutover (see tasks/main.yml).
+alloy_expected_storage_path: /var/lib/alloy/data
+alloy_http_listen_address: localhost:12345
+
+alloy_loki_push_url: http://localhost:3100/loki/api/v1/push
+
+# Promtail positions are intentionally not imported. tail_from_end avoids a
+# full replay on the first Alloy start; a small cutover gap/overlap is accepted.
+alloy_file_sources:
+  - name: unifi
+    path: /var/log/unifi.log
+    tail_from_end: true
+    labels:
+      job: unifi
+      host: uckg2
+    extract_second_token_as_host: false
+  - name: network_devices
+    path: /var/log/unifi-devices.log
+    tail_from_end: true
+    labels:
+      job: network-devices
+    extract_second_token_as_host: true
+
+alloy_journal_sources:
+  - name: system
+    max_age: 12h
+    labels:
+      job: system
+      host: monnie
+    source_unit_label: __journal__systemd_unit
+    target_unit_label: unit
+
+alloy_promtail_service_name: promtail

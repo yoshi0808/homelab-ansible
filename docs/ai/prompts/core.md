@@ -343,6 +343,7 @@ playbook は 1 ファイルにまとめず、運用目的ごとに分ける。
 | `unifi_backup_fetch_policy.md`                  | CloudKey の UniFi OS システムバックアップ取得             |
 | `time_sync_check_policy.md`                     | quory 基準の NTP 同期状態チェック・quory 参照追加準備     |
 | `autonomous_recovery_policy.md`                 | Sophos / authy / monnie の自律復旧ラダー（検知→restart→reboot→HA failover） |
+| `log_observability_policy.md`                   | monnie 中心のログ収集基盤（UniFi/機器 syslog → rsyslog → Alloy → Loki → Grafana、将来 pve/Sophos 拡張・エラーフック） |
 
 AI は該当システムを扱う際、本書（`core.md`）に加えて、対応する `*_policy.md`
 を必ず参照する。
