@@ -10,7 +10,7 @@ loki.write "local" {
 }
 
 {% for source in alloy_file_sources %}
-{% set needs_pipeline = (source.extract_second_token_as_host | default(false) | bool) or (source.extract_normalized_level_at_start | default(false) | bool) or (source.extract_level_best_effort | default(false) | bool) %}
+{% set needs_pipeline = (source.extract_second_token_as_host | default(false) | bool) or (source.extract_normalized_level_at_start | default(false) | bool) or (source.strip_normalized_prefix | default(false) | bool) or (source.extract_level_best_effort | default(false) | bool) %}
 {% if needs_pipeline %}
 loki.process {{ (source.name ~ '_pipeline') | to_json }} {
   forward_to = [loki.write.local.receiver]
@@ -36,6 +36,18 @@ loki.process {{ (source.name ~ '_pipeline') | to_json }} {
     values = {
       "host" = "host",
     }
+  }
+
+{% endif %}
+{% if source.strip_normalized_prefix | default(false) | bool %}
+  // The receiver writes: <level> <host> <RFC3339 timestamp> <message>.
+  // level/host are labels by this point, so retain only the message in Loki.
+  stage.regex {
+    expression = "^(?:error|warning|info|debug)\\s+\\S+\\s+\\S+\\s+(?P<message>.*)$"
+  }
+
+  stage.output {
+    source = "message"
   }
 
 {% endif %}
@@ -139,6 +151,23 @@ loki.relabel {{ (source.name ~ '_metadata') | to_json }} {
   }
 }
 
+{% set drop_info_debug_units = source.drop_info_debug_units | default([]) %}
+{% if drop_info_debug_units | length > 0 %}
+loki.process {{ (source.name ~ '_pipeline') | to_json }} {
+  forward_to = [loki.write.local.receiver]
+
+{% for unit in drop_info_debug_units %}
+{% set drop_selector = '{job=' ~ (source.labels.job | to_json) ~ ', host=' ~ (source.labels.host | to_json) ~ ', unit=' ~ (unit | to_json) ~ ', level=~"info|debug"}' %}
+  stage.match {
+    selector            = {{ drop_selector | to_json }}
+    action              = "drop"
+    drop_counter_reason = "observability_info_debug"
+  }
+
+{% endfor %}
+}
+
+{% endif %}
 loki.source.journal {{ source.name | to_json }} {
   max_age       = {{ source.max_age | to_json }}
   relabel_rules = loki.relabel.{{ source.name }}_metadata.rules
@@ -147,7 +176,11 @@ loki.source.journal {{ source.name | to_json }} {
     {{ label.0 | to_json }} = {{ label.1 | to_json }},
 {% endfor %}
   }
+{% if drop_info_debug_units | length > 0 %}
+  forward_to = [loki.process.{{ source.name }}_pipeline.receiver]
+{% else %}
   forward_to = [loki.write.local.receiver]
+{% endif %}
 }
 
 {% endfor %}

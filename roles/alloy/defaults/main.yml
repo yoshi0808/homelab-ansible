@@ -66,6 +66,7 @@ alloy_file_sources:
       host: uckg2
     extract_second_token_as_host: false
     extract_normalized_level_at_start: false
+    strip_normalized_prefix: false
     extract_level_best_effort: true
     require_existing_file: true
   - name: network_devices
@@ -75,6 +76,7 @@ alloy_file_sources:
       job: network-devices
     extract_second_token_as_host: true
     extract_normalized_level_at_start: false
+    strip_normalized_prefix: false
     extract_level_best_effort: true
     require_existing_file: true
   - name: pve_nodes
@@ -86,6 +88,7 @@ alloy_file_sources:
       job: pve-nodes
     extract_second_token_as_host: true
     extract_normalized_level_at_start: true
+    strip_normalized_prefix: true
     extract_level_best_effort: false
     require_existing_file: false
   - name: sophos_fw
@@ -96,6 +99,7 @@ alloy_file_sources:
       host: sophos-fw
     extract_second_token_as_host: false
     extract_normalized_level_at_start: true
+    strip_normalized_prefix: true
     extract_level_best_effort: false
     require_existing_file: false
   - name: ubuntu_nodes
@@ -105,8 +109,19 @@ alloy_file_sources:
       job: ubuntu-nodes
     extract_second_token_as_host: true
     extract_normalized_level_at_start: true
+    strip_normalized_prefix: true
     extract_level_best_effort: false
     require_existing_file: false
+
+# Drop only info/debug emitted by monnie's own observability stack. Keep full
+# unit names here so tester can correct a target-specific unit name without
+# changing the River template. warning/error always continue to Loki.
+alloy_observability_journal_drop_units:
+  - loki.service
+  - alloy.service
+  - grafana-server.service
+  - prometheus.service
+  - promtail.service
 
 alloy_journal_sources:
   - name: system
@@ -117,6 +132,7 @@ alloy_journal_sources:
     source_unit_label: __journal__systemd_unit
     target_unit_label: unit
     source_priority_label: __journal_priority
+    drop_info_debug_units: "{{ alloy_observability_journal_drop_units }}"
 
 alloy_promtail_service_name: promtail
 alloy_ready_url: http://localhost:12345/-/ready

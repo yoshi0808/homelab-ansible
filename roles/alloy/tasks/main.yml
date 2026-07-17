@@ -25,6 +25,7 @@
       - item.labels.job is defined
       - not ((item.extract_second_token_as_host | default(false) | bool) and (item.labels.host is defined))
       - not ((item.extract_normalized_level_at_start | default(false) | bool) and (item.extract_level_best_effort | default(false) | bool))
+      - not ((item.strip_normalized_prefix | default(false) | bool) and not (item.extract_normalized_level_at_start | default(false) | bool))
     fail_msg: "Invalid Alloy file source definition: {{ item }}"
     quiet: true
   loop: "{{ alloy_file_sources }}"
@@ -41,6 +42,11 @@
       - item.source_unit_label == "__journal__systemd_unit"
       - item.target_unit_label == "unit"
       - item.source_priority_label == "__journal_priority"
+      - item.drop_info_debug_units is defined
+      - item.drop_info_debug_units | type_debug == "list"
+      - item.drop_info_debug_units | length > 0
+      - item.drop_info_debug_units | unique | length == item.drop_info_debug_units | length
+      - item.drop_info_debug_units | reject('match', '^[A-Za-z0-9@_.-]+\.service$') | list | length == 0
     fail_msg: "Invalid Alloy journal source definition: {{ item }}"
     quiet: true
   loop: "{{ alloy_journal_sources }}"
@@ -73,11 +79,18 @@
       - "'loki.process \"network_devices_pipeline\"' in alloy_candidate_config"
       - "'loki.process \"pve_nodes_pipeline\"' in alloy_candidate_config"
       - "'loki.process \"ubuntu_nodes_pipeline\"' in alloy_candidate_config"
+      - "alloy_candidate_config.count('source = \"message\"') == 3"
+      - "alloy_candidate_config.count('(?P<message>.*)') == 3"
       - "'loki.source.journal \"system\"' in alloy_candidate_config"
+      - "'loki.process \"system_pipeline\"' in alloy_candidate_config"
       - "'\"job\" = \"ubuntu-nodes\"' in alloy_candidate_config"
       - alloy_journal_sources[0].name == "system"
       - alloy_journal_sources[0].labels.job == "ubuntu-nodes"
       - alloy_journal_sources[0].labels.host == "monnie"
+      - alloy_journal_sources[0].drop_info_debug_units == alloy_observability_journal_drop_units
+      - "alloy_candidate_config.count('action              = \"drop\"') == (alloy_observability_journal_drop_units | length)"
+      - "alloy_candidate_config.count('drop_counter_reason = \"observability_info_debug\"') == (alloy_observability_journal_drop_units | length)"
+      - "alloy_observability_journal_drop_units | reject('in', alloy_candidate_config) | list | length == 0"
       - "'replacement  = \"error\"' in alloy_candidate_config"
       - "'replacement  = \"warning\"' in alloy_candidate_config"
       - "'replacement  = \"info\"' in alloy_candidate_config"

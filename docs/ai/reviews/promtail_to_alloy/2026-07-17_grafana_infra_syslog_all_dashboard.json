@@ -126,6 +126,7 @@
                       },
                       "spec": {
                         "expr": "{job=~\"pve-nodes|sophos-fw|ubuntu-nodes\", host=~\"$host\", level=~\"$level\"} |= \"$search\" | line_format \"{{ .host }} | {{ __line__ }}\"",
+                        "maxLines": 1500,
                         "queryType": "range"
                       }
                     },
@@ -261,8 +262,14 @@
         "spec": {
           "name": "level",
           "current": {
-            "text": "All",
-            "value": "$__all"
+            "text": [
+              "warning",
+              "error"
+            ],
+            "value": [
+              "warning",
+              "error"
+            ]
           },
           "label": "Severity",
           "hide": "dontHide",
