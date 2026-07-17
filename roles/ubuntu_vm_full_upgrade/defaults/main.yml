@@ -7,6 +7,27 @@
 ubuntu_vm_full_upgrade_report_dir: "{{ reports_base_dir }}/ubuntu-vm-full-upgrade"
 
 # ---------------------------------------------------------------------------
+# Non-apt product update registry (2026-07-17_035). Each entry describes two
+# read-only JSON endpoints and the JMESPath expressions used to extract their
+# versions. Collection runs only during the monthly dry_run=true path; it
+# never downloads or installs an artifact. The schema is product-agnostic so
+# future manually managed products can be registered without changing the
+# collection flow. The first registered product is monnie's manually
+# installed Prometheus.
+# ---------------------------------------------------------------------------
+ubuntu_vm_full_upgrade_nonapt_per_node:
+  monnie:
+    - name: prometheus
+      current_url: "http://localhost:9090/api/v1/status/buildinfo"
+      current_version_query: "data.version"
+      current_use_proxy: false
+      latest_url: "https://api.github.com/repos/prometheus/prometheus/releases/latest"
+      latest_version_query: "tag_name"
+      latest_tag_strip_prefix: "v"
+      timeout_seconds: 10
+      note: "手動インストール。更新は人間作業（Notion『Prometheus / Grafana / unifi-poller セットアップ手順』参照）"
+
+# ---------------------------------------------------------------------------
 # Important-component patterns (requirement §5.2). Stored as UNANCHORED regex
 # fragments (not glob, no leading ^ / trailing $) — classify.yml combines all
 # applicable fragments for a host into one alternation and wraps it in

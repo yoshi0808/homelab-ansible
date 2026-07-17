@@ -1,0 +1,68 @@
+---
+# Pure response parsing and comparison, split from the HTTP collection so the
+# three decision states can be regression-tested without external network or
+# service access.
+
+- name: "Extract {{ ubuntu_vm_full_upgrade_nonapt_product.name }} versions"
+  ansible.builtin.set_fact:
+    ubuntu_vm_full_upgrade_nonapt_current_version: >-
+      {{ ((ubuntu_vm_full_upgrade_nonapt_current_raw.json | default({}))
+          | community.general.json_query(ubuntu_vm_full_upgrade_nonapt_product.current_version_query)
+          | default('', true) | string) }}
+    ubuntu_vm_full_upgrade_nonapt_latest_version_raw: >-
+      {{ ((ubuntu_vm_full_upgrade_nonapt_latest_raw.json | default({}))
+          | community.general.json_query(ubuntu_vm_full_upgrade_nonapt_product.latest_version_query)
+          | default('', true) | string) }}
+
+- name: "Normalize {{ ubuntu_vm_full_upgrade_nonapt_product.name }} versions and collection status"
+  ansible.builtin.set_fact:
+    ubuntu_vm_full_upgrade_nonapt_latest_version: >-
+      {{ ubuntu_vm_full_upgrade_nonapt_latest_version_raw
+         | regex_replace('^' + (ubuntu_vm_full_upgrade_nonapt_product.latest_tag_strip_prefix | default('') | regex_escape), '') }}
+    ubuntu_vm_full_upgrade_nonapt_current_rc: >-
+      {{ 0 if ((ubuntu_vm_full_upgrade_nonapt_current_raw.status | default(-1) | int) == 200
+                and (ubuntu_vm_full_upgrade_nonapt_current_version | length) > 0)
+         else (1 if (ubuntu_vm_full_upgrade_nonapt_current_raw.status | default(-1) | int) == 200
+                 else (ubuntu_vm_full_upgrade_nonapt_current_raw.status | default(-1) | int)) }}
+    ubuntu_vm_full_upgrade_nonapt_latest_rc: >-
+      {{ 0 if ((ubuntu_vm_full_upgrade_nonapt_latest_raw.status | default(-1) | int) == 200
+                and (ubuntu_vm_full_upgrade_nonapt_latest_version_raw | length) > 0)
+         else (1 if (ubuntu_vm_full_upgrade_nonapt_latest_raw.status | default(-1) | int) == 200
+                 else (ubuntu_vm_full_upgrade_nonapt_latest_raw.status | default(-1) | int)) }}
+
+- name: "Determine {{ ubuntu_vm_full_upgrade_nonapt_product.name }} comparison state"
+  ansible.builtin.set_fact:
+    ubuntu_vm_full_upgrade_nonapt_versions_comparable: >-
+      {{ (ubuntu_vm_full_upgrade_nonapt_current_rc | int) == 0
+         and (ubuntu_vm_full_upgrade_nonapt_latest_rc | int) == 0
+         and (ubuntu_vm_full_upgrade_nonapt_current_version is match('^(0|[1-9][0-9]*)[.](0|[1-9][0-9]*)[.](0|[1-9][0-9]*)$'))
+         and (ubuntu_vm_full_upgrade_nonapt_latest_version is match('^(0|[1-9][0-9]*)[.](0|[1-9][0-9]*)[.](0|[1-9][0-9]*)$')) }}
+
+- name: "Classify {{ ubuntu_vm_full_upgrade_nonapt_product.name }} version state"
+  ansible.builtin.set_fact:
+    ubuntu_vm_full_upgrade_nonapt_state: >-
+      {{ 'update_available'
+         if (ubuntu_vm_full_upgrade_nonapt_versions_comparable | bool)
+            and (ubuntu_vm_full_upgrade_nonapt_current_version is version(ubuntu_vm_full_upgrade_nonapt_latest_version, '<', version_type='semver'))
+         else 'up_to_date'
+         if (ubuntu_vm_full_upgrade_nonapt_versions_comparable | bool)
+         else 'failed' }}
+
+- name: "Record {{ ubuntu_vm_full_upgrade_nonapt_product.name }} non-apt result"
+  ansible.builtin.set_fact:
+    ubuntu_vm_full_upgrade_nonapt_results: >-
+      {{ ubuntu_vm_full_upgrade_nonapt_results + [{
+        'name': ubuntu_vm_full_upgrade_nonapt_product.name,
+        'current': ubuntu_vm_full_upgrade_nonapt_current_version,
+        'latest': ubuntu_vm_full_upgrade_nonapt_latest_version,
+        'state': ubuntu_vm_full_upgrade_nonapt_state,
+        'current_rc': ubuntu_vm_full_upgrade_nonapt_current_rc | int,
+        'latest_rc': ubuntu_vm_full_upgrade_nonapt_latest_rc | int,
+        'current_http_status': ubuntu_vm_full_upgrade_nonapt_current_raw.status | default(-1) | int,
+        'latest_http_status': ubuntu_vm_full_upgrade_nonapt_latest_raw.status | default(-1) | int,
+        'note': ubuntu_vm_full_upgrade_nonapt_product.note | default(''),
+        'reason': (('non-apt update available: ' + ubuntu_vm_full_upgrade_nonapt_product.name
+                    + ' ' + ubuntu_vm_full_upgrade_nonapt_current_version
+                    + ' → ' + ubuntu_vm_full_upgrade_nonapt_latest_version)
+                   if ubuntu_vm_full_upgrade_nonapt_state == 'update_available' else ''),
+      }] }}

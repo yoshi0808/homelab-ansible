@@ -57,6 +57,18 @@ if [ -n "$phased_names" ]; then
   phased_policy=$(apt-cache policy $phased_names 2>&1)
 fi
 
+# Packages explicitly kept back by the operator with `apt-mark hold`.
+# `apt-mark showhold` only reads dpkg selections; like phased_detail above,
+# this is notification/reconciliation data and is not an input to Status or
+# apply judgement. Keep the command result separately so a collection error
+# is not misreported as a package name.
+hold_out=$(apt-mark showhold 2>&1)
+hold_rc=$?
+hold_names=""
+if [ "$hold_rc" -eq 0 ]; then
+  hold_names=$(printf '%s\n' "$hold_out" | sed '/^[[:space:]]*$/d' | sort -u)
+fi
+
 reboot_required_flag="false"
 [ -f /var/run/reboot-required ] && reboot_required_flag="true"
 
@@ -72,6 +84,9 @@ INST_LINES="$inst_lines" \
 REMV_LINES="$remv_lines" \
 PHASED_NAMES="$phased_names" \
 PHASED_POLICY="$phased_policy" \
+HOLD_RC="$hold_rc" \
+HOLD_TAIL="$(printf '%s\n' "$hold_out" | tail -20)" \
+HOLD_NAMES="$hold_names" \
 REBOOT_REQUIRED_FLAG="$reboot_required_flag" \
 python3 - << 'PYEOF'
 import json
@@ -161,6 +176,10 @@ print(json.dumps({
         "rc": int(os.environ["CHECK_RC"]),
         "tail": os.environ.get("CHECK_TAIL", ""),
     },
+    "apt_mark_showhold": {
+        "rc": int(os.environ["HOLD_RC"]),
+        "tail": os.environ.get("HOLD_TAIL", ""),
+    },
     "simulation": {
         "rc": int(os.environ["SIM_RC"]),
         "inst": lines("INST_NAMES"),
@@ -168,6 +187,7 @@ print(json.dumps({
         "inst_detail": inst_detail(),
         "remv_detail": remv_detail(),
         "phased_detail": phased_detail(),
+        "hold": lines("HOLD_NAMES"),
         "raw_tail": os.environ.get("SIM_RAW_TAIL", ""),
     },
     "reboot_required_flag": os.environ.get("REBOOT_REQUIRED_FLAG", "false") == "true",

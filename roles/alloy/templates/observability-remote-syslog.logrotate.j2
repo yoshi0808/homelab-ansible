@@ -1,0 +1,14 @@
+# Managed by Ansible (roles/alloy). Do not edit on the host.
+{{ alloy_remote_syslog_destinations.values() | sort | join(' ') }} {
+    weekly
+    rotate 4
+    missingok
+    notifempty
+    compress
+    delaycompress
+    su syslog syslog
+    sharedscripts
+    postrotate
+        /usr/bin/systemctl kill -s HUP {{ alloy_rsyslog_service_name }}.service >/dev/null 2>&1 || true
+    endscript
+}

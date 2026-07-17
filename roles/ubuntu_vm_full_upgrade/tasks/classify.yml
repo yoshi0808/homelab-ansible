@@ -115,20 +115,22 @@
     _remv_count: "{{ ubuntu_vm_full_upgrade_sim.simulation.remv | length }}"
 
 # ---------------------------------------------------------------------------
-# Status determination (requirement §5.4). Precedence: BLOCKED (untrustworthy
-# simulation) > MAJOR_UPGRADE_DETECTED > NO_UPDATES > REVIEW_REQUIRED (or
-# BLOCKED for an important remove with no successor) > UPGRADE_READY.
+# Status determination (requirement §5.4). First preserve the existing apt
+# decision exactly, then layer the non-apt registry result on top. A confirmed
+# non-apt update raises NO_UPDATES/UPGRADE_READY to REVIEW_REQUIRED; it never
+# lowers BLOCKED/MAJOR_UPGRADE_DETECTED/REVIEW_REQUIRED. Failed/incomparable
+# collection is fail-quiet and leaves both Status and reason unchanged.
 # ---------------------------------------------------------------------------
-- name: Determine Status
+- name: Determine apt Status
   ansible.builtin.set_fact:
-    ubuntu_vm_full_upgrade_status: >-
+    ubuntu_vm_full_upgrade_apt_status: >-
       {{ 'BLOCKED' if (ubuntu_vm_full_upgrade_sim.apt_update.rc != 0 or ubuntu_vm_full_upgrade_sim.apt_check.rc != 0 or ubuntu_vm_full_upgrade_sim.simulation.rc != 0)
          else 'MAJOR_UPGRADE_DETECTED' if (ubuntu_vm_full_upgrade_major_signals | length > 0)
          else 'NO_UPDATES' if ((ubuntu_vm_full_upgrade_sim.simulation.inst | length) == 0 and (ubuntu_vm_full_upgrade_sim.simulation.remv | length) == 0)
          else 'BLOCKED' if (ubuntu_vm_full_upgrade_remv_blocking | length > 0)
          else 'REVIEW_REQUIRED' if ((ubuntu_vm_full_upgrade_sim.simulation.remv | length) > 0 or (ubuntu_vm_full_upgrade_inst_important | length) > 0)
          else 'UPGRADE_READY' }}
-    ubuntu_vm_full_upgrade_status_reason: >-
+    ubuntu_vm_full_upgrade_apt_status_reason: >-
       {{ ('apt-get update/check または apt-get -s full-upgrade が失敗した(rc: update=' + (ubuntu_vm_full_upgrade_sim.apt_update.rc | string) + ', check=' + (ubuntu_vm_full_upgrade_sim.apt_check.rc | string) + ', sim=' + (ubuntu_vm_full_upgrade_sim.simulation.rc | string) + ')。パッケージindexが最新でない可能性があり、この結果に基づくapplyは行わない')
          if (ubuntu_vm_full_upgrade_sim.apt_update.rc != 0 or ubuntu_vm_full_upgrade_sim.apt_check.rc != 0 or ubuntu_vm_full_upgrade_sim.simulation.rc != 0)
          else ('メジャーアップグレード疑い: ' + (ubuntu_vm_full_upgrade_major_signals | join('; ')))
@@ -140,3 +142,23 @@
          else ('重要コンポーネント更新あり、またはremoveあり(後継確認可)。人間判断のうえ手動apply')
          if ((ubuntu_vm_full_upgrade_sim.simulation.remv | length) > 0 or (ubuntu_vm_full_upgrade_inst_important | length) > 0)
          else '重要コンポーネント該当なし、removeなし。手動apply可' }}
+
+- name: Identify confirmed non-apt updates
+  ansible.builtin.set_fact:
+    ubuntu_vm_full_upgrade_nonapt_updates: >-
+      {{ ubuntu_vm_full_upgrade_nonapt_results
+         | selectattr('state', 'equalto', 'update_available') | list }}
+
+- name: Apply non-apt update promotion to Status
+  ansible.builtin.set_fact:
+    ubuntu_vm_full_upgrade_status: >-
+      {{ ubuntu_vm_full_upgrade_apt_status
+         if (ubuntu_vm_full_upgrade_apt_status in ['BLOCKED', 'MAJOR_UPGRADE_DETECTED', 'REVIEW_REQUIRED']
+             or (ubuntu_vm_full_upgrade_nonapt_updates | length) == 0)
+         else 'REVIEW_REQUIRED' }}
+    ubuntu_vm_full_upgrade_status_reason: >-
+      {{ ubuntu_vm_full_upgrade_apt_status_reason
+         + (('; ' + (_nonapt_reasons | join('; ')))
+            if (ubuntu_vm_full_upgrade_nonapt_updates | length) > 0 else '') }}
+  vars:
+    _nonapt_reasons: "{{ ubuntu_vm_full_upgrade_nonapt_updates | map(attribute='reason') | list }}"

@@ -1,8 +1,8 @@
-# Ubuntu ノード Patch Policy v1.3
+# Ubuntu ノード Patch Policy v1.5
 
 作成日: 2026-05-09
-更新日: 2026-06-09
-版: v1.3
+更新日: 2026-07-17
+版: v1.5
 対象: homelab 環境の Ubuntu ノード全般（VM・物理ノード）
 
 ---
@@ -48,9 +48,7 @@ Ansible の役割は、パッチ適用そのものではなく以下に限定す
 
 ### 3.1 Ubuntu Pro に任せる
 
-パッケージの更新は Ubuntu Pro + unattended-upgrades が自動で行う。
-
-Ansible はパッケージ更新を行わない。
+セキュリティ系パッケージの定常更新は Ubuntu Pro + unattended-upgrades が自動で行う。Ansibleによる定常的な自動適用は行わず、対象外の通常更新だけを§3.3の月次判定と確認付き手動applyで扱う。
 
 対象:
 
@@ -69,6 +67,28 @@ Ansible はパッケージ更新を行わない。
 - homelab 環境として実害がほぼない
 
 サービスを Package-Blacklist に追加して手動管理に切り替えることは、対応忘れのリスクが高いため採用しない。
+
+### 3.3 月次full-upgrade判定
+
+Ubuntu Pro / unattended-upgradesの対象外となる通常更新は、`ubuntu_vm_full_upgrade.yml`で月次に判定し、ノード単位で`#patches`へ通知する。月次実行は`dry_run=true`のread-only判定であり、実適用は確認文字列を伴う単一ノードの手動applyに限定する。
+
+通知にはinstall / remove / phasing保留の件数とパッケージ別バージョンを表示する。`apt-mark showhold`でhold中のパッケージをread-only収集し、1件以上ある月だけphasing保留の直後に`holdにより保留: N件（パッケージ名）`を表示する。hold一覧は説明・照合用であり、Status・重要パッケージ・件数閾値・apply判定には使用しない。
+
+monnieのunpollerリポジトリでは、`3.3.1+git → 3.3.1+git`のように同一バージョン文字列が更新候補として継続表示されることがある。これはリポジトリメタデータ由来の既知事象として、そのまま候補表示に残す。同一文字列だけを根拠に除外するとepoch・revision・アーキテクチャ等の差異を誤って隠す可能性があるため、専用の除外判定は設けない。
+
+### 3.4 非apt管理プロダクトの月次更新確認
+
+`ubuntu_vm_full_upgrade`はホスト別の汎用registryに登録した非apt管理プロダクトも、`dry_run=true`の月次実行時だけ確認する。第1弾の対象はmonnieへ手動インストールしたPrometheusのみ。現在版はmonnie自身から`http://localhost:9090/api/v1/status/buildinfo`をread-only HTTP GETして取得し、最新版はGitHub Releases APIのprometheus/prometheus latest stableをread-only HTTPS GETして取得する。GitHubの`v`タグprefixを除去し、両方が数値バージョンとして取得できた場合だけ比較する。
+
+ノード単位通知には次のいずれかを`apt外:`行で表示し、report JSONの`nonapt`にもname / current / latest / state / current・latest rc / HTTP status / noteを保存する。
+
+- 更新あり: `apt外: prometheus CURRENT → LATEST (更新あり・手動更新が必要)`
+- 最新: `apt外: prometheus CURRENT (最新)`
+- 取得または比較失敗: `apt外: prometheus 取得/比較失敗(current rc=X / latest rc=Y)`
+
+両方の取得成功と数値比較により更新ありが確定した場合だけ、Statusを最低`REVIEW_REQUIRED`へ昇格し、`status_reason`へ`non-apt update available: prometheus CURRENT → LATEST`を追加する。既存の`BLOCKED` / `MAJOR_UPGRADE_DETECTED`は降格させない。取得・JSON parse・version比較の失敗はbest-effort / fail-quietとして通知とreportにのみ残し、Statusを変更せずplaybookも失敗させない。
+
+この経路はバージョン確認専用であり、自動download・自動更新・service restartを一切行わない。Prometheusの更新は人間がNotion「Prometheus / Grafana / unifi-poller セットアップ手順」に従って手作業で行う。`dry_run=false`のapt apply経路では非aptチェック自体を実行しない。
 
 ---
 
@@ -119,6 +139,7 @@ Ansible による管理・監視・healthcheck は行わない。
 | `radius_healthcheck.yml` | FreeRADIUS 稼働確認・日次レポート | 朝（05:30） | なし |
 | `monitoring_healthcheck.yml` | Prometheus / Grafana / Loki 稼働確認・日次レポート | 朝（05:35） | なし |
 | `ubuntu_nightly.yml` | reboot_required 確認 → 条件付き reboot → サービス確認 → 通知 | 深夜（03:30） | あり（reboot） |
+| `ubuntu_vm_full_upgrade.yml` | 月次full-upgrade判定・ノード単位通知 → 確認付き手動apply | 毎月2日（dry-run）/ 必要時（apply） | dry-runなし / applyあり |
 
 healthcheck は VM が提供するサービスに応じた専用 playbook を用意する。
 
@@ -162,6 +183,7 @@ read-only。各 VM のサービス稼働状態を収集・判定・レポート�
 | ubuntu_nightly: reboot_required = false | なし |
 | ubuntu_nightly: reboot 実行 → サービス確認 OK | あり（reboot した旨 + OK） |
 | ubuntu_nightly: reboot 実行 → サービス確認 NG | あり（CRITICAL） |
+| ubuntu_vm_full_upgrade: 月次dry-run / 手動apply | あり（ノード単位。通常は#patches、BLOCKEDのみ#alerts） |
 | healthcheck: OK | なし |
 | healthcheck: WARNING | あり |
 | healthcheck: CRITICAL | あり |
@@ -181,7 +203,7 @@ Webhook URL は Ansible Vault 暗号化済みの `inventories/vars/slack.yml` �
 ```yaml
 slack_webhook_info: "..."    # #info チャンネル
 slack_webhook_alerts: "..."  # #alerts チャンネル
-slack_webhook_patches: "..." # #patches チャンネル（Ubuntu管理では使用しない）
+slack_webhook_patches: "..." # #patches チャンネル（月次full-upgrade判定・apply）
 ```
 
 呼び出し方:
@@ -204,6 +226,7 @@ slack_webhook_patches: "..." # #patches チャンネル（Ubuntu管理では使�
 | ubuntu_nightly: 正常完了（reboot OK） | #info | ok |
 | ubuntu_nightly: CRITICAL（サービス異常） | #alerts | critical |
 | ubuntu_nightly: reboot タイムアウト | #alerts | critical |
+| ubuntu_vm_full_upgrade: 月次dry-run / 手動apply | #patches（BLOCKEDのみ#alerts） | Statusに応じてinfo / ok / warning / critical |
 | healthcheck: WARNING | #alerts | warning |
 | healthcheck: CRITICAL | #alerts | critical |
 

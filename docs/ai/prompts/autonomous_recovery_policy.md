@@ -235,7 +235,16 @@ Slack(`@Homelab`メンション、Socket Mode)からのリクエストを受け�
 
 いずれも`recovery-probe.py`のループ先頭でチェックされ、有効な場合はそのサイクルの連続失敗カウンタをリセットしてskipする(mute解除直後にすぐ閾値に達することを防ぐ)。push経路(`recovery-push-dispatch.sh`)も対象別muteを個別に確認する。
 
-対象別muteを自動設定するplaybook: `proxmox_evacuate_node.yml` / `proxmox_patch_apply_node.yml` / `proxmox_restore_vm_placement.yml` / `ubuntu_nightly.yml` / `proxmox_patch_weekly_full.yml` / `cert_renew.yml`(monnieはグローバルpauseで代替)。
+対象別muteを自動設定するplaybookと実装上のTTL:
+
+- `proxmox_evacuate_node.yml`: authy / monnie / sophos-fw、120分
+- `proxmox_patch_apply_node.yml`: authy / monnie / sophos-fw、60分
+- `proxmox_restore_vm_placement.yml`: authy / monnie / sophos-fw、90分
+- `ubuntu_nightly.yml`: reboot対象のauthy / monnie、30分
+- `proxmox_patch_weekly_full.yml`: authy / monnie / sophos-fw、360分
+- `ubuntu_vm_full_upgrade.yml`: apply経路のauthy / monnie、45分
+
+`cert_renew.yml`のmonnie証明書更新は対象別muteではなく、TTLなしのグローバルpauseを設定してからgrafana-serverへ証明書をdeployし、deployが正常終了した場合だけ後続taskでresumeする実装である。resumeは`always` / `rescue`に無いため、deploy失敗時はグローバルpauseが残留し、全targetの監視再開には人間による明示的な`homelab-monitoring-resume`が必要となる。
 
 ---
 

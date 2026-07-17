@@ -1,0 +1,45 @@
+# Managed by Ansible (roles/alloy). Do not edit on the host.
+# This file intentionally does not declare an input. UDP 514 remains owned by
+# the existing /etc/rsyslog.d/10-unifi.conf listener and UniFi allowlist.
+
+template(name="AlloyRemoteError" type="string"
+         string="error %hostname% %timereported:::date-rfc3339% %syslogtag%%msg:::sp-if-no-1st-sp%%msg%\n")
+template(name="AlloyRemoteWarning" type="string"
+         string="warning %hostname% %timereported:::date-rfc3339% %syslogtag%%msg:::sp-if-no-1st-sp%%msg%\n")
+template(name="AlloyRemoteInfo" type="string"
+         string="info %hostname% %timereported:::date-rfc3339% %syslogtag%%msg:::sp-if-no-1st-sp%%msg%\n")
+template(name="AlloyRemoteDebug" type="string"
+         string="debug %hostname% %timereported:::date-rfc3339% %syslogtag%%msg:::sp-if-no-1st-sp%%msg%\n")
+
+{% for destination_name, destination_path in alloy_remote_syslog_destinations | dictsort %}
+{% set route_sources = alloy_remote_syslog_sources | selectattr('destination', 'equalto', destination_name) | list %}
+# {{ route_sources | map(attribute='hostname') | join(', ') }} -> {{ destination_path }}
+if (
+{% set route = namespace(first=true) %}
+{% for source in route_sources %}
+{% for address in alloy_remote_syslog_allowed_ipv4s[source.name] %}
+{% if not route.first %} or
+{% endif %}    $fromhost-ip == '{{ address }}'{% set route.first = false %}
+{% endfor %}
+{% endfor %}
+) then {
+    if ($syslogseverity <= 3) then {
+        action(type="omfile" file="{{ destination_path }}" template="AlloyRemoteError"
+               fileOwner="syslog" fileGroup="syslog" fileCreateMode="0644")
+    }
+    if ($syslogseverity == 4) then {
+        action(type="omfile" file="{{ destination_path }}" template="AlloyRemoteWarning"
+               fileOwner="syslog" fileGroup="syslog" fileCreateMode="0644")
+    }
+    if ($syslogseverity == 5 or $syslogseverity == 6) then {
+        action(type="omfile" file="{{ destination_path }}" template="AlloyRemoteInfo"
+               fileOwner="syslog" fileGroup="syslog" fileCreateMode="0644")
+    }
+    if ($syslogseverity == 7) then {
+        action(type="omfile" file="{{ destination_path }}" template="AlloyRemoteDebug"
+               fileOwner="syslog" fileGroup="syslog" fileCreateMode="0644")
+    }
+    stop
+}
+
+{% endfor %}

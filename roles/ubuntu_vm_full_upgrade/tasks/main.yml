@@ -114,6 +114,23 @@
       ansible.builtin.set_fact:
         ubuntu_vm_full_upgrade_sim: "{{ ubuntu_vm_full_upgrade_sim_raw.stdout | from_json }}"
 
+    # Non-apt checks are intentionally limited to the monthly dry-run path.
+    # The manual apply path stays apt-only, and every collector is best-effort
+    # read-only HTTP GET (requirement 035). Initializing on every participating
+    # host keeps report/notification rendering schema-stable when a host has no
+    # registry entries or when dry_run=false.
+    - name: Initialize non-apt product results
+      ansible.builtin.set_fact:
+        ubuntu_vm_full_upgrade_nonapt_results: []
+
+    - name: Collect registered non-apt product versions (monthly dry-run only)
+      ansible.builtin.include_tasks: collect_nonapt_product.yml
+      loop: "{{ ubuntu_vm_full_upgrade_nonapt_per_node[inventory_hostname] | default([]) }}"
+      loop_control:
+        loop_var: ubuntu_vm_full_upgrade_nonapt_product
+        label: "{{ ubuntu_vm_full_upgrade_nonapt_product.name }}"
+      when: dry_run | bool
+
     - name: Classify packages and determine Status
       ansible.builtin.include_tasks: classify.yml
 
@@ -195,6 +212,9 @@
             'inst_detail': ubuntu_vm_full_upgrade_sim.simulation.inst_detail,
             'remv_detail': ubuntu_vm_full_upgrade_sim.simulation.remv_detail,
             'phased_detail': ubuntu_vm_full_upgrade_sim.simulation.phased_detail,
+            'hold': ubuntu_vm_full_upgrade_sim.simulation.hold,
+            'hold_collection_rc': ubuntu_vm_full_upgrade_sim.apt_mark_showhold.rc,
+            'nonapt': ubuntu_vm_full_upgrade_nonapt_results,
             'inst_important': ubuntu_vm_full_upgrade_inst_important,
             'remv_classified': ubuntu_vm_full_upgrade_remv_classified | default([]),
             'product_impact': ubuntu_vm_full_upgrade_product_impact,
@@ -246,6 +266,18 @@
         slack_message: |
           {{ ubuntu_vm_full_upgrade_status_reason }}
           候補: install={{ ubuntu_vm_full_upgrade_sim.simulation.inst | length }} remove={{ ubuntu_vm_full_upgrade_sim.simulation.remv | length }} / 保留(phasing)={{ ubuntu_vm_full_upgrade_sim.simulation.phased_detail | length }}
+          {% if ubuntu_vm_full_upgrade_sim.simulation.hold | length > 0 %}
+          holdにより保留: {{ ubuntu_vm_full_upgrade_sim.simulation.hold | length }}件（{{ ubuntu_vm_full_upgrade_sim.simulation.hold | join(', ') }}）
+          {% endif %}
+          {% for product in ubuntu_vm_full_upgrade_nonapt_results %}
+          {% if product.state == 'update_available' %}
+          apt外: {{ product.name }} {{ product.current }} → {{ product.latest }} (更新あり・手動更新が必要)
+          {% elif product.state == 'up_to_date' %}
+          apt外: {{ product.name }} {{ product.current }} (最新)
+          {% else %}
+          apt外: {{ product.name }} 取得/比較失敗(current rc={{ product.current_rc }} / latest rc={{ product.latest_rc }})
+          {% endif %}
+          {% endfor %}
           {% if ubuntu_vm_full_upgrade_notify_detail_block %}
           {{ ubuntu_vm_full_upgrade_notify_detail_block }}
           {% endif %}

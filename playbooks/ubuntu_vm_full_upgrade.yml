@@ -40,7 +40,8 @@
 #   "would apply" message go to #patches. Abnormal per-host paths
 #   (healthcheck failure, post-reboot criticals, reboot/scheduling
 #   failures) stay on #alerts.
-# - Bodies show status_reason, counts (install / remove / 保留(phasing))
+# - Bodies show status_reason, counts (install / remove / 保留(phasing)),
+#   plus `apt-mark hold` packages only when at least one hold exists,
 #   and a monospaced per-package block: "pkg old → new" (upgrades,
 #   "(新規)" for fresh installs) / "pkg ver (remove)" /
 #   "pkg installed → candidate (phasing保留)". Phased versions come from a
@@ -51,18 +52,31 @@
 #   `apt list --upgradable` (the monnie 23-vs-25 mismatch fix). With zero
 #   candidates but phased pending, the NO_UPDATES reason reads
 #   適用候補なし(phasing保留あり).
+# - During dry_run=true only, each host's registered non-apt products are
+#   checked by read-only HTTP GET and rendered as `apt外:` lines. The first
+#   registry entry is monnie's manually installed Prometheus: current from
+#   localhost:9090 buildinfo, latest stable from GitHub Releases API. A
+#   confirmed newer release raises Status to at least REVIEW_REQUIRED and
+#   appends the version transition to status_reason. Collection/parse/
+#   comparison failures are visible in the line/report but fail-quiet and do
+#   not affect Status. No artifact is downloaded or installed.
+# - Known observation: monnie's unpoller repository can advertise
+#   `3.3.1+git -> 3.3.1+git` (the same version string) every month. This is
+#   retained in the raw apt plan as repository metadata behaviour; no
+#   special filtering or Status change is applied (see patch policy §3.3).
 # - Display cap: ubuntu_vm_full_upgrade_notify_detail_max_lines (default
 #   100, aligned with the MAJOR_UPGRADE total threshold) — normal months
 #   render fully in Slack; overflow collapses to 他N件 and the per-host
 #   report JSON is a troubleshooting artifact, not the normal reading path.
 # - Design history: docs/ai/reviews/ubuntu_vm_full_upgrade/
-#   (latest implement: 2026-07-12_022_implement.md).
+#   (latest implement: 2026-07-17_036_implement.md).
 #
 # tester-gate: check-mode-native — the common judgement path (healthcheck,
-# apt-get update/check/-s full-upgrade simulation, important-component/
-# remove classification, Status determination, notification) never mutates
-# installed packages (apt-get update/check/-s full-upgrade only touch the
-# package index cache and print a plan — same semi-safe classification
+# apt-get update/check/-s full-upgrade simulation, dry-run-only read-only
+# non-apt version GETs, important-component/remove classification, Status
+# determination, notification) never mutates installed packages (apt-get
+# update/check/-s full-upgrade only touch the package index cache and print
+# a plan — same semi-safe classification
 # proxmox_patch_dryrun.yml already uses for the equivalent Proxmox step), so
 # it always runs for real regardless of --check (roles/ubuntu_vm_full_upgrade/
 # tasks/main.yml sets check_mode: false at that block). The only genuinely

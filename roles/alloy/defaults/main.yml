@@ -20,8 +20,33 @@ alloy_http_listen_address: localhost:12345
 
 alloy_loki_push_url: http://localhost:3100/loki/api/v1/push
 
-# Promtail positions are intentionally not imported. tail_from_end avoids a
-# full replay on the first Alloy start; a small cutover gap/overlap is accepted.
+# The existing /etc/rsyslog.d/10-unifi.conf remains outside this role. This
+# role adds a later, separate route for Phase 2 sources after resolving the
+# names on monnie; no source address literal is stored in Git.
+alloy_rsyslog_service_name: rsyslog
+alloy_rsyslog_existing_unifi_config: /etc/rsyslog.d/10-unifi.conf
+alloy_rsyslog_remote_config_path: /etc/rsyslog.d/15-observability-sources.conf
+alloy_rsyslog_remote_staging_path: /etc/rsyslog.d/15-observability-sources.conf.staging
+alloy_rsyslog_logrotate_path: /etc/logrotate.d/observability-remote-syslog
+alloy_rsyslog_logrotate_staging_path: /etc/logrotate.d/observability-remote-syslog.staging.disabled
+alloy_remote_syslog_sources:
+  - name: pve1
+    hostname: pve1.internal
+    destination: pve_nodes
+  - name: pve2
+    hostname: pve2.internal
+    destination: pve_nodes
+  - name: sophos_fw
+    hostname: sophos-fw.internal
+    destination: sophos_fw
+
+alloy_remote_syslog_destinations:
+  pve_nodes: /var/log/pve-nodes.log
+  sophos_fw: /var/log/sophos-fw.log
+
+# Promtail positions are intentionally not imported. Existing UniFi sources
+# start at EOF to avoid a full replay; optional empty sources start at BOF so
+# the first line that creates each file is retained.
 alloy_file_sources:
   - name: unifi
     path: /var/log/unifi.log
@@ -30,12 +55,39 @@ alloy_file_sources:
       job: unifi
       host: uckg2
     extract_second_token_as_host: false
+    extract_normalized_level_at_start: false
+    extract_level_best_effort: true
+    require_existing_file: true
   - name: network_devices
     path: /var/log/unifi-devices.log
     tail_from_end: true
     labels:
       job: network-devices
     extract_second_token_as_host: true
+    extract_normalized_level_at_start: false
+    extract_level_best_effort: true
+    require_existing_file: true
+  - name: pve_nodes
+    path: /var/log/pve-nodes.log
+    # The file is absent before its sender is enabled. file_match waits for it;
+    # reading from the beginning preserves the first message that creates it.
+    tail_from_end: false
+    labels:
+      job: pve-nodes
+    extract_second_token_as_host: true
+    extract_normalized_level_at_start: true
+    extract_level_best_effort: false
+    require_existing_file: false
+  - name: sophos_fw
+    path: /var/log/sophos-fw.log
+    tail_from_end: false
+    labels:
+      job: sophos-fw
+      host: sophos-fw
+    extract_second_token_as_host: false
+    extract_normalized_level_at_start: true
+    extract_level_best_effort: false
+    require_existing_file: false
 
 alloy_journal_sources:
   - name: system
@@ -45,5 +97,12 @@ alloy_journal_sources:
       host: monnie
     source_unit_label: __journal__systemd_unit
     target_unit_label: unit
+    source_priority_label: __journal_priority
 
 alloy_promtail_service_name: promtail
+alloy_ready_url: http://localhost:12345/-/ready
+alloy_runtime_settle_seconds: 15
+alloy_runtime_fatal_log_pattern: >-
+  (?i)(invalid selector syntax|invalid char escape|failed to create source,
+  skipping|could not perform the initial load successfully|failed to evaluate
+  config|component[^\n]*(unhealthy|failed))

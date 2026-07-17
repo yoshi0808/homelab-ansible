@@ -4,7 +4,9 @@
 # - the apt unit uses User=alloy, /etc/default/alloy, /etc/alloy/config.alloy,
 #   the expected --storage.path, and the explicitly managed localhost HTTP bind.
 # - `/usr/bin/alloy validate <path>` exists and returns non-zero for bad config.
-# - alloy can read journald (systemd-journal membership) and both rsyslog files.
+# - alloy can read journald and existing rsyslog files. Phase 2 files may be
+#   absent until their senders are enabled; file_match must wait without
+#   constructing a reader for a nonexistent path.
 # These are collected/asserted here where safe. First-install --check cannot
 # inspect files or run a binary that the simulated package has not created.
 # It still renders/checks the candidate below; tester must repeat the package
@@ -21,6 +23,8 @@
       - item.name is match('^[A-Za-z_][A-Za-z0-9_]*$')
       - item.path is match('^/')
       - item.labels.job is defined
+      - not ((item.extract_second_token_as_host | default(false) | bool) and (item.labels.host is defined))
+      - not ((item.extract_normalized_level_at_start | default(false) | bool) and (item.extract_level_best_effort | default(false) | bool))
     fail_msg: "Invalid Alloy file source definition: {{ item }}"
     quiet: true
   loop: "{{ alloy_file_sources }}"
@@ -36,28 +40,373 @@
       - item.labels.host is defined
       - item.source_unit_label == "__journal__systemd_unit"
       - item.target_unit_label == "unit"
+      - item.source_priority_label == "__journal_priority"
     fail_msg: "Invalid Alloy journal source definition: {{ item }}"
     quiet: true
   loop: "{{ alloy_journal_sources }}"
   loop_control:
     label: "{{ item.name | default('undefined') }}"
 
+- name: Validate Alloy runtime verification inputs
+  ansible.builtin.assert:
+    that:
+      - alloy_ready_url == "http://localhost:12345/-/ready"
+      - alloy_runtime_settle_seconds | int >= 15
+      - alloy_runtime_fatal_log_pattern | length > 0
+    fail_msg: >-
+      Alloy runtime verification must retain the localhost ready endpoint, at
+      least 15 seconds of settle time, and a non-empty fatal journal pattern.
+    quiet: true
+
 - name: Render the candidate Alloy configuration without writing it
   ansible.builtin.set_fact:
     alloy_candidate_config: "{{ lookup('ansible.builtin.template', 'config.alloy.j2') }}"
 
-- name: Check the rendered Phase 1 pipeline contract
+- name: Check the rendered Alloy pipeline contract
   ansible.builtin.assert:
     that:
       - "'loki.source.file \"unifi\"' in alloy_candidate_config"
       - "'loki.source.file \"network_devices\"' in alloy_candidate_config"
-      - "'loki.process \"network_devices_host\"' in alloy_candidate_config"
+      - "'loki.source.file \"pve_nodes\"' in alloy_candidate_config"
+      - "'loki.source.file \"sophos_fw\"' in alloy_candidate_config"
+      - "'loki.process \"network_devices_pipeline\"' in alloy_candidate_config"
+      - "'loki.process \"pve_nodes_pipeline\"' in alloy_candidate_config"
       - "'loki.source.journal \"system\"' in alloy_candidate_config"
+      - "'replacement  = \"error\"' in alloy_candidate_config"
+      - "'replacement  = \"warning\"' in alloy_candidate_config"
+      - "'replacement  = \"info\"' in alloy_candidate_config"
+      - "'replacement  = \"debug\"' in alloy_candidate_config"
       - "'loki.write \"local\"' in alloy_candidate_config"
       - alloy_loki_push_url in alloy_candidate_config
       - "'tail_from_end = true' in alloy_candidate_config"
-    fail_msg: "Rendered Alloy config is missing a required Phase 1 pipeline."
+      - "'tail_from_end = false' in alloy_candidate_config"
+      - "alloy_candidate_config.count('file_match {') == (alloy_file_sources | length)"
+    fail_msg: "Rendered Alloy config is missing a required logging pipeline."
     quiet: true
+
+- name: Validate remote syslog source inputs
+  ansible.builtin.assert:
+    that:
+      - item.name is match('^[A-Za-z_][A-Za-z0-9_]*$')
+      - item.hostname is match('^[A-Za-z0-9.-]+$')
+      - item.destination in alloy_remote_syslog_destinations
+      - alloy_remote_syslog_destinations[item.destination] is match('^/var/log/[^/]+\.log$')
+    fail_msg: "Invalid remote syslog source definition: {{ item }}"
+    quiet: true
+  loop: "{{ alloy_remote_syslog_sources }}"
+  loop_control:
+    label: "{{ item.name | default('undefined') }}"
+
+- name: Require the existing UniFi rsyslog configuration
+  ansible.builtin.stat:
+    path: "{{ alloy_rsyslog_existing_unifi_config }}"
+  register: alloy_unifi_rsyslog_config
+  check_mode: false
+
+- name: Preserve the existing UniFi rsyslog routing boundary
+  ansible.builtin.assert:
+    that:
+      - alloy_unifi_rsyslog_config.stat.exists
+      - alloy_unifi_rsyslog_config.stat.isreg
+      - alloy_rsyslog_remote_config_path != alloy_rsyslog_existing_unifi_config
+      - alloy_rsyslog_remote_staging_path == alloy_rsyslog_remote_config_path + '.staging'
+      - alloy_rsyslog_logrotate_staging_path == alloy_rsyslog_logrotate_path + '.staging.disabled'
+    fail_msg: >-
+      The existing UniFi rsyslog configuration is missing or the Phase 2 path
+      would overwrite it. Refuse to change the established UDP 514 route.
+    quiet: true
+
+- name: Read the existing UniFi source-IP allowlist
+  ansible.builtin.slurp:
+    path: "{{ alloy_rsyslog_existing_unifi_config }}"
+  register: alloy_unifi_rsyslog_definition
+  check_mode: false
+
+- name: Extract the existing UniFi source-IP identities
+  ansible.builtin.set_fact:
+    alloy_existing_unifi_allowed_ipv4s: >-
+      {{ (alloy_unifi_rsyslog_definition.content | b64decode) |
+         regex_findall('(?m)\$fromhost-ip\s*==\s*[^\r\n0-9]*([0-9]{1,3}(?:\.[0-9]{1,3}){3})') |
+         unique }}
+
+- name: Require a recognizable existing UniFi allowlist
+  ansible.builtin.assert:
+    that:
+      - alloy_existing_unifi_allowed_ipv4s | length > 0
+    fail_msg: >-
+      No $fromhost-ip IPv4 allowlist entries could be extracted from
+      {{ alloy_rsyslog_existing_unifi_config }}. Refuse to deploy a new route
+      without proving that its source identities do not overlap UniFi.
+    quiet: true
+
+- name: Resolve remote syslog sender names on monnie
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/getent
+      - ahostsv4
+      - "{{ item.hostname }}"
+  loop: "{{ alloy_remote_syslog_sources }}"
+  loop_control:
+    label: "{{ item.hostname }}"
+  register: alloy_remote_syslog_resolution
+  changed_when: false
+  check_mode: false
+
+- name: Require IPv4 resolution for every allowed syslog sender
+  ansible.builtin.assert:
+    that:
+      - item.rc == 0
+      - item.stdout_lines | length > 0
+      - item.stdout is search('(?m)^[0-9]{1,3}(?:\.[0-9]{1,3}){3}\s')
+    fail_msg: >-
+      {{ item.item.hostname }} did not resolve to an IPv4 address on monnie.
+      Refuse to deploy an incomplete source-IP allowlist.
+    quiet: true
+  loop: "{{ alloy_remote_syslog_resolution.results }}"
+  loop_control:
+    label: "{{ item.item.hostname }}"
+
+- name: Build the runtime source-IP allowlist
+  ansible.builtin.set_fact:
+    alloy_remote_syslog_allowed_ipv4s: >-
+      {{ alloy_remote_syslog_allowed_ipv4s | default({}) |
+         combine({item.item.name:
+           (item.stdout | regex_findall('(?m)^([0-9]{1,3}(?:\.[0-9]{1,3}){3})\s') | unique)}) }}
+  loop: "{{ alloy_remote_syslog_resolution.results }}"
+  loop_control:
+    label: "{{ item.item.hostname }}"
+
+- name: Require a non-empty runtime allowlist for every sender
+  ansible.builtin.assert:
+    that:
+      - alloy_remote_syslog_allowed_ipv4s[item.name] | default([]) | length > 0
+    fail_msg: >-
+      {{ item.hostname }} resolved successfully but produced no usable IPv4
+      source identity. Refuse to deploy an empty sender route.
+    quiet: true
+  loop: "{{ alloy_remote_syslog_sources }}"
+  loop_control:
+    label: "{{ item.hostname }}"
+
+- name: Require source-IP identities to be unambiguous
+  ansible.builtin.assert:
+    that:
+      - >-
+        (alloy_remote_syslog_allowed_ipv4s | dict2items |
+         map(attribute='value') | flatten | length) ==
+        (alloy_remote_syslog_allowed_ipv4s | dict2items |
+         map(attribute='value') | flatten | unique | length)
+    fail_msg: >-
+      Two configured sender names resolved to the same IPv4 address. Refuse to
+      assign one source IP to multiple remote syslog routing identities.
+    quiet: true
+
+- name: Require new source IPs not to overlap the UniFi allowlist
+  ansible.builtin.assert:
+    that:
+      - >-
+        (alloy_existing_unifi_allowed_ipv4s |
+         intersect(alloy_remote_syslog_allowed_ipv4s | dict2items |
+                   map(attribute='value') | flatten) | length) == 0
+    fail_msg: >-
+      A pve/Sophos sender resolved to an IPv4 address already present in the
+      existing UniFi allowlist. Refuse ambiguous first-match routing.
+    quiet: true
+
+- name: Check for an existing Phase 2 rsyslog snippet
+  ansible.builtin.stat:
+    path: "{{ alloy_rsyslog_remote_config_path }}"
+  register: alloy_rsyslog_previous_config_stat
+  check_mode: false
+
+- name: Preserve the existing Phase 2 rsyslog snippet for rollback
+  ansible.builtin.slurp:
+    path: "{{ alloy_rsyslog_remote_config_path }}"
+  register: alloy_rsyslog_previous_config
+  when: alloy_rsyslog_previous_config_stat.stat.exists
+  check_mode: false
+
+- name: Stage, validate, and promote Phase 2 remote syslog routing
+  block:
+    - name: Remove a stale Phase 2 rsyslog staging file
+      ansible.builtin.file:
+        path: "{{ alloy_rsyslog_remote_staging_path }}"
+        state: absent
+
+    - name: Render the Phase 2 rsyslog candidate under the allowed config path
+      ansible.builtin.template:
+        src: observability-sources.rsyslog.j2
+        dest: "{{ alloy_rsyslog_remote_staging_path }}"
+        owner: root
+        group: root
+        mode: "0640"
+      register: alloy_rsyslog_staging_result
+
+    - name: Validate the staged Phase 2 rsyslog snippet
+      ansible.builtin.command:
+        argv:
+          - /usr/sbin/rsyslogd
+          - -N1
+          - -f
+          - "{{ alloy_rsyslog_remote_staging_path }}"
+      changed_when: false
+      when: not ansible_check_mode
+
+    - name: Promote the validated Phase 2 rsyslog snippet
+      ansible.builtin.copy:
+        src: "{{ alloy_rsyslog_remote_staging_path }}"
+        remote_src: true
+        dest: "{{ alloy_rsyslog_remote_config_path }}"
+        owner: root
+        group: root
+        mode: "0644"
+      register: alloy_rsyslog_remote_config_result
+      when: not ansible_check_mode
+
+  always:
+    - name: Remove the Phase 2 rsyslog staging file
+      ansible.builtin.file:
+        path: "{{ alloy_rsyslog_remote_staging_path }}"
+        state: absent
+
+- name: Validate the complete rsyslog configuration and activate the new route
+  block:
+    - name: Validate the complete rsyslog configuration on every APPLY
+      ansible.builtin.command:
+        argv:
+          - /usr/sbin/rsyslogd
+          - -N1
+      changed_when: false
+      when: not ansible_check_mode
+
+    - name: Restart rsyslog with the validated Phase 2 route
+      ansible.builtin.systemd_service:
+        name: "{{ alloy_rsyslog_service_name }}"
+        state: restarted
+      when:
+        - not ansible_check_mode
+        - alloy_rsyslog_remote_config_result is changed
+
+    - name: Confirm rsyslog accepted the new route
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/systemctl
+          - is-active
+          - "{{ alloy_rsyslog_service_name }}"
+      changed_when: false
+      when:
+        - not ansible_check_mode
+        - alloy_rsyslog_remote_config_result is changed
+
+  rescue:
+    - name: Restore the previous Phase 2 rsyslog snippet
+      ansible.builtin.copy:
+        content: >-
+          {{ alloy_rsyslog_previous_config.content | default('') | b64decode }}
+        dest: "{{ alloy_rsyslog_remote_config_path }}"
+        owner: root
+        group: root
+        mode: "0644"
+      when:
+        - alloy_rsyslog_remote_config_result is changed
+        - alloy_rsyslog_previous_config_stat.stat.exists
+
+    - name: Remove the new Phase 2 snippet when no previous version existed
+      ansible.builtin.file:
+        path: "{{ alloy_rsyslog_remote_config_path }}"
+        state: absent
+      when:
+        - alloy_rsyslog_remote_config_result is changed
+        - not alloy_rsyslog_previous_config_stat.stat.exists
+
+    - name: Validate the restored complete rsyslog configuration
+      ansible.builtin.command:
+        argv:
+          - /usr/sbin/rsyslogd
+          - -N1
+      register: alloy_rsyslog_restore_validation
+      changed_when: false
+      failed_when: false
+      when: alloy_rsyslog_remote_config_result is changed
+
+    - name: Restart rsyslog with the restored configuration
+      ansible.builtin.systemd_service:
+        name: "{{ alloy_rsyslog_service_name }}"
+        state: restarted
+      register: alloy_rsyslog_restore_restart
+      failed_when: false
+      when:
+        - alloy_rsyslog_remote_config_result is changed
+        - alloy_rsyslog_restore_validation.rc == 0
+
+    - name: Check rsyslog state after rollback
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/systemctl
+          - is-active
+          - "{{ alloy_rsyslog_service_name }}"
+      register: alloy_rsyslog_restore_active
+      changed_when: false
+      failed_when: false
+
+    - name: Fail after restoring the previous rsyslog route
+      ansible.builtin.fail:
+        msg: >-
+          The Phase 2 rsyslog route failed complete-config validation or
+          restart. A promoted change was rolled back when applicable. Restored validation rc={{
+          alloy_rsyslog_restore_validation.rc | default('not-run') }}; rsyslog state={{
+          alloy_rsyslog_restore_active.stdout | default('unknown') }}.
+
+- name: Stage, validate, and promote Phase 2 logrotate configuration
+  block:
+    - name: Remove a stale Phase 2 logrotate staging file
+      ansible.builtin.file:
+        path: "{{ alloy_rsyslog_logrotate_staging_path }}"
+        state: absent
+
+    - name: Render the Phase 2 logrotate candidate under /etc
+      ansible.builtin.template:
+        src: observability-remote-syslog.logrotate.j2
+        dest: "{{ alloy_rsyslog_logrotate_staging_path }}"
+        owner: root
+        group: root
+        mode: "0640"
+      register: alloy_rsyslog_logrotate_staging_result
+
+    - name: Validate the staged Phase 2 logrotate configuration
+      ansible.builtin.command:
+        argv:
+          - /usr/sbin/logrotate
+          - --debug
+          - "{{ alloy_rsyslog_logrotate_staging_path }}"
+      changed_when: false
+      when: not ansible_check_mode
+
+    - name: Promote the validated Phase 2 logrotate configuration
+      ansible.builtin.copy:
+        src: "{{ alloy_rsyslog_logrotate_staging_path }}"
+        remote_src: true
+        dest: "{{ alloy_rsyslog_logrotate_path }}"
+        owner: root
+        group: root
+        mode: "0644"
+      register: alloy_rsyslog_logrotate_result
+      when: not ansible_check_mode
+
+  always:
+    - name: Remove the Phase 2 logrotate staging file
+      ansible.builtin.file:
+        path: "{{ alloy_rsyslog_logrotate_staging_path }}"
+        state: absent
+
+- name: Confirm rsyslog remains active
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/systemctl
+      - is-active
+      - "{{ alloy_rsyslog_service_name }}"
+  changed_when: false
+  check_mode: false
 
 - name: Check existing Grafana apt repository file
   ansible.builtin.stat:
@@ -88,6 +437,8 @@
       - /usr/bin/apt-cache
       - policy
       - "{{ alloy_package_name }}"
+  environment:
+    LC_ALL: C
   register: alloy_apt_policy
   changed_when: false
   check_mode: false
@@ -114,12 +465,13 @@
 - name: Require readable rsyslog output files
   ansible.builtin.assert:
     that:
-      - item.stat.exists
-      - item.stat.isreg
-      - item.stat.mode[-1] in ['4', '5', '6', '7']
+      - not (item.item.require_existing_file | default(true) | bool) or item.stat.exists
+      - not item.stat.exists or item.stat.isreg
+      - not item.stat.exists or item.stat.mode[-1] in ['4', '5', '6', '7']
     fail_msg: >-
-      {{ item.item.path }} must already exist and be world-readable. The Alloy
-      role does not change rsyslog-owned files or their routing.
+      {{ item.item.path }} must be a world-readable regular file when it
+      exists. Established UniFi files are required; Phase 2 files may remain
+      absent until the corresponding remote sender is enabled.
     quiet: true
   loop: "{{ alloy_source_file_stats.results }}"
   loop_control:
@@ -297,6 +649,7 @@
     owner: root
     group: "{{ alloy_group }}"
     mode: "0640"
+    backup: true
     validate: "{{ alloy_binary_path }} validate %s"
   register: alloy_config_result
   when: not ansible_check_mode or alloy_binary_before.stat.exists
@@ -332,6 +685,22 @@
         state: stopped
         enabled: false
 
+    - name: Clear a previous Alloy start-limit failure before starting
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/systemctl
+          - reset-failed
+          - "{{ alloy_service_unit }}"
+      changed_when: false
+
+    - name: Record the Alloy runtime verification epoch
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/date
+          - "+%s"
+      register: alloy_runtime_started_epoch
+      changed_when: false
+
     - name: Enable and start Alloy with the validated configuration
       ansible.builtin.systemd_service:
         name: "{{ alloy_service_name }}"
@@ -339,30 +708,203 @@
         enabled: true
         daemon_reload: true
 
-    - name: Confirm Alloy is active after cutover
+    - name: Allow Alloy component graph evaluation to settle
+      ansible.builtin.pause:
+        seconds: "{{ alloy_runtime_settle_seconds }}"
+
+    - name: Read Alloy active state after the settle period
       ansible.builtin.command:
         argv:
           - /usr/bin/systemctl
           - is-active
           - "{{ alloy_service_unit }}"
+      register: alloy_runtime_active
       changed_when: false
+      failed_when: false
+
+    - name: Query the Alloy ready endpoint after the settle period
+      ansible.builtin.uri:
+        url: "{{ alloy_ready_url }}"
+        method: GET
+        status_code: 200
+        return_content: true
+      register: alloy_runtime_ready
+      failed_when: false
+
+    - name: Read Alloy journal for the runtime verification window
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/journalctl
+          - --unit
+          - "{{ alloy_service_unit }}"
+          - --since
+          - "@{{ alloy_runtime_started_epoch.stdout }}"
+          - --no-pager
+          - --output=cat
+      register: alloy_runtime_journal
+      changed_when: false
+      failed_when: false
+
+    - name: Require a healthy Alloy runtime graph after cutover
+      ansible.builtin.assert:
+        that:
+          - alloy_runtime_active.stdout == "active"
+          - alloy_runtime_ready.status | default(-1) == 200
+          - alloy_runtime_journal.rc == 0
+          - alloy_runtime_journal.stdout is not regex(alloy_runtime_fatal_log_pattern)
+        fail_msg: >-
+          Alloy did not remain active and ready with a clean component graph
+          after {{ alloy_runtime_settle_seconds }} seconds. The previous Alloy
+          configuration will be restored when a template backup is available;
+          otherwise Promtail will be restored.
+        quiet: true
 
   rescue:
-    - name: Stop and disable Alloy after a failed cutover
+    - name: Recover the previous Alloy runtime from the template backup
+      when: alloy_config_result.backup_file | default('', true) | length > 0
+      block:
+        - name: Restore the previous Alloy configuration
+          ansible.builtin.copy:
+            src: "{{ alloy_config_result.backup_file }}"
+            dest: "{{ alloy_config_path }}"
+            remote_src: true
+            owner: root
+            group: "{{ alloy_group }}"
+            mode: "0640"
+
+        - name: Validate the restored Alloy configuration
+          ansible.builtin.command:
+            argv:
+              - "{{ alloy_binary_path }}"
+              - validate
+              - "{{ alloy_config_path }}"
+          changed_when: false
+
+        - name: Clear Alloy start-limit state before recovery
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/systemctl
+              - reset-failed
+              - "{{ alloy_service_unit }}"
+          changed_when: false
+
+        - name: Record the restored Alloy verification epoch
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/date
+              - "+%s"
+          register: alloy_recovery_started_epoch
+          changed_when: false
+
+        - name: Restart Alloy with the restored configuration
+          ansible.builtin.systemd_service:
+            name: "{{ alloy_service_name }}"
+            state: restarted
+            enabled: true
+            daemon_reload: true
+
+        - name: Allow the restored Alloy graph to settle
+          ansible.builtin.pause:
+            seconds: "{{ alloy_runtime_settle_seconds }}"
+
+        - name: Read restored Alloy active state
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/systemctl
+              - is-active
+              - "{{ alloy_service_unit }}"
+          register: alloy_recovery_active
+          changed_when: false
+          failed_when: false
+
+        - name: Query the restored Alloy ready endpoint
+          ansible.builtin.uri:
+            url: "{{ alloy_ready_url }}"
+            method: GET
+            status_code: 200
+            return_content: true
+          register: alloy_recovery_ready
+          failed_when: false
+
+        - name: Read restored Alloy journal
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/journalctl
+              - --unit
+              - "{{ alloy_service_unit }}"
+              - --since
+              - "@{{ alloy_recovery_started_epoch.stdout }}"
+              - --no-pager
+              - --output=cat
+          register: alloy_recovery_journal
+          changed_when: false
+          failed_when: false
+
+        - name: Require the restored Alloy runtime to be healthy
+          ansible.builtin.assert:
+            that:
+              - alloy_recovery_active.stdout == "active"
+              - alloy_recovery_ready.status | default(-1) == 200
+              - alloy_recovery_journal.rc == 0
+              - alloy_recovery_journal.stdout is not regex(alloy_runtime_fatal_log_pattern)
+            fail_msg: >-
+              The new and previous Alloy configurations both failed runtime
+              verification. Promtail will be restored as the final fallback.
+            quiet: true
+
+      rescue:
+        - name: Stop and disable Alloy after recovery failure
+          ansible.builtin.systemd_service:
+            name: "{{ alloy_service_name }}"
+            state: stopped
+            enabled: false
+          failed_when: false
+
+        - name: Restore Promtail after Alloy recovery failure
+          ansible.builtin.systemd_service:
+            name: "{{ alloy_promtail_service_name }}"
+            state: started
+            enabled: true
+
+        - name: Fail after restoring Promtail from recovery failure
+          ansible.builtin.fail:
+            msg: >-
+              The new Alloy runtime and its restored predecessor both failed.
+              Alloy is stopped/disabled and Promtail is started/enabled.
+
+    - name: Remove the consumed Alloy template backup after recovery
+      ansible.builtin.file:
+        path: "{{ alloy_config_result.backup_file }}"
+        state: absent
+      when: alloy_config_result.backup_file | default('', true) | length > 0
+
+    - name: Stop and disable Alloy when no template backup exists
       ansible.builtin.systemd_service:
         name: "{{ alloy_service_name }}"
         state: stopped
         enabled: false
       failed_when: false
+      when: alloy_config_result.backup_file | default('', true) | length == 0
 
-    - name: Restore Promtail after a failed cutover
+    - name: Restore Promtail when no template backup exists
       ansible.builtin.systemd_service:
         name: "{{ alloy_promtail_service_name }}"
         state: started
         enabled: true
+      when: alloy_config_result.backup_file | default('', true) | length == 0
 
-    - name: Fail after restoring Promtail
+    - name: Fail after restoring a healthy log collector
       ansible.builtin.fail:
         msg: >-
-          Alloy cutover failed. Alloy was stopped/disabled and Promtail was
-          restored to started/enabled. Review the preceding failure.
+          The new Alloy runtime failed verification. {{ 'The previous Alloy
+          configuration was restored and verified active/ready.' if
+          (alloy_config_result.backup_file | default('', true) | length > 0) else 'Alloy was stopped
+          and Promtail was restored to started/enabled.' }}
+
+- name: Remove the successful Alloy template backup
+  ansible.builtin.file:
+    path: "{{ alloy_config_result.backup_file }}"
+    state: absent
+  when:
+    - not ansible_check_mode
+    - alloy_config_result.backup_file | default('', true) | length > 0

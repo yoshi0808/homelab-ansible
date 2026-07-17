@@ -1,6 +1,7 @@
 // Managed by Ansible (roles/alloy). Do not edit on the host.
-// Phase 1 preserves the existing Promtail contract while rsyslog and Loki
-// remain unchanged. New files start at EOF to avoid replaying full histories.
+// Phase 2 preserves the existing UniFi contract, adds remote syslog files,
+// and normalizes severity to error|warning|info|debug. Optional new files are
+// discovered without constructing a reader until they exist.
 
 loki.write "local" {
   endpoint {
@@ -9,10 +10,24 @@ loki.write "local" {
 }
 
 {% for source in alloy_file_sources %}
-{% if source.extract_second_token_as_host | bool %}
-loki.process "{{ source.name }}_host" {
+{% set needs_pipeline = (source.extract_second_token_as_host | default(false) | bool) or (source.extract_normalized_level_at_start | default(false) | bool) or (source.extract_level_best_effort | default(false) | bool) %}
+{% if needs_pipeline %}
+loki.process {{ (source.name ~ '_pipeline') | to_json }} {
   forward_to = [loki.write.local.receiver]
 
+{% if source.extract_normalized_level_at_start | default(false) | bool %}
+  stage.regex {
+    expression = "^(?P<level>error|warning|info|debug)\\s"
+  }
+
+  stage.labels {
+    values = {
+      "level" = "level",
+    }
+  }
+
+{% endif %}
+{% if source.extract_second_token_as_host | default(false) | bool %}
   stage.regex {
     expression = "^\\S+ (?P<host>\\S+) "
   }
@@ -22,6 +37,45 @@ loki.process "{{ source.name }}_host" {
       "host" = "host",
     }
   }
+
+{% endif %}
+{% if source.extract_level_best_effort | default(false) | bool %}
+{% set selector_prefix = '{job=' ~ (source.labels.job | to_json) ~ '} |~ ' %}
+{% set selector_token_prefix = '(?i)^(?:\\\\S+\\\\s+){0,3}' %}
+  // Existing UniFi formats are heterogeneous. Only treat an explicit
+  // severity token near the beginning as authoritative; otherwise omit level.
+  stage.match {
+    selector = {{ (selector_prefix ~ '"' ~ selector_token_prefix ~ '(?:emerg|alert|crit|err|error)(?:\\\\s|:)"') | to_json }}
+
+    stage.static_labels {
+      values = { "level" = "error" }
+    }
+  }
+
+  stage.match {
+    selector = {{ (selector_prefix ~ '"' ~ selector_token_prefix ~ '(?:warn|warning)(?:\\\\s|:)"') | to_json }}
+
+    stage.static_labels {
+      values = { "level" = "warning" }
+    }
+  }
+
+  stage.match {
+    selector = {{ (selector_prefix ~ '"' ~ selector_token_prefix ~ '(?:notice|info)(?:\\\\s|:)"') | to_json }}
+
+    stage.static_labels {
+      values = { "level" = "info" }
+    }
+  }
+
+  stage.match {
+    selector = {{ (selector_prefix ~ '"' ~ selector_token_prefix ~ 'debug(?:\\\\s|:)"') | to_json }}
+
+    stage.static_labels {
+      values = { "level" = "debug" }
+    }
+  }
+{% endif %}
 }
 
 {% endif %}
@@ -35,8 +89,12 @@ loki.source.file {{ source.name | to_json }} {
     },
   ]
   tail_from_end = {{ source.tail_from_end | bool | lower }}
-{% if source.extract_second_token_as_host | bool %}
-  forward_to = [loki.process.{{ source.name }}_host.receiver]
+  file_match {
+    enabled     = true
+    sync_period = "10s"
+  }
+{% if needs_pipeline %}
+  forward_to = [loki.process.{{ source.name }}_pipeline.receiver]
 {% else %}
   forward_to = [loki.write.local.receiver]
 {% endif %}
@@ -44,18 +102,46 @@ loki.source.file {{ source.name | to_json }} {
 
 {% endfor %}
 {% for source in alloy_journal_sources %}
-loki.relabel "{{ source.name }}_unit" {
+loki.relabel {{ (source.name ~ '_metadata') | to_json }} {
   forward_to = []
 
   rule {
     source_labels = [{{ source.source_unit_label | to_json }}]
     target_label  = {{ source.target_unit_label | to_json }}
   }
+
+  rule {
+    source_labels = [{{ source.source_priority_label | to_json }}]
+    regex         = "[0-3]"
+    target_label  = "level"
+    replacement  = "error"
+  }
+
+  rule {
+    source_labels = [{{ source.source_priority_label | to_json }}]
+    regex         = "4"
+    target_label  = "level"
+    replacement  = "warning"
+  }
+
+  rule {
+    source_labels = [{{ source.source_priority_label | to_json }}]
+    regex         = "[5-6]"
+    target_label  = "level"
+    replacement  = "info"
+  }
+
+  rule {
+    source_labels = [{{ source.source_priority_label | to_json }}]
+    regex         = "7"
+    target_label  = "level"
+    replacement  = "debug"
+  }
 }
 
 loki.source.journal {{ source.name | to_json }} {
   max_age       = {{ source.max_age | to_json }}
-  relabel_rules = loki.relabel.{{ source.name }}_unit.rules
+  relabel_rules = loki.relabel.{{ source.name }}_metadata.rules
   labels = {
 {% for label in source.labels | dictsort %}
     {{ label.0 | to_json }} = {{ label.1 | to_json }},

@@ -1,23 +1,25 @@
 ---
 # alloy_setup.yml
 #
-# Purpose: replace EOL Promtail on monnie with Grafana Alloy while preserving
-# the three existing Loki streams and leaving rsyslog, Loki, and Grafana
-# unchanged.
+# Purpose: manage monnie's Grafana Alloy pipeline. Phase 2 preserves the three
+# existing Loki streams and adds source-IP-limited pve/Sophos rsyslog routes,
+# two file sources, log rotation, and normalized level labels. Loki, UFW,
+# Grafana, and /etc/rsyslog.d/10-unifi.conf remain unchanged.
 #
 # Target/executor: monitoring_servers (currently monnie), run from ansy/quory.
 #
-# Flow: verify the existing Grafana apt repo and source-file permissions;
-# install Alloy without package auto-start; verify the apt unit/CLI contract;
-# deploy and validate /etc/alloy/config.alloy; stop+disable Promtail; then
-# enable+start Alloy. A failed Alloy start restores Promtail automatically.
+# Flow: resolve sender names and deploy/validate separate rsyslog routing;
+# configure rotation; verify the existing Grafana apt repo and source-file
+# permissions; install Alloy without package auto-start; validate and deploy
+# /etc/alloy/config.alloy; then restart Alloy when required. The original
+# cutover rescue continues to restore Promtail if an Alloy start fails.
 #
 # Important: Promtail positions are not imported. New Alloy file readers use
 # tail_from_end=true to avoid a full replay; a small cutover gap/overlap is an
 # accepted Phase 1 tradeoff. Promtail remains installed for rollback.
 #
-# Pre-deploy verification and implementation details:
-# docs/ai/reviews/promtail_to_alloy/2026-07-16_003_implement.md
+# Pre-deploy verification and Phase 2 manual pve procedure:
+# docs/ai/reviews/promtail_to_alloy/2026-07-17_009_implement.md
 #
 # tester-gate: check-mode-native — apt uses native check mode and the candidate
 # config is always rendered/contract-checked. On a fresh host, package-owned
@@ -25,7 +27,8 @@
 # once installed, file/template changes use native check mode. The actual
 # Promtail stop+disable and Alloy enable+start block is skipped under --check
 # and tagged destructive. APPLY performs a production log-agent cutover and
-# requires Yoshinobu's explicit decision.
+# requires Yoshinobu's explicit decision. pve-side rsyslog remains manual and
+# is never changed by this playbook.
 
 - name: Install and cut over Grafana Alloy on monitoring servers
   hosts: monitoring_servers

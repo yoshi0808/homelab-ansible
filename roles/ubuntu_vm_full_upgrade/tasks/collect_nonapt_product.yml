@@ -1,0 +1,31 @@
+---
+# Collect one registry entry. Both requests are read-only and best-effort:
+# failed_when=false keeps a local service outage, GitHub/API outage, invalid
+# JSON, or missing version field from failing the monthly play. The result's
+# state remains "failed" in those cases and classify.yml ignores it.
+
+- name: "Read current {{ ubuntu_vm_full_upgrade_nonapt_product.name }} version"
+  ansible.builtin.uri:
+    url: "{{ ubuntu_vm_full_upgrade_nonapt_product.current_url }}"
+    method: GET
+    return_content: true
+    timeout: "{{ ubuntu_vm_full_upgrade_nonapt_product.timeout_seconds | default(10) | int }}"
+    headers: "{{ ubuntu_vm_full_upgrade_nonapt_product.current_headers | default({}) }}"
+    use_proxy: "{{ ubuntu_vm_full_upgrade_nonapt_product.current_use_proxy | default(true) | bool }}"
+  register: ubuntu_vm_full_upgrade_nonapt_current_raw
+  changed_when: false
+  failed_when: false
+
+- name: "Read latest {{ ubuntu_vm_full_upgrade_nonapt_product.name }} version"
+  ansible.builtin.uri:
+    url: "{{ ubuntu_vm_full_upgrade_nonapt_product.latest_url }}"
+    method: GET
+    return_content: true
+    timeout: "{{ ubuntu_vm_full_upgrade_nonapt_product.timeout_seconds | default(10) | int }}"
+    headers: "{{ ubuntu_vm_full_upgrade_nonapt_product.latest_headers | default({'Accept': 'application/vnd.github+json'}) }}"
+  register: ubuntu_vm_full_upgrade_nonapt_latest_raw
+  changed_when: false
+  failed_when: false
+
+- name: "Evaluate {{ ubuntu_vm_full_upgrade_nonapt_product.name }} version responses"
+  ansible.builtin.include_tasks: evaluate_nonapt_product.yml
