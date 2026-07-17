@@ -82,6 +82,11 @@ UniFi機器/コントローラ → UDP514 ────────────�
 
 ## 6. 制約・禁止事項
 
+- **syslog 転送は平文 UDP 514**（全ソース: UniFi/CloudKey/pve/Sophos）。暗号化・認証なし。
+  同一 LAN 上での盗聴・送信元偽装が理論上可能で、**rsyslog の source-IP allowlist は
+  ルーティング振り分けであって認証ではない**。経路は homelab 内部 LAN に閉じている
+  （2026-07-17 に Yoshinobu へ提示済み。将来オプション: pve→monnie は両端 rsyslog のため
+  homelab CA + TLS(6514/TCP) へ上げられる。アプライアンス側は TLS 非対応のため平文が残る）。
 - 収集は Loki 一本に統一。目的別の別収集パイプラインを建てない。
 - rsyslog を syslog 集約役として維持する（Alloy 直受信で置換しない）。
 - Loki/UFW を Phase 2 では変更しない。Loki 3100 をリモートへ公開しない。
