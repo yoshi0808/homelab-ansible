@@ -1,0 +1,77 @@
+---
+# serial_getty_mask.yml
+#
+# Purpose: stop and persistently mask only serial-getty@ttyS0.service on the
+# Ubuntu nodes where ttyS0 has no usable UART backend. This suppresses the
+# agetty restart loop and its repeated terminal-attribute errors.
+#
+# Scope: ansy / monnie / quory / authy. pve1/pve2 and every other service or
+# boot setting are out of scope. In particular, this playbook does not edit
+# GRUB, the kernel command line, getty.target, or the serial device itself.
+#
+# Safety workflow:
+#   1. Confirm no node depends on a real serial console (see implement note).
+#   2. Preview: ansible-playbook playbooks/serial_getty_mask.yml --check --diff
+#   3. APPLY only after Yoshinobu's explicit approval.
+#
+# tester-gate: check-mode-native — current unit state is collected read-only
+# under --check, while the service stop+mask is gated by ansible_check_mode and
+# tagged destructive. serial-getty is not an autonomous-recovery target, so no
+# recovery mute is required; APPLY still requires a human decision because it
+# removes a possible console access path.
+
+- name: Stop and mask unused ttyS0 serial getty
+  hosts: ansy:monnie:quory:authy
+  gather_facts: false
+  become: true
+  serial: 1
+
+  vars:
+    serial_getty_mask_unit: serial-getty@ttyS0.service
+
+  pre_tasks:
+    - name: Reject deprecated tester_mode
+      ansible.builtin.assert:
+        that: not (tester_mode | default(false) | bool)
+        fail_msg: >-
+          tester_mode is not supported. Use --check --diff for the read-only
+          preview; stop+mask is gated by ansible_check_mode.
+        quiet: true
+
+    - name: Read current serial getty state
+      ansible.builtin.command:
+        argv:
+          - systemctl
+          - show
+          - "{{ serial_getty_mask_unit }}"
+          - --property=LoadState
+          - --property=ActiveState
+          - --property=SubState
+          - --property=UnitFileState
+      register: serial_getty_mask_state_before
+      changed_when: false
+      failed_when: false
+      check_mode: false
+
+    - name: Show current serial getty state
+      ansible.builtin.debug:
+        msg: >-
+          {{ inventory_hostname }} {{ serial_getty_mask_unit }} before:
+          {{ serial_getty_mask_state_before.stdout_lines | default([]) | join(', ') }}
+
+    - name: Show check-mode plan
+      ansible.builtin.debug:
+        msg: >-
+          --check: would stop and persistently mask
+          {{ serial_getty_mask_unit }} on {{ inventory_hostname }}; no service
+          or boot setting was changed.
+      when: ansible_check_mode
+
+  tasks:
+    - name: Stop and persistently mask ttyS0 serial getty
+      ansible.builtin.systemd_service:
+        name: "{{ serial_getty_mask_unit }}"
+        state: stopped
+        masked: true
+      when: not ansible_check_mode
+      tags: [destructive]
