@@ -1,0 +1,13 @@
+# Managed by Ansible (roles/rsyslog_forward_to_monnie). Do not edit on the host.
+action(
+    type="omfwd"
+    target={{ rsyslog_forward_target | to_json }}
+    port={{ rsyslog_forward_port | to_json }}
+    protocol={{ rsyslog_forward_protocol | to_json }}
+    template="RSYSLOG_SyslogProtocol23Format"
+)
+{% if rsyslog_forward_stop_after_forward | bool %}
+
+# Fresh rsyslog installs must not create new duplicate local log files.
+stop
+{% endif %}

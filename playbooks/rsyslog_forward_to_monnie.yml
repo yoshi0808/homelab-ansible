@@ -1,0 +1,41 @@
+---
+# rsyslog_forward_to_monnie.yml
+#
+# Purpose: forward ansy/quory/authy journald events through rsyslog to the
+# existing monnie UDP/514 aggregation point. Loki, UFW, pve, and monnie's
+# receiving configuration are not changed by this playbook.
+#
+# Rollout is deliberately one host at a time and must use explicit limits in
+# this order after each prior E2E gate passes:
+#   1. -l ansy
+#   2. -l quory
+#   3. -l authy
+# authy requires a quory-mediated homelab-mute before APPLY. ansy/quory do not.
+# Every APPLY requires Yoshinobu's explicit approval. Run --syntax-check and
+# --check first. quory self-application also requires an immediate read-only
+# Ansible connectivity check after service restarts.
+#
+# tester-gate: check-mode-native — package/files use native check mode;
+# rsyslogd native validation, promotion, and service restarts are skipped in
+# check mode. APPLY changes the production logging path and is human-gated.
+
+- name: Forward Ubuntu node journald logs to monnie
+  hosts: ansy:quory:authy
+  gather_facts: false
+  become: true
+  serial: 1
+
+  pre_tasks:
+    - name: Require an explicit single-host rollout limit
+      ansible.builtin.assert:
+        that:
+          - ansible_play_hosts_all | length == 1
+        fail_msg: >-
+          This playbook must target exactly one host with an explicit limit.
+          Apply in order: -l ansy, then -l quory, then -l authy only after each
+          preceding E2E gate; authy also requires its quory-mediated mute.
+        quiet: true
+      run_once: true
+
+  roles:
+    - rsyslog_forward_to_monnie

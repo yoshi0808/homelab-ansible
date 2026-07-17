@@ -69,9 +69,15 @@
       - "'loki.source.file \"network_devices\"' in alloy_candidate_config"
       - "'loki.source.file \"pve_nodes\"' in alloy_candidate_config"
       - "'loki.source.file \"sophos_fw\"' in alloy_candidate_config"
+      - "'loki.source.file \"ubuntu_nodes\"' in alloy_candidate_config"
       - "'loki.process \"network_devices_pipeline\"' in alloy_candidate_config"
       - "'loki.process \"pve_nodes_pipeline\"' in alloy_candidate_config"
+      - "'loki.process \"ubuntu_nodes_pipeline\"' in alloy_candidate_config"
       - "'loki.source.journal \"system\"' in alloy_candidate_config"
+      - "'\"job\" = \"ubuntu-nodes\"' in alloy_candidate_config"
+      - alloy_journal_sources[0].name == "system"
+      - alloy_journal_sources[0].labels.job == "ubuntu-nodes"
+      - alloy_journal_sources[0].labels.host == "monnie"
       - "'replacement  = \"error\"' in alloy_candidate_config"
       - "'replacement  = \"warning\"' in alloy_candidate_config"
       - "'replacement  = \"info\"' in alloy_candidate_config"
@@ -209,7 +215,7 @@
          intersect(alloy_remote_syslog_allowed_ipv4s | dict2items |
                    map(attribute='value') | flatten) | length) == 0
     fail_msg: >-
-      A pve/Sophos sender resolved to an IPv4 address already present in the
+      A remote syslog sender resolved to an IPv4 address already present in the
       existing UniFi allowlist. Refuse ambiguous first-match routing.
     quiet: true
 

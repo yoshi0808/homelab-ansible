@@ -1,0 +1,451 @@
+---
+- name: Validate rsyslog forwarding role inputs before mutation
+  ansible.builtin.assert:
+    that:
+      - inventory_hostname in rsyslog_forward_allowed_hosts
+      - rsyslog_forward_config_filename is match('^[0-9]{2}-[A-Za-z0-9_-]+\.conf$')
+      - rsyslog_forward_stop_after_forward is boolean
+      - rsyslog_forward_config_path == '/etc/rsyslog.d/' + rsyslog_forward_config_filename
+      - rsyslog_forward_staging_path == rsyslog_forward_config_path + '.staging'
+      - rsyslog_forward_target == 'monnie.internal'
+      - rsyslog_forward_port == '514'
+      - rsyslog_forward_protocol == 'udp'
+      - rsyslog_forward_settle_seconds | int >= 10
+    fail_msg: >-
+      Invalid or unresolved rsyslog forwarding inputs. The numbered filename
+      and stop policy must be finalized from the per-node pre-deploy recon
+      before this role may mutate a sender.
+    quiet: true
+
+- name: Render the forwarding candidate without writing it
+  ansible.builtin.set_fact:
+    rsyslog_forward_candidate: >-
+      {{ lookup('ansible.builtin.template', 'monnie-forward.rsyslog.j2') }}
+
+- name: Check the rendered forwarding contract
+  ansible.builtin.assert:
+    that:
+      - "'type=\"omfwd\"' in rsyslog_forward_candidate"
+      - "'target=\"monnie.internal\"' in rsyslog_forward_candidate"
+      - "'port=\"514\"' in rsyslog_forward_candidate"
+      - "'protocol=\"udp\"' in rsyslog_forward_candidate"
+      - "'template=\"RSYSLOG_SyslogProtocol23Format\"' in rsyslog_forward_candidate"
+      - >-
+        (rsyslog_forward_stop_after_forward | bool) ==
+        ('\nstop\n' in ('\n' + rsyslog_forward_candidate + '\n'))
+    fail_msg: "Rendered rsyslog forwarding candidate violates its input contract."
+    quiet: true
+
+- name: Inspect existing numbered rsyslog snippets for pre-deploy evidence
+  ansible.builtin.find:
+    paths: /etc/rsyslog.d
+    patterns: "*.conf"
+    file_type: file
+    recurse: false
+  register: rsyslog_forward_existing_snippets
+  check_mode: false
+
+- name: Build the existing unmanaged rsyslog snippet inventory
+  ansible.builtin.set_fact:
+    rsyslog_forward_existing_unmanaged_snippets: >-
+      {{ rsyslog_forward_existing_snippets.files |
+         map(attribute='path') | map('regex_replace', '^.*/', '') |
+         reject('equalto', rsyslog_forward_config_filename) | sort | list }}
+
+- name: Require the numbered snippet inventory to match pre-deploy recon
+  ansible.builtin.assert:
+    that:
+      - >-
+        rsyslog_forward_required_snippets_by_host[inventory_hostname] |
+        difference(rsyslog_forward_existing_unmanaged_snippets) | length == 0
+      - >-
+        rsyslog_forward_existing_unmanaged_snippets |
+        difference(rsyslog_forward_allowed_snippets_by_host[inventory_hostname]) |
+        length == 0
+    fail_msg: >-
+      /etc/rsyslog.d changed after the read-only pre-deploy recon. Existing
+      unmanaged snippets={{ rsyslog_forward_existing_unmanaged_snippets }}.
+      Inspect every new/removed numbered rule and its stop/output behavior
+      before choosing or retaining {{ rsyslog_forward_config_filename }}.
+    quiet: true
+
+- name: Check for an existing managed forwarding snippet
+  ansible.builtin.stat:
+    path: "{{ rsyslog_forward_config_path }}"
+  register: rsyslog_forward_previous_config_stat
+  check_mode: false
+
+- name: Preserve the existing managed forwarding snippet
+  ansible.builtin.slurp:
+    path: "{{ rsyslog_forward_config_path }}"
+  register: rsyslog_forward_previous_config
+  when: rsyslog_forward_previous_config_stat['stat']['exists'] | bool
+  check_mode: false
+
+- name: Refuse to overwrite a colliding unmanaged rsyslog snippet
+  ansible.builtin.assert:
+    that:
+      - >-
+        not rsyslog_forward_previous_config_stat.stat.exists or
+        'Managed by Ansible (roles/rsyslog_forward_to_monnie)' in
+        (rsyslog_forward_previous_config.content | default('') | b64decode)
+    fail_msg: >-
+      {{ rsyslog_forward_config_path }} already exists without this role's
+      ownership marker. Re-run read-only pre-deploy inspection and choose a
+      non-colliding number; never overwrite the existing rule.
+    quiet: true
+
+- name: Check for an existing journald forwarding drop-in
+  ansible.builtin.stat:
+    path: "{{ rsyslog_forward_journald_dropin_path }}"
+  register: rsyslog_forward_previous_dropin_stat
+  check_mode: false
+
+- name: Preserve the existing journald forwarding drop-in
+  ansible.builtin.slurp:
+    path: "{{ rsyslog_forward_journald_dropin_path }}"
+  register: rsyslog_forward_previous_dropin
+  when: rsyslog_forward_previous_dropin_stat['stat']['exists'] | bool
+  check_mode: false
+
+- name: Refuse to overwrite a colliding unmanaged journald drop-in
+  ansible.builtin.assert:
+    that:
+      - >-
+        not rsyslog_forward_previous_dropin_stat.stat.exists or
+        'Managed by Ansible (roles/rsyslog_forward_to_monnie)' in
+        (rsyslog_forward_previous_dropin.content | default('') | b64decode)
+    fail_msg: >-
+      {{ rsyslog_forward_journald_dropin_path }} already exists without this
+      role's ownership marker. Inspect its management source and semantics;
+      never overwrite another journald policy owner after recon.
+    quiet: true
+
+- name: Check whether rsyslog was installed before this run
+  ansible.builtin.stat:
+    path: "{{ rsyslog_forward_binary_path }}"
+  register: rsyslog_forward_binary_before
+  check_mode: false
+
+- name: Require the reconfirmed package baseline on existing rsyslog nodes
+  ansible.builtin.assert:
+    that:
+      - >-
+        inventory_hostname == 'authy' or
+        (rsyslog_forward_binary_before['stat']['exists'] | bool)
+    fail_msg: >-
+      rsyslog disappeared from ansy/quory after pre-deploy recon. Refuse to
+      turn an existing-local-logging node into an implicit fresh install;
+      investigate package and local log state first.
+    quiet: true
+
+- name: Check whether the journald drop-in directory existed before this run
+  ansible.builtin.stat:
+    path: "{{ rsyslog_forward_journald_dropin_dir }}"
+  register: rsyslog_forward_dropin_dir_before
+  check_mode: false
+
+- name: Install rsyslog from the configured Ubuntu repository
+  ansible.builtin.apt:
+    name: "{{ rsyslog_forward_package_name }}"
+    state: present
+  register: rsyslog_forward_package_result
+  when: >-
+    inventory_hostname == 'authy' and
+    not (rsyslog_forward_binary_before['stat']['exists'] | bool)
+
+- name: Ensure the journald drop-in directory exists
+  ansible.builtin.file:
+    path: "{{ rsyslog_forward_journald_dropin_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Configure journald forwarding to syslog
+  ansible.builtin.template:
+    src: forward-to-syslog.conf.j2
+    dest: "{{ rsyslog_forward_journald_dropin_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+  register: rsyslog_forward_dropin_result
+  when: >-
+    not ansible_check_mode or
+    (rsyslog_forward_dropin_dir_before['stat']['exists'] | bool)
+
+- name: Stage, validate, and promote the monnie forwarding rule
+  block:
+    - name: Remove a stale forwarding staging file
+      ansible.builtin.file:
+        path: "{{ rsyslog_forward_staging_path }}"
+        state: absent
+
+    - name: Render the forwarding candidate under the AppArmor-allowed path
+      ansible.builtin.template:
+        src: monnie-forward.rsyslog.j2
+        dest: "{{ rsyslog_forward_staging_path }}"
+        owner: root
+        group: root
+        mode: "0640"
+      register: rsyslog_forward_staging_result
+      when: >-
+        not ansible_check_mode or
+        (rsyslog_forward_binary_before['stat']['exists'] | bool)
+
+    - name: Validate the staged forwarding candidate
+      ansible.builtin.command:
+        argv:
+          - "{{ rsyslog_forward_binary_path }}"
+          - -N1
+          - -f
+          - "{{ rsyslog_forward_staging_path }}"
+      changed_when: false
+      when: not ansible_check_mode
+
+    - name: Promote the validated forwarding candidate
+      ansible.builtin.copy:
+        src: "{{ rsyslog_forward_staging_path }}"
+        remote_src: true
+        dest: "{{ rsyslog_forward_config_path }}"
+        owner: root
+        group: root
+        mode: "0644"
+      register: rsyslog_forward_config_result
+      when: not ansible_check_mode
+
+  always:
+    - name: Remove the forwarding staging file
+      ansible.builtin.file:
+        path: "{{ rsyslog_forward_staging_path }}"
+        state: absent
+
+- name: Validate and activate rsyslog and journald forwarding
+  block:
+    - name: Validate the complete rsyslog configuration on every APPLY
+      ansible.builtin.command:
+        argv:
+          - "{{ rsyslog_forward_binary_path }}"
+          - -N1
+      changed_when: false
+      when: not ansible_check_mode
+
+    - name: Record the sender activation epoch
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/date
+          - "+%s"
+      register: rsyslog_forward_activation_epoch
+      changed_when: false
+      when:
+        - not ansible_check_mode
+        - >-
+          rsyslog_forward_package_result is changed or
+          rsyslog_forward_config_result is changed or
+          rsyslog_forward_dropin_result is changed
+
+    - name: Ensure rsyslog is enabled and started
+      ansible.builtin.systemd_service:
+        name: "{{ rsyslog_forward_service_name }}"
+        state: started
+        enabled: true
+      when: >-
+        not ansible_check_mode or
+        (rsyslog_forward_binary_before['stat']['exists'] | bool)
+
+    - name: Restart rsyslog after package installation or config promotion
+      ansible.builtin.systemd_service:
+        name: "{{ rsyslog_forward_service_name }}"
+        state: restarted
+        enabled: true
+      when:
+        - not ansible_check_mode
+        - >-
+          rsyslog_forward_package_result is changed or
+          rsyslog_forward_config_result is changed
+
+    - name: Restart systemd-journald after drop-in deployment
+      ansible.builtin.systemd_service:
+        name: "{{ rsyslog_forward_journald_service_name }}"
+        state: restarted
+      when:
+        - not ansible_check_mode
+        - rsyslog_forward_dropin_result is changed
+
+    - name: Allow sender services to settle after activation
+      ansible.builtin.pause:
+        seconds: "{{ rsyslog_forward_settle_seconds }}"
+      when:
+        - not ansible_check_mode
+        - >-
+          rsyslog_forward_package_result is changed or
+          rsyslog_forward_config_result is changed or
+          rsyslog_forward_dropin_result is changed
+
+    - name: Read rsyslog active state
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/systemctl
+          - is-active
+          - "{{ rsyslog_forward_service_name }}"
+      register: rsyslog_forward_active
+      changed_when: false
+      failed_when: false
+      check_mode: false
+      when: >-
+        not ansible_check_mode or
+        (rsyslog_forward_binary_before['stat']['exists'] | bool)
+
+    - name: Read systemd-journald active state
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/systemctl
+          - is-active
+          - "{{ rsyslog_forward_journald_service_name }}"
+      register: rsyslog_forward_journald_active
+      changed_when: false
+      failed_when: false
+      check_mode: false
+
+    - name: Read sender service journals from the activation epoch
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/journalctl
+          - --unit
+          - "{{ rsyslog_forward_service_name }}"
+          - --unit
+          - "{{ rsyslog_forward_journald_service_name }}"
+          - --since
+          - "@{{ rsyslog_forward_activation_epoch.stdout }}"
+          - --no-pager
+          - --output=cat
+      register: rsyslog_forward_activation_journal
+      changed_when: false
+      failed_when: false
+      when:
+        - not ansible_check_mode
+        - >-
+          rsyslog_forward_package_result is changed or
+          rsyslog_forward_config_result is changed or
+          rsyslog_forward_dropin_result is changed
+
+    - name: Require active sender services
+      ansible.builtin.assert:
+        that:
+          - rsyslog_forward_active.stdout == 'active'
+          - rsyslog_forward_journald_active.stdout == 'active'
+        fail_msg: "rsyslog or systemd-journald is not active after configuration."
+        quiet: true
+      when: >-
+        not ansible_check_mode or
+        (rsyslog_forward_binary_before['stat']['exists'] | bool)
+
+    - name: Require a clean sender activation journal
+      ansible.builtin.assert:
+        that:
+          - rsyslog_forward_activation_journal.rc == 0
+          - >-
+            rsyslog_forward_activation_journal.stdout is not
+            regex(rsyslog_forward_fatal_log_pattern)
+        fail_msg: >-
+          Sender service activation logged a fatal rsyslog/journald error.
+          The previous managed files will be restored where available.
+        quiet: true
+      when:
+        - not ansible_check_mode
+        - >-
+          rsyslog_forward_package_result is changed or
+          rsyslog_forward_config_result is changed or
+          rsyslog_forward_dropin_result is changed
+
+  rescue:
+    - name: Restore the previous forwarding snippet
+      ansible.builtin.copy:
+        content: >-
+          {{ rsyslog_forward_previous_config.content | default('') | b64decode }}
+        dest: "{{ rsyslog_forward_config_path }}"
+        owner: root
+        group: root
+        mode: "0644"
+      when:
+        - rsyslog_forward_config_result is changed
+        - rsyslog_forward_previous_config_stat['stat']['exists'] | bool
+
+    - name: Remove the new forwarding snippet when no predecessor existed
+      ansible.builtin.file:
+        path: "{{ rsyslog_forward_config_path }}"
+        state: absent
+      when:
+        - rsyslog_forward_config_result is changed
+        - not (rsyslog_forward_previous_config_stat['stat']['exists'] | bool)
+
+    - name: Restore the previous journald drop-in
+      ansible.builtin.copy:
+        content: >-
+          {{ rsyslog_forward_previous_dropin.content | default('') | b64decode }}
+        dest: "{{ rsyslog_forward_journald_dropin_path }}"
+        owner: root
+        group: root
+        mode: "0644"
+      when:
+        - rsyslog_forward_dropin_result is changed
+        - rsyslog_forward_previous_dropin_stat['stat']['exists'] | bool
+
+    - name: Remove the new journald drop-in when no predecessor existed
+      ansible.builtin.file:
+        path: "{{ rsyslog_forward_journald_dropin_path }}"
+        state: absent
+      when:
+        - rsyslog_forward_dropin_result is changed
+        - not (rsyslog_forward_previous_dropin_stat['stat']['exists'] | bool)
+
+    - name: Validate the restored complete rsyslog configuration
+      ansible.builtin.command:
+        argv:
+          - "{{ rsyslog_forward_binary_path }}"
+          - -N1
+      register: rsyslog_forward_restore_validation
+      changed_when: false
+      failed_when: false
+
+    - name: Restart rsyslog with the restored configuration
+      ansible.builtin.systemd_service:
+        name: "{{ rsyslog_forward_service_name }}"
+        state: restarted
+        enabled: true
+      failed_when: false
+      when: rsyslog_forward_restore_validation['rc'] == 0
+
+    - name: Restart systemd-journald with the restored drop-in state
+      ansible.builtin.systemd_service:
+        name: "{{ rsyslog_forward_journald_service_name }}"
+        state: restarted
+      failed_when: false
+      when: rsyslog_forward_dropin_result is changed
+
+    - name: Read sender service states after rollback
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/systemctl
+          - is-active
+          - "{{ item }}"
+      loop:
+        - "{{ rsyslog_forward_service_name }}"
+        - "{{ rsyslog_forward_journald_service_name }}"
+      register: rsyslog_forward_rollback_states
+      changed_when: false
+      failed_when: false
+
+    - name: Fail after sender rollback
+      ansible.builtin.fail:
+        msg: >-
+          Sender forwarding activation failed. Managed rsyslog/journald files
+          were restored when changed; restored rsyslog validation rc={{
+          rsyslog_forward_restore_validation.rc | default('not-run') }}, stderr={{
+          rsyslog_forward_restore_validation.stderr | default('not-run') }};
+          service states={{ rsyslog_forward_rollback_states.results |
+          map(attribute='stdout') | list | default([]) }}. {{ 'The authy
+          rsyslog package is intentionally not removed automatically; follow
+          the authy manual rollback in 2026-07-17_017_implement.md to restore
+          the pre-install package-absent state.' if inventory_hostname ==
+          'authy' else '' }}

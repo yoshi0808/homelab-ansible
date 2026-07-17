@@ -39,10 +39,20 @@ alloy_remote_syslog_sources:
   - name: sophos_fw
     hostname: sophos-fw.internal
     destination: sophos_fw
+  - name: ansy
+    hostname: ansy.internal
+    destination: ubuntu_nodes
+  - name: quory
+    hostname: quory.internal
+    destination: ubuntu_nodes
+  - name: authy
+    hostname: authy.internal
+    destination: ubuntu_nodes
 
 alloy_remote_syslog_destinations:
   pve_nodes: /var/log/pve-nodes.log
   sophos_fw: /var/log/sophos-fw.log
+  ubuntu_nodes: /var/log/ubuntu-nodes.log
 
 # Promtail positions are intentionally not imported. Existing UniFi sources
 # start at EOF to avoid a full replay; optional empty sources start at BOF so
@@ -88,12 +98,21 @@ alloy_file_sources:
     extract_normalized_level_at_start: true
     extract_level_best_effort: false
     require_existing_file: false
+  - name: ubuntu_nodes
+    path: /var/log/ubuntu-nodes.log
+    tail_from_end: false
+    labels:
+      job: ubuntu-nodes
+    extract_second_token_as_host: true
+    extract_normalized_level_at_start: true
+    extract_level_best_effort: false
+    require_existing_file: false
 
 alloy_journal_sources:
   - name: system
     max_age: 12h
     labels:
-      job: system
+      job: ubuntu-nodes
       host: monnie
     source_unit_label: __journal__systemd_unit
     target_unit_label: unit

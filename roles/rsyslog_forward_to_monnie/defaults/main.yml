@@ -1,0 +1,60 @@
+---
+rsyslog_forward_allowed_hosts:
+  - ansy
+  - quory
+  - authy
+
+rsyslog_forward_package_name: rsyslog
+rsyslog_forward_binary_path: /usr/sbin/rsyslogd
+rsyslog_forward_service_name: rsyslog
+rsyslog_forward_journald_service_name: systemd-journald
+
+# Finalized by 2026-07-17_ubuntu_predeploy_recon.md. 49 runs after the existing
+# Cloud-init-specific stop rule and before Ubuntu's default local-file rules.
+rsyslog_forward_config_filename: 49-monnie-forward.conf
+rsyslog_forward_stop_after_forward_by_host:
+  ansy: false
+  quory: false
+  authy: true
+rsyslog_forward_stop_after_forward: >-
+  {{ rsyslog_forward_stop_after_forward_by_host[inventory_hostname] }}
+rsyslog_forward_config_path: "/etc/rsyslog.d/{{ rsyslog_forward_config_filename }}"
+rsyslog_forward_staging_path: "{{ rsyslog_forward_config_path }}.staging"
+
+# Fail closed if numbered snippets drift from the read-only recon before APPLY.
+# 50-default.conf is optional on authy only because the rsyslog package creates
+# it during the first install; it is absent in the pre-install baseline.
+rsyslog_forward_required_snippets_by_host:
+  ansy:
+    - 20-ufw.conf
+    - 21-cloudinit.conf
+    - 50-default.conf
+  quory:
+    - 20-ufw.conf
+    - 21-cloudinit.conf
+    - 50-default.conf
+  authy:
+    - 20-ufw.conf
+    - 21-cloudinit.conf
+rsyslog_forward_allowed_snippets_by_host:
+  ansy:
+    - 20-ufw.conf
+    - 21-cloudinit.conf
+    - 50-default.conf
+  quory:
+    - 20-ufw.conf
+    - 21-cloudinit.conf
+    - 50-default.conf
+  authy:
+    - 20-ufw.conf
+    - 21-cloudinit.conf
+    - 50-default.conf
+
+rsyslog_forward_journald_dropin_dir: /etc/systemd/journald.conf.d
+rsyslog_forward_journald_dropin_path: /etc/systemd/journald.conf.d/forward-to-syslog.conf
+
+rsyslog_forward_target: monnie.internal
+rsyslog_forward_port: "514"
+rsyslog_forward_protocol: udp
+rsyslog_forward_settle_seconds: 10
+rsyslog_forward_fatal_log_pattern: '(?i)(error during parsing|syntax error|failed to load module|action[^\n]*suspended|omfwd[^\n]*(error|failed))'

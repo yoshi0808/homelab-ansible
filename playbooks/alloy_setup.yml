@@ -2,8 +2,9 @@
 # alloy_setup.yml
 #
 # Purpose: manage monnie's Grafana Alloy pipeline. Phase 2 preserves the three
-# existing Loki streams and adds source-IP-limited pve/Sophos rsyslog routes,
-# two file sources, log rotation, and normalized level labels. Loki, UFW,
+# existing Loki streams and adds source-IP-limited pve/Sophos/Ubuntu rsyslog
+# routes, three remote file sources, log rotation, and normalized level labels.
+# Loki, UFW,
 # Grafana, and /etc/rsyslog.d/10-unifi.conf remain unchanged.
 #
 # Target/executor: monitoring_servers (currently monnie), run from ansy/quory.
@@ -28,7 +29,8 @@
 # Promtail stop+disable and Alloy enable+start block is skipped under --check
 # and tagged destructive. APPLY performs a production log-agent cutover and
 # requires Yoshinobu's explicit decision. pve-side rsyslog remains manual and
-# is never changed by this playbook.
+# is never changed by this playbook. ansy/quory/authy sender configuration is
+# owned by the separate rsyslog_forward_to_monnie playbook.
 
 - name: Install and cut over Grafana Alloy on monitoring servers
   hosts: monitoring_servers
