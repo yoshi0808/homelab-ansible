@@ -12,13 +12,33 @@
   delegate_to: localhost
   become: false
 
+- name: Validate download, cache, log, and mirror inputs
+  ansible.builtin.assert:
+    that:
+      - proxmox_patch_apply_nas_mount_path is match('^/mnt/pve/[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$')
+      - proxmox_patch_apply_nas_cache_dir == proxmox_patch_apply_nas_mount_path + '/proxmox-patch-cache'
+      - proxmox_patch_apply_nas_cache_keep | int >= 1
+      - proxmox_patch_apply_nas_io_timeout | int >= 30
+      - proxmox_patch_apply_nas_timeout_kill_after | int >= 1
+      - proxmox_patch_apply_nas_timeout_kill_after | int <= 30
+      - proxmox_patch_apply_log_dir is match('^/var/log/[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$')
+      - proxmox_patch_apply_mirror_probe_count | int >= 1
+      - proxmox_patch_apply_mirror_probe_count | int <= 10
+      - proxmox_patch_apply_mirror_ping_count | int >= 1
+      - proxmox_patch_apply_mirror_ping_count | int <= 10
+      - proxmox_patch_apply_mirror_ping_timeout | int >= 1
+      - proxmox_patch_apply_mirror_ping_timeout | int <= 10
+      - proxmox_patch_apply_mirror_host is match('^[A-Za-z0-9.-]+$')
+    fail_msg: "Invalid Proxmox patch cache, log, or mirror configuration."
+    quiet: true
+
 # =============================================================================
 # Initialize: set all result facts before block so always-block can reference them
 # =============================================================================
 
 - name: Set run timestamp and initialize result facts
   ansible.builtin.set_fact:
-    _apply_run_ts: "{{ lookup('pipe', 'date +%Y%m%dT%H%M%S') }}"
+    _apply_run_ts: "{{ lookup('pipe', 'TZ=Asia/Tokyo date +%Y%m%dT%H%M%S') }}"
     _apply_failed: false
     _apply_abort_type: "none"
     _apply_error_msg: ""
@@ -28,6 +48,12 @@
     _important_updates: []
     _new_vs_dryrun: []
     _unchanged_vs_dryrun: []
+    _download_stdout: ""
+    _download_stderr: ""
+    _download_bytes: 0
+    _download_seconds: 0
+    _download_cache_hit: false
+    _apply_seconds: 0
     _apply_stdout: ""
     _apply_collect: {}
     _reboot_required_before: false
@@ -39,6 +65,19 @@
     _notify_body: "パッチ適用の結果を取得できませんでした。ログを確認してください。"
     _post_hc_retry_status: "CRITICAL"
     _post_hc_retry_json: {}
+    _nas_cache_available: false
+    _nas_cache_warnings: []
+    _mirror_candidates: []
+    _mirror_probe_results: []
+    _mirror_selected_address: ""
+    _mirror_selected_rtt_ms: ""
+
+- name: Set JST cache key and persistent phase log paths
+  ansible.builtin.set_fact:
+    _apply_cache_date: "{{ _apply_run_ts[0:8] }}"
+    _download_log_path: "{{ proxmox_patch_apply_log_dir }}/{{ _apply_run_ts }}-download.log"
+    _apply_log_path: "{{ proxmox_patch_apply_log_dir }}/{{ _apply_run_ts }}-apply.log"
+    _nas_cache_run_dir: "{{ proxmox_patch_apply_nas_cache_dir }}/{{ _apply_run_ts[0:8] }}"
 
 - name: Ensure report directory exists
   ansible.builtin.file:
@@ -158,6 +197,22 @@
         owner: root
         group: root
       check_mode: false
+
+    - name: Copy apt phase runner
+      ansible.builtin.copy:
+        src: proxmox-patch-apt-phase.sh
+        dest: /usr/local/sbin/proxmox-patch-apt-phase.sh
+        mode: "0750"
+        owner: root
+        group: root
+
+    - name: Copy optional NAS cache helper
+      ansible.builtin.copy:
+        src: proxmox-patch-cache.sh
+        dest: /usr/local/sbin/proxmox-patch-cache.sh
+        mode: "0750"
+        owner: root
+        group: root
 
     - name: Run pre-apply dry-run collect
       ansible.builtin.command:
@@ -283,27 +338,423 @@
         proxmox_patch_apply_manual_confirm == 'MAINTENANCE_REQUIRED'
 
     # =========================================================================
-    # Phase 2: Apply
+    # Phase 2a/2b: optional seed -> download -> publish -> apply
     # =========================================================================
 
-    - name: Set abort type for apply phase
-      ansible.builtin.set_fact:
-        _apply_abort_type: "apply_failed"
-
-    - name: Apply patches (apt-get dist-upgrade)
-      ansible.builtin.command:
-        cmd: apt-get -y dist-upgrade
-      environment:
-        DEBIAN_FRONTEND: noninteractive
-      register: _apply_raw
-      changed_when: true
+    - name: Download and apply the package transaction
       when: not ansible_check_mode
       tags: [destructive]
+      block:
+        - name: Set abort type for download phase
+          ansible.builtin.set_fact:
+            _apply_abort_type: "download_failed"
 
-    - name: Record apply output
-      ansible.builtin.set_fact:
-        _apply_stdout: "{{ _apply_raw.stdout | default('') }}"
-        _apply_abort_type: "none"
+        - name: Resolve persistent log directory before root write
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/readlink
+              - -m
+              - --
+              - "{{ proxmox_patch_apply_log_dir }}"
+          register: _log_dir_canonical
+          changed_when: false
+          failed_when: false
+
+        - name: Abort when persistent log directory is non-canonical
+          when: >-
+            (_log_dir_canonical.rc | default(1)) != 0 or
+            (_log_dir_canonical.stdout | default('') | trim) != proxmox_patch_apply_log_dir
+          block:
+            - ansible.builtin.set_fact:
+                _apply_error_msg: >-
+                  Refusing non-canonical persistent log directory before root write:
+                  {{ proxmox_patch_apply_log_dir }}
+            - ansible.builtin.fail:
+                msg: "{{ _apply_error_msg }}"
+
+        - name: Ensure persistent patch log directory exists
+          ansible.builtin.file:
+            path: "{{ proxmox_patch_apply_log_dir }}"
+            state: directory
+            owner: root
+            group: root
+            mode: "0750"
+
+        - name: Locate the configured NAS mount without mounting it
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/timeout
+              - "--kill-after={{ proxmox_patch_apply_nas_timeout_kill_after | int }}s"
+              - "15s"
+              - /usr/bin/findmnt
+              - -rn
+              - -T
+              - "{{ proxmox_patch_apply_nas_mount_path }}"
+              - -o
+              - TARGET
+          register: _nas_findmnt
+          changed_when: false
+          failed_when: false
+          when: proxmox_patch_apply_nas_cache_enabled | bool
+
+        - name: Probe NAS path with a bounded wait
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/timeout
+              - "--kill-after={{ proxmox_patch_apply_nas_timeout_kill_after | int }}s"
+              - "15s"
+              - /usr/bin/test
+              - -d
+              - "{{ proxmox_patch_apply_nas_mount_path }}"
+          register: _nas_path_probe
+          changed_when: false
+          failed_when: false
+          when:
+            - proxmox_patch_apply_nas_cache_enabled | bool
+            - (_nas_findmnt.rc | default(1)) == 0
+            - (_nas_findmnt.stdout | default('') | trim) == proxmox_patch_apply_nas_mount_path
+
+        - name: Safely prepare same-day NAS cache directory with a bounded wait
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/timeout
+              - "--kill-after={{ proxmox_patch_apply_nas_timeout_kill_after | int }}s"
+              - "{{ proxmox_patch_apply_nas_io_timeout | int }}s"
+              - /usr/local/sbin/proxmox-patch-cache.sh
+              - prepare
+              - "{{ proxmox_patch_apply_nas_mount_path }}"
+              - "{{ _nas_cache_run_dir }}"
+              - "{{ proxmox_patch_apply_nas_cache_dir }}"
+          register: _nas_cache_prepare
+          changed_when: >-
+            (_nas_cache_prepare.rc | default(1)) == 0 and
+            not ((_nas_cache_prepare.stdout | default('')) is search('created=0'))
+          failed_when: false
+          when:
+            - proxmox_patch_apply_nas_cache_enabled | bool
+            - (_nas_path_probe.rc | default(1)) == 0
+
+        - name: Record NAS cache availability
+          ansible.builtin.set_fact:
+            _nas_cache_available: >-
+              {{ (proxmox_patch_apply_nas_cache_enabled | bool) and
+                 ((_nas_findmnt.rc | default(1)) == 0) and
+                 ((_nas_findmnt.stdout | default('') | trim) == proxmox_patch_apply_nas_mount_path) and
+                 ((_nas_path_probe.rc | default(1)) == 0) and
+                 ((_nas_cache_prepare.rc | default(1)) == 0) }}
+
+        - name: Warn and continue when optional NAS cache is unavailable
+          ansible.builtin.debug:
+            msg: >-
+              [WARNING] Optional NAS deb cache is unavailable on {{ inventory_hostname }};
+              continuing with direct repository download.
+          when:
+            - proxmox_patch_apply_nas_cache_enabled | bool
+            - not (_nas_cache_available | bool)
+
+        - name: Record NAS availability warning
+          ansible.builtin.set_fact:
+            _nas_cache_warnings: >-
+              {{ _nas_cache_warnings + ['NAS cache unavailable; direct download used'] }}
+          when:
+            - proxmox_patch_apply_nas_cache_enabled | bool
+            - not (_nas_cache_available | bool)
+
+        - name: Seed local apt archives from same-day NAS cache
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/timeout
+              - "--kill-after={{ proxmox_patch_apply_nas_timeout_kill_after | int }}s"
+              - "{{ proxmox_patch_apply_nas_io_timeout | int }}s"
+              - /usr/local/sbin/proxmox-patch-cache.sh
+              - seed
+              - "{{ _nas_cache_run_dir }}"
+              - /var/cache/apt/archives
+              - "{{ proxmox_patch_apply_nas_cache_dir }}"
+          register: _nas_seed
+          changed_when: >-
+            (_nas_seed.rc | default(1)) == 0 and
+            not ((_nas_seed.stdout | default('')) is search('copied=0'))
+          failed_when: false
+          when: _nas_cache_available | bool
+
+        - name: Warn and continue when NAS seed fails
+          ansible.builtin.debug:
+            msg: >-
+              [WARNING] NAS deb seed failed on {{ inventory_hostname }};
+              apt will validate existing files and download missing archives directly.
+          when:
+            - _nas_cache_available | bool
+            - (_nas_seed.rc | default(0)) != 0
+
+        - name: Record NAS seed warning
+          ansible.builtin.set_fact:
+            _nas_cache_warnings: "{{ _nas_cache_warnings + ['NAS seed failed; direct download used'] }}"
+          when:
+            - _nas_cache_available | bool
+            - (_nas_seed.rc | default(0)) != 0
+
+        - name: Resolve runtime mirror candidates repeatedly
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/getent
+              - ahostsv4
+              - "{{ proxmox_patch_apply_mirror_host }}"
+          loop: "{{ range(proxmox_patch_apply_mirror_probe_count | int) | list }}"
+          loop_control:
+            label: "resolution {{ item + 1 }}"
+          register: _mirror_resolve
+          changed_when: false
+          failed_when: false
+          when: proxmox_patch_apply_mirror_probe_enabled | bool
+
+        - name: Build unique runtime mirror candidate list
+          ansible.builtin.set_fact:
+            _mirror_candidates: >-
+              {{ ((_mirror_resolve.results | default([]) |
+                   selectattr('rc', 'equalto', 0) |
+                   map(attribute='stdout_lines') | flatten |
+                   map('regex_replace', '^\s*([0-9.]+)\s+.*$', '\1') |
+                   select('match', '^[0-9]{1,3}(\.[0-9]{1,3}){3}$') |
+                   unique | list)
+                  [:proxmox_patch_apply_mirror_probe_count | int])
+                 if (proxmox_patch_apply_mirror_probe_enabled | bool) else [] }}
+
+        - name: Probe candidate RTT
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/ping
+              - -n
+              - -c
+              - "{{ proxmox_patch_apply_mirror_ping_count | string }}"
+              - -W
+              - "{{ proxmox_patch_apply_mirror_ping_timeout | string }}"
+              - "{{ item }}"
+          loop: "{{ _mirror_candidates }}"
+          loop_control:
+            label: "runtime candidate {{ ansible_loop.index }}"
+            extended: true
+          register: _mirror_ping
+          changed_when: false
+          failed_when: false
+
+        - name: Record successful runtime mirror probes
+          ansible.builtin.set_fact:
+            _mirror_probe_results: >-
+              {{ _mirror_probe_results + [{
+                   'address': item.item,
+                   'rtt_ms': (item.stdout | regex_findall('= [0-9.]+/([0-9.]+)/') | first | float)
+                 }] }}
+          loop: "{{ _mirror_ping.results | default([]) }}"
+          loop_control:
+            label: "successful runtime candidate"
+          when:
+            - item.rc == 0
+            - item.stdout is search('= [0-9.]+/[0-9.]+/')
+
+        - name: Select lowest-RTT runtime mirror
+          ansible.builtin.set_fact:
+            _mirror_selected_address: >-
+              {{ ((_mirror_probe_results | sort(attribute='rtt_ms') | first).address)
+                 if (_mirror_probe_results | length > 0) else '' }}
+            _mirror_selected_rtt_ms: >-
+              {{ ((_mirror_probe_results | sort(attribute='rtt_ms') | first).rtt_ms)
+                 if (_mirror_probe_results | length > 0) else '' }}
+
+        - name: Warn and continue without pin when mirror probe has no result
+          ansible.builtin.debug:
+            msg: >-
+              [WARNING] No usable RTT probe result for {{ proxmox_patch_apply_mirror_host }};
+              continuing with normal DNS selection.
+          when:
+            - proxmox_patch_apply_mirror_probe_enabled | bool
+            - _mirror_selected_address | length == 0
+
+        - name: Checksum hosts before temporary mirror pin
+          ansible.builtin.stat:
+            path: /etc/hosts
+            get_checksum: true
+            checksum_algorithm: sha256
+          register: _hosts_before_download
+
+        - name: Download package archives with persistent log
+          ansible.builtin.command:
+            argv:
+              - /usr/local/sbin/proxmox-patch-apt-phase.sh
+              - download
+              - "{{ _download_log_path }}"
+              - "{{ proxmox_patch_apply_mirror_host }}"
+              - "{{ _mirror_selected_address }}"
+          register: _download_raw
+          changed_when: true
+          failed_when: false
+
+        - name: Record download command diagnostics
+          ansible.builtin.set_fact:
+            _download_stdout: "{{ _download_raw.stdout | default('') }}"
+            _download_stderr: "{{ _download_raw.stderr | default('') }}"
+
+        - name: Checksum hosts after temporary mirror pin
+          ansible.builtin.stat:
+            path: /etc/hosts
+            get_checksum: true
+            checksum_algorithm: sha256
+          register: _hosts_after_download
+
+        - name: Abort if hosts was not restored exactly
+          when: >-
+            not (_hosts_before_download.stat.exists | default(false)) or
+            not (_hosts_after_download.stat.exists | default(false)) or
+            (_hosts_before_download.stat.checksum | default('before-missing')) !=
+            (_hosts_after_download.stat.checksum | default('after-missing')) or
+            (_hosts_before_download.stat.mode | default('before-mode-missing')) !=
+            (_hosts_after_download.stat.mode | default('after-mode-missing')) or
+            (_hosts_before_download.stat.uid | default(-1)) !=
+            (_hosts_after_download.stat.uid | default(-2)) or
+            (_hosts_before_download.stat.gid | default(-1)) !=
+            (_hosts_after_download.stat.gid | default(-2))
+          block:
+            - ansible.builtin.set_fact:
+                _apply_error_msg: >-
+                  Download phase did not restore /etc/hosts exactly; manual recovery is required
+                  before any later apt operation. stderr excerpt:
+                  {{ ((_download_stderr | trim)[:400])
+                     if ((_download_stderr | trim | length) > 0)
+                     else '(none)' }}.
+                  Log: {{ _download_log_path }}
+            - ansible.builtin.fail:
+                msg: "{{ _apply_error_msg }}"
+
+        - name: Record download output and statistics
+          ansible.builtin.set_fact:
+            _download_bytes: >-
+              {{ (_download_raw.stdout | default('') |
+                  regex_findall('(?m)^PROXMOX_PATCH_DOWNLOAD_BYTES=([0-9]+)$') |
+                  last | default('0')) | int }}
+            _download_seconds: >-
+              {{ (_download_raw.stdout | default('') |
+                  regex_findall('(?m)^PROXMOX_PATCH_DOWNLOAD_SECONDS=([0-9]+)$') |
+                  last | default('0')) | int }}
+            _download_cache_hit: >-
+              {{ (_download_raw.stdout | default('') |
+                  regex_findall('(?m)^PROXMOX_PATCH_CACHE_HIT=(true|false)$') |
+                  last | default('false')) == 'true' }}
+
+        - name: Abort when archive download fails
+          when: (_download_raw.rc | default(1)) != 0
+          block:
+            - ansible.builtin.set_fact:
+                _apply_error_msg: >-
+                  apt-get -d dist-upgrade failed with rc={{ _download_raw.rc | default('unknown') }}.
+                  stderr excerpt:
+                  {{ ((_download_raw.stderr | default('') | trim)[:400])
+                     if ((_download_raw.stderr | default('') | trim | length) > 0)
+                     else '(none)' }}.
+                  Persistent log: {{ _download_log_path }}
+            - ansible.builtin.fail:
+                msg: "{{ _apply_error_msg }}"
+
+        - name: Publish local apt archives to same-day NAS cache
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/timeout
+              - "--kill-after={{ proxmox_patch_apply_nas_timeout_kill_after | int }}s"
+              - "{{ proxmox_patch_apply_nas_io_timeout | int }}s"
+              - /usr/local/sbin/proxmox-patch-cache.sh
+              - publish
+              - /var/cache/apt/archives
+              - "{{ _nas_cache_run_dir }}"
+              - "{{ proxmox_patch_apply_nas_cache_dir }}"
+          register: _nas_publish
+          changed_when: >-
+            (_nas_publish.rc | default(1)) == 0 and
+            not ((_nas_publish.stdout | default('')) is search('copied=0'))
+          failed_when: false
+          when: _nas_cache_available | bool
+
+        - name: Warn and continue when NAS publish fails
+          ansible.builtin.debug:
+            msg: >-
+              [WARNING] NAS deb publish failed on {{ inventory_hostname }};
+              continuing because the local archives are complete.
+          when:
+            - _nas_cache_available | bool
+            - (_nas_publish.rc | default(0)) != 0
+
+        - name: Record NAS publish warning
+          ansible.builtin.set_fact:
+            _nas_cache_warnings: "{{ _nas_cache_warnings + ['NAS publish failed; apply continued'] }}"
+          when:
+            - _nas_cache_available | bool
+            - (_nas_publish.rc | default(0)) != 0
+
+        - name: Prune old NAS date generations non-critically
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/timeout
+              - "--kill-after={{ proxmox_patch_apply_nas_timeout_kill_after | int }}s"
+              - "{{ proxmox_patch_apply_nas_io_timeout | int }}s"
+              - /usr/local/sbin/proxmox-patch-cache.sh
+              - prune
+              - "{{ proxmox_patch_apply_nas_cache_dir }}"
+              - "{{ proxmox_patch_apply_nas_cache_keep | string }}"
+              - "{{ proxmox_patch_apply_nas_cache_dir }}"
+          register: _nas_prune
+          changed_when: >-
+            (_nas_prune.rc | default(1)) == 0 and
+            not ((_nas_prune.stdout | default('')) is search('removed=0'))
+          failed_when: false
+          when: _nas_cache_available | bool
+
+        - name: Warn and continue when NAS prune fails
+          ansible.builtin.debug:
+            msg: "[WARNING] NAS cache prune failed; patch apply continues."
+          when:
+            - _nas_cache_available | bool
+            - (_nas_prune.rc | default(0)) != 0
+
+        - name: Record NAS prune warning
+          ansible.builtin.set_fact:
+            _nas_cache_warnings: "{{ _nas_cache_warnings + ['NAS prune failed; apply continued'] }}"
+          when:
+            - _nas_cache_available | bool
+            - (_nas_prune.rc | default(0)) != 0
+
+        - name: Set abort type for apply phase
+          ansible.builtin.set_fact:
+            _apply_abort_type: "apply_failed"
+
+        - name: Apply downloaded patches with persistent log
+          ansible.builtin.command:
+            argv:
+              - /usr/local/sbin/proxmox-patch-apt-phase.sh
+              - apply
+              - "{{ _apply_log_path }}"
+          register: _apply_raw
+          changed_when: true
+          failed_when: false
+
+        - name: Record apply output and duration
+          ansible.builtin.set_fact:
+            _apply_stdout: "{{ _apply_raw.stdout | default('') }}"
+            _apply_seconds: >-
+              {{ (_apply_raw.stdout | default('') |
+                  regex_findall('(?m)^PROXMOX_PATCH_APPLY_SECONDS=([0-9]+)$') |
+                  last | default('0')) | int }}
+
+        - name: Abort when package apply fails
+          when: (_apply_raw.rc | default(1)) != 0
+          block:
+            - ansible.builtin.set_fact:
+                _apply_error_msg: >-
+                  apt-get dist-upgrade failed with rc={{ _apply_raw.rc | default('unknown') }}.
+                  Persistent log: {{ _apply_log_path }}
+            - ansible.builtin.fail:
+                msg: "{{ _apply_error_msg }}"
+
+        - name: Record successful apply phase
+          ansible.builtin.set_fact:
+            _apply_abort_type: "none"
 
     - name: Run post-apply collect
       ansible.builtin.command:
@@ -414,6 +865,8 @@
           [ABORT] {{ inventory_hostname }}: 自動適用中止 - 更新内容が変化しました
           {%- elif _apply_abort_type in ['control_node', 'healthcheck', 'vms_not_evacuated', 'apt_update', 'apt_check', 'sim_failed', 'manual_not_confirmed'] -%}
           [ABORT] {{ inventory_hostname }}: 前提チェック失敗 ({{ _apply_abort_type }})
+          {%- elif _apply_abort_type == 'download_failed' -%}
+          [FAILED] {{ inventory_hostname }}: apt archive download 失敗
           {%- elif _apply_abort_type == 'apply_failed' -%}
           [FAILED] {{ inventory_hostname }}: apt-get dist-upgrade 失敗
           {%- elif _apply_abort_type == 'reboot_timeout' -%}
@@ -482,10 +935,35 @@
           {% endif %}
 
           =========================================
-          Phase 3: apply
+          Phase 3: download
           =========================================
           {% if not (_apply_abort_type in ['control_node', 'healthcheck', 'vms_not_evacuated', 'apt_update', 'apt_check', 'sim_failed', 'maintenance_required', 'manual_not_confirmed']) %}
+          download bytes  : {{ _download_bytes }}
+          download seconds: {{ _download_seconds }}
+          cache hit        : {{ _download_cache_hit }}
+          mirror host      : {{ proxmox_patch_apply_mirror_host }}
+          mirror address   : {{ _mirror_selected_address | default('') }}
+          mirror RTT (ms)  : {{ _mirror_selected_rtt_ms | default('') }}
+          download log     : {{ _download_log_path }}
+          NAS cache        : {{ 'available' if (_nas_cache_available | bool) else 'fallback/direct' }}
+          {% if _nas_cache_warnings | length > 0 %}
+          NAS warnings     : {{ _nas_cache_warnings | join(' | ') }}
+          {% endif %}
+          {% if _apply_abort_type == 'download_failed' %}
+          エラー: {{ _apply_error_msg }}
+          stderr excerpt: {{ ((_download_stderr | trim)[:400]) if ((_download_stderr | trim | length) > 0) else '(none)' }}
+          {% endif %}
+          {% else %}
+          (前提チェック失敗のため未実施)
+          {% endif %}
+
+          =========================================
+          Phase 4: apply
+          =========================================
+          {% if not (_apply_abort_type in ['control_node', 'healthcheck', 'vms_not_evacuated', 'apt_update', 'apt_check', 'sim_failed', 'maintenance_required', 'manual_not_confirmed', 'download_failed']) %}
           適用パッケージ数: {{ _sim_updates | length }}
+          apply seconds  : {{ _apply_seconds }}
+          apply log      : {{ _apply_log_path }}
           reboot 実施   : {{ _apply_reboot_done }}
           reboot trigger: {{ _apply_collect.reboot_trigger | default('') }}
           {% if _apply_abort_type in ['apply_failed', 'reboot_timeout'] %}
@@ -496,7 +974,7 @@
           {% endif %}
 
           =========================================
-          Phase 4: post-healthcheck
+          Phase 5: post-healthcheck
           =========================================
           post-healthcheck: {{ _post_hc_status }}
         _notify_channel: "{{ 'alerts' if (_apply_abort_type != 'none' or _apply_failed | bool or _post_hc_status != 'OK') else 'patches' }}"
@@ -531,6 +1009,18 @@
             'pre_healthcheck_status': _pre_hc_status,
             'updates': _sim_updates,
             'removes': _sim_removes,
+            'download_bytes': _download_bytes,
+            'download_seconds': _download_seconds,
+            'cache_hit': _download_cache_hit,
+            'download_stderr_excerpt': (_download_stderr | trim)[:1000],
+            'download_log': _download_log_path,
+            'mirror_host': proxmox_patch_apply_mirror_host,
+            'mirror_address': _mirror_selected_address,
+            'mirror_rtt_ms': _mirror_selected_rtt_ms,
+            'nas_cache_available': _nas_cache_available,
+            'nas_cache_warnings': _nas_cache_warnings,
+            'apply_seconds': _apply_seconds,
+            'apply_log': _apply_log_path,
             'apply_output': _apply_stdout | truncate(3000),
             'reboot_done': _apply_reboot_done,
             'reboot_trigger': _apply_collect.reboot_trigger | default(''),

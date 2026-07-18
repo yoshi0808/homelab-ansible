@@ -51,3 +51,24 @@ proxmox_patch_apply_important_component_prefixes:
 # max wait = (retry_count + 1) * retry_delay seconds.
 proxmox_patch_apply_hc_retry_count: 2
 proxmox_patch_apply_hc_retry_delay: 60
+
+# Optional same-day deb cache on the existing Proxmox-managed NAS mount.
+# This is only an optimization: every node still validates cached debs against
+# its own refreshed apt indexes and downloads any missing/different versions.
+proxmox_patch_apply_nas_cache_enabled: true
+proxmox_patch_apply_nas_mount_path: /mnt/pve/Synology-nfs
+proxmox_patch_apply_nas_cache_dir: "{{ proxmox_patch_apply_nas_mount_path }}/proxmox-patch-cache"
+proxmox_patch_apply_nas_cache_keep: 3
+proxmox_patch_apply_nas_io_timeout: 300
+proxmox_patch_apply_nas_timeout_kill_after: 5
+
+# Persistent target-node logs for the separated download and apply phases.
+proxmox_patch_apply_log_dir: /var/log/proxmox-patch
+
+# Select the lowest-RTT address returned at runtime for the Proxmox CDN and pin
+# it only around apt-get -d. No address is stored in Git or retained in hosts.
+proxmox_patch_apply_mirror_probe_enabled: true
+proxmox_patch_apply_mirror_probe_count: 5
+proxmox_patch_apply_mirror_ping_count: 3
+proxmox_patch_apply_mirror_ping_timeout: 2
+proxmox_patch_apply_mirror_host: download.proxmox.com
