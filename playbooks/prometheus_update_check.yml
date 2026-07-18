@@ -1,0 +1,29 @@
+---
+# prometheus_update_check.yml - monnieへ手動導入したPrometheusの現在版と
+# GitHub latest stable releaseを週次比較し、上位版または収集失敗だけをSlack通知する。
+# バイナリ更新、設定変更、service restartは行わない。実行元はquory、対象はmonnie。
+# Semaphore UIへのスケジュール登録は別作業。
+#
+# tester-gate: check-mode-native — command/uriによるread-only収集は--checkでも
+# 実走し、外部副作用となるSlack通知だけをansible_check_modeで抑止する。
+
+- name: prometheus_update_check - verify execution host
+  hosts: localhost
+  gather_facts: true
+  connection: local
+  tasks:
+    - name: Ensure this playbook is running on quory
+      ansible.builtin.assert:
+        that:
+          - ansible_facts['hostname'] == 'quory'
+        fail_msg: >-
+          prometheus_update_check.yml must be run on quory only
+          (current host: {{ ansible_facts['hostname'] }}).
+
+- name: Check manually installed Prometheus release on monnie
+  hosts: monnie
+  gather_facts: false
+  tasks:
+    - name: Run prometheus_update_check role
+      ansible.builtin.import_role:
+        name: prometheus_update_check

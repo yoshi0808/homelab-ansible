@@ -1,0 +1,7 @@
+---
+prometheus_update_check_binary: /opt/prometheus/prometheus
+prometheus_update_check_repo: prometheus/prometheus
+prometheus_update_check_api_url: "https://api.github.com/repos/{{ prometheus_update_check_repo }}/releases/latest"
+prometheus_update_check_release_url: "https://github.com/{{ prometheus_update_check_repo }}/releases/latest"
+prometheus_update_check_api_timeout: 15
+prometheus_update_check_manual_reference: "Notion『Prometheus / Grafana / unifi-poller セットアップ手順』"

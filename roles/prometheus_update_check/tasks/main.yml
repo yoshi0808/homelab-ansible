@@ -1,0 +1,113 @@
+---
+# prometheus_update_check collects installed/latest versions and reports only.
+# Parsing, comparison, status classification, and notification decisions stay
+# in Ansible; this role never downloads artifacts, updates files, or restarts
+# Prometheus.
+
+# ---------------------------------------------------------------------------
+# Phase 1: collect the currently installed version
+# ---------------------------------------------------------------------------
+- name: Collect installed Prometheus version
+  ansible.builtin.command:
+    argv:
+      - "{{ prometheus_update_check_binary }}"
+      - --version
+  register: prometheus_update_check_current_raw
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Parse installed Prometheus version
+  ansible.builtin.set_fact:
+    prometheus_update_check_current_version: >-
+      {{ (prometheus_update_check_current_raw.stdout | default('') |
+          regex_findall('(?m)^prometheus, version ([0-9]+[.][0-9]+[.][0-9]+)(?:[ ]|$)') |
+          first | default('')) }}
+
+# ---------------------------------------------------------------------------
+# Phase 2: collect the latest stable GitHub release
+# ---------------------------------------------------------------------------
+- name: Collect latest stable Prometheus release
+  ansible.builtin.uri:
+    url: "{{ prometheus_update_check_api_url }}"
+    method: GET
+    return_content: true
+    timeout: "{{ prometheus_update_check_api_timeout }}"
+  register: prometheus_update_check_latest_raw
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Parse latest Prometheus version
+  ansible.builtin.set_fact:
+    prometheus_update_check_latest_version: >-
+      {{ ((prometheus_update_check_latest_raw.json | default({})).tag_name | default('') | string)
+         | regex_replace('^v', '') }}
+
+# ---------------------------------------------------------------------------
+# Phase 3: classify collection and compare versions in Ansible
+# ---------------------------------------------------------------------------
+- name: Judge Prometheus version collection status
+  ansible.builtin.set_fact:
+    prometheus_update_check_collected: >-
+      {{ (prometheus_update_check_current_raw.rc | default(1) | int) == 0
+         and (prometheus_update_check_latest_raw.status | default(-1) | int) == 200
+         and (prometheus_update_check_current_version is match('^[0-9]+[.][0-9]+[.][0-9]+$'))
+         and (prometheus_update_check_latest_version is match('^[0-9]+[.][0-9]+[.][0-9]+$')) }}
+
+- name: Judge whether a newer Prometheus release is available
+  ansible.builtin.set_fact:
+    prometheus_update_check_update_available: >-
+      {{ (prometheus_update_check_latest_version is version(prometheus_update_check_current_version, '>'))
+         if (prometheus_update_check_collected | bool) else false }}
+
+- name: Record Prometheus update-check status
+  ansible.builtin.set_fact:
+    prometheus_update_check_status: >-
+      {{ 'collection_failed' if not (prometheus_update_check_collected | bool)
+         else 'update_available' if (prometheus_update_check_update_available | bool)
+         else 'up_to_date' }}
+
+- name: Print Prometheus update-check summary
+  ansible.builtin.debug:
+    msg:
+      host: "{{ inventory_hostname }}"
+      status: "{{ prometheus_update_check_status }}"
+      current: "{{ prometheus_update_check_current_version | default('') }}"
+      latest: "{{ prometheus_update_check_latest_version | default('') }}"
+
+# ---------------------------------------------------------------------------
+# Phase 4: notify only for a newer release or collection failure
+# ---------------------------------------------------------------------------
+- name: Send Prometheus update-check notification
+  ansible.builtin.include_tasks: "{{ playbook_dir }}/../roles/common_slack/tasks/notify.yml"
+  vars:
+    slack_channel: "{{ 'alerts' if prometheus_update_check_status == 'collection_failed' else 'info' }}"
+    slack_status: "{{ 'error' if prometheus_update_check_status == 'collection_failed' else 'info' }}"
+    prometheus_update_check_binary_diagnostic: >-
+      {{ (prometheus_update_check_current_raw.stderr | default('', true))
+         or (prometheus_update_check_current_raw.msg | default('', true))
+         or '(no module message)' }}
+    prometheus_update_check_api_diagnostic: >-
+      {{ (prometheus_update_check_latest_raw.msg | default('', true))
+         or '(no module message)' }}
+    slack_title: >-
+      [prometheus_update_check] {{ 'collection failed' if prometheus_update_check_status == 'collection_failed'
+      else 'new release available' }}
+    slack_message: |
+      Prometheus weekly update check
+      - host: {{ inventory_hostname }}
+      - version: {{ prometheus_update_check_current_version | default('?', true) }} → {{ prometheus_update_check_latest_version | default('?', true) }}
+      - status: {{ prometheus_update_check_status }}
+      - installed version collection: {{ 'FAILED (rc=' ~ (prometheus_update_check_current_raw.rc | default('unknown') | string) ~ ')' if (prometheus_update_check_current_raw.rc | default(1) | int) != 0 else 'FAILED (version parse)' if not (prometheus_update_check_current_version is match('^[0-9]+[.][0-9]+[.][0-9]+$')) else 'OK' }}
+      - GitHub latest release collection: {{ 'FAILED (HTTP status=' ~ (prometheus_update_check_latest_raw.status | default('unknown') | string) ~ ')' if (prometheus_update_check_latest_raw.status | default(-1) | int) != 200 else 'FAILED (tag_name parse)' if not (prometheus_update_check_latest_version is match('^[0-9]+[.][0-9]+[.][0-9]+$')) else 'OK' }}
+      {% if prometheus_update_check_status == 'collection_failed' %}
+      - installed diagnostic: {{ (prometheus_update_check_binary_diagnostic | trim)[:200] }}
+      - GitHub API diagnostic: {{ (prometheus_update_check_api_diagnostic | trim)[:200] }}
+      {% endif %}
+      - release: {{ prometheus_update_check_release_url }}
+
+      自動更新は行いません。適用は人間が判断し、手動更新手順 {{ prometheus_update_check_manual_reference }} を参照してください。
+  when:
+    - not ansible_check_mode
+    - prometheus_update_check_status in ['update_available', 'collection_failed']
