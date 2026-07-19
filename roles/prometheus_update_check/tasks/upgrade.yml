@@ -1,0 +1,599 @@
+---
+- name: Execute Prometheus upgrade transaction
+  become: true
+  block:
+    - name: Initialize Prometheus upgrade transaction facts
+      ansible.builtin.set_fact:
+        prometheus_update_check_upgrade_step: initialize
+        prometheus_update_check_upgrade_swap_started: false
+        prometheus_update_check_upgrade_backup_ready: false
+        prometheus_update_check_upgrade_generation_created: false
+        prometheus_update_check_upgrade_lock_acquired: false
+        prometheus_update_check_automatic_rollback_state: not_required
+        prometheus_update_check_upgrade_backup_path: >-
+          {{ prometheus_update_check_backup_dir + '/' + prometheus_update_check_current_version
+             + '-' + prometheus_update_check_run_timestamp }}
+        prometheus_update_check_archive_name: >-
+          prometheus-{{ prometheus_update_check_effective_target_version }}.{{ prometheus_update_check_arch }}.tar.gz
+
+    - name: Acquire exclusive Prometheus transaction lock
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/mkdir
+          - --mode=0700
+          - --
+          - "{{ prometheus_update_check_lock_dir }}"
+      register: prometheus_update_check_upgrade_lock_raw
+      changed_when: (prometheus_update_check_upgrade_lock_raw.rc | int) == 0
+      failed_when: false
+
+    - name: Record Prometheus transaction lock ownership
+      ansible.builtin.set_fact:
+        prometheus_update_check_upgrade_lock_acquired: >-
+          {{ (prometheus_update_check_upgrade_lock_raw.rc | int) == 0 }}
+
+    - name: Require exclusive Prometheus transaction lock
+      ansible.builtin.assert:
+        that:
+          - prometheus_update_check_upgrade_lock_acquired | bool
+        fail_msg: >-
+          Another Prometheus upgrade or rollback transaction holds
+          {{ prometheus_update_check_lock_dir }}; refusing concurrent mutation.
+
+    - name: Resolve Prometheus install directory before root write
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/readlink
+          - -m
+          - --
+          - "{{ prometheus_update_check_install_dir }}"
+      register: prometheus_update_check_upgrade_install_canonical
+      changed_when: false
+
+    - name: Resolve Prometheus backup directory before root write
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/readlink
+          - -m
+          - --
+          - "{{ prometheus_update_check_backup_dir }}"
+      register: prometheus_update_check_upgrade_backup_canonical
+      changed_when: false
+
+    - name: Inspect Prometheus install directory without following symlinks
+      ansible.builtin.stat:
+        path: "{{ prometheus_update_check_install_dir }}"
+        follow: false
+      register: prometheus_update_check_upgrade_install_dir_stat
+
+    - name: Inspect Prometheus backup directory without following symlinks
+      ansible.builtin.stat:
+        path: "{{ prometheus_update_check_backup_dir }}"
+        follow: false
+      register: prometheus_update_check_upgrade_backup_dir_stat
+
+    - name: Validate canonical Prometheus write boundaries
+      ansible.builtin.assert:
+        that:
+          - (prometheus_update_check_upgrade_install_canonical.stdout | trim) == prometheus_update_check_install_dir
+          - prometheus_update_check_upgrade_install_dir_stat.stat.isdir | default(false)
+          - not (prometheus_update_check_upgrade_install_dir_stat.stat.islnk | default(false))
+          - (prometheus_update_check_upgrade_backup_canonical.stdout | trim) == prometheus_update_check_backup_dir
+          - not (prometheus_update_check_upgrade_backup_dir_stat.stat.exists | default(false)) or ((prometheus_update_check_upgrade_backup_dir_stat.stat.isdir | default(false)) and not (prometheus_update_check_upgrade_backup_dir_stat.stat.islnk | default(false)))
+        fail_msg: "Prometheus install/backup directory is non-canonical, a symlink, or unsafe."
+
+    - name: Inspect current Prometheus binary metadata
+      ansible.builtin.stat:
+        path: "{{ prometheus_update_check_binary }}"
+        follow: false
+      register: prometheus_update_check_upgrade_current_prometheus_stat
+
+    - name: Inspect current promtool binary metadata
+      ansible.builtin.stat:
+        path: "{{ prometheus_update_check_install_dir }}/promtool"
+        follow: false
+      register: prometheus_update_check_upgrade_current_promtool_stat
+
+    - name: Validate current Prometheus binaries before backup
+      ansible.builtin.assert:
+        that:
+          - prometheus_update_check_upgrade_current_prometheus_stat.stat.isreg | default(false)
+          - not (prometheus_update_check_upgrade_current_prometheus_stat.stat.islnk | default(false))
+          - prometheus_update_check_upgrade_current_promtool_stat.stat.isreg | default(false)
+          - not (prometheus_update_check_upgrade_current_promtool_stat.stat.islnk | default(false))
+        fail_msg: "Current prometheus/promtool must be regular non-symlink files."
+
+    - name: Set Prometheus upgrade step to backup
+      ansible.builtin.set_fact:
+        prometheus_update_check_upgrade_step: backup
+
+    - name: Ensure Prometheus backup root exists
+      ansible.builtin.file:
+        path: "{{ prometheus_update_check_backup_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0750"
+
+    - name: Check Prometheus backup generation does not already exist
+      ansible.builtin.stat:
+        path: "{{ prometheus_update_check_upgrade_backup_path }}"
+        follow: false
+      register: prometheus_update_check_upgrade_backup_path_before
+
+    - name: Require a fresh Prometheus backup generation path
+      ansible.builtin.assert:
+        that:
+          - not (prometheus_update_check_upgrade_backup_path_before.stat.exists | default(false))
+        fail_msg: "Prometheus backup generation already exists; refusing to mix backup contents."
+
+    - name: Create Prometheus backup generation directory exclusively
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/mkdir
+          - --mode=0750
+          - --
+          - "{{ prometheus_update_check_upgrade_backup_path }}"
+      changed_when: true
+
+    - name: Record Prometheus backup generation ownership
+      ansible.builtin.set_fact:
+        prometheus_update_check_upgrade_generation_created: true
+
+    - name: Resolve created Prometheus backup generation
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/readlink
+          - -m
+          - --
+          - "{{ prometheus_update_check_upgrade_backup_path }}"
+      register: prometheus_update_check_upgrade_backup_path_canonical
+      changed_when: false
+
+    - name: Inspect created Prometheus backup generation
+      ansible.builtin.stat:
+        path: "{{ prometheus_update_check_upgrade_backup_path }}"
+        follow: false
+      register: prometheus_update_check_upgrade_backup_path_after
+
+    - name: Validate created Prometheus backup generation boundary
+      ansible.builtin.assert:
+        that:
+          - (prometheus_update_check_upgrade_backup_path_canonical.stdout | trim) == prometheus_update_check_upgrade_backup_path
+          - (prometheus_update_check_upgrade_backup_path | dirname) == prometheus_update_check_backup_dir
+          - prometheus_update_check_upgrade_backup_path_after.stat.isdir | default(false)
+          - not (prometheus_update_check_upgrade_backup_path_after.stat.islnk | default(false))
+        fail_msg: "Created Prometheus backup generation is not a safe direct child."
+
+    - name: Back up current Prometheus binary
+      ansible.builtin.copy:
+        src: "{{ prometheus_update_check_binary }}"
+        dest: "{{ prometheus_update_check_upgrade_backup_path }}/prometheus"
+        remote_src: true
+        owner: "{{ prometheus_update_check_upgrade_current_prometheus_stat.stat.pw_name }}"
+        group: "{{ prometheus_update_check_upgrade_current_prometheus_stat.stat.gr_name }}"
+        mode: "{{ prometheus_update_check_upgrade_current_prometheus_stat.stat.mode }}"
+
+    - name: Back up current promtool binary
+      ansible.builtin.copy:
+        src: "{{ prometheus_update_check_install_dir }}/promtool"
+        dest: "{{ prometheus_update_check_upgrade_backup_path }}/promtool"
+        remote_src: true
+        owner: "{{ prometheus_update_check_upgrade_current_promtool_stat.stat.pw_name }}"
+        group: "{{ prometheus_update_check_upgrade_current_promtool_stat.stat.gr_name }}"
+        mode: "{{ prometheus_update_check_upgrade_current_promtool_stat.stat.mode }}"
+
+    - name: Mark Prometheus upgrade backup complete
+      ansible.builtin.set_fact:
+        prometheus_update_check_upgrade_backup_ready: true
+
+    - name: Calculate Prometheus upgrade backup checksums
+      ansible.builtin.stat:
+        path: "{{ item }}"
+        checksum_algorithm: sha256
+        get_checksum: true
+        follow: false
+      loop:
+        - "{{ prometheus_update_check_upgrade_backup_path }}/prometheus"
+        - "{{ prometheus_update_check_upgrade_backup_path }}/promtool"
+      register: prometheus_update_check_upgrade_backup_checksum_stats
+
+    - name: Record Prometheus upgrade backup checksums
+      ansible.builtin.set_fact:
+        prometheus_update_check_upgrade_backup_prometheus_checksum: >-
+          {{ prometheus_update_check_upgrade_backup_checksum_stats.results[0].stat.checksum }}
+        prometheus_update_check_upgrade_backup_promtool_checksum: >-
+          {{ prometheus_update_check_upgrade_backup_checksum_stats.results[1].stat.checksum }}
+
+    - name: Find Prometheus backup generations for pruning
+      ansible.builtin.find:
+        paths: "{{ prometheus_update_check_backup_dir }}"
+        recurse: false
+        file_type: directory
+        use_regex: true
+        patterns: '^[0-9]+[.][0-9]+[.][0-9]+-[0-9]{8}T[0-9]{6}$'
+      register: prometheus_update_check_upgrade_backup_find
+
+    - name: Select old Prometheus backup generations for pruning
+      ansible.builtin.set_fact:
+        prometheus_update_check_upgrade_backup_prune: >-
+          {{ (prometheus_update_check_upgrade_backup_find.files |
+              sort(attribute='mtime', reverse=true))[(prometheus_update_check_backup_keep | int):] }}
+
+    - name: Prune old Prometheus backup generations
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        state: absent
+      loop: "{{ prometheus_update_check_upgrade_backup_prune }}"
+      loop_control:
+        label: "{{ item.path }}"
+
+    - name: Set Prometheus upgrade step to download
+      ansible.builtin.set_fact:
+        prometheus_update_check_upgrade_step: download
+
+    - name: Create temporary Prometheus upgrade directory
+      ansible.builtin.tempfile:
+        state: directory
+        prefix: prometheus-update-
+      register: prometheus_update_check_upgrade_temp
+
+    - name: Download Prometheus release checksums
+      ansible.builtin.get_url:
+        url: >-
+          {{ prometheus_update_check_download_base }}/v{{ prometheus_update_check_effective_target_version }}/sha256sums.txt
+        dest: "{{ prometheus_update_check_upgrade_temp.path }}/sha256sums.txt"
+        mode: "0600"
+        timeout: "{{ prometheus_update_check_download_timeout }}"
+
+    - name: Read Prometheus release checksums
+      ansible.builtin.slurp:
+        src: "{{ prometheus_update_check_upgrade_temp.path }}/sha256sums.txt"
+      register: prometheus_update_check_upgrade_checksums_raw
+
+    - name: Extract expected Prometheus archive checksum
+      ansible.builtin.set_fact:
+        prometheus_update_check_upgrade_expected_checksum: >-
+          {{ (prometheus_update_check_upgrade_checksums_raw.content | b64decode |
+              regex_findall('(?m)^([0-9a-fA-F]{64})[ ]+' +
+                            (prometheus_update_check_archive_name | regex_escape) + '$') |
+              first | default('') | lower) }}
+
+    - name: Require an exact Prometheus archive checksum
+      ansible.builtin.assert:
+        that:
+          - prometheus_update_check_upgrade_expected_checksum is match('^[0-9a-f]{64}$')
+        fail_msg: "Release checksum file does not contain the requested Prometheus archive."
+
+    - name: Download and verify Prometheus release archive
+      ansible.builtin.get_url:
+        url: >-
+          {{ prometheus_update_check_download_base }}/v{{ prometheus_update_check_effective_target_version }}/{{ prometheus_update_check_archive_name }}
+        dest: "{{ prometheus_update_check_upgrade_temp.path }}/{{ prometheus_update_check_archive_name }}"
+        mode: "0600"
+        timeout: "{{ prometheus_update_check_download_timeout }}"
+        checksum: "sha256:{{ prometheus_update_check_upgrade_expected_checksum }}"
+
+    - name: Set Prometheus upgrade step to extraction
+      ansible.builtin.set_fact:
+        prometheus_update_check_upgrade_step: extraction
+
+    - name: Extract verified Prometheus release archive
+      ansible.builtin.unarchive:
+        src: "{{ prometheus_update_check_upgrade_temp.path }}/{{ prometheus_update_check_archive_name }}"
+        dest: "{{ prometheus_update_check_upgrade_temp.path }}"
+        remote_src: true
+
+    - name: Inspect extracted Prometheus binary
+      ansible.builtin.stat:
+        path: >-
+          {{ prometheus_update_check_upgrade_temp.path }}/prometheus-{{ prometheus_update_check_effective_target_version }}.{{ prometheus_update_check_arch }}/prometheus
+        follow: false
+      register: prometheus_update_check_upgrade_new_prometheus_stat
+
+    - name: Inspect extracted promtool binary
+      ansible.builtin.stat:
+        path: >-
+          {{ prometheus_update_check_upgrade_temp.path }}/prometheus-{{ prometheus_update_check_effective_target_version }}.{{ prometheus_update_check_arch }}/promtool
+        follow: false
+      register: prometheus_update_check_upgrade_new_promtool_stat
+
+    - name: Validate extracted Prometheus binaries
+      ansible.builtin.assert:
+        that:
+          - prometheus_update_check_upgrade_new_prometheus_stat.stat.isreg | default(false)
+          - not (prometheus_update_check_upgrade_new_prometheus_stat.stat.islnk | default(false))
+          - prometheus_update_check_upgrade_new_promtool_stat.stat.isreg | default(false)
+          - not (prometheus_update_check_upgrade_new_promtool_stat.stat.islnk | default(false))
+
+    - name: Set Prometheus upgrade step to config validation
+      ansible.builtin.set_fact:
+        prometheus_update_check_upgrade_step: config_validation
+
+    - name: Validate existing config with the new promtool
+      ansible.builtin.command:
+        argv:
+          - >-
+            {{ prometheus_update_check_upgrade_temp.path }}/prometheus-{{ prometheus_update_check_effective_target_version }}.{{ prometheus_update_check_arch }}/promtool
+          - check
+          - config
+          - "{{ prometheus_update_check_install_dir }}/prometheus.yml"
+      register: prometheus_update_check_upgrade_config_check
+      changed_when: false
+      failed_when: false
+
+    - name: Abort before swap when the new promtool rejects the config
+      ansible.builtin.assert:
+        that:
+          - (prometheus_update_check_upgrade_config_check.rc | int) == 0
+        fail_msg: >-
+          New promtool rejected the existing config:
+          {{ (prometheus_update_check_upgrade_config_check.stderr | default('') | trim)[:300] }}
+
+    - name: Set Prometheus upgrade step to binary swap
+      ansible.builtin.set_fact:
+        prometheus_update_check_upgrade_step: binary_swap
+        prometheus_update_check_upgrade_swap_started: true
+
+    - name: Install new Prometheus binary
+      ansible.builtin.copy:
+        src: >-
+          {{ prometheus_update_check_upgrade_temp.path }}/prometheus-{{ prometheus_update_check_effective_target_version }}.{{ prometheus_update_check_arch }}/prometheus
+        dest: "{{ prometheus_update_check_binary }}"
+        remote_src: true
+        owner: "{{ prometheus_update_check_upgrade_current_prometheus_stat.stat.pw_name }}"
+        group: "{{ prometheus_update_check_upgrade_current_prometheus_stat.stat.gr_name }}"
+        mode: "{{ prometheus_update_check_upgrade_current_prometheus_stat.stat.mode }}"
+
+    - name: Install new promtool binary
+      ansible.builtin.copy:
+        src: >-
+          {{ prometheus_update_check_upgrade_temp.path }}/prometheus-{{ prometheus_update_check_effective_target_version }}.{{ prometheus_update_check_arch }}/promtool
+        dest: "{{ prometheus_update_check_install_dir }}/promtool"
+        remote_src: true
+        owner: "{{ prometheus_update_check_upgrade_current_promtool_stat.stat.pw_name }}"
+        group: "{{ prometheus_update_check_upgrade_current_promtool_stat.stat.gr_name }}"
+        mode: "{{ prometheus_update_check_upgrade_current_promtool_stat.stat.mode }}"
+
+    - name: Set Prometheus upgrade step to service restart
+      ansible.builtin.set_fact:
+        prometheus_update_check_upgrade_step: service_restart
+
+    - name: Restart Prometheus after binary swap
+      ansible.builtin.systemd:
+        name: "{{ prometheus_update_check_service }}"
+        state: restarted
+
+    - name: Set Prometheus upgrade step to health verification
+      ansible.builtin.set_fact:
+        prometheus_update_check_upgrade_step: health_verification
+
+    - name: Wait for Prometheus service to become active
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/systemctl
+          - is-active
+          - "{{ prometheus_update_check_service }}"
+      register: prometheus_update_check_upgrade_active_raw
+      changed_when: false
+      retries: 6
+      delay: 5
+      until:
+        - (prometheus_update_check_upgrade_active_raw.rc | int) == 0
+        - (prometheus_update_check_upgrade_active_raw.stdout | trim) == 'active'
+
+    - name: Collect upgraded Prometheus version
+      ansible.builtin.command:
+        argv:
+          - "{{ prometheus_update_check_binary }}"
+          - --version
+      register: prometheus_update_check_upgrade_version_raw
+      changed_when: false
+
+    - name: Parse upgraded Prometheus version
+      ansible.builtin.set_fact:
+        prometheus_update_check_upgrade_version: >-
+          {{ (prometheus_update_check_upgrade_version_raw.stdout | default('') |
+              regex_findall('(?m)^prometheus, version ([0-9]+[.][0-9]+[.][0-9]+)(?:[ ]|$)') |
+              first | default('')) }}
+
+    - name: Probe upgraded Prometheus health endpoint
+      ansible.builtin.uri:
+        url: "{{ prometheus_update_check_health_url }}"
+        method: GET
+        return_content: false
+        timeout: 10
+      register: prometheus_update_check_upgrade_health_raw
+      failed_when: false
+      retries: 6
+      delay: 5
+      until: (prometheus_update_check_upgrade_health_raw.status | default(-1) | int) == 200
+
+    - name: Require upgraded Prometheus version and health
+      ansible.builtin.assert:
+        that:
+          - prometheus_update_check_upgrade_version == prometheus_update_check_effective_target_version
+          - (prometheus_update_check_upgrade_health_raw.status | default(-1) | int) == 200
+
+    - name: Record successful Prometheus upgrade
+      ansible.builtin.set_fact:
+        prometheus_update_check_status: upgraded
+        prometheus_update_check_result_version: "{{ prometheus_update_check_upgrade_version }}"
+        prometheus_update_check_error: ""
+        prometheus_update_check_failure_step: ""
+
+  rescue:
+    - name: Capture Prometheus upgrade failure
+      ansible.builtin.set_fact:
+        prometheus_update_check_failure_step: >-
+          {{ prometheus_update_check_upgrade_step | default(ansible_failed_task.name | default('unknown')) }}
+        prometheus_update_check_error: >-
+          {{ (ansible_failed_result.msg | default(ansible_failed_result.stderr | default('upgrade task failed')) | string | trim)[:500] }}
+
+    - name: Remove incomplete Prometheus backup generation
+      ansible.builtin.file:
+        path: "{{ prometheus_update_check_upgrade_backup_path }}"
+        state: absent
+      failed_when: false
+      when:
+        - prometheus_update_check_upgrade_backup_path is defined
+        - prometheus_update_check_upgrade_lock_acquired | default(false) | bool
+        - prometheus_update_check_upgrade_generation_created | default(false) | bool
+        - not (prometheus_update_check_upgrade_backup_ready | default(false) | bool)
+
+    - name: Restore previous Prometheus binary automatically
+      ansible.builtin.copy:
+        src: "{{ prometheus_update_check_upgrade_backup_path }}/prometheus"
+        dest: "{{ prometheus_update_check_binary }}"
+        remote_src: true
+        owner: "{{ prometheus_update_check_upgrade_current_prometheus_stat.stat.pw_name }}"
+        group: "{{ prometheus_update_check_upgrade_current_prometheus_stat.stat.gr_name }}"
+        mode: "{{ prometheus_update_check_upgrade_current_prometheus_stat.stat.mode }}"
+      register: prometheus_update_check_auto_restore_prometheus
+      ignore_errors: true
+      when: prometheus_update_check_upgrade_swap_started | default(false) | bool
+
+    - name: Restore previous promtool binary automatically
+      ansible.builtin.copy:
+        src: "{{ prometheus_update_check_upgrade_backup_path }}/promtool"
+        dest: "{{ prometheus_update_check_install_dir }}/promtool"
+        remote_src: true
+        owner: "{{ prometheus_update_check_upgrade_current_promtool_stat.stat.pw_name }}"
+        group: "{{ prometheus_update_check_upgrade_current_promtool_stat.stat.gr_name }}"
+        mode: "{{ prometheus_update_check_upgrade_current_promtool_stat.stat.mode }}"
+      register: prometheus_update_check_auto_restore_promtool
+      ignore_errors: true
+      when: prometheus_update_check_upgrade_swap_started | default(false) | bool
+
+    - name: Restart Prometheus after automatic binary restore
+      ansible.builtin.systemd:
+        name: "{{ prometheus_update_check_service }}"
+        state: restarted
+      register: prometheus_update_check_auto_restore_restart
+      ignore_errors: true
+      when: prometheus_update_check_upgrade_swap_started | default(false) | bool
+
+    - name: Check Prometheus active state after automatic restore
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/systemctl
+          - is-active
+          - "{{ prometheus_update_check_service }}"
+      register: prometheus_update_check_auto_restore_active_raw
+      changed_when: false
+      retries: 6
+      delay: 5
+      until:
+        - (prometheus_update_check_auto_restore_active_raw.rc | default(1) | int) == 0
+        - (prometheus_update_check_auto_restore_active_raw.stdout | default('') | trim) == 'active'
+      ignore_errors: true
+      when: prometheus_update_check_upgrade_swap_started | default(false) | bool
+
+    - name: Collect Prometheus version after automatic restore
+      ansible.builtin.command:
+        argv:
+          - "{{ prometheus_update_check_binary }}"
+          - --version
+      register: prometheus_update_check_auto_restore_version_raw
+      changed_when: false
+      ignore_errors: true
+      when: prometheus_update_check_upgrade_swap_started | default(false) | bool
+
+    - name: Inspect automatically restored Prometheus binaries
+      ansible.builtin.stat:
+        path: "{{ item }}"
+        checksum_algorithm: sha256
+        get_checksum: true
+        follow: false
+      loop:
+        - "{{ prometheus_update_check_binary }}"
+        - "{{ prometheus_update_check_install_dir }}/promtool"
+      register: prometheus_update_check_auto_restore_checksum_stats
+      ignore_errors: true
+      when: prometheus_update_check_upgrade_swap_started | default(false) | bool
+
+    - name: Probe Prometheus health after automatic restore
+      ansible.builtin.uri:
+        url: "{{ prometheus_update_check_health_url }}"
+        method: GET
+        return_content: false
+        timeout: 10
+      register: prometheus_update_check_auto_restore_health_raw
+      retries: 6
+      delay: 5
+      until: (prometheus_update_check_auto_restore_health_raw.status | default(-1) | int) == 200
+      ignore_errors: true
+      when: prometheus_update_check_upgrade_swap_started | default(false) | bool
+
+    - name: Parse Prometheus version after automatic restore
+      ansible.builtin.set_fact:
+        prometheus_update_check_auto_restore_version: >-
+          {{ (prometheus_update_check_auto_restore_version_raw.stdout | default('') |
+              regex_findall('(?m)^prometheus, version ([0-9]+[.][0-9]+[.][0-9]+)(?:[ ]|$)') |
+              first | default('')) }}
+      when: prometheus_update_check_upgrade_swap_started | default(false) | bool
+
+    - name: Record automatic rollback result
+      ansible.builtin.set_fact:
+        prometheus_update_check_automatic_rollback_state: >-
+          {{ 'not_required' if not (prometheus_update_check_upgrade_swap_started | default(false) | bool)
+             else 'succeeded'
+             if not (prometheus_update_check_auto_restore_prometheus.failed | default(false) | bool)
+                and not (prometheus_update_check_auto_restore_promtool.failed | default(false) | bool)
+                and not (prometheus_update_check_auto_restore_restart.failed | default(false) | bool)
+                and not (prometheus_update_check_auto_restore_active_raw.failed | default(false) | bool)
+                and (prometheus_update_check_auto_restore_active_raw.stdout | default('') | trim) == 'active'
+                and prometheus_update_check_auto_restore_version == prometheus_update_check_current_version
+                and not (prometheus_update_check_auto_restore_health_raw.failed | default(false) | bool)
+                and (prometheus_update_check_auto_restore_health_raw.status | default(-1) | int) == 200
+                and not (prometheus_update_check_auto_restore_checksum_stats.failed | default(false) | bool)
+                and not (prometheus_update_check_auto_restore_checksum_stats.results[0].failed | default(false) | bool)
+                and not (prometheus_update_check_auto_restore_checksum_stats.results[1].failed | default(false) | bool)
+                and (prometheus_update_check_auto_restore_checksum_stats.results[0].stat.isreg | default(false))
+                and not (prometheus_update_check_auto_restore_checksum_stats.results[0].stat.islnk | default(false))
+                and (prometheus_update_check_auto_restore_checksum_stats.results[1].stat.isreg | default(false))
+                and not (prometheus_update_check_auto_restore_checksum_stats.results[1].stat.islnk | default(false))
+                and (prometheus_update_check_auto_restore_checksum_stats.results[0].stat.checksum | default(''))
+                    == (prometheus_update_check_upgrade_backup_prometheus_checksum | default('missing'))
+                and (prometheus_update_check_auto_restore_checksum_stats.results[1].stat.checksum | default(''))
+                    == (prometheus_update_check_upgrade_backup_promtool_checksum | default('missing'))
+             else 'failed' }}
+        prometheus_update_check_status: upgrade_failed
+        prometheus_update_check_result_version: >-
+          {{ prometheus_update_check_auto_restore_version
+             if (prometheus_update_check_upgrade_swap_started | default(false) | bool)
+             else prometheus_update_check_current_version }}
+
+  always:
+    - name: Remove temporary Prometheus upgrade directory
+      ansible.builtin.file:
+        path: "{{ prometheus_update_check_upgrade_temp.path }}"
+        state: absent
+      failed_when: false
+      when: prometheus_update_check_upgrade_temp.path | default('') | length > 0
+
+    - name: Release exclusive Prometheus transaction lock
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/rmdir
+          - --
+          - "{{ prometheus_update_check_lock_dir }}"
+      register: prometheus_update_check_upgrade_lock_release_raw
+      changed_when: (prometheus_update_check_upgrade_lock_release_raw.rc | int) == 0
+      failed_when: false
+      when: prometheus_update_check_upgrade_lock_acquired | default(false) | bool
+
+    - name: Record Prometheus upgrade lock release failure
+      ansible.builtin.set_fact:
+        prometheus_update_check_lock_release_operation_status: "{{ prometheus_update_check_status }}"
+        prometheus_update_check_lock_release_operation_error: "{{ prometheus_update_check_error | default('') }}"
+        prometheus_update_check_status: lock_release_failed
+        prometheus_update_check_failure_step: lock_release
+        prometheus_update_check_error: >-
+          Prometheus operation completed with status={{ prometheus_update_check_status }},
+          but lock release failed for {{ prometheus_update_check_lock_dir }}
+          (rc={{ prometheus_update_check_upgrade_lock_release_raw.rc | default('unknown') }},
+          stderr={{ prometheus_update_check_upgrade_lock_release_raw.stderr | default('') | trim }}).
+      when:
+        - prometheus_update_check_upgrade_lock_acquired | default(false) | bool
+        - (prometheus_update_check_upgrade_lock_release_raw.rc | default(1) | int) != 0

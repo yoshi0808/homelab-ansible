@@ -1,11 +1,11 @@
 ---
-# prometheus_update_check.yml - monnieへ手動導入したPrometheusの現在版と
-# GitHub latest stable releaseを週次比較し、上位版または収集失敗だけをSlack通知する。
-# バイナリ更新、設定変更、service restartは行わない。実行元はquory、対象はmonnie。
-# Semaphore UIへのスケジュール登録は別作業。
+# prometheus_update_check.yml - monnieへ手動導入したPrometheusを3モードで管理する。
+# --checkは確認+通知のみ、通常実行はbackup/checksum/config検証付きupgradeと失敗時
+# 自動rollback、-e rollback=trueはbackupからの手動rollback。実行元quory、対象monnie。
+# config/storage/unit/retentionは変更しない。Semaphore UI設定変更は別作業。
 #
-# tester-gate: check-mode-native — command/uriによるread-only収集は--checkでも
-# 実走し、外部副作用となるSlack通知だけをansible_check_modeで抑止する。
+# tester-gate: check-mode-native — read-only収集と成果物であるSlack通知は--checkでも
+# 実走し、binary swap/restart/restore等のdestructive blockだけをcheck modeで抑止する。
 
 - name: prometheus_update_check - verify execution host
   hosts: localhost

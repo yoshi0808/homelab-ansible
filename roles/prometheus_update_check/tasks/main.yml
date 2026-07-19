@@ -1,8 +1,39 @@
 ---
-# prometheus_update_check collects installed/latest versions and reports only.
-# Parsing, comparison, status classification, and notification decisions stay
-# in Ansible; this role never downloads artifacts, updates files, or restarts
-# Prometheus.
+# prometheus_update_check always collects current/latest versions. Destructive
+# upgrade or rollback actions run only without --check; all decisions stay in
+# Ansible and Slack remains an explicit check-mode notification exception.
+
+- name: Validate Prometheus update-check inputs
+  ansible.builtin.assert:
+    that:
+      - prometheus_update_check_target_version | length == 0 or prometheus_update_check_target_version is match('^[0-9]+[.][0-9]+[.][0-9]+$')
+      - prometheus_update_check_rollback_to | length == 0 or prometheus_update_check_rollback_to is match('^[0-9]+[.][0-9]+[.][0-9]+$')
+      - prometheus_update_check_rollback | bool or prometheus_update_check_rollback_to | length == 0
+      - prometheus_update_check_arch == 'linux-amd64'
+      - prometheus_update_check_install_dir is match('^/opt/[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$')
+      - prometheus_update_check_binary == prometheus_update_check_install_dir + '/prometheus'
+      - prometheus_update_check_backup_dir == prometheus_update_check_install_dir + '/backups'
+      - prometheus_update_check_backup_keep | int >= 1
+      - prometheus_update_check_backup_keep | int <= 20
+      - prometheus_update_check_service is match('^[A-Za-z0-9][A-Za-z0-9_.@-]*$')
+      - prometheus_update_check_download_base == 'https://github.com/' + prometheus_update_check_repo + '/releases/download'
+      - prometheus_update_check_release_page_base == 'https://github.com/' + prometheus_update_check_repo + '/releases/tag'
+      - prometheus_update_check_health_url is match('^http://localhost:[0-9]+/-/healthy$')
+      - prometheus_update_check_lock_dir == '/run/lock/prometheus_update_check.lock'
+    fail_msg: "Invalid Prometheus target, rollback, path, service, or download configuration."
+    quiet: true
+
+- name: Initialize Prometheus update operation facts
+  ansible.builtin.set_fact:
+    prometheus_update_check_run_timestamp: "{{ lookup('pipe', 'TZ=Asia/Tokyo date +%Y%m%dT%H%M%S') }}"
+    prometheus_update_check_status: collection_failed
+    prometheus_update_check_error: ""
+    prometheus_update_check_failure_step: ""
+    prometheus_update_check_result_version: ""
+    prometheus_update_check_automatic_rollback_state: not_started
+    prometheus_update_check_manual_recovery_state: not_started
+    prometheus_update_check_selected_backup: {}
+    prometheus_update_check_backup_candidates: []
 
 # ---------------------------------------------------------------------------
 # Phase 1: collect the currently installed version
@@ -45,7 +76,7 @@
          | regex_replace('^v', '') }}
 
 # ---------------------------------------------------------------------------
-# Phase 3: classify collection and compare versions in Ansible
+# Phase 3/3.5: classify collection and select the requested target
 # ---------------------------------------------------------------------------
 - name: Judge Prometheus version collection status
   ansible.builtin.set_fact:
@@ -55,59 +86,123 @@
          and (prometheus_update_check_current_version is match('^[0-9]+[.][0-9]+[.][0-9]+$'))
          and (prometheus_update_check_latest_version is match('^[0-9]+[.][0-9]+[.][0-9]+$')) }}
 
-- name: Judge whether a newer Prometheus release is available
+- name: Select Prometheus target version
+  ansible.builtin.set_fact:
+    prometheus_update_check_target_pinned: "{{ prometheus_update_check_target_version | length > 0 }}"
+    prometheus_update_check_effective_target_version: >-
+      {{ prometheus_update_check_target_version
+         if (prometheus_update_check_target_version | length > 0)
+         else prometheus_update_check_latest_version }}
+
+- name: Judge whether a Prometheus upgrade is wanted
   ansible.builtin.set_fact:
     prometheus_update_check_update_available: >-
       {{ (prometheus_update_check_latest_version is version(prometheus_update_check_current_version, '>'))
          if (prometheus_update_check_collected | bool) else false }}
+    prometheus_update_check_upgrade_wanted: >-
+      {{ (prometheus_update_check_collected | bool)
+         and ((prometheus_update_check_effective_target_version != prometheus_update_check_current_version)
+              if (prometheus_update_check_target_pinned | bool)
+              else (prometheus_update_check_latest_version is version(prometheus_update_check_current_version, '>'))) }}
 
-- name: Record Prometheus update-check status
+- name: Record normal-mode pre-apply status
   ansible.builtin.set_fact:
     prometheus_update_check_status: >-
       {{ 'collection_failed' if not (prometheus_update_check_collected | bool)
-         else 'update_available' if (prometheus_update_check_update_available | bool)
+         else 'update_available' if (prometheus_update_check_upgrade_wanted | bool)
          else 'up_to_date' }}
+    prometheus_update_check_result_version: "{{ prometheus_update_check_current_version }}"
+  when: not (prometheus_update_check_rollback | bool)
 
-- name: Print Prometheus update-check summary
+# ---------------------------------------------------------------------------
+# Phase M/R discovery: rollback target selection is read-only and also runs
+# under --check so the exact backup can be reported without restoring it.
+# ---------------------------------------------------------------------------
+- name: Discover and select Prometheus rollback backup
+  ansible.builtin.include_tasks: discover_backups.yml
+  when:
+    - prometheus_update_check_rollback | bool
+    - (prometheus_update_check_current_raw.rc | default(1) | int) == 0
+    - prometheus_update_check_current_version is match('^[0-9]+[.][0-9]+[.][0-9]+$')
+
+- name: Reject manual rollback when current Prometheus version is unavailable
+  ansible.builtin.set_fact:
+    prometheus_update_check_status: rollback_failed
+    prometheus_update_check_failure_step: current_version_collection
+    prometheus_update_check_error: >-
+      Manual rollback requires a successfully collected current Prometheus version;
+      recovery from an unreadable current binary is outside this role's scope.
+    prometheus_update_check_result_version: "{{ prometheus_update_check_current_version | default('') }}"
+  when:
+    - prometheus_update_check_rollback | bool
+    - (prometheus_update_check_current_raw.rc | default(1) | int) != 0
+      or not (prometheus_update_check_current_version is match('^[0-9]+[.][0-9]+[.][0-9]+$'))
+
+- name: Show selected rollback target
+  ansible.builtin.debug:
+    msg: >-
+      Prometheus rollback target{{ ' (not executed under --check)' if ansible_check_mode else '' }}:
+      {{ prometheus_update_check_current_version | default('?', true) }} ->
+      {{ prometheus_update_check_selected_backup.version | default('?') }}
+      ({{ prometheus_update_check_selected_backup.path | default('backup unavailable') }})
+  when: prometheus_update_check_rollback | bool
+
+# ---------------------------------------------------------------------------
+# Phase U: real upgrade. The block is completely skipped under --check.
+# ---------------------------------------------------------------------------
+- name: Upgrade Prometheus with automatic rollback
+  when:
+    - not (prometheus_update_check_rollback | bool)
+    - not ansible_check_mode
+    - prometheus_update_check_upgrade_wanted | bool
+  tags: [destructive]
+  block:
+    - name: Run guarded Prometheus upgrade
+      ansible.builtin.include_tasks: upgrade.yml
+
+# ---------------------------------------------------------------------------
+# Phase R: manual rollback. Discovery above remains active under --check, but
+# restore/restart only run in a real rollback invocation.
+# ---------------------------------------------------------------------------
+- name: Roll back Prometheus from a selected backup
+  when:
+    - prometheus_update_check_rollback | bool
+    - not ansible_check_mode
+    - prometheus_update_check_selected_backup.path | default('') | length > 0
+  tags: [destructive]
+  block:
+    - name: Run guarded manual Prometheus rollback
+      ansible.builtin.include_tasks: manual_rollback.yml
+
+- name: Print Prometheus update operation summary
   ansible.builtin.debug:
     msg:
       host: "{{ inventory_hostname }}"
       status: "{{ prometheus_update_check_status }}"
       current: "{{ prometheus_update_check_current_version | default('') }}"
-      latest: "{{ prometheus_update_check_latest_version | default('') }}"
+      target: "{{ prometheus_update_check_effective_target_version | default('') }}"
+      result: "{{ prometheus_update_check_result_version | default('') }}"
+      error: "{{ prometheus_update_check_error | default('') }}"
 
 # ---------------------------------------------------------------------------
-# Phase 4: notify only for a newer release or collection failure
+# Phase 4: Slack is the intentional check-mode exception. A block is used
+# because include_tasks cannot receive check_mode directly; check_mode:false
+# cascades into common_slack while skip_notifications remains effective.
 # ---------------------------------------------------------------------------
-- name: Send Prometheus update-check notification
-  ansible.builtin.include_tasks: "{{ playbook_dir }}/../roles/common_slack/tasks/notify.yml"
-  vars:
-    slack_channel: "{{ 'alerts' if prometheus_update_check_status == 'collection_failed' else 'info' }}"
-    slack_status: "{{ 'error' if prometheus_update_check_status == 'collection_failed' else 'info' }}"
-    prometheus_update_check_binary_diagnostic: >-
-      {{ (prometheus_update_check_current_raw.stderr | default('', true))
-         or (prometheus_update_check_current_raw.msg | default('', true))
-         or '(no module message)' }}
-    prometheus_update_check_api_diagnostic: >-
-      {{ (prometheus_update_check_latest_raw.msg | default('', true))
-         or '(no module message)' }}
-    slack_title: >-
-      [prometheus_update_check] {{ 'collection failed' if prometheus_update_check_status == 'collection_failed'
-      else 'new release available' }}
-    slack_message: |
-      Prometheus weekly update check
-      - host: {{ inventory_hostname }}
-      - version: {{ prometheus_update_check_current_version | default('?', true) }} → {{ prometheus_update_check_latest_version | default('?', true) }}
-      - status: {{ prometheus_update_check_status }}
-      - installed version collection: {{ 'FAILED (rc=' ~ (prometheus_update_check_current_raw.rc | default('unknown') | string) ~ ')' if (prometheus_update_check_current_raw.rc | default(1) | int) != 0 else 'FAILED (version parse)' if not (prometheus_update_check_current_version is match('^[0-9]+[.][0-9]+[.][0-9]+$')) else 'OK' }}
-      - GitHub latest release collection: {{ 'FAILED (HTTP status=' ~ (prometheus_update_check_latest_raw.status | default('unknown') | string) ~ ')' if (prometheus_update_check_latest_raw.status | default(-1) | int) != 200 else 'FAILED (tag_name parse)' if not (prometheus_update_check_latest_version is match('^[0-9]+[.][0-9]+[.][0-9]+$')) else 'OK' }}
-      {% if prometheus_update_check_status == 'collection_failed' %}
-      - installed diagnostic: {{ (prometheus_update_check_binary_diagnostic | trim)[:200] }}
-      - GitHub API diagnostic: {{ (prometheus_update_check_api_diagnostic | trim)[:200] }}
-      {% endif %}
-      - release: {{ prometheus_update_check_release_url }}
+- name: Send Prometheus update operation notification
+  check_mode: false
+  when: prometheus_update_check_status in [
+          'update_available', 'collection_failed', 'upgraded', 'upgrade_failed',
+          'rollback_available', 'rolled_back', 'rollback_failed',
+          'lock_release_failed']
+  block:
+    - name: Build and send Prometheus Slack notification
+      ansible.builtin.include_tasks: notify.yml
 
-      自動更新は行いません。適用は人間が判断し、手動更新手順 {{ prometheus_update_check_manual_reference }} を参照してください。
-  when:
-    - not ansible_check_mode
-    - prometheus_update_check_status in ['update_available', 'collection_failed']
+- name: Fail the play after notifying about an apply or rollback failure
+  ansible.builtin.fail:
+    msg: >-
+      prometheus_update_check {{ prometheus_update_check_status }}:
+      {{ prometheus_update_check_error | default('unknown failure', true) }}
+  when: prometheus_update_check_status in [
+          'upgrade_failed', 'rollback_failed', 'lock_release_failed']

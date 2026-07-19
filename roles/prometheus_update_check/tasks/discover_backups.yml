@@ -1,0 +1,128 @@
+---
+- name: Resolve Prometheus backup root before discovery
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/readlink
+      - -m
+      - --
+      - "{{ prometheus_update_check_backup_dir }}"
+  register: prometheus_update_check_backup_root_canonical
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  become: true
+
+- name: Inspect Prometheus backup root without following symlinks
+  ansible.builtin.stat:
+    path: "{{ prometheus_update_check_backup_dir }}"
+    follow: false
+  register: prometheus_update_check_backup_root_stat
+  changed_when: false
+  check_mode: false
+  become: true
+
+- name: Record safe Prometheus backup root state
+  ansible.builtin.set_fact:
+    prometheus_update_check_backup_root_safe: >-
+      {{ (prometheus_update_check_backup_root_canonical.rc | default(1) | int) == 0
+         and (prometheus_update_check_backup_root_canonical.stdout | default('') | trim)
+             == prometheus_update_check_backup_dir
+         and (not (prometheus_update_check_backup_root_stat.stat.exists | default(false))
+              or ((prometheus_update_check_backup_root_stat.stat.isdir | default(false))
+                  and not (prometheus_update_check_backup_root_stat.stat.islnk | default(false)))) }}
+
+- name: Find Prometheus backup generations
+  ansible.builtin.find:
+    paths: "{{ prometheus_update_check_backup_dir }}"
+    recurse: false
+    file_type: directory
+    use_regex: true
+    patterns: '^[0-9]+[.][0-9]+[.][0-9]+-[0-9]{8}T[0-9]{6}$'
+  register: prometheus_update_check_backup_find
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  become: true
+  when:
+    - prometheus_update_check_backup_root_safe | bool
+    - prometheus_update_check_backup_root_stat.stat.isdir | default(false)
+
+- name: Record discovered Prometheus backup directories
+  ansible.builtin.set_fact:
+    prometheus_update_check_backup_directories: >-
+      {{ prometheus_update_check_backup_find.files | default([])
+         if (prometheus_update_check_backup_root_safe | bool)
+            and not (prometheus_update_check_backup_find.failed | default(false) | bool)
+         else [] }}
+    prometheus_update_check_backup_candidates: []
+
+- name: Inspect Prometheus binaries in backup generations
+  ansible.builtin.stat:
+    path: "{{ item.path }}/prometheus"
+    follow: false
+  loop: "{{ prometheus_update_check_backup_directories }}"
+  loop_control:
+    label: "{{ item.path }}"
+  register: prometheus_update_check_backup_prometheus_stats
+  changed_when: false
+  check_mode: false
+  become: true
+
+- name: Inspect promtool binaries in backup generations
+  ansible.builtin.stat:
+    path: "{{ item.path }}/promtool"
+    follow: false
+  loop: "{{ prometheus_update_check_backup_directories }}"
+  loop_control:
+    label: "{{ item.path }}"
+  register: prometheus_update_check_backup_promtool_stats
+  changed_when: false
+  check_mode: false
+  become: true
+
+- name: Build valid Prometheus backup candidate list
+  ansible.builtin.set_fact:
+    prometheus_update_check_backup_candidates: >-
+      {{ prometheus_update_check_backup_candidates + [{
+        'path': prometheus_update_check_backup_directories[item].path,
+        'version': (prometheus_update_check_backup_directories[item].path | basename |
+                    regex_findall('^([0-9]+[.][0-9]+[.][0-9]+)-[0-9]{8}T[0-9]{6}$') |
+                    first | default('')),
+        'mtime': prometheus_update_check_backup_directories[item].mtime | float,
+      }] }}
+  loop: "{{ range(0, prometheus_update_check_backup_directories | length) | list }}"
+  loop_control:
+    label: "{{ prometheus_update_check_backup_directories[item].path }}"
+  when:
+    - prometheus_update_check_backup_prometheus_stats.results[item].stat.isreg | default(false)
+    - not (prometheus_update_check_backup_prometheus_stats.results[item].stat.islnk | default(false))
+    - prometheus_update_check_backup_promtool_stats.results[item].stat.isreg | default(false)
+    - not (prometheus_update_check_backup_promtool_stats.results[item].stat.islnk | default(false))
+
+- name: Select requested or newest Prometheus backup
+  ansible.builtin.set_fact:
+    prometheus_update_check_selected_backup: >-
+      {{ ((prometheus_update_check_backup_candidates |
+           selectattr('version', 'equalto', prometheus_update_check_rollback_to) |
+           sort(attribute='mtime', reverse=true) | first | default({}))
+          if (prometheus_update_check_rollback_to | length > 0)
+          else (prometheus_update_check_backup_candidates |
+                sort(attribute='mtime', reverse=true) | first | default({}))) }}
+
+- name: Record rollback dry-run or unavailable-backup status
+  ansible.builtin.set_fact:
+    prometheus_update_check_status: >-
+      {{ 'rollback_failed'
+         if (prometheus_update_check_selected_backup.path | default('') | length == 0)
+         else 'rollback_available' if ansible_check_mode
+         else 'rollback_pending' }}
+    prometheus_update_check_error: >-
+      {{ 'Prometheus backup root is non-canonical, a symlink, or not a directory'
+         if not (prometheus_update_check_backup_root_safe | bool)
+         else ('No valid Prometheus backup found for rollback_to=' + prometheus_update_check_rollback_to)
+         if (prometheus_update_check_selected_backup.path | default('') | length == 0)
+            and (prometheus_update_check_rollback_to | length > 0)
+         else 'No valid Prometheus backup generation is available'
+         if (prometheus_update_check_selected_backup.path | default('') | length == 0)
+         else '' }}
+    prometheus_update_check_result_version: "{{ prometheus_update_check_current_version | default('') }}"

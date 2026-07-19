@@ -1,0 +1,66 @@
+---
+- name: Send Prometheus update notification through common Slack
+  ansible.builtin.include_tasks: "{{ playbook_dir }}/../roles/common_slack/tasks/notify.yml"
+  vars:
+    slack_channel: >-
+      {{ 'alerts' if prometheus_update_check_status in
+         ['collection_failed', 'upgrade_failed', 'rollback_failed',
+          'lock_release_failed'] else 'info' }}
+    slack_status: >-
+      {{ 'error' if prometheus_update_check_status in
+         ['collection_failed', 'upgrade_failed', 'rollback_failed',
+          'lock_release_failed'] else 'info' }}
+    slack_title: "[prometheus_update_check] {{ prometheus_update_check_status }}"
+    prometheus_update_check_binary_diagnostic: >-
+      {{ (prometheus_update_check_current_raw.stderr | default('', true))
+         or (prometheus_update_check_current_raw.msg | default('', true))
+         or '(no module message)' }}
+    prometheus_update_check_api_diagnostic: >-
+      {{ (prometheus_update_check_latest_raw.msg | default('', true))
+         or '(no module message)' }}
+    slack_message: |
+      Prometheus update operation
+      - host: {{ inventory_hostname }}
+      - status: {{ prometheus_update_check_status }}
+      {% if prometheus_update_check_status == 'update_available' %}
+      - update available (not applied{{ ' under --check' if ansible_check_mode else '' }}): {{ prometheus_update_check_current_version }} → {{ prometheus_update_check_effective_target_version }}
+      - release: {{ prometheus_update_check_release_page_base }}/v{{ prometheus_update_check_effective_target_version }}
+      {% elif prometheus_update_check_status == 'upgraded' %}
+      - upgraded: {{ prometheus_update_check_current_version }} → {{ prometheus_update_check_result_version }}
+      - health: active / version matched / HTTP 200
+      {% elif prometheus_update_check_status == 'upgrade_failed' %}
+      - upgrade failed: {{ prometheus_update_check_current_version }} → {{ prometheus_update_check_effective_target_version }}
+      - failed step: {{ prometheus_update_check_failure_step }}
+      - backup: {{ prometheus_update_check_upgrade_backup_path | default('unavailable', true) }}
+      - automatic rollback: {{ prometheus_update_check_automatic_rollback_state }}
+      - current version after recovery: {{ prometheus_update_check_result_version | default('?', true) }}
+      - error: {{ prometheus_update_check_error }}
+      {% elif prometheus_update_check_status == 'rollback_available' %}
+      - rollback target (not executed under --check): {{ prometheus_update_check_current_version | default('?', true) }} → {{ prometheus_update_check_selected_backup.version }}
+      - backup: {{ prometheus_update_check_selected_backup.path }}
+      {% elif prometheus_update_check_status == 'rolled_back' %}
+      - rolled_back: {{ prometheus_update_check_current_version | default('?', true) }} → {{ prometheus_update_check_result_version }}
+      - backup: {{ prometheus_update_check_selected_backup.path }}
+      - health: active / version matched / HTTP 200
+      {% elif prometheus_update_check_status == 'rollback_failed' %}
+      - rollback failed: {{ prometheus_update_check_current_version | default('?', true) }} → {{ prometheus_update_check_selected_backup.version | default('?', true) }}
+      - backup: {{ prometheus_update_check_selected_backup.path | default('not found', true) }}
+      - failed step: {{ prometheus_update_check_failure_step | default('backup_selection', true) }}
+      - pre-rollback recovery: {{ prometheus_update_check_manual_recovery_state }}
+      - error: {{ prometheus_update_check_error }}
+      {% elif prometheus_update_check_status == 'lock_release_failed' %}
+      - operation result before lock release: {{ prometheus_update_check_lock_release_operation_status | default('unknown') }}
+      - observed version after operation: {{ prometheus_update_check_result_version | default('?', true) }}
+      - operation error before lock release: {{ prometheus_update_check_lock_release_operation_error | default('(none)', true) }}
+      - lock path: {{ prometheus_update_check_lock_dir }}
+      - lock release error: {{ prometheus_update_check_error }}
+      - action: verify the transaction is no longer active, then follow the stale-lock recovery procedure
+      {% elif prometheus_update_check_status == 'collection_failed' %}
+      - version: {{ prometheus_update_check_current_version | default('?', true) }} → {{ prometheus_update_check_latest_version | default('?', true) }}
+      - installed version collection: {{ 'FAILED (rc=' ~ (prometheus_update_check_current_raw.rc | default('unknown') | string) ~ ')' if (prometheus_update_check_current_raw.rc | default(1) | int) != 0 else 'FAILED (version parse)' if not (prometheus_update_check_current_version is match('^[0-9]+[.][0-9]+[.][0-9]+$')) else 'OK' }}
+      - GitHub latest release collection: {{ 'FAILED (HTTP status=' ~ (prometheus_update_check_latest_raw.status | default('unknown') | string) ~ ')' if (prometheus_update_check_latest_raw.status | default(-1) | int) != 200 else 'FAILED (tag_name parse)' if not (prometheus_update_check_latest_version is match('^[0-9]+[.][0-9]+[.][0-9]+$')) else 'OK' }}
+      - installed diagnostic: {{ (prometheus_update_check_binary_diagnostic | trim)[:200] }}
+      - GitHub API diagnostic: {{ (prometheus_update_check_api_diagnostic | trim)[:200] }}
+      {% endif %}
+
+      config/storage/unit/retentionは変更していません。

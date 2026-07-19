@@ -2,6 +2,17 @@
 prometheus_update_check_binary: /opt/prometheus/prometheus
 prometheus_update_check_repo: prometheus/prometheus
 prometheus_update_check_api_url: "https://api.github.com/repos/{{ prometheus_update_check_repo }}/releases/latest"
-prometheus_update_check_release_url: "https://github.com/{{ prometheus_update_check_repo }}/releases/latest"
 prometheus_update_check_api_timeout: 15
-prometheus_update_check_manual_reference: "Notion『Prometheus / Grafana / unifi-poller セットアップ手順』"
+prometheus_update_check_target_version: "{{ prometheus_target_version | default('') }}"
+prometheus_update_check_arch: linux-amd64
+prometheus_update_check_download_base: "https://github.com/{{ prometheus_update_check_repo }}/releases/download"
+prometheus_update_check_release_page_base: "https://github.com/{{ prometheus_update_check_repo }}/releases/tag"
+prometheus_update_check_download_timeout: 120
+prometheus_update_check_backup_dir: /opt/prometheus/backups
+prometheus_update_check_backup_keep: 3
+prometheus_update_check_service: prometheus
+prometheus_update_check_install_dir: /opt/prometheus
+prometheus_update_check_health_url: http://localhost:9090/-/healthy
+prometheus_update_check_lock_dir: /run/lock/prometheus_update_check.lock
+prometheus_update_check_rollback: "{{ rollback | default(false) | bool }}"
+prometheus_update_check_rollback_to: "{{ rollback_to | default('') }}"
