@@ -1,13 +1,23 @@
 ---
-# prometheus_update_check always collects current/latest versions. Destructive
-# upgrade or rollback actions run only without --check; all decisions stay in
-# Ansible and Slack remains an explicit check-mode notification exception.
+# prometheus_update_check always collects current/latest versions. dry_run is
+# the primary mode selector; ansible_check_mode remains a second destructive
+# gate. Slack remains an explicit check-mode notification exception.
+
+- name: Require an explicit Prometheus dry-run mode
+  ansible.builtin.assert:
+    that: dry_run is defined
+    fail_msg: >-
+      dry_run must be specified explicitly: -e dry_run=true for inspection,
+      or -e dry_run=false for a deliberate upgrade/rollback apply. Omitting
+      it is fail-closed to prevent an unintended automatic upgrade.
+    quiet: true
 
 - name: Validate Prometheus update-check inputs
   ansible.builtin.assert:
     that:
       - prometheus_update_check_target_version | length == 0 or prometheus_update_check_target_version is match('^[0-9]+[.][0-9]+[.][0-9]+$')
       - prometheus_update_check_rollback_to | length == 0 or prometheus_update_check_rollback_to is match('^[0-9]+[.][0-9]+[.][0-9]+$')
+      - (dry_run | string | lower) in ['true', 'false']
       - prometheus_update_check_rollback | bool or prometheus_update_check_rollback_to | length == 0
       - prometheus_update_check_arch == 'linux-amd64'
       - prometheus_update_check_install_dir is match('^/opt/[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$')
@@ -125,6 +135,14 @@
     - (prometheus_update_check_current_raw.rc | default(1) | int) == 0
     - prometheus_update_check_current_version is match('^[0-9]+[.][0-9]+[.][0-9]+$')
 
+- name: Record Prometheus rollback target for explicit dry-run mode
+  ansible.builtin.set_fact:
+    prometheus_update_check_status: rollback_available
+  when:
+    - prometheus_update_check_rollback | bool
+    - dry_run | bool
+    - prometheus_update_check_selected_backup.path | default('') | length > 0
+
 - name: Reject manual rollback when current Prometheus version is unavailable
   ansible.builtin.set_fact:
     prometheus_update_check_status: rollback_failed
@@ -141,18 +159,21 @@
 - name: Show selected rollback target
   ansible.builtin.debug:
     msg: >-
-      Prometheus rollback target{{ ' (not executed under --check)' if ansible_check_mode else '' }}:
+      Prometheus rollback target{{ ' (not executed in dry-run mode)' if
+      ((dry_run | bool) or ansible_check_mode) else '' }}:
       {{ prometheus_update_check_current_version | default('?', true) }} ->
       {{ prometheus_update_check_selected_backup.version | default('?') }}
       ({{ prometheus_update_check_selected_backup.path | default('backup unavailable') }})
   when: prometheus_update_check_rollback | bool
 
 # ---------------------------------------------------------------------------
-# Phase U: real upgrade. The block is completely skipped under --check.
+# Phase U: real upgrade. dry_run is the primary gate and --check is the
+# independent secondary safety gate.
 # ---------------------------------------------------------------------------
 - name: Upgrade Prometheus with automatic rollback
   when:
     - not (prometheus_update_check_rollback | bool)
+    - not (dry_run | bool)
     - not ansible_check_mode
     - prometheus_update_check_upgrade_wanted | bool
   tags: [destructive]
@@ -161,12 +182,13 @@
       ansible.builtin.include_tasks: upgrade.yml
 
 # ---------------------------------------------------------------------------
-# Phase R: manual rollback. Discovery above remains active under --check, but
-# restore/restart only run in a real rollback invocation.
+# Phase R: manual rollback. Discovery remains active in both dry-run layers;
+# restore/restart require dry_run=false and native check mode off.
 # ---------------------------------------------------------------------------
 - name: Roll back Prometheus from a selected backup
   when:
     - prometheus_update_check_rollback | bool
+    - not (dry_run | bool)
     - not ansible_check_mode
     - prometheus_update_check_selected_backup.path | default('') | length > 0
   tags: [destructive]
@@ -178,6 +200,7 @@
   ansible.builtin.debug:
     msg:
       host: "{{ inventory_hostname }}"
+      dry_run: "{{ dry_run | bool }}"
       status: "{{ prometheus_update_check_status }}"
       current: "{{ prometheus_update_check_current_version | default('') }}"
       target: "{{ prometheus_update_check_effective_target_version | default('') }}"

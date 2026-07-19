@@ -1,17 +1,55 @@
 ---
-# prometheus_update_check.yml - monnieへ手動導入したPrometheusを3モードで管理する。
-# --checkは確認+通知のみ、通常実行はbackup/checksum/config検証付きupgradeと失敗時
-# 自動rollback、-e rollback=trueはbackupからの手動rollback。実行元quory、対象monnie。
-# config/storage/unit/retentionは変更しない。Semaphore UI設定変更は別作業。
+# prometheus_update_check.yml - quoryからmonnieへ手動導入したPrometheusを管理する。
+# dry_run extra-varが主モード選択で、未指定は意図しない自動upgradeを防ぐためfail-closed。
+# config/storage/unit/retentionは変更せず、binary 2本だけを安全機構付きで更新/復元する。
+#
+# Weekly inspection / existing Friday Semaphore schedule:
+#   ansible-playbook playbooks/prometheus_update_check.yml -e dry_run=true
+# Manual apply (optional version pin):
+#   ansible-playbook playbooks/prometheus_update_check.yml -e dry_run=false
+#   Optional: append -e prometheus_target_version=X.Y.Z
+# Manual rollback (optional backup version):
+#   ansible-playbook playbooks/prometheus_update_check.yml \
+#     -e rollback=true -e dry_run=false
+#   Optional: append -e rollback_to=X.Y.Z
+# Rollback inspection only:
+#   ansible-playbook playbooks/prometheus_update_check.yml \
+#     -e rollback=true -e dry_run=true
+# Validate the apply path without changing binaries or restarting:
+#   ansible-playbook playbooks/prometheus_update_check.yml --check \
+#     -e dry_run=false
+#
+# Deployment requirement: add `-e dry_run=true` to the existing Friday
+# Semaphore task. Until updated, that job fails at the required-variable
+# assertion; it never falls through to automatic upgrade.
+# Design record: docs/ai/reviews/prometheus_update_check/2026-07-19_015_implement.md
 #
 # tester-gate: check-mode-native — read-only収集と成果物であるSlack通知は--checkでも
-# 実走し、binary swap/restart/restore等のdestructive blockだけをcheck modeで抑止する。
+# 実走する。destructive blockはdry_run=falseに加えnot ansible_check_modeも必須とし、
+# --check -e dry_run=falseで適用引数経路を無変更のまま検証できる。
 
 - name: prometheus_update_check - verify execution host
   hosts: localhost
   gather_facts: true
   connection: local
   tasks:
+    - name: Require an explicit Prometheus dry-run mode
+      ansible.builtin.assert:
+        that: dry_run is defined
+        fail_msg: >-
+          dry_run must be specified explicitly: -e dry_run=true for
+          inspection or -e dry_run=false for deliberate apply. Update the
+          existing Friday Semaphore task to pass -e dry_run=true.
+        quiet: true
+
+    - name: Validate the explicit Prometheus dry-run mode
+      ansible.builtin.assert:
+        that: (dry_run | string | lower) in ['true', 'false']
+        fail_msg: >-
+          dry_run must be boolean true or false. Got
+          dry_run={{ dry_run | string }}.
+        quiet: true
+
     - name: Ensure this playbook is running on quory
       ansible.builtin.assert:
         that:

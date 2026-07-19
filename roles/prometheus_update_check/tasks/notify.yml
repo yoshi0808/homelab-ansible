@@ -36,7 +36,7 @@
       - current version after recovery: {{ prometheus_update_check_result_version | default('?', true) }}
       - error: {{ prometheus_update_check_error }}
       {% elif prometheus_update_check_status == 'rollback_available' %}
-      - rollback target (not executed under --check): {{ prometheus_update_check_current_version | default('?', true) }} → {{ prometheus_update_check_selected_backup.version }}
+      - rollback target (not executed in dry-run mode): {{ prometheus_update_check_current_version | default('?', true) }} → {{ prometheus_update_check_selected_backup.version }}
       - backup: {{ prometheus_update_check_selected_backup.path }}
       {% elif prometheus_update_check_status == 'rolled_back' %}
       - rolled_back: {{ prometheus_update_check_current_version | default('?', true) }} → {{ prometheus_update_check_result_version }}
