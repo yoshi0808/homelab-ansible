@@ -88,6 +88,38 @@ loki.process {{ (source.name ~ '_pipeline') | to_json }} {
     }
   }
 {% endif %}
+{% if source.labels.job == 'unifi' %}
+{% set cef_selector_prefix = '{job=' ~ (source.labels.job | to_json) ~ '} |~ ' %}
+{% set cef_header_prefix = 'CEF:[[:space:]]*[0-9]+\\\\|[^|]*\\\\|[^|]*\\\\|[^|]*\\\\|[^|]*\\\\|[^|]*\\\\|' %}
+{% set cef_regex_delimiter = '"' %}
+  // CloudKey's two CEF producers differ only in optional whitespace after
+  // "CEF:". Treat the numeric CEF header severity as authoritative, after
+  // the generic token-based best-effort stages above. Labels only: preserve
+  // both UniFi raw message formats byte-for-byte.
+  stage.match {
+    selector = {{ (cef_selector_prefix ~ cef_regex_delimiter ~ cef_header_prefix ~ '[0-3]\\\\|' ~ cef_regex_delimiter) | to_json }}
+
+    stage.static_labels {
+      values = { "level" = "info" }
+    }
+  }
+
+  stage.match {
+    selector = {{ (cef_selector_prefix ~ cef_regex_delimiter ~ cef_header_prefix ~ '[4-6]\\\\|' ~ cef_regex_delimiter) | to_json }}
+
+    stage.static_labels {
+      values = { "level" = "warning" }
+    }
+  }
+
+  stage.match {
+    selector = {{ (cef_selector_prefix ~ cef_regex_delimiter ~ cef_header_prefix ~ '(?:10|[7-9])\\\\|' ~ cef_regex_delimiter) | to_json }}
+
+    stage.static_labels {
+      values = { "level" = "error" }
+    }
+  }
+{% endif %}
 }
 
 {% endif %}
