@@ -473,11 +473,9 @@ AI が patch / reboot / migration / inventory 変更などの危険操作を、�
 AI の役割分担は以下とする。
 
 ```text
-要求仕様整理: ChatGPT / Claude Code（要件定義・ハブ役）
-実装: Claude Code（implementer ロール）
+要求仕様整理: Codex(`techlead`) / Claude Code（`claude`）
+実装: Codex（implementer ロール）
 レビュー: Codex（reviewer ロール）
-追加実装: Claude Code（implementer ロール）
-再レビュー: Codex（reviewer ロール）
 テスト: Codex（tester ロール。安全な検証方法を選択し、品質を保証する QA 担当。本番適用はしない）
 運用判断: Yoshinobu
 本番実行判断: Yoshinobu
@@ -485,18 +483,9 @@ AI の役割分担は以下とする。
 コミット: Yoshinobu
 ```
 
-Claude Code は agmsg 上で2ロールに分かれる（詳細は §15）。
-
-- 要件定義・ハブ役（agmsg 名 `claude`）: ユーザーとの対話、requirement 整理・保存、
-  implementer / reviewer / tester との受け渡し仲介、レビュー指摘のトリアージ、
-  test_plan 起案、テスト結果と requirement の突合。
-- 実装担当（agmsg 名 `implementer`）: `claude` から受け取った requirement /
-  review をもとに実装し、implement ファイルを保存する。reviewer / tester とは
-  直接やり取りせず、常に `claude` 経由で受け渡しする。
-
 #### 2セッション体制（`claude` / `techlead`、2026-07-19〜）
 
-Claude Code は同一リポ・同一ホスト上で **2つのライブセッション**として並行することがある。どちらも中身は Yoshinobu 本人が操作するが、agmsg 上は別名義で宛先を分離する。
+Claude Code の`claude`はプロジェクトリーダー役である。全体ガバナンスを管理する。難易度の高い個別の要件定義を行う場合もある。細かな案件は`techlead`が担う。`techlead`はClaudeCodeまたはCodexが同一リポ・同一ホスト上で **2つのライブセッション**として並行することがある。どちらも中身は Yoshinobu 本人が操作するが、agmsg 上は別名義で宛先を分離する。
 
 - `claude`（CLI / tmux 常駐、**プロジェクトリーダー**）: 上記の要件定義・ハブ役。実装
   pipeline の統括、tmux での Codex 群の駆動、commit 準備、**memory の清書・統合**を担う。
@@ -525,9 +514,7 @@ Claude Code は同一リポ・同一ホスト上で **2つのライブセッシ�
 
 設計用テンプレート、Claude Code 実装テンプレート、Codex レビューテンプレートは、原則として置かない。
 
-要求仕様は、ユーザーと ChatGPT の会話で整理する。
-
-Codex レビューの観点も `core.md` にまとめる。レビューで不足が出た場合は、別テンプレートを増やすのではなく、まず `core.md` を改善する。
+要求仕様は、ユーザーと AI の会話で整理する。
 
 推奨構成:
 
@@ -604,17 +591,17 @@ YYYY-MM-DD_008_final.md
 
 ```text
 1. ユーザーが作りたい Playbook / Role を ChatGPT、または要件定義・ハブ役の
-   Claude Code（agmsg 名 `claude`）に相談する
+   Claude Code（agmsg 名 `claude`）または`techlead`に相談する
 
-2. ChatGPT / `claude` が会話を通じて要求仕様を整理する
+2. `techlead` / `claude` が会話を通じて要求仕様を整理する
 
 3. ユーザーが要求仕様を確認する
 
-4. `claude` は、ユーザーから受け取った要求仕様を以下に保存する
+4. `claude` または`techlead`は、ユーザーから受け取った要求仕様を以下に保存する
 
    docs/ai/reviews/<target>/YYYY-MM-DD_001_requirement.md
 
-5. `claude` が `implementer` に requirement のパスと implement の保存先パスを
+5. `techlead` が `implementer` に requirement のパスと implement の保存先パスを
    agmsg で送る（§「エージェント間メッセージング（agmsg）」）
 
 6. `implementer` が playbook / role / shell を実装する
@@ -635,9 +622,9 @@ YYYY-MM-DD_008_final.md
 
    `implementer` は保存後、implement ファイルのパスを `claude` に agmsg で返す。
 
-8. `claude` が reviewer に requirement / implement のパスと review の保存先を送る
+8. `techlead` が reviewer に requirement / implement のパスと review の保存先を送る
 
-9. Codex（`reviewer`）が git diff、requirement、implement をもとにレビューし、
+9. `reviewer`が git diff、requirement、implement をもとにレビューし、
    以下に保存する
 
    docs/ai/reviews/<target>/YYYY-MM-DD_003_review.md
@@ -645,7 +632,7 @@ YYYY-MM-DD_008_final.md
 10. `reviewer` が review ファイルのパスを `claude` に返す。`claude` は指摘を
     トリアージし（後述）、修正要否をユーザーに提示する
 
-11. 修正が必要な場合、`claude` が `implementer` に review ファイルのパスを渡して
+11. 修正が必要な場合、`techlead` が `implementer` に review ファイルのパスを渡して
     追加実装を依頼する
 
 12. `implementer` は、追加実装後の内容を次の implement として保存し、
@@ -707,14 +694,14 @@ Codex にレビューを依頼する場合は、対象となる requirement / im
 
 | 工程             | 担当                          | 保存するファイル                                             | 次に参照する主なファイル                                     |
 | ---------------- | ----------------------------- | ------------------------------------------------------------ | ------------------------------------------------------------ |
-| 要求仕様の整理   | ChatGPT / `claude`（ハブ）    | ChatGPT の場合は直接ファイル保存はせず要求仕様本文を提示する。`claude` の場合は次行の requirement 保存まで行う。 | ChatGPT が提示した要求仕様本文、または requirement ファイル  |
-| requirement 保存 | `claude`（ハブ）              | `YYYY-MM-DD_001_requirement.md`                              | `YYYY-MM-DD_001_requirement.md`                              |
+| 要求仕様の整理   | `techlead` / `claude`（ハブ）    | 次行の requirement 保存まで行う。 | ユーザー が提示した要求仕様本文、または requirement ファイル  |
+| requirement 保存 | `tedhlead`（ハブ）              | `YYYY-MM-DD_001_requirement.md`                              | `YYYY-MM-DD_001_requirement.md`                              |
 | 初回実装         | `implementer`                 | `YYYY-MM-DD_002_implement.md`                                | `YYYY-MM-DD_001_requirement.md`, `YYYY-MM-DD_002_implement.md` |
-| レビュー         | Codex（`reviewer`）           | `YYYY-MM-DD_003_review.md`                                   | `YYYY-MM-DD_001_requirement.md`, `YYYY-MM-DD_002_implement.md`, `YYYY-MM-DD_003_review.md` |
+| レビュー         | `reviewer`）           | `YYYY-MM-DD_003_review.md`                                   | `YYYY-MM-DD_001_requirement.md`, `YYYY-MM-DD_002_implement.md`, `YYYY-MM-DD_003_review.md` |
 | 追加実装         | `implementer`                 | `YYYY-MM-DD_004_implement.md`                                | `YYYY-MM-DD_001_requirement.md`, `YYYY-MM-DD_003_review.md`, `YYYY-MM-DD_004_implement.md` |
-| 再レビュー       | Codex（`reviewer`）           | `YYYY-MM-DD_005_review.md`                                   | `YYYY-MM-DD_001_requirement.md`, `YYYY-MM-DD_004_implement.md`, `YYYY-MM-DD_005_review.md` |
+| 再レビュー       | `reviewer`           | `YYYY-MM-DD_005_review.md`                                   | `YYYY-MM-DD_001_requirement.md`, `YYYY-MM-DD_004_implement.md`, `YYYY-MM-DD_005_review.md` |
 
-`claude`（要件定義・ハブ役）は、ユーザーから受け取った要求仕様を `requirement` ファイルとして保存する。
+`techlead`（要件定義・ハブ役）は、ユーザーから受け取った要求仕様を `requirement` ファイルとして保存する。
 ユーザーが手作業で requirement ファイルを作る運用ではない。
 
 `implementer` は、実装完了後に実装内容・作成/更新ファイル・確認結果を `implement` ファイルとして保存する。
@@ -730,7 +717,7 @@ Next step files:
 - docs/ai/reviews/radius_healthcheck/2026-05-06_002_implement.md
 ```
 
-ユーザーは、この一覧をそのまま次の `claude` / `implementer` / Codex への依頼に含める。
+ユーザーは、この一覧をそのまま次の `claude` または `techlead` への依頼に含める。
 
 agmsg を使う場合の受け渡しは、次の「エージェント間メッセージング（agmsg）」に従う。
 
@@ -742,8 +729,8 @@ agmsg を使う場合の受け渡しは、次の「エージェント間メッ�
 
 | ロール        | エージェント | 種別                                                         |
 | ------------- | ------------ | ------------------------------------------------------------ |
-| `claude`      | Claude Code  | 要件定義・ハブ担当（ユーザー対話、requirement 作成、implementer/reviewer/tester との受け渡し仲介、トリアージ、test_plan 起案、結果突合） |
-| `implementer` | Claude Code  | 実装担当（`claude` から requirement / review を受け取り実装、implement ファイル作成） |
+| `techlead`,`claude`      | Claude Code またはCodex  | 要件定義・ハブ担当（ユーザー対話、requirement 作成、implementer/reviewer/tester との受け渡し仲介、トリアージ、test_plan 起案、結果突合） |
+| `implementer` | Codex  | 実装担当（`techlead` から requirement / review を受け取り実装、implement ファイル作成） |
 | `reviewer`    | Codex        | レビュー担当                                                 |
 | `tester`      | Codex        | テスト担当（on-demand 起動）                                 |
 
@@ -756,37 +743,40 @@ agmsg を使う場合の受け渡しは、次の「エージェント間メッ�
 - 全エージェントは同じ作業ディレクトリ（`ansy` 上のリポジトリ）を共有するため、
   受け取った側は、メッセージのパスから実体ファイルを読む。
 - `implementer` は `reviewer` / `tester` と直接やり取りしない。受け渡しは常に
-  `claude` を経由する（`claude` がハブ）。
+  `techlead` を経由する。
 
 流れ:
 
 ```text
-1. claude が requirement を書き、implementer に
+1. techlead が requirement を書き、implementer に
    requirement / implement 保存先のパスを送る
-2. implementer が実装し、implement ファイルを書いて claude に返す
-3. claude が reviewer に agmsg で
+2. implementer が実装し、implement ファイルを書いて techlead に返す
+3. techlead が reviewer に agmsg で
    requirement / implement のパスと、review の保存先パスを送る
-4. Codex（reviewer）がファイルを読み、レビューして review ファイルを書く
-5. reviewer が claude に agmsg で、結果サマリと review ファイルのパスを返す
-6. claude が指摘をトリアージし、修正が必要なら review のパスを添えて
+4. reviewerがファイルを読み、レビューして review ファイルを書く
+5. reviewer が techlead に agmsg で、結果サマリと review ファイルのパスを返す
+6. techlead が指摘をトリアージし、修正が必要なら review のパスを添えて
    implementer に追加実装を依頼する
 7. 必要なら 2〜6 を繰り返す
 8. Yoshinobu が判断し、commit する
 ```
 
-注意:
+注意: tmuxの操作について
 
-- Codex（`reviewer` / `tester`）は Monitor を持たず、agmsg を自動受信しない。
-  Claude Code 側から agmsg をキックして、受信・処理させる。
-  Claude Code（`claude` / `implementer`）はどちらも monitor モードで自動受信する。
+- tmux 上の担当エージェントが AI の ASK・承認プロンプトで停止した
+  ことを検知するため、`scripts/tmux-ask-watch.sh` を使用してよい。
+- watcher は停止状態を agmsg で techlead に通知するだけであり、キー入力、
+  自動承認、コマンド実行は行わない。
+- 通知を受けた techlead は対象ペインと要求内容を確認し、承認可否を Yoshinobu に
+  委ねる。watcher の通知を承認そのものとして扱わない。
+- ペイン内容、実行コマンド、質問本文、秘密情報は agmsg 通知へ転載しない。
 - agmsg はあくまで受け渡し手段であり、運用判断・本番実行判断・commit 判断は
   §14 の通り Yoshinobu が行う。agmsg ループは Yoshinobu の判断待ちで止まる。
   AI が agmsg 経由で自律的に commit や危険操作を行う構成は採用しない。
 
+### reviewer レビュー観点
 
-### Codex レビュー観点
-
-Codex にレビューを依頼する場合は、主に以下を確認する。
+reviewer にレビューを依頼する場合は、主に以下を確認する。
 
 - `core.md` の方針に反していないか
 - shell / script が収集と JSON 整形に留まっているか
@@ -810,7 +800,7 @@ Codex にレビューを依頼する場合は、主に以下を確認する。
 
 ### レビュー指摘のトリアージと仲裁
 
-要件定義・ハブ役の `claude` は、Codex のレビュー結果を鵜呑みにして全指摘を機械的に
+要件定義・ハブ役の `techlead` は、reviewer のレビュー結果を鵜呑みにして全指摘を機械的に
 implementer へ流さない。各指摘を自分で評価し、分類したうえで Yoshinobu に提示し、
 採否の判断を仰ぐ。
 
