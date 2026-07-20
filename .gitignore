@@ -40,12 +40,17 @@ homelab_vault_pass
 .cert/
 
 # ヘルパーシェル
-new-session.sh
+scripts/tests
+new-session.sh*
 kick.sh
 prep-agent.sh
 start-tester.sh
 stop-tester.sh
 swap-right.sh
+
+scripts/ai-next.sh
+tmux-ask-watch.sh
+
 
 .codex
 .claude/settings.local.json
