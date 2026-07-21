@@ -42,12 +42,18 @@
              else ['memory collection failed (free -b returned no data)'])
       + ([] if radius_health.memory.used_percent | int < 90
              else ['memory used_percent is ' + (radius_health.memory.used_percent | string) + '%'])
+      + ([] if radius_health.disk.collection_ok
+             else ['disk collection failed (df -B1 -P / returned no data)'])
+      + ([] if radius_health.disk.used_percent | int < 90
+             else ['disk used_percent is ' + (radius_health.disk.used_percent | string) + '%'])
       }}"
     radius_warnings: "{{ []
       + ([] if radius_health.journal.error_count_1h | int == 0
              else ['journal errors in last 1h: ' + (radius_health.journal.error_count_1h | string)])
       + ([] if radius_health.memory.used_percent | int < 80 or radius_health.memory.used_percent | int >= 90
              else ['memory used_percent is ' + (radius_health.memory.used_percent | string) + '%'])
+      + ([] if radius_health.disk.used_percent | int < 80 or radius_health.disk.used_percent | int >= 90
+             else ['disk used_percent is ' + (radius_health.disk.used_percent | string) + '%'])
       }}"
 
 - name: Build report
@@ -70,6 +76,12 @@
         used_mb: "{{ radius_health.memory.used_mb }}"
         available_mb: "{{ radius_health.memory.available_mb }}"
         used_percent: "{{ radius_health.memory.used_percent }}"
+      disk:
+        collection_ok: "{{ radius_health.disk.collection_ok }}"
+        total_mb: "{{ radius_health.disk.total_mb }}"
+        used_mb: "{{ radius_health.disk.used_mb }}"
+        available_mb: "{{ radius_health.disk.available_mb }}"
+        used_percent: "{{ radius_health.disk.used_percent }}"
       result:
         status: "{{ 'CRITICAL' if radius_criticals | length > 0
                     else ('WARNING' if radius_warnings | length > 0
@@ -86,5 +98,11 @@
       - "Ports   : 1812/udp={{ radius_health.ports.udp_1812 }} 1813/udp={{ radius_health.ports.udp_1813 }}"
       - "Journal : error_count_1h={{ radius_health.journal.error_count_1h }}"
       - "Memory  : collection_ok={{ radius_health.memory.collection_ok }} total={{ radius_health.memory.total_mb }}MB used={{ radius_health.memory.used_mb }}MB available={{ radius_health.memory.available_mb }}MB used_percent={{ radius_health.memory.used_percent }}%"
+      - >-
+        Disk    : collection_ok={{ radius_health.disk.collection_ok }}
+        total={{ radius_health.disk.total_mb }}MB
+        used={{ radius_health.disk.used_mb }}MB
+        available={{ radius_health.disk.available_mb }}MB
+        used_percent={{ radius_health.disk.used_percent }}%
       - "Criticals: {{ radius_criticals }}"
       - "Warnings : {{ radius_warnings }}"

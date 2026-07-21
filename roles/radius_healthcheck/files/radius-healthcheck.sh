@@ -54,6 +54,33 @@ else
   mem_available_bytes=0
 fi
 
+if disk_line=$(LC_ALL=C df -B1 -P / 2>/dev/null | awk 'NR == 2 {print $2, $3, $4, $5}') && [ -n "$disk_line" ]; then
+  disk_total_bytes=$(echo "$disk_line" | cut -d' ' -f1)
+  disk_used_bytes=$(echo "$disk_line" | cut -d' ' -f2)
+  disk_available_bytes=$(echo "$disk_line" | cut -d' ' -f3)
+  disk_used_percent_raw=$(echo "$disk_line" | cut -d' ' -f4)
+  if [[ "$disk_total_bytes" =~ ^[0-9]+$ ]] && \
+     [[ "$disk_used_bytes" =~ ^[0-9]+$ ]] && \
+     [[ "$disk_available_bytes" =~ ^[0-9]+$ ]] && \
+     [[ "$disk_used_percent_raw" =~ ^[0-9]+%$ ]] && \
+     [ "$disk_total_bytes" -gt 0 ]; then
+    disk_collection_ok="true"
+    disk_used_percent="${disk_used_percent_raw%\%}"
+  else
+    disk_collection_ok="false"
+    disk_total_bytes=0
+    disk_used_bytes=0
+    disk_available_bytes=0
+    disk_used_percent=0
+  fi
+else
+  disk_collection_ok="false"
+  disk_total_bytes=0
+  disk_used_bytes=0
+  disk_available_bytes=0
+  disk_used_percent=0
+fi
+
 FREERADIUS_SERVICE_ACTIVE="$freeradius_service_active" \
 FREERADIUS_VERSION="$freeradius_version" \
 PORT_1812="$port_1812" \
@@ -64,6 +91,11 @@ MEM_COLLECTION_OK="$mem_collection_ok" \
 MEM_TOTAL_BYTES="$mem_total_bytes" \
 MEM_USED_BYTES="$mem_used_bytes" \
 MEM_AVAILABLE_BYTES="$mem_available_bytes" \
+DISK_COLLECTION_OK="$disk_collection_ok" \
+DISK_TOTAL_BYTES="$disk_total_bytes" \
+DISK_USED_BYTES="$disk_used_bytes" \
+DISK_AVAILABLE_BYTES="$disk_available_bytes" \
+DISK_USED_PERCENT="$disk_used_percent" \
 python3 - << 'PYEOF'
 import json, os
 from datetime import datetime, timezone, timedelta
@@ -74,6 +106,12 @@ mem_total = int(os.environ.get("MEM_TOTAL_BYTES", 0))
 mem_used = int(os.environ.get("MEM_USED_BYTES", 0))
 mem_available = int(os.environ.get("MEM_AVAILABLE_BYTES", 0))
 mem_used_percent = round(mem_used / mem_total * 100) if mem_total > 0 else 0
+
+disk_collection_ok = os.environ.get("DISK_COLLECTION_OK", "false") == "true"
+disk_total = int(os.environ.get("DISK_TOTAL_BYTES", 0))
+disk_used = int(os.environ.get("DISK_USED_BYTES", 0))
+disk_available = int(os.environ.get("DISK_AVAILABLE_BYTES", 0))
+disk_used_percent = int(os.environ.get("DISK_USED_PERCENT", 0))
 
 print(json.dumps({
     "collected_at": datetime.now(JST).strftime("%Y-%m-%dT%H:%M:%S%z"),
@@ -95,6 +133,13 @@ print(json.dumps({
         "used_mb": round(mem_used / 1048576),
         "available_mb": round(mem_available / 1048576),
         "used_percent": mem_used_percent
+    },
+    "disk": {
+        "collection_ok": disk_collection_ok,
+        "total_mb": round(disk_total / 1048576),
+        "used_mb": round(disk_used / 1048576),
+        "available_mb": round(disk_available / 1048576),
+        "used_percent": disk_used_percent
     }
 }))
 PYEOF
