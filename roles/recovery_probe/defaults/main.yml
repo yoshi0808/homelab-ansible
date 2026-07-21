@@ -22,8 +22,10 @@ recovery_probe_user: yoshi
 # LAN 側が健全な分岐と通知 flush 時のみ(requirement 参照)
 recovery_probe_external_check_url: https://one.one.one.one
 
-# pvesh 確証に使う pve ホスト(inventory 名)
-recovery_probe_pve_host: pve1
+# pvesh 確証に使う pve ホスト(inventory 名)。
+# 暫定: pve1は平日日中シャットダウン運用のため常時起動のpve2に向ける
+# (2026-07-21)。pve1を平日常時起動に戻す場合は要見直し。
+recovery_probe_pve_host: pve2
 
 # true にすると systemd サービスを enable + start する(本番 quory)。
 # 開発(ansy)では配置のみで起動しない(recovery_io_setup と同じ流儀)
