@@ -3,3 +3,6 @@ proxmox_snapshot_check_report_dir: "{{ reports_base_dir }}/proxmox-snapshot"
 
 # Snapshots older than this are reported as stale (default: 7 days).
 proxmox_snapshot_check_threshold_seconds: 604800
+
+# Stale snapshots at or beyond this age are critical (default: 30 days).
+proxmox_snapshot_check_critical_threshold_seconds: 2592000

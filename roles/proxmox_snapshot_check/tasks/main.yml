@@ -22,10 +22,21 @@
   ansible.builtin.set_fact:
     proxmox_snapshot_data: "{{ snapshot_raw.stdout | from_json }}"
 
+- name: Validate snapshot age thresholds
+  ansible.builtin.assert:
+    that:
+      - proxmox_snapshot_check_critical_threshold_seconds | int > proxmox_snapshot_check_threshold_seconds | int
+    fail_msg: >-
+      proxmox_snapshot_check_critical_threshold_seconds must be greater than
+      proxmox_snapshot_check_threshold_seconds
+
 - name: Compute staleness threshold (epoch)
   ansible.builtin.set_fact:
     _snap_now_epoch: "{{ ansible_facts['date_time']['epoch'] | int }}"
     _snap_threshold_epoch: "{{ (ansible_facts['date_time']['epoch'] | int) - (proxmox_snapshot_check_threshold_seconds | int) }}"
+    proxmox_snapshot_check_critical_threshold_epoch: >-
+      {{ (ansible_facts['date_time']['epoch'] | int) -
+         (proxmox_snapshot_check_critical_threshold_seconds | int) }}
 
 # Requirement: "7日（604800秒）以上前" -> snapshots at or beyond the threshold age
 # (snaptime <= now - threshold), so a snapshot exactly at the boundary is included.
@@ -48,6 +59,13 @@
   loop_control:
     label: "{{ item.type }}/{{ item.vmid }}/{{ item.snapname }}"
 
+- name: Split stale snapshots into warning and critical lists
+  ansible.builtin.set_fact:
+    proxmox_snapshot_check_stale_warning_entries: "{{ _stale_entries |
+      selectattr('snaptime', 'gt', proxmox_snapshot_check_critical_threshold_epoch | int) | list }}"
+    proxmox_snapshot_check_stale_critical_entries: "{{ _stale_entries |
+      selectattr('snaptime', 'le', proxmox_snapshot_check_critical_threshold_epoch | int) | list }}"
+
 # A collection failure must not be reported as "no stale snapshots / OK".
 - name: Determine collection failure
   ansible.builtin.set_fact:
@@ -60,13 +78,21 @@
       node: "{{ proxmox_snapshot_data.node }}"
       collected_at: "{{ proxmox_snapshot_data.collected_at }}"
       threshold_days: "{{ proxmox_snapshot_check_threshold_seconds | int // 86400 }}"
+      critical_threshold_days: "{{ proxmox_snapshot_check_critical_threshold_seconds | int // 86400 }}"
       collection_ok: "{{ proxmox_snapshot_data.collection_ok }}"
       errors: "{{ proxmox_snapshot_data.errors }}"
       total_snapshots: "{{ proxmox_snapshot_data.snapshots | length }}"
       stale_count: "{{ _stale_entries | length }}"
       stale_snapshots: "{{ _stale_entries }}"
+      stale_warning_count: "{{ proxmox_snapshot_check_stale_warning_entries | length }}"
+      stale_warning_snapshots: "{{ proxmox_snapshot_check_stale_warning_entries }}"
+      stale_critical_count: "{{ proxmox_snapshot_check_stale_critical_entries | length }}"
+      stale_critical_snapshots: "{{ proxmox_snapshot_check_stale_critical_entries }}"
       result:
-        status: "{{ 'WARNING' if (_stale_entries | length > 0 or _snap_collection_failed | bool) else 'OK' }}"
+        status: "{{ 'CRITICAL' if proxmox_snapshot_check_stale_critical_entries | length > 0
+                    else ('WARNING' if (proxmox_snapshot_check_stale_warning_entries | length > 0 or
+                                        _snap_collection_failed | bool)
+                    else 'OK') }}"
 
 - name: Ensure report directory exists
   ansible.builtin.file:
@@ -89,7 +115,11 @@
       {% set ns = namespace(result='OK', lines=[]) -%}
       {% for host in ansible_play_hosts -%}
       {% set r = hostvars[host].proxmox_snapshot_report -%}
-      {% if r.result.status == 'WARNING' %}{% set ns.result = 'WARNING' %}{% endif -%}
+      {% if r.result.status == 'CRITICAL' -%}
+      {% set ns.result = 'CRITICAL' -%}
+      {% elif r.result.status == 'WARNING' and ns.result != 'CRITICAL' -%}
+      {% set ns.result = 'WARNING' -%}
+      {% endif -%}
       {% set _ = ns.lines.append(host ~ '=' ~ r.result.status ~ '(stale=' ~ (r.stale_count | string) ~ '/' ~ (r.total_snapshots | string) ~ ',collection_ok=' ~ (r.collection_ok | string | lower) ~ ',errors=' ~ (r.errors | length | string) ~ ')') -%}
       {% endfor -%}
       SUMMARY proxmox_snapshot_check | Result={{ ns.result }} | {{ ns.lines | join(' | ') }} | Threshold={{ proxmox_snapshot_check_threshold_seconds | int // 86400 }}d
@@ -105,12 +135,19 @@
   tags: notify
   vars:
     slack_channel: "alerts"
-    slack_status: "warning"
-    slack_title: "[Proxmox Snapshot Check] WARNING - {{ inventory_hostname }}"
+    slack_status: "{{ 'critical' if proxmox_snapshot_report.result.status == 'CRITICAL' else 'warning' }}"
+    slack_title: "[Proxmox Snapshot Check] {{ proxmox_snapshot_report.result.status }} - {{ inventory_hostname }}"
     slack_message: |
-      Host : {{ inventory_hostname }}
-      Stale snapshots (>= {{ proxmox_snapshot_report.threshold_days }} days): {{ proxmox_snapshot_report.stale_count }}
-      {% for s in proxmox_snapshot_report.stale_snapshots %}
+      {% set warning_days = proxmox_snapshot_report.threshold_days %}
+      {% set critical_days = proxmox_snapshot_report.critical_threshold_days %}
+      Host   : {{ inventory_hostname }}
+      Status : {{ proxmox_snapshot_report.result.status }}
+      Critical snapshots (>= {{ critical_days }} days): {{ proxmox_snapshot_report.stale_critical_count }}
+      {% for s in proxmox_snapshot_report.stale_critical_snapshots %}
+      - {{ s.type }} {{ s.vmid }} ({{ s.guest_name }}) snapshot "{{ s.snapname }}" - {{ s.age_days }} days old (created {{ s.snaptime_iso }})
+      {% endfor %}
+      Warning snapshots (>= {{ warning_days }} and < {{ critical_days }} days): {{ proxmox_snapshot_report.stale_warning_count }}
+      {% for s in proxmox_snapshot_report.stale_warning_snapshots %}
       - {{ s.type }} {{ s.vmid }} ({{ s.guest_name }}) snapshot "{{ s.snapname }}" - {{ s.age_days }} days old (created {{ s.snaptime_iso }})
       {% endfor %}
       {% if not proxmox_snapshot_report.collection_ok or proxmox_snapshot_report.errors | length > 0 %}
@@ -119,4 +156,4 @@
       - {{ e.scope }}: {{ e.error }}
       {% endfor %}
       {% endif %}
-  when: proxmox_snapshot_report.result.status == 'WARNING'
+  when: proxmox_snapshot_report.result.status in ['WARNING', 'CRITICAL']

@@ -881,11 +881,15 @@ Phase 7はPhase 3〜5の本格展開を待たないが、実証対象が存在�
 
 ### TODO 7-2: Role別の不足を修正する
 
-- [ ] Tech LeadのContext選択漏れを分析する。
-- [ ] Implementerの実装Skill不足を分析する。
-- [ ] Reviewerの見落としを分析する。
-- [ ] Testerの検証不足を分析する。
-- [ ] 問題をcoreへ直接追加せず、適切なRole・Skill・Context・Knowledgeへ反映する。
+- [x] Tech LeadのContext選択漏れを分析する。
+- [x] Implementerの実装Skill不足を分析する。
+- [x] Reviewerの見落としを分析する。
+- [x] Testerの検証不足を分析する。
+- [x] 問題をcoreへ直接追加せず、適切なRole・Skill・Context・Knowledgeへ反映する。
+
+2026-07-22、Coordinator承認済み。分析結果は `docs/ai/reviews/agent_skills_reorganization_todo7-2_result.md` を参照する。coreは変更せず、Knowledge候補2件は昇格を保留した。
+
+同日のtester-gateコメント実態整合では、挙動不変の文書変更にも通常の3-Role独立フローを適用し、工程コストが変更規模を上回った。`docs/ai/reviews/agent_skills_reorganization_phase7_process_incident_lightweight_lane.md` にProcess Incidentとして記録し、軽量レーンを今後のRole / Workflow設計の再評価材料およびKnowledge昇格候補とした。coreへは追加しない。
 
 **この作業を行う意味**
 
@@ -894,6 +898,18 @@ Phase 7はPhase 3〜5の本格展開を待たないが、実証対象が存在�
 **完了条件**
 
 試行で発見した問題が、適切な情報層へ反映されている。
+
+### Phase 7 follow-up: tester-gate理由コメントの実態整合（依頼B）
+
+- [x] 7 playbookの通知経路と抑止条件を個別に棚卸しする。
+- [x] `safe-readonly` 分類を維持し、実態とずれたmarkerコメントだけを修正する。
+- [x] `time_sync_check` の3通知経路と過去事故対策が有効であることを確認する。
+- [x] `proxmox_patch_dryrun` の2通知経路とdry-runコマンドを区別して記録する。
+- [x] ReviewerとTesterが対象限定の差分、marker lint、guard実態を確認する。
+- [x] 重複した棚卸し結果を正式記録1件へ統合する。
+- [x] 過剰な工程をProcess Incidentとして記録し、軽量レーンの適用条件を定める。
+
+2026-07-22、Coordinator承認済み。実装結果は `docs/ai/reviews/agent_skills_reorganization_tester_gate_comment_alignment.md`、工程改善は `docs/ai/reviews/agent_skills_reorganization_phase7_process_incident_lightweight_lane.md` を参照する。7 playbookはmarkerコメント各1行だけを変更し、分類と実装コードは変更していない。
 
 ---
 

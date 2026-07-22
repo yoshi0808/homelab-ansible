@@ -1,5 +1,5 @@
 ---
-# tester-gate: safe-readonly — パッチ dry-run 収集(apt update + シミュレーション)のみで実変更なし。通知は common_slack の tester_mode ガードで抑止される
+# tester-gate: safe-readonly — 実patchなし（apt-get update/check、-s dist-upgrade）。healthcheck通知のみcallerでguardし、全経路をcommon_slackのtester_mode/skip_notificationsで抑止
 #
 # 2026-07-06: roles/proxmox_patch_dryrun の command/copy/file タスクに
 # check_mode: false が付いていなかったため、素の --check だと自動 skip されて

@@ -47,10 +47,16 @@
              else ['memory collection failed (free -b returned no data)'])
       + ([] if monitoring_health.memory.used_percent | int < 90
              else ['memory used_percent is ' + (monitoring_health.memory.used_percent | string) + '%'])
+      + ([] if monitoring_health.disk.collection_ok
+             else ['disk collection failed (df -B1 -P / returned no data)'])
+      + ([] if monitoring_health.disk.used_percent | int < 90
+             else ['disk used_percent is ' + (monitoring_health.disk.used_percent | string) + '%'])
       }}"
     monitoring_warnings: "{{ []
       + ([] if monitoring_health.memory.used_percent | int < 80 or monitoring_health.memory.used_percent | int >= 90
              else ['memory used_percent is ' + (monitoring_health.memory.used_percent | string) + '%'])
+      + ([] if monitoring_health.disk.used_percent | int < 80 or monitoring_health.disk.used_percent | int >= 90
+             else ['disk used_percent is ' + (monitoring_health.disk.used_percent | string) + '%'])
       }}"
 
 - name: Build report
@@ -73,6 +79,12 @@
         used_mb: "{{ monitoring_health.memory.used_mb }}"
         available_mb: "{{ monitoring_health.memory.available_mb }}"
         used_percent: "{{ monitoring_health.memory.used_percent }}"
+      disk:
+        collection_ok: "{{ monitoring_health.disk.collection_ok }}"
+        total_mb: "{{ monitoring_health.disk.total_mb }}"
+        used_mb: "{{ monitoring_health.disk.used_mb }}"
+        available_mb: "{{ monitoring_health.disk.available_mb }}"
+        used_percent: "{{ monitoring_health.disk.used_percent }}"
       result:
         status: "{{ 'CRITICAL' if monitoring_criticals | length > 0
                     else ('WARNING' if monitoring_warnings | length > 0
@@ -91,5 +103,11 @@
       - "unpoller  : {{ monitoring_health.services.unpoller }}"
       - "Ports     : 9090/tcp={{ monitoring_health.ports.tcp_9090 }} 3000/tcp={{ monitoring_health.ports.tcp_3000 }} 3100/tcp={{ monitoring_health.ports.tcp_3100 }}"
       - "Memory    : collection_ok={{ monitoring_health.memory.collection_ok }} total={{ monitoring_health.memory.total_mb }}MB used={{ monitoring_health.memory.used_mb }}MB available={{ monitoring_health.memory.available_mb }}MB used_percent={{ monitoring_health.memory.used_percent }}%"
+      - >-
+        Disk      : collection_ok={{ monitoring_health.disk.collection_ok }}
+        total={{ monitoring_health.disk.total_mb }}MB
+        used={{ monitoring_health.disk.used_mb }}MB
+        available={{ monitoring_health.disk.available_mb }}MB
+        used_percent={{ monitoring_health.disk.used_percent }}%
       - "Criticals : {{ monitoring_criticals }}"
       - "Warnings  : {{ monitoring_warnings }}"

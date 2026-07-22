@@ -1,5 +1,5 @@
 ---
-# tester-gate: safe-readonly — read-only 収集のみ(冪等な収集スクリプト配置とローカルレポート出力を含む)。通知は common_slack の tester_mode ガードで抑止される
+# tester-gate: safe-readonly — read-only診断（冪等な収集script配置とlocal report保存を含む）。異常時通知はcallerのskip_notificationsとcommon_slack内のtester_mode/skip_notificationsで抑止する
 - name: Monitoring healthcheck
   hosts: monitoring_servers
   gather_facts: true
