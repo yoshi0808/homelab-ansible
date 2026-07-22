@@ -22,11 +22,9 @@
 
 ## trio routing
 
-- `techlead` は無印trio（`implementer` / `reviewer` / `tester`）へ直接依頼し、各成果物の報告を直接受ける。
-- `techlead2` は2付きtrio（`implementer2` / `reviewer2` / `tester2`）へ直接依頼し、各成果物の報告を直接受ける。
-- 各Tech Leadは実装・レビュー・テスト結果を統合した後、Coordinator（`claude`）へ共有する。trio memberが通常案件の成果物をCoordinatorへ直接返す経路ではない。
-- cross-trioの依頼、応援、移管は通常経路ではない。両Tech LeadまたはCoordinatorを介して明示合意し、agmsgで旧ownerの停止、新owner、進行中成果物の返却先を通知してから切り替える。
-- 現行boot scriptはこのroutingをまだ実装していない。実装済み経路との差は Phase 0現状基準を正本とし、Phase 3で正式化、Phase 8でscriptへ反映する。
+trio routingとRole本文(責任・権限・成果物返却先・移管規則)の正本は`docs/ai/roles/`(Phase 3で作成、2026-07-22)へ移行した。`docs/ai/roles/techlead.md`の「Routingと移管」節を参照する。要点のみ再掲する: `techlead`は無印trio、`techlead2`は2付きtrioへ直接指示し、cross-trioの移管は両Tech LeadまたはCoordinatorを介して明示合意してから切り替える。
+
+現行boot scriptはこのroutingをまだ実装していない。実装済み経路との差は Phase 0現状基準を正本とし、Phase 8でscriptへ反映する。
 
 ## 正本の優先順位
 
@@ -35,7 +33,8 @@
 | 情報 | 優先する正本 | fallback |
 |---|---|---|
 | 全Role共通原則・安全境界 | `docs/ai/core.md` | なし。旧coreと競合したら新coreを優先 |
-| identity、Role、trio routing | 本index | `agent_skills_reorganization_plan.md` Phase 3は設計根拠。旧coreから推測しない |
+| identity → Role対応 | 本index | `agent_skills_reorganization_plan.md` Phase 3は設計根拠。旧coreから推測しない |
+| Role本文(責任・権限・成果物返却先・移管規則) | `docs/ai/roles/<role>.md` | 本indexのtrio routing節(要約のみ) |
 | 現在scriptが実際に行うboot・配送 | `new-session.sh`, `prep-agent.sh`, 配備済みagmsg、およびPhase 0現状基準 | 計画書は将来像であり、実装済み事実を上書きしない |
 | 未移行の許可・禁止・例外・手順 | `docs/ai/core-migration-map.md` の該当行 | 行が指す `docs/ai/prompts/core.md` の正確な節だけを読む |
 | 案件固有の要求・成果物 | agmsgの最新依頼と指定された `docs/ai/reviews/<target>/` | 関係しそうなreviewsを無差別に探索しない |
@@ -53,7 +52,7 @@ Phase 0現状基準は実測事実、計画書は将来の作業順・設計根�
 
 ## 置換条件
 
-- **Phase 3**: `docs/ai/roles/` に正式なCoordinator / Tech Lead / Implementer / Reviewer / Tester定義とrouting・移管規則が作成されたら、本indexのRole本文参照とtrio routingをそれらへ置換する。
+- **Phase 3(2026-07-22完了)**: `docs/ai/roles/` に正式なCoordinator / Tech Lead / Implementer / Reviewer / Tester定義とrouting・移管規則が作成された。本indexのRole本文参照とtrio routingの詳細はそれらへ置換済み(上記「trio routing」節・「正本の優先順位」参照)。identity→Role対応表とその他の暫定解決手順は、Phase 5/8の条件が満たされるまで本indexを正本のまま維持する。
 - **Phase 5**: Role / Context / Policy / Skillの選択・遅延読込手順が実装されたら、本indexの暫定解決手順をそのindexへ置換する。
 - **Phase 8**: `new-session.sh` / `prep-agent.sh` が正式indexを読み、bootメッセージと返信先がtrio ownerに一致することを検証したら、本indexを廃止する。
 

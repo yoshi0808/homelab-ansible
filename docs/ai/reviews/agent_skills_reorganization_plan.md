@@ -317,16 +317,18 @@ CodexとClaude Codeは常設指示として認識するファイル名が異な�
 
 ## Phase 2: 環境・Ansible・運用情報を分類する
 
-### TODO 2-1: 情報分類の最小単位を決める
+### TODO 2-1: 情報分類の最小単位を決める(2026-07-22完了)
 
-- [ ] System Contextを定義する。
-- [ ] Repository Contextを定義する。
-- [ ] Operations Contextを定義する。
-- [ ] Policyを定義する。
-- [ ] コードを見れば分かる情報と、文書化すべき情報を分ける。
-- [ ] IPアドレス、VLAN ID、VM ID、認証情報の正本をInventory・変数・秘密管理へ限定する。
-- [ ] ホスト名や構成情報をSkillへ書く必要がある条件を例外として定義する。
-- [ ] 既存の `docs/ai/reviews/`(機能別フォルダ35件超)と、新設するIssue/Context/Policyの関係を整理する(廃止・統合はせず、位置づけを明記するだけでよい)。
+- [x] System Contextを定義する。→ `docs/ai/context-classification.md` §1。
+- [x] Repository Contextを定義する。→ 同§1。
+- [x] Operations Contextを定義する。→ 同§1(pilot3の`docs/ai/context/operations/healthcheck.md`を先行実装として参照)。
+- [x] Policyを定義する。→ 同§1(概念とディレクトリ`docs/ai/policies/`を定義。個別Policyファイルの本作成は別途)。
+- [x] コードを見れば分かる情報と、文書化すべき情報を分ける。→ §2に4基準を明記。
+- [x] IPアドレス、VLAN ID、VM ID、認証情報の正本をInventory・変数・秘密管理へ限定する。→ §3(既存リポジトリ規約を追認、TODO2-2/2-3で実証済み)。
+- [x] ホスト名や構成情報をSkillへ書く必要がある条件を例外として定義する。→ §4(2条件を明記)。
+- [x] 既存の `docs/ai/reviews/`(機能別フォルダ37件+新設12ファイル)と、新設するContext/Policyの関係を整理する。→ §5(廃止・統合せず、目的別の使い分け表を作成)。
+
+TODO2-2/2-3/2-4の実践結果を踏まえ、Coordinatorが`docs/ai/context-classification.md`として直接統合(Tier1相当、単一新規文書・挙動不変)。
 
 **この作業を行う意味**
 
@@ -366,12 +368,14 @@ docs/ai/
 
 新しい情報を追加するとき、どの分類へ置くか迷わない。
 
-### TODO 2-2: System Contextを作る
+### TODO 2-2: System Contextを作る(2026-07-22完了)
 
-- [ ] 全体概要を短くまとめる。
-- [ ] Proxmox、RADIUS、監視、Semaphoreなど対象領域別に分ける。
-- [ ] ノードの役割、依存関係、可用性、安全上の注意を記録する。
-- [ ] 変化しやすい値を固定文章へ埋め込みすぎない。
+- [x] 全体概要を短くまとめる。→ `docs/ai/context/system/overview.md`。
+- [x] Proxmox、RADIUS、監視、Semaphoreなど対象領域別に分ける。→ `proxmox.md`/`radius.md`/`monitoring.md`/`semaphore.md`。
+- [x] ノードの役割、依存関係、可用性、安全上の注意を記録する。→ 5ファイルとも同一節構成(領域の役割/ノードの役割/依存関係/可用性/安全上の注意)。
+- [x] 変化しやすい値を固定文章へ埋め込みすぎない。→ IPv4/VLAN ID/VM ID/認証情報は0件とreviewerが個別確認済み(inventory group名・変数名で表現)。
+
+techlead(無印trio)がTier4案件として着手、implementer→reviewer一巡でmust-fix 0。所要時間は着手から完了まで約20分。詳細は依頼A/Bの経緯を参照(agmsg記録)。
 
 **この作業を行う意味**
 
@@ -382,12 +386,14 @@ Tech Lead、Reviewer、Testerが、コードだけでは判断できない実環
 - Tech Leadが全体構成と主要な依存関係を説明できる。
 - 他Roleは対象領域のContextだけで、安全性と影響範囲を判断できる。
 
-### TODO 2-3: Ansible Repository Contextを作る
+### TODO 2-3: Ansible Repository Contextを作る(2026-07-22完了)
 
-- [ ] inventory groupと対象ホストの関係を整理する。
-- [ ] playbookの目的、対象、変更系／read-only、利用roleを一覧化する。
-- [ ] roleの目的と主要な入出力を一覧化する。
-- [ ] 開発からquory本番実行までの流れを整理する。
+- [x] inventory groupと対象ホストの関係を整理する。→ `docs/ai/context/ansible/inventory-map.md`。
+- [x] playbookの目的、対象、変更系／read-only、利用roleを一覧化する。→ `playbook-map.md`(全37 playbook)。
+- [x] roleの目的と主要な入出力を一覧化する。→ `role-map.md`(全32 role)。
+- [x] 開発からquory本番実行までの流れを整理する。→ `repository-overview.md`(ansy→Yoshinobu確定→Git→quory clean確認+`git pull --ff-only`→本番実行の境界を明記)。
+
+techlead2(2付きtrio)がTier4案件として着手、implementer2→reviewer2(初回4 must-fix、局所修正後PASS)→tester2(playbook 37/37・role 32/32・inventory group/host 9/9・禁止値0でOVERALL PASS)。所要時間は着手から完了まで約20分。未解決事項として`prometheus_update_check`と`ubuntu_vm_patch_policy.md`§3.4の不一致をplaybook-mapにfollow-up候補として記録(今回は未解消)。
 
 **この作業を行う意味**
 
@@ -411,12 +417,14 @@ AIが毎回リポジトリ全体を探索し直す負担を減らし、類似実
 
 新しいIssueを受けたTech Leadが、対象playbook・role・inventory・Policy候補を短時間で特定できる。
 
-### TODO 2-4: Role別Contextマトリクスを確定する
+### TODO 2-4: Role別Contextマトリクスを確定する(2026-07-22完了)
 
-- [ ] 各Roleが起動時に必ず読む情報を決める。
-- [ ] 作業開始時に読む情報を決める。
-- [ ] 必要時だけ読む情報を決める。
-- [ ] 読まなくてよい情報を明確にする。
+- [x] 各Roleが起動時に必ず読む情報を決める。
+- [x] 作業開始時に読む情報を決める。
+- [x] 必要時だけ読む情報を決める。
+- [x] 読まなくてよい情報を明確にする。
+
+TODO2-2/2-3の成果物が揃ったのを受け、Coordinatorが`docs/ai/role-context-matrix.md`として統合・確定(Tier1相当、単一新規文書・挙動不変のため委任なしで直接作成)。タイミング軸(起動時/着手時/必要時/不要)とCoordinator自身の扱いを明記し、TODO2-2レビューで指摘された不足(timing軸・Coordinatorの明示的な扱い)を解消した。
 
 **この作業を行う意味**
 
@@ -453,11 +461,11 @@ AIが毎回リポジトリ全体を探索し直す負担を減らし、類似実
 
 ## Phase 3: Role定義を設計する
 
-### TODO 3-1: identityとRoleを分離する
+### TODO 3-1: identityとRoleを分離する(2026-07-21解決・2026-07-22 docs/ai/roles/参照へ整合)
 
-- [ ] `reviewer2`、`implementer2`、`tester2`、`techlead2` のidentityとRoleの対応を定義する。
-- [ ] identity名からRoleを暗黙推論しない構成を決める。
-- [ ] 対応表をどこに置くか決める。
+- [x] `reviewer2`、`implementer2`、`tester2`、`techlead2` のidentityとRoleの対応を定義する。→ `docs/ai/role-routing-index.md`の対応表。
+- [x] identity名からRoleを暗黙推論しない構成を決める。→ 同index、多対1の明示表。
+- [x] 対応表をどこに置くか決める。→ `docs/ai/role-routing-index.md`(Phase5/8の置換条件まで正本として維持)。
 
 **この作業を行う意味**
 
@@ -493,16 +501,16 @@ AIが毎回リポジトリ全体を探索し直す負担を減らし、類似実
 
 AIがidentity登録後、機械的かつ一意にRoleを解決できる。
 
-### TODO 3-2: 各Roleの判断責任を定義する
+### TODO 3-2: 各Roleの判断責任を定義する(2026-07-22完了)
 
-- [ ] Coordinator(`claude`)の責任、権限、成果物を定義する。
-- [ ] Tech Leadの責任、権限、成果物を定義する。
-- [ ] Implementerの責任、権限、成果物を定義する。
-- [ ] Reviewerの責任、権限、成果物を定義する。
-- [ ] Testerの責任、権限、成果物を定義する。
-- [ ] Role間の引き継ぎ条件を定義する。
-- [ ] trio間の移管で、Coordinatorが仲介するのか割当を変更できるのか、旧ownerの停止、新ownerの通知、進行中成果物の返却先を定義する。
-- [ ] requirement / implement / review / test_result / Tech Lead統合結果の返却先と、Coordinator差戻し時の再指示経路を定義する。
+- [x] Coordinator(`claude`)の責任、権限、成果物を定義する。→ `docs/ai/roles/coordinator.md`。
+- [x] Tech Leadの責任、権限、成果物を定義する。→ `docs/ai/roles/techlead.md`。
+- [x] Implementerの責任、権限、成果物を定義する。→ `docs/ai/roles/implementer.md`。
+- [x] Reviewerの責任、権限、成果物を定義する。→ `docs/ai/roles/reviewer.md`。
+- [x] Testerの責任、権限、成果物を定義する。→ `docs/ai/roles/tester.md`。
+- [x] Role間の引き継ぎ条件を定義する。→ 各ファイルの「成果物と返却先」節。
+- [x] trio間の移管で、Coordinatorが仲介するのか割当を変更できるのか、旧ownerの停止、新ownerの通知、進行中成果物の返却先を定義する。→ `techlead.md`「Routingと移管」節。
+- [x] requirement / implement / review / test_result / Tech Lead統合結果の返却先と、Coordinator差戻し時の再指示経路を定義する。→ `techlead.md`「成果物と返却先」節。
 
 **この作業を行う意味**
 
@@ -553,12 +561,14 @@ Role Skillへ詳細手順を書く前に、誰が何を決めるかを固定す�
 
 同じ作業について、担当Roleと承認Roleが明確になっている。
 
-### TODO 3-3: Role定義が参照するContextとSkillを定義する
+### TODO 3-3: Role定義が参照するContextとSkillを定義する(2026-07-22完了)
 
-- [ ] Roleごとの必須Contextを記載する。
-- [ ] RoleごとのContext選択基準を記載する。
-- [ ] Roleごとの必要Skillを記載する。
-- [ ] Roleごとの禁止事項とエスカレーション条件を記載する。
+- [x] Roleごとの必須Contextを記載する。→ 各ファイルの「必須ContextとSkill」節、`role-context-matrix.md`を正本として参照。
+- [x] RoleごとのContext選択基準を記載する。→ 同節、`context-classification.md`を参照。
+- [x] Roleごとの必要Skillを記載する。→ 同節(Tech Leadは要件分解・Tier判定等、他Roleは対応するSkillを参照)。
+- [x] Roleごとの禁止事項とエスカレーション条件を記載する。→ 各ファイルの「禁止・エスカレーション」節。
+
+techlead2がTier4案件として作成(implementer2等への委任なし、自身で作成)、techleadが並行diffレビューでmust-fix 0・承認。所要時間は着手から完了まで約4分。role-context-matrix.md/context-classification.mdとの整合を確認済み。stage接尾辞・採番規則等のhow-toはRoleへ入れずWorkflow/委任Skill候補として保留(non-blocking follow-up)。`docs/ai/role-routing-index.md`のRole本文重複はCoordinatorが解消し、`docs/ai/roles/`参照へ置換済み。
 
 **この作業を行う意味**
 

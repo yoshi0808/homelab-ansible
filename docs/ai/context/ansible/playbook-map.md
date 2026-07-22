@@ -1,0 +1,49 @@
+# Ansible Playbook Map
+
+対象は現行の `playbooks/*.yml` 全件である。「種別」はtester-gateの転記ではなく、処理内容による地図用要約である。実行可否と検証方法は各playbook先頭の `# tester-gate:`、承認済みtest plan、関連Policyを確認する。
+
+「対象inventory group」列にはgroupだけでなく、host literal、colon区切りhost pattern、`localhost`、動的group、変数によるinventory context選択、controller local実行も記載する。
+
+| Playbook名 | 目的 | 対象inventory group | 主なrole | 種別 | 関連Policy | 主要依存 |
+| --- | --- | --- | --- | --- | --- | --- |
+| `alloy_setup.yml` | rsyslog受信経路とGrafana Alloyを検証・配備しPromtailから切替 | `monitoring_servers` | `alloy` | change / observability cutover | `docs/ai/prompts/log_observability_policy.md` | 既存rsyslog/Promtail、Grafana apt repository、名前解決 |
+| `ca_trust_deploy.yml` | 管理対象へhomelab CA trustを配布 | `control_nodes:dev_nodes:monitoring_servers:radius_servers:proxmox` | `homelab_cert_renew` (`deploy_ca_trust`) | change / trust store | `docs/ai/prompts/cert_renew_policy.md` | CA資材、対象OS trust store |
+| `cert_renew.yml` | ansy、Proxmox、monnie向け証明書を発行・配備・通知 | `localhost`, `quory`, `ansy`, `proxmox`, `monnie` | `homelab_cert_renew`, `common_slack` | change / certificate / service restart | `docs/ai/prompts/cert_renew_policy.md`, `docs/ai/prompts/autonomous_recovery_policy.md` | CA staging、実行時名前解決、対象service、cleanup |
+| `cert_renew_quory.yml` | quoryのSemaphore証明書を独立更新 | `localhost`, `quory` | `homelab_cert_renew`, `common_slack` | change / certificate / service restart | `docs/ai/prompts/cert_renew_policy.md` | CA staging、systemd timer経路、cleanup |
+| `cloudkey_cert_deploy.yml` | CloudKey証明書を発行しAPI配備・検証・旧世代整理 | `localhost`（CloudKeyへ接続） | `cloudkey_cert_deploy`, `common_slack` | change / certificate / delete guarded | `docs/ai/prompts/cert_renew_cloudkey_policy.md` | `inventories/vars/cloudkey.yml`、CA資材、名前解決、CloudKey API |
+| `codex_update_check.yml` | ansy/quoryのCodex CLIとnpmを確認し条件により更新 | `localhost`, `ansy:quory` | `codex_update_check` | change / package update | 個別Policyなし | npm registry、実行host検証 |
+| `monitoring_healthcheck.yml` | 監視サービス群を収集・判定しreport/通知 | `monitoring_servers` | `monitoring_healthcheck`, `common_slack` | read-only diagnostics | `docs/ai/prompts/ubuntu_vm_patch_policy.md` | 配置される収集script、controller側report path |
+| `prometheus_update_check.yml` | 手動導入Prometheusの版を確認し承認入力時に更新・rollback補助 | `localhost`, `monnie` | `prometheus_update_check`, `common_slack` | check + guarded change / service restart | `docs/ai/prompts/ubuntu_vm_patch_policy.md` §3.4（候補・現行playbookとの整合確認要） | release取得、backup、確認入力 |
+| `proxmox_backup_restore_verify.yml` | backupを一時VMへ実restoreし起動・agent・cleanupを検証 | `proxmox`, 動的 `brv_restore_targets` | `proxmox_backup_restore_verify` | change / restore / start-stop / cleanup | `docs/ai/prompts/proxmox_backup_restore_verify_policy.md` | backup選択、動的group、storage、lock、cleanup |
+| `proxmox_evacuate_node.yml` | patch対象ノードからVM/CTを退避 | `localhost`, 対向Proxmox host, `target_node` | `proxmox_evacuate_node`, `proxmox_healthcheck`, `recovery_mute` | change / migration or stop | `docs/ai/prompts/proxmox_patch_policy.md`, `docs/ai/prompts/autonomous_recovery_policy.md` | `target_node`、対向healthcheck、VM配置情報 |
+| `proxmox_healthcheck.yml` | クラスタ、ノード、VM状態を収集・判定 | `proxmox` | `proxmox_healthcheck`, `common_slack` | read-only diagnostics | `docs/ai/prompts/proxmox_patch_policy.md` | 収集script、controller側report path |
+| `proxmox_hw_check.yml` | Proxmox hardware状態を収集・判定 | `proxmox` | `proxmox_hw_check` | read-only diagnostics | 個別Policyなし | 収集script、期待値vars、controller側report path |
+| `proxmox_patch_apply_node.yml` | 指定ノードへapt patchを適用し必要時reboot・再healthcheck | `localhost`, `target_node` | `proxmox_patch_apply_node`, `recovery_mute` | patch / possible reboot | `docs/ai/prompts/proxmox_patch_policy.md`, `docs/ai/prompts/autonomous_recovery_policy.md` | `target_node`、事前判定、apt、post-healthcheck |
+| `proxmox_patch_dryrun.yml` | healthcheck後に更新候補・simulation・分類情報を収集 | `proxmox` | `proxmox_healthcheck`, `proxmox_patch_dryrun` | read-only patch simulation | `docs/ai/prompts/proxmox_patch_policy.md` | apt metadata、収集/merge script、report path |
+| `proxmox_patch_weekly_full.yml` | preflightから両ノード退避・patch・復帰まで順次制御 | `proxmox`, `localhost`, `pve1`, `pve2` | Proxmox patch系roles, `recovery_mute`, `common_slack` | patch orchestration / migration / reboot | `docs/ai/prompts/proxmox_patch_policy.md`, `docs/ai/prompts/autonomous_recovery_policy.md` | healthcheck、dry-run、evacuate、apply、restore各playbook |
+| `proxmox_restore_vm_placement.yml` | 退避後のVM/CTをhome nodeへ戻す | `localhost`, `target_node` | `proxmox_restore_vm_placement`, `recovery_mute` | change / migration | `docs/ai/prompts/proxmox_patch_policy.md`, `docs/ai/prompts/autonomous_recovery_policy.md` | `target_node`、VM tag/home情報、クラスタ状態 |
+| `proxmox_snapshot_check.yml` | VM snapshot状態を収集・判定 | `proxmox` | `proxmox_snapshot_check`, `common_slack` | read-only diagnostics | 個別Policyなし | 収集script、controller側report path |
+| `radius_healthcheck.yml` | FreeRADIUS/RADIUS基盤を収集・判定しreport/通知 | `radius_servers` | `radius_healthcheck`, `common_slack` | read-only diagnostics | `docs/ai/prompts/ubuntu_vm_patch_policy.md` | 収集script、期待値vars、report path |
+| `recovery_exec_setup.yml` | recovery用Codex runner、wrapper、限定SSH経路を配備 | `dev_nodes:control_nodes` | `recovery_exec` | change / recovery execution plane | `docs/ai/prompts/autonomous_recovery_policy.md` | 許可対象vars、templates、鍵生成経路、対象setup |
+| `recovery_ha_failover.yml` | 承認対象VMのHA failoverを実施・記録 | `pve1` | `recovery_ha_failover` | change / HA failover | `docs/ai/prompts/autonomous_recovery_policy.md` | `target` allowlist、cluster/HA状態、report path |
+| `recovery_io_setup.yml` | Slack I/O bridge serviceと権限を配備 | `dev_nodes:control_nodes` | `recovery_io` | change / service deployment | `docs/ai/prompts/autonomous_recovery_policy.md` | environment設定、systemd、sudoers template |
+| `recovery_probe_notify.yml` | recovery probe結果をSlack通知 | `localhost` | `common_slack` | notification only | `docs/ai/prompts/autonomous_recovery_policy.md` | probeから渡す通知入力、通知設定 |
+| `recovery_probe_setup.yml` | recovery probe serviceとmute CLIを配備 | `dev_nodes:control_nodes` | `recovery_probe`, `recovery_mute` | change / service deployment | `docs/ai/prompts/autonomous_recovery_policy.md` | probe設定、systemd、mute state path |
+| `recovery_push_drill_setup.yml` | push経路drill用unitを対象別に配備 | `quory` | `recovery_push` (`drill_setup`) | change / drill units | `docs/ai/prompts/autonomous_recovery_policy.md` | `recovery_push_targets`、systemd units |
+| `recovery_push_setup.yml` | OnFailure push triggerとdispatch経路を配備 | `quory` | `recovery_push` | change / recovery trigger | `docs/ai/prompts/autonomous_recovery_policy.md` | target mapping、SSH/public key、systemd units |
+| `recovery_service_restart.yml` | 承認対象serviceをrestartし復旧判定 | `pve1` | `recovery_service_restart` | service restart | `docs/ai/prompts/autonomous_recovery_policy.md` | `target`/service allowlist、post-check、report path |
+| `recovery_vm_reboot.yml` | 承認対象VMを停止・起動し復旧判定 | `pve1` | `recovery_vm_reboot` | VM reboot | `docs/ai/prompts/autonomous_recovery_policy.md` | `target` allowlist、VM/guest-agent状態、report path |
+| `rsyslog_forward_to_monnie.yml` | Ubuntuノードのjournald/syslog転送を検証・配備 | `ansy:quory:authy` | `rsyslog_forward_to_monnie` | change / logging config / service reload | `docs/ai/prompts/log_observability_policy.md` | 既存snippet基準、monnie名前解決、rsyslog/journald |
+| `serial_getty_mask.yml` | 未使用serial gettyを停止・mask | `ansy:monnie:quory:authy` | playbook内tasks | change / service stop and mask | 個別Policyなし | systemd unit現状、対象OS |
+| `sophos_trim.yml` | Sophos SSD trimをdry-runまたは実行し通知 | `sophos` | `sophos_trim`, `common_slack` | maintenance change / dry-run-aware | 個別Policyなし | 対話SSH wrapper、実行mode、通知設定 |
+| `systemd_timers.yml` | Ansible playbook用systemd service/timerを配備・有効化 | controller local（`connection: local`）。`target_hosts` はinventory context選択（既定 `control_nodes`）でありSSH配備対象ではない | `systemd_timers` | change / scheduling | 個別Policyなし | `systemd_ansible_timers`、repository path、systemd |
+| `test_ca_env.yml` | localhostでCA関連環境変数の有無を表示確認 | `localhost` | playbook内tasks | read-only debug | `docs/ai/prompts/cert_renew_policy.md` | controller environment |
+| `time_sync_check.yml` | 基準hostと各方式の時刻同期を収集・判定・通知 | `quory:pve1:pve2:ansy:monnie:authy:sophos` | `time_sync_check`, `common_slack` | read-only diagnostics | `docs/ai/prompts/time_sync_check_policy.md` | `inventories/vars/cloudkey.yml`、chrony、機器別取得経路 |
+| `time_sync_ntp_reference.yml` | Ubuntu/Proxmoxへquoryを追加NTP参照として配備 | `pve1:pve2:ansy:monnie:authy` | `time_sync_ntp_reference` | change / time config / service restart | `docs/ai/prompts/time_sync_check_policy.md` | quory名前解決、chrony conf.d |
+| `ubuntu_nightly.yml` | reboot-requiredを確認し条件付きreboot・service確認・通知 | `radius_servers`, `monitoring_servers` | playbook内tasks, `recovery_mute`, `monitoring_healthcheck`, `common_slack` | conditional reboot | `docs/ai/prompts/ubuntu_vm_patch_policy.md`, `docs/ai/prompts/autonomous_recovery_policy.md` | reboot-required flag、post-healthcheck、mute/通知 |
+| `ubuntu_vm_full_upgrade.yml` | 月次simulation・分類、確認付き単一host full-upgradeとreboot | `dev_nodes:control_nodes:radius_servers:monitoring_servers` | `ubuntu_vm_full_upgrade`, `recovery_mute`, healthcheck roles | patch / guarded apply / possible reboot | `docs/ai/prompts/ubuntu_vm_patch_policy.md`, `docs/ai/prompts/autonomous_recovery_policy.md` | `dry_run`、対象/確認入力、apt/non-apt取得、post-healthcheck |
+| `unifi_backup_fetch.yml` | CloudKey backupを取得・鮮度確認・世代整理・通知 | `pve1`（CloudKeyへ接続） | `unifi_backup_fetch`, `common_slack` | change / backup write / retention delete | `docs/ai/prompts/unifi_backup_fetch_policy.md` | `inventories/vars/cloudkey.yml`、CloudKey API、backup保存先 |
+
+## Policy整合の注意
+
+`prometheus_update_check.yml` のPolicy候補である `docs/ai/prompts/ubuntu_vm_patch_policy.md` §3.4は、非apt Prometheusの自動download・自動更新・service restartを禁止している。一方、現行playbook/roleは確認入力に基づく更新・rollback機能を持つ。この不一致はIssue化候補であり、この地図では解消しない。
