@@ -187,5 +187,5 @@ ubuntu_vm_full_upgrade_quory_flag_file: /var/lib/ubuntu-vm-full-upgrade/quory-re
 # script this round) — documented for manual placement in implement.md,
 # following the same "quory-local file, not git-managed, mode 0600" pattern
 # already used for the cert_renew intermediate CA key
-# (docs/ai/prompts/cert_renew_policy.md §4.4).
+# (docs/ai/policies/cert_renew_policy.md §4.4).
 ubuntu_vm_full_upgrade_quory_postcheck_webhook_conf: /etc/ubuntu-vm-full-upgrade/slack-webhook-quory.conf

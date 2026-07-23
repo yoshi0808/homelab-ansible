@@ -33,7 +33,7 @@
 #
 # Fail 条件: タグ不適格 / VM 不存在 / 起動後 running にならない
 #
-# 参照: docs/ai/prompts/autonomous_recovery_policy.md §5 §8 §13
+# 参照: docs/ai/policies/autonomous_recovery_policy.md §5 §8 §13
 #       docs/ai/reviews/autonomous_recovery/2026-06-27_001_requirement.md
 
 - name: Recovery - VM reboot

@@ -34,7 +34,7 @@
 #      no Ansible process is involved — see implement.md §12 rationale, and
 #      the same "quory-local file, mode 0600, not git-managed" pattern
 #      already used for the cert_renew intermediate CA key,
-#      docs/ai/prompts/cert_renew_policy.md §4.4).
+#      docs/ai/policies/cert_renew_policy.md §4.4).
 
 set -uo pipefail
 

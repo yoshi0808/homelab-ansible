@@ -30,7 +30,7 @@
 # Fail 条件: タグ不適格 / VM 不存在/非実行中 / タイムアウト内に active にならない
 # 成功でも失敗でも Slack 通知を送り、レポートを保存する（best-effort）。
 #
-# 参照: docs/ai/prompts/autonomous_recovery_policy.md §5 §8
+# 参照: docs/ai/policies/autonomous_recovery_policy.md §5 §8
 #       docs/ai/reviews/autonomous_recovery/2026-06-27_001_requirement.md
 
 - name: Recovery - service restart

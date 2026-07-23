@@ -1,7 +1,7 @@
 # 自律復旧パイプライン デプロイ手順書
 
 対象ロール: `recovery_exec`, `recovery_io`, `recovery_probe`
-参照: `docs/ai/prompts/autonomous_recovery_policy.md`
+参照: `docs/ai/policies/autonomous_recovery_policy.md`
 
 ---
 

@@ -10,7 +10,7 @@
 - `docs/ai/core.md` は全Role共通原則の正本とする。
 - 案件固有の要求と工程記録は、agmsgの依頼と `docs/ai/reviews/<target>/` の requirement、implement、review、test_plan、test_result、finalを正本とする。
 - 現在の変更内容は作業ツリーとdiffを正本とし、説明文だけで変更済みと判断しない。
-- 対象システム固有の判断は、該当Policyを正本とする。移行中のPolicyは `docs/ai/prompts/*_policy.md` にある。
+- 対象システム固有の判断は、該当Policyを正本とする。Policyは `docs/ai/policies/*_policy.md` にある。
 - `docs/ai/prompts/core.md` は移行元の旧正本である。未移行の詳細を確認するため残すが、共通原則は本ファイルを優先する。
 
 ## 人間の権限と安全境界

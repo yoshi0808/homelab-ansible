@@ -33,7 +33,7 @@
 # Fail 条件: タグ不適格 / HA 未登録 / 代替ノードなし / 移行タイムアウト
 # 失敗時は Slack に critical 通知し、人間のエスカレーションを促す。
 #
-# 参照: docs/ai/prompts/autonomous_recovery_policy.md §5 §8 §13
+# 参照: docs/ai/policies/autonomous_recovery_policy.md §5 §8 §13
 #       docs/ai/reviews/autonomous_recovery/2026-06-27_001_requirement.md
 
 - name: Recovery - HA failover

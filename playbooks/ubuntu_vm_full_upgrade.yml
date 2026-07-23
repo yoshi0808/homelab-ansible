@@ -2,7 +2,7 @@
 # ubuntu_vm_full_upgrade.yml - Monthly full-upgrade judgement + notification
 # for ansy/monnie/authy/quory, plus manual single-node apply. Ubuntu Pro +
 # unattended-upgrades already auto-applies security/ESM/ESM Apps patches
-# (docs/ai/prompts/ubuntu_vm_patch_policy.md); this playbook covers the
+# (docs/ai/policies/ubuntu_vm_patch_policy.md); this playbook covers the
 # non-security main/updates/universe packages that accumulate untouched
 # otherwise. Apply is never automatic — always a deliberate manual run.
 #

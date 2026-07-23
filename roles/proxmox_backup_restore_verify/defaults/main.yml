@@ -8,7 +8,7 @@ verify_restore_vmid: 999
 # Minimal best-effort lock guarding against an accidental double start.
 #
 # Concurrent runs are forbidden by OPERATION, not by code (3-way agreement; see
-# docs/ai/prompts/proxmox_backup_restore_verify_policy.md): the monthly run is a
+# docs/ai/policies/proxmox_backup_restore_verify_policy.md): the monthly run is a
 # single scheduled run from quory, and any manual run from ansy is made by a
 # human who ensures it does not overlap. This is therefore only a convenience
 # guard, NOT a full distributed mutex.

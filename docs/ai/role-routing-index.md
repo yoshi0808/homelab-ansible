@@ -38,7 +38,7 @@ trio routingとRole本文(責任・権限・成果物返却先・移管規則)�
 | 現在scriptが実際に行うboot・配送 | `new-session.sh`, `prep-agent.sh`, 配備済みagmsg、およびPhase 0現状基準 | 計画書は将来像であり、実装済み事実を上書きしない |
 | 未移行の許可・禁止・例外・手順 | `docs/ai/core-migration-map.md` の該当行 | 行が指す `docs/ai/prompts/core.md` の正確な節だけを読む |
 | 案件固有の要求・成果物 | agmsgの最新依頼と指定された `docs/ai/reviews/<target>/` | 関係しそうなreviewsを無差別に探索しない |
-| 対象システム固有の判断 | 現行 `docs/ai/prompts/*_policy.md` | Phase 2で新Policy indexへ置換予定 |
+| 対象システム固有の判断 | `docs/ai/policies/*_policy.md` | なし(2026-07-23、Phase2で移行完了) |
 
 Phase 0現状基準は実測事実、計画書は将来の作業順・設計根拠を表す。両者が違う場合は矛盾ではなく未移行差分として扱い、現状の説明にはPhase 0、将来の実装判断には計画書を使う。
 

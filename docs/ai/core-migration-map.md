@@ -31,7 +31,7 @@
 | §7 check shellとAnsibleの責務 | 移す | Policy / Skill | **[分類のみ Phase 2]** Ansible Design Policy; **[分類のみ Phase 4–5]** Implementer / Reviewer Skill | 主に実装・レビュー時に必要 |
 | §8 files / templates / script | 移す | Policy / Skill | **[分類のみ Phase 2]** Ansible Design Policy; **[分類のみ Phase 4–5]** Implementer Skill | 実装手順と例外である |
 | §9 read-onlyと変更系の分離 | 一部残す | core / Policy | **[既存]** coreの共通境界; **[分類のみ Phase 2]** Change Safety Policy | 詳細条件は個別判断である |
-| §10 命名、playbook一覧、Policy一覧 | 移す | Repository Context / Policy index | **[予定 Phase 2]** `playbook-map.md` とPolicy index; 移行中Policyは **[既存]** `docs/ai/prompts/*_policy.md` | 一覧は変化する |
+| §10 命名、playbook一覧、Policy一覧 | 移す | Repository Context / Policy index | **[既存]** `playbook-map.md`; Policyは **[既存]** `docs/ai/policies/*_policy.md`(2026-07-23移行完了) | 一覧は変化する |
 | §11 Git / quory反映 | 一部残す | core / Deployment Policy | **[既存]** coreの正本・自己更新禁止; **[分類のみ Phase 2]** Deployment Policy | 操作詳細だけを分離する |
 | §12 自動実行 | 移す | Operations Context / Policy | **[分類のみ Phase 2]** Scheduling Policy | 実行基盤依存の判断である |
 | §13 `.gitignore` | 一部残す | core / Repository Context / Skill | **[既存]** coreの秘密・生成物境界; **[分類のみ Phase 2/5]** Repository Context / Contribution Skill | pattern詳細はコードから確認可能 |

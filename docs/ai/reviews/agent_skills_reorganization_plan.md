@@ -1128,22 +1128,26 @@ Phase 8  new-session.sh / prep-agent.sh変更
 
 この再構成は、ファイルを分割した時点では完了ではない。次の状態を満たしたときに完了とする。
 
-- [ ] `core.md` が短く、全Role共通の不変原則だけになっている。
-- [ ] Codexの `AGENTS.md` とClaude Codeの `CLAUDE.md` が薄い入口になり、共通原則を二重管理していない。
-- [ ] 各Skillは `SKILL.md` を正本としてCodexとClaude Codeで共有できる。
-- [ ] SkillにIPアドレス、認証情報、VLAN ID、VM IDが記載されていない。
-- [ ] ホスト名や構成情報がSkillへ無闇に埋め込まれていない。
-- [ ] オンプレ環境、Ansible構成、運用、Policyが明確に分類されている。
-- [ ] identityとRoleが分離され、AIが名前から役割を推測しない。
-- [ ] Tech Lead、Implementer、Reviewer、Testerの責任と成果物が明確である。
-- [ ] Roleごとに必要なContextだけを読み込める。
-- [ ] 一般能力は公開Skillを基礎とし、独自Skillはホームラボ固有部分に限定されている。
-- [ ] 採用Skillの出典、revision、ローカル変更、更新方法を追跡できる。
-- [ ] KnowledgeがIncident、Lesson、Decision、Temporaryに分類されている。
-- [ ] 低リスク案件で新しい連携方式を実証している。
-- [ ] `new-session.sh` がtmuxと起動配置に集中し、Role初期化が分離されている。
-- [ ] agmsg monitorとAI間メッセージ配送が従来通り安定して動く。
-- [ ] 新しいRoleや第3席を追加するとき、Role定義とidentity対応の追加だけで済む。
+**2026-07-23、claude(Coordinator/Tech Lead兼務)が全項目を検証**(Phase0〜8完了・commit `e157a50`後の最終確認)。
+
+- [x] `core.md` が短く、全Role共通の不変原則だけになっている。→ 92行、Phase1(2026-07-21)以降不変。
+- [x] Codexの `AGENTS.md` とClaude Codeの `CLAUDE.md` が薄い入口になり、共通原則を二重管理していない。→ 両ファイルとも数行、`docs/ai/core.md`/`role-routing-index.md`への参照のみ。
+- [x] 各Skillは `SKILL.md` を正本としてCodexとClaude Codeで共有できる。→ `skills/<name>/SKILL.md`9件、`.claude/skills/`symlink+Role定義からの明示参照の両方で実証済み(TODO5-2)。
+- [x] SkillにIPアドレス、認証情報、VLAN ID、VM IDが記載されていない。→ grep確認済み、既存pre-commit IPv4チェックも`skills/**`をカバー。
+- [x] ホスト名や構成情報がSkillへ無闇に埋め込まれていない。→ 9件とも汎用手法のみでホスト名の記載なし。
+- [x] オンプレ環境、Ansible構成、運用、Policyが明確に分類されている。→ System/Repository/Operations Contextは実在(`docs/ai/context/`)。**2026-07-23、Policy移行完了**: 9件の`*_policy.md`を`docs/ai/prompts/`から`docs/ai/policies/`へ`git mv`(履歴保持)。実際に参照している現役ファイル(playbook 4件、role defaults 2件、script 2件、`playbook-map.md`、`autonomous_recovery_deploy_runbook.md`、Policy間の相互参照3件、`core.md`/`role-routing-index.md`/`repository-overview.md`/`core-migration-map.md`の一般記述)を全て新パスへ更新。`docs/ai/reviews/`配下の過去の作業記録(140件超)は監査証跡として旧パス記載のまま意図的に残す(Yoshinobu合意)。
+- [x] identityとRoleが分離され、AIが名前から役割を推測しない。→ `role-routing-index.md`の多対1対応表、`prep-agent.sh`のcase文で7 identity全て個別解決。
+- [x] Tech Lead、Implementer、Reviewer、Testerの責任と成果物が明確である。→ `docs/ai/roles/*.md`5件。
+- [x] Roleごとに必要なContextだけを読み込める。→ `role-context-matrix.md`+各`prep-agent.sh`メッセージが該当列を明示。
+- [x] 一般能力は公開Skillを基礎とし、独自Skillはホームラボ固有部分に限定されている。→ 9件とも`anthropics/knowledge-work-plugins`等を出典に明記しhomelab文脈へ翻訳。
+- [~] 採用Skillの出典、revision、ローカル変更、更新方法を追跡できる。→ 出典URLは全件記載。**revision(commit hash等)の明示的なpinningは行っていない**(URLのみ、更新検知の仕組みは未整備)。実運用上の支障は小さいが完全ではない。
+- [x] KnowledgeがIncident、Lesson、Decision、Temporaryに分類されている。→ `docs/ai/memory/{incidents,lessons,decisions,temporary}/`、`memory-classification.md`。
+- [x] 低リスク案件で新しい連携方式を実証している。→ Phase7 pilot1/2/3。
+- [x] `new-session.sh` がtmuxと起動配置に集中し、Role初期化が分離されている。→ 既存構造がこの通りであることをPhase8で確認済み(構造変更は不要と判断)。
+- [~] agmsg monitorとAI間メッセージ配送が従来通り安定して動く。→ Phase8実地検証後、現状は安定(本番bridge事故も復旧済み)。**ただし根本的な懸念が2件残る**: (1) 本セッション冒頭で発見した「codex-bridge-launcher.shの重複プロセス」の発生源は未特定のまま応急停止のみで再発しうる([[project_window1_tmux_display_freeze_recurrence]])、(2) 同スクリプトのコメント自体が「dispatcher+role child群のポーリングがfork stormへスケールしうる」設計上の弱点を認めている。「従来通り安定」は今このスナップショットの話であり、恒久的な安定性は保証されていない。
+- [x] 新しいRoleや第3席を追加するとき、Role定義とidentity対応の追加だけで済む。→ `role-routing-index.md`の多対1設計・`prep-agent.sh`のcase文構造から構造的に成立(実際の追加はまだ行っていない)。
+
+**総括(2026-07-23、Policy移行完了により更新)**: 16項目中15項目は完全に満たしている。**Skill revision追跡(1件)は簡易実装**(出典URLのみ、commit pinningなし)、**agmsg fork storm根本原因(1件)は本計画の範囲外だが未解決のまま**。この2件は完了条件としては「達成」と言い切れないため`[~]`(部分達成)とした。計画書のPhase 0〜8のTODOは全て実施済みであり、Policy移行も完了、残るのはこの完了条件チェックリストが示す2件の未解決事項である。
 
 ---
 

@@ -26,7 +26,7 @@
 | `roles/*/files/` | 対象へ配置する固定script・資産 | 各ファイル |
 | `roles/*/templates/` | 変数展開して配置する設定・unit・script | 各template |
 | `roles/*/handlers/` | 通知を受けて行うservice操作等 | 各handler |
-| `docs/ai/prompts/*_policy.md` | 移行期間中のシステム別許可・禁止・停止条件 | 該当Policy |
+| `docs/ai/policies/*_policy.md` | システム別許可・禁止・停止条件 | 該当Policy |
 | `playbooks/README.md` | 人間向けplaybookカタログと更新規則 | READMEと各playbookの現行実体 |
 
 小さな処理はroleを作らずplaybook内tasksで完結する場合がある。逆に `common_slack` や `recovery_mute` のように、独立playbookではなく複数入口からtask単位で利用されるroleもある。
