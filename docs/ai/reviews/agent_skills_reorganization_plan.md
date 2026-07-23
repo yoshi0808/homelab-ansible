@@ -582,12 +582,14 @@ Role定義が薄く保たれ、同じルールが複数Roleへコピーされて
 
 ## Phase 4: 公開Skillを調査・評価する
 
-### TODO 4-1: Skillの利用目的をRoleごとに明確にする
+### TODO 4-1: Skillの利用目的をRoleごとに明確にする(2026-07-23完了)
 
-- [ ] Tech Leadに不足している能力を列挙する。
-- [ ] Implementerに不足している能力を列挙する。
-- [ ] Reviewerに不足している能力を列挙する。
-- [ ] Testerに不足している能力を列挙する。
+- [x] Tech Leadに不足している能力を列挙する。
+- [x] Implementerに不足している能力を列挙する。
+- [x] Reviewerに不足している能力を列挙する。
+- [x] Testerに不足している能力を列挙する。
+
+`docs/ai/reviews/agent_skills_reorganization_todo4-1_capability_gaps.md`にて、本表の初期候補とTODO7-2のpilot実測を突合し、Role別に「確認済みギャップ/未検証の候補/対応済み(delegation skill草案で解消)」を分類した。TODO4-2は確認済みギャップを最優先に探索する。
 
 **この作業を行う意味**
 
@@ -607,12 +609,14 @@ Role定義が薄く保たれ、同じルールが複数Roleへコピーされて
 
 各Skill候補について、どのRoleのどの能力を改善するためか説明できる。
 
-### TODO 4-2: 信頼できる公開Skillを探索する
+### TODO 4-2: 信頼できる公開Skillを探索する(2026-07-23大筋完了、詳細は下記未解決参照)
 
-- [ ] OpenAI、Anthropic、Microsoft等の公式・信頼できるリポジトリを優先する。
-- [ ] Ansible、レビュー、テスト、要件分解に関するSkillを収集する。
-- [ ] Skill本文だけでなく、付属するShell、Python、外部通信、権限要求も確認する。
-- [ ] ライセンス、更新状況、上流リポジトリ、コミットを記録する。
+- [x] OpenAI、Anthropic、Microsoft等の公式・信頼できるリポジトリを優先する。→ `anthropics/knowledge-work-plugins`(Apache-2.0、446 commits)を採用。
+- [x] Ansible、レビュー、テスト、要件分解に関するSkillを収集する。→ Yoshinobuがclaude.aiとの壁打ちで実施、Coordinatorが出典をWebFetch/GitHub APIで検証。
+- [x] Skill本文だけでなく、付属するShell、Python、外部通信、権限要求も確認する。→ GitHub API再帰確認で対象27ファイル全てMarkdown、実行コード0件。
+- [x] ライセンス、更新状況、上流リポジトリ、コミットを記録する。→ `docs/ai/reviews/agent_skills_adoption_by_role.md`に記録。
+
+成果物は`docs/ai/reviews/agent_skills_adoption_by_role.md`(採用9項目、Role別に取り込む実体・出典・適用先を明記)。壁打ち時点で2件のskill名誤り(feature-spec→write-spec、roadmap-management→roadmap-update)と1件の出典混同(Decision Memosの出典をstakeholder-updateへ訂正)をCoordinatorが検証・修正した。未解決: 不採用・保留項目を含む全評価ログ(`skill_survey.md`)が未保存のため、完了条件の「不採用の理由が記録されている」は未充足。
 
 **この作業を行う意味**
 
@@ -640,12 +644,14 @@ Role定義が薄く保たれ、同じルールが複数Roleへコピーされて
 
 採用、部分採用、不採用の理由が記録されている。
 
-### TODO 4-3: 公開Skillの利用方式を決める
+### TODO 4-3: 公開Skillの利用方式を決める(2026-07-23完了)
 
-- [ ] そのままインストールするSkillを決める。
-- [ ] 上流Skillを参照して使うものを決める。
-- [ ] ホームラボ用の補足を追加するものを決める。
-- [ ] forkまたはローカルコピーする場合の更新追跡方法を決める。
+- [x] そのままインストールするSkillを決める。→ 0件。`anthropics/knowledge-work-plugins`はビジネス職向け一般ワークフロー前提のため、そのまま導入できるものはない(`agent_skills_adoption_by_role.md`/`skill_survey.md`の判定は全て「参考にする」=型を借りて自作)。
+- [x] 上流Skillを参照して使うものを決める。→ Implementerの Google Shell/Python Style Guide、Ansible公式ドキュメント(Jinja2/変数/shellモジュール/commandモジュール)は本文転記せず`references/`からURL参照のみ。
+- [x] ホームラボ用の補足を追加するものを決める。→ Security review(Ansible公式ドキュメント+recovery pipelineインシデント実例の自作補足)が代表例。他の「参考にする」8件も型を借りた上でhomelab文脈への翻訳(用語・具体例の置換)を伴うため、実質的に全件がこのカテゴリに該当する。
+- [x] forkまたはローカルコピーする場合の更新追跡方法を決める。→ fork/丸ごとコピーは無し(全て「型を見て自作」または「参照のみ」)。追跡すべきは出典情報のみとし、新規作成する各SKILL.mdの冒頭に出典URL・参照日・ライセンスを記載する規約とする(`agent_skills_adoption_by_role.md`で既に同形式を採用済み)。
+
+成果物: `docs/ai/reviews/agent_skills_adoption_by_role.md`(採用9項目の実体・出典・適用先)、`docs/ai/reviews/skill_survey.md`(21項目の全評価ログ、3層モデル、フェーズ1-8の実装ロードマップ)。Yoshinobuがclaude.aiとの壁打ちで作成、Coordinatorが出典検証・実行コード0件確認・誤記訂正(2件)を実施。
 
 **この作業を行う意味**
 
@@ -669,13 +675,13 @@ Role定義が薄く保たれ、同じルールが複数Roleへコピーされて
 
 ## Phase 5: Role SkillとContext読み込みを実装する
 
-### TODO 5-1: Role定義ファイルを作る
+### TODO 5-1: Role定義ファイルを作る(Phase3で前倒し完了、2026-07-23確認)
 
-- [ ] coordinator(`claude`)のRole定義を作る(2026-07-21確定。壁打ち・案件振り分け・Tech Lead決定内容のレビューを担うため必須)。
-- [ ] techleadのRole定義を作る。
-- [ ] implementerのRole定義を作る。
-- [ ] reviewerのRole定義を作る。
-- [ ] testerのRole定義を作る。
+- [x] coordinator(`claude`)のRole定義を作る(2026-07-21確定。壁打ち・案件振り分け・Tech Lead決定内容のレビューを担うため必須)。→ `docs/ai/roles/coordinator.md`。
+- [x] techleadのRole定義を作る。→ `docs/ai/roles/techlead.md`。
+- [x] implementerのRole定義を作る。→ `docs/ai/roles/implementer.md`。
+- [x] reviewerのRole定義を作る。→ `docs/ai/roles/reviewer.md`。
+- [x] testerのRole定義を作る。→ `docs/ai/roles/tester.md`。
 
 **この作業を行う意味**
 
@@ -684,6 +690,8 @@ Role定義が薄く保たれ、同じルールが複数Roleへコピーされて
 **完了条件**
 
 各AIがRole定義を読んだ後、自分の責任、禁止事項、必要成果物を説明できる。
+
+**2026-07-23メモ**: 計画時点ではPhase3=紙上の設計、Phase5=実ファイル作成の想定だったが、実際にPhase3(TODO3-2/3-3)を実行した際に`docs/ai/roles/`の5ファイルを直接作成したため、本TODOの完了条件は前倒しで満たされている。Phase5で新規に作る作業は残っていない。
 
 
 ### TODO 5-2: Codex・Claude Codeで共有するSkillソースを決める
@@ -705,12 +713,14 @@ Role定義が薄く保たれ、同じルールが複数Roleへコピーされて
 - Skillが環境台帳化していない。
 - 環境固有値はInventory、変数、Context、Policy、Issueから解決される。
 
-### TODO 5-3: Contextの遅延読み込み方法を決める
+### TODO 5-3: Contextの遅延読み込み方法を決める(2026-07-23完了)
 
-- [ ] 起動時に読むContextを最小化する。
-- [ ] Issue受領時にTech Leadが必要Contextを指定する形式を決める。
-- [ ] 他Roleが追加Contextを自主調査する条件を決める。
-- [ ] Context指定をagmsgメッセージへ含める形式を決める。
+- [x] 起動時に読むContextを最小化する。→ `docs/ai/core.md`・`role-routing-index.md`・`docs/ai/roles/<role>.md`のみ(実運用で既に最小化済み)。
+- [x] Issue受領時にTech Leadが必要Contextを指定する形式を決める。→ 【参照範囲】欄。
+- [x] 他Roleが追加Contextを自主調査する条件を決める。→ `role-context-matrix.md`の原則を追認。
+- [x] Context指定をagmsgメッセージへ含める形式を決める。→ `docs/ai/context/operations/agmsg-message-format.md`。
+
+2026-07-22〜23の実運用(Phase2/3/4委任)で既に使われていた【objective】【output format】【scope】【参照範囲】【Tier】形式を、Coordinatorが明文化した。
 
 **この作業を行う意味**
 
@@ -737,12 +747,12 @@ acceptance_criteria:
 
 Implementer、Reviewer、Testerが、案件に無関係な全体Contextを読まずに作業できる。
 
-### TODO 5-4: Roleごとの出力フォーマットを決める
+### TODO 5-4: Roleごとの出力フォーマットを決める(2026-07-23完了)
 
-- [ ] Tech Leadの依頼・判断メッセージ形式を決める。
-- [ ] Implementerの完了報告形式を決める。
-- [ ] Reviewerの指摘形式を決める。
-- [ ] Testerの結果形式を決める。
+- [x] Tech Leadの依頼・判断メッセージ形式を決める。→ `docs/ai/context/operations/agmsg-message-format.md`§1・§2。
+- [x] Implementerの完了報告形式を決める。→ 同§2。
+- [x] Reviewerの指摘形式を決める。→ 同§2。
+- [x] Testerの結果形式を決める。→ 同§2。
 
 **この作業を行う意味**
 
