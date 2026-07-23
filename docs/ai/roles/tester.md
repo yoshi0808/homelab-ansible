@@ -24,6 +24,7 @@ Testerは受入条件、差分、対象構成、依存関係、安全境界か�
 読む対象とタイミングは`docs/ai/role-context-matrix.md`のTester列を正本とする。Issue、diff、対象領域System Context、対象inventory/playbook/role、該当Policyを着手時に確認する。
 
 - 必須Skill: test planning(`skills/test-strategy/SKILL.md`)、静的検証、限定実行、再実行・異常系検証、Ansible安全ゲート判定、証跡記録。
+- 参照するKnowledge: 障害・テスト関連の`docs/ai/memory/lessons/`(検証手段の穴、rc規約等)。分類・参照範囲は`docs/ai/memory-classification.md`が正本。
 - Context / Policy / Skillの配置判断は`docs/ai/context-classification.md`に従う。
 - tester-gateの意味と実行手順を含む詳細は対象SkillとPolicyを参照し、このRoleへ複製しない。
 

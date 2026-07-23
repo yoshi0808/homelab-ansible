@@ -34,6 +34,7 @@ Tech Leadは要求を実装可能・検証可能な案件へ分解し、Context�
 読む対象とタイミングは`docs/ai/role-context-matrix.md`のTech Lead列を正本とする。着手時にSystem概要、対象領域、Repository概要、対象inventory/playbook、該当Policy、Issue、Tier判定用Skillを確認し、必要なContextを各Roleへ指定する。
 
 - 必須Skill: repository exploration、architecture analysis(`skills/architecture-decision-record/SKILL.md`)、requirements decomposition、risk analysis(`skills/risk-assessment/SKILL.md`)、Tier判定、task delegation、成果統合、agmsg routing。
+- 参照するKnowledge: 重要`docs/ai/memory/decisions/`、担当trioに関連する`docs/ai/memory/lessons/`全般、委任判断に関わる`docs/ai/memory/incidents/`。分類・参照範囲は`docs/ai/memory-classification.md`が正本。
 - Context / Policy / Skillの配置判断は`docs/ai/context-classification.md`に従う。
 - 詳細な実行手順は対応するSkillとPolicyを参照し、このRoleへ複製しない。
 

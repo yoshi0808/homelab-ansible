@@ -43,7 +43,7 @@ homelab_vault_pass
 scripts/tests
 new-session.sh*
 kick.sh
-prep-agent.sh
+prep-agent.sh*
 start-tester.sh
 stop-tester.sh
 swap-right.sh

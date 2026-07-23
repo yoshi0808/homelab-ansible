@@ -797,20 +797,22 @@ residual_risks:
 
 ポイントは、**Knowledgeは Claude Memoryのコピーではない**ということである。Claude Memoryはこれまで通りClaude Codeが単独で活用し続け、そのうちCodex系Role(`implementer`/`reviewer`/`tester`/`techlead2`)の判断にも必要になったものだけを、都度Knowledgeへ書き出す(遅延移行)。一括移行はしない。
 
-- [ ] 判定ルールを1つだけ採用する: 「この知識を知らないことで、Codex系Roleの判断や実装が変わるか」。
+- [x] 判定ルールを1つだけ採用する: 「この知識を知らないことで、Codex系Roleの判断や実装が変わるか」。→ `docs/ai/memory-classification.md` 1節。
   - Yesの場合 → Knowledge(`docs/ai/memory/`)へ書く(例: rollback系CLI引数の規約、破壊的操作の分類基準、multilayer escapeの落とし穴など)。
   - Noの場合 → Claude Memoryのままでよい(例: Yoshinobuとのコミュニケーションスタイル、Claude Code自身の作業習慣など、Claude Code固有の運用に閉じるもの)。
-- [ ] 既存のClaude Memory(現在数十件)を一括移行しない。上記ルールに該当するものが実際に必要になった時点で、都度Knowledgeへ書き出す。一括棚卸しは低難度作業としてCodexへ依頼してもよいが、着手はPhase 7の実証結果を見てから判断する。
-- [ ] Knowledgeは恒久的な置き場ではない。再利用可能な手順として固まったものは、TODO 6-2の昇格ルールに従ってSkillへ昇格させ、Knowledge側からは昇格済みである旨を残す(参照はSkillへ寄せ、内容を二重に保持しない)。
-- [ ] Knowledgeの内部分類(Incident/Lesson/Decision/Temporary)は、Claude Memoryの`user`/`feedback`/`project`/`reference`とは別の分類体系であることを明記する(型名を無理に揃えない)。
+- [x] 既存のClaude Memory(現在数十件)を一括移行しない。上記ルールに該当するものが実際に必要になった時点で、都度Knowledgeへ書き出す。→ pilotとして本節に例示された3件のみ`lessons/`へ書き出した(下記2026-07-23追記)。一括棚卸しは行わない方針を確定。
+- [x] Knowledgeは恒久的な置き場ではない。再利用可能な手順として固まったものは、TODO 6-2の昇格ルールに従ってSkillへ昇格させ、Knowledge側からは昇格済みである旨を残す(参照はSkillへ寄せ、内容を二重に保持しない)。→ `docs/ai/memory-classification.md` 3節に昇格規則として明記。
+- [x] Knowledgeの内部分類(Incident/Lesson/Decision/Temporary)は、Claude Memoryの`user`/`feedback`/`project`/`reference`とは別の分類体系であることを明記する(型名を無理に揃えない)。→ 同ファイル1節・2節。
 
-### TODO 6-1: Knowledgeを分類する
+**2026-07-23完了**: `docs/ai/memory-classification.md`として4層モデル・判定ルールを統合した。`docs/ai/memory/{incidents,lessons,decisions,temporary}/`を作成し、TODO6-0で名指しされていた3件のClaude Memory(rollback CLI引数規約、破壊的操作分類基準、multilayer escaping教訓)を`lessons/`へpilot移行した。Claude Memory側は削除せず、異なる読者向けの書き出しとして併存させる方針とした(内容の完全一致は求めない)。
 
-- [ ] Incidentを定義する。
-- [ ] Lessonを定義する。
-- [ ] Decisionを定義する。
-- [ ] Temporary情報を定義する。
-- [ ] 各分類の保存期間と参照範囲を決める。
+### TODO 6-1: Knowledgeを分類する(2026-07-23完了)
+
+- [x] Incidentを定義する。→ `docs/ai/memory-classification.md` 2節。
+- [x] Lessonを定義する。→ 同節。
+- [x] Decisionを定義する。→ 同節。
+- [x] Temporary情報を定義する。→ 同節。
+- [x] 各分類の保存期間と参照範囲を決める。→ 同節の表に記載。
 
 **この作業を行う意味**
 
@@ -829,13 +831,13 @@ residual_risks:
 
 Knowledgeの各項目について、事実・教訓・正式判断・一時情報のどれか判別できる。
 
-### TODO 6-2: Knowledgeの昇格・廃止ルールを決める
+### TODO 6-2: Knowledgeの昇格・廃止ルールを決める(2026-07-23完了)
 
-- [ ] IncidentからLessonへ昇格する条件を決める。
-- [ ] LessonからSkillへ昇格する条件を決める(恒久的なノウハウは最終的にKnowledgeではなくSkillへ寄せる)。
-- [ ] Skillからcoreへ昇格する条件を決める(全Role共通の不変原則になった場合のみ)。
-- [ ] Temporary情報の削除条件を決める。
-- [ ] 古くなったDecisionを見直す方法を決める。
+- [x] IncidentからLessonへ昇格する条件を決める。→ `docs/ai/memory-classification.md` 3節。
+- [x] LessonからSkillへ昇格する条件を決める(恒久的なノウハウは最終的にKnowledgeではなくSkillへ寄せる)。→ 同節。
+- [x] Skillからcoreへ昇格する条件を決める(全Role共通の不変原則になった場合のみ)。→ 同節。
+- [x] Temporary情報の削除条件を決める。→ 同節。
+- [x] 古くなったDecisionを見直す方法を決める。→ 同節(定期レビューはせずtrigger-basedで見直す)。
 
 **この作業を行う意味**
 
@@ -845,12 +847,12 @@ Knowledgeの各項目について、事実・教訓・正式判断・一時情�
 
 ミスが起きたとき、どこへ記録し、いつSkillやcoreへ反映するか迷わない。
 
-### TODO 6-3: RoleごとのKnowledge参照範囲を決める
+### TODO 6-3: RoleごとのKnowledge参照範囲を決める(2026-07-23完了)
 
-- [ ] Tech Leadが読むDecisionと重要Lessonを決める。
-- [ ] Implementerが読む対象関連Lessonを決める。
-- [ ] Reviewerが読む過去のレビューLessonを決める。
-- [ ] Testerが読む障害・テストLessonを決める。
+- [x] Tech Leadが読むDecisionと重要Lessonを決める。→ `docs/ai/memory-classification.md` 4節、`docs/ai/roles/techlead.md`の必須ContextとSkill節。
+- [x] Implementerが読む対象関連Lessonを決める。→ 同節、`docs/ai/roles/implementer.md`。
+- [x] Reviewerが読む過去のレビューLessonを決める。→ 同節、`docs/ai/roles/reviewer.md`。
+- [x] Testerが読む障害・テストLessonを決める。→ 同節、`docs/ai/roles/tester.md`。Coordinatorの参照範囲も併せて`docs/ai/roles/coordinator.md`へ追記した。
 
 **この作業を行う意味**
 
@@ -941,16 +943,18 @@ Phase 7はPhase 3〜5の本格展開を待たないが、実証対象が存在�
 
 このPhaseは、Role、Context、Skill、Knowledgeの構造が確定した後に実施する。
 
-### TODO 8-1: 起動時に必要な処理を定義する
+### TODO 8-1: 起動時に必要な処理を定義する(2026-07-23完了)
 
-- [ ] agmsg identity登録を行う。
-- [ ] identityからRoleを解決する。
-- [ ] `core.md` を読む。
-- [ ] Role定義を読む。
-- [ ] 起動時必須Skillを確認する。
-- [ ] 起動時必須Contextだけを読む。
-- [ ] monitorを開始する。
-- [ ] READY状態をagmsgで報告するか決める。
+- [x] agmsg identity登録を行う。→ 既存の`join.sh`/`spawn.sh`/`actas`のまま変更なし。
+- [x] identityからRoleを解決する。→ `prep-agent.sh`のcase文で7 identity全てを個別分岐(旧版は`implementer2`・`techlead2`が未網羅で汎用メッセージに落ちていた不備を修正)。
+- [x] `core.md` を読む。→ 各roleメッセージが`docs/ai/prompts/core.md`(旧)ではなく`docs/ai/core.md`(新)を指すよう修正。
+- [x] Role定義を読む。→ `docs/ai/roles/<role>.md`への参照を追加。
+- [x] 起動時必須Skillを確認する。→ 各roleに対応する`skills/<name>/SKILL.md`への参照を追加(reviewer: code-review/duplication-reuse-check/ansible-security-review、tester: test-strategy、implementer: ansible-implementation-style/ansible-security-review、techlead2: architecture-decision-record/risk-assessment)。
+- [x] 起動時必須Contextだけを読む。→ `docs/ai/role-context-matrix.md`の該当列を参照する1文を追加(個別Contextファイル名はハードコードしない、陳腐化を避けるため)。
+- [x] monitorを開始する。→ 既存の`delivery.sh set monitor codex`のまま変更なし。
+- [x] READY状態をagmsgで報告するか決める。→ 厳密なYAML構造は採用せず、「identity・Role・読み込んだSkillを添えて返信する」という軽量な文章形式に決定(軽量レーン方針、過剰な工程を避ける)。
+
+**副産物として発見・修正した既存バグ(2026-07-23)**: 旧版の`prep-agent.sh`は、tester/implementer向けメッセージ内に`<種別>`・`<playbook>`・`<target>`という山括弧表記を含んでいた。これは[[feedback_agmsg_backtick_quoting]]が指摘する「send.shはメッセージを内部でevalするため`|`/`<`/`>`/バッククォートが壊れる」の既知パターンそのもので、Phase8着手前から本番の起動メッセージに潜在していた。新版では該当箇所を山括弧・バッククォート無しの平文に書き換えて解消した。
 
 **この作業を行う意味**
 
@@ -976,13 +980,15 @@ monitor: active
 
 起動したAIが、自分のidentity、Role、必須原則、利用Skillを明示できる。
 
-### TODO 8-2: `new-session.sh` と `prep-agent.sh` の責務を分ける
+### TODO 8-2: `new-session.sh` と `prep-agent.sh` の責務を分ける(2026-07-23確認・完了)
 
-- [ ] `new-session.sh` はtmux、pane、AIプロセス、agmsg参加を中心に保つ。
-- [ ] Role解決と読み込みは `prep-agent.sh` または専用bootstrapへ寄せる。
-- [ ] `reviewer2` などのidentityをRoleへ正規化する。
-- [ ] readiness timeoutや失敗時の扱いを維持する。
-- [ ] 既存monitor動作とper-agent bridgeを壊さない。
+- [x] `new-session.sh` はtmux、pane、AIプロセス、agmsg参加を中心に保つ。→ 既存構造がこの通りであることを確認、変更なし。
+- [x] Role解決と読み込みは `prep-agent.sh` または専用bootstrapへ寄せる。→ 既に`prep-agent.sh`がこれを担っていることを確認。TODO8-1の内容修正のみ行い、責務分割自体は現状で妥当と判断(新規bootstrapスクリプトへの分離は不要)。
+- [x] `reviewer2` などのidentityをRoleへ正規化する。→ `prep-agent.sh`のcase文(全7 identity)+`docs/ai/role-routing-index.md`(正本)で対応済み。
+- [x] readiness timeoutや失敗時の扱いを維持する。→ 90秒timeout・`|| true`ガードは変更していない。
+- [x] 既存monitor動作とper-agent bridgeを壊さない。→ `delivery.sh set monitor codex`呼び出し、spawn.sh/join.sh呼び出し順序は変更していない。メッセージ本文のみの変更であることを確認済み。
+
+**結論**: `new-session.sh`自体の構造変更は不要と判断した(既にTODO8-2が求める責務分割を満たしていた)。実際の変更は`prep-agent.sh`のメッセージ内容(TODO8-1)のみ。両スクリプトともgitignore対象のローカルヘルパーのため、変更前に`new-session.sh.bak-pre-phase8-<timestamp>`・`prep-agent.sh.bak-pre-phase8-<timestamp>`としてバックアップを取得済み。
 
 **この作業を行う意味**
 
@@ -1012,12 +1018,24 @@ prep-agent.sh または bootstrap-agent.sh
 - 各AIが正しいRoleで初期化される。
 - Role追加や席追加時に起動スクリプトの大幅変更が不要になる。
 
-### TODO 8-3: 旧方式へ戻せる状態で切り替える
+### TODO 8-3: 旧方式へ戻せる状態で切り替える(2026-07-23完了、実地検証で実際の事故と復旧を経験)
 
-- [ ] 変更前スクリプトをGitまたはバックアップで保持する。
-- [ ] 一つのRoleまたはworkers windowから段階導入する。
-- [ ] monitor、agmsg配送、READY、引き継ぎを確認する。
-- [ ] stale bridge、pane誤配置、bootstrap timeoutを再確認する。
+- [x] 変更前スクリプトをGitまたはバックアップで保持する。→ `new-session.sh.bak-pre-phase8-20260723-221054`・`prep-agent.sh.bak-pre-phase8-20260723-221054`(gitignore対象のため手動バックアップ)。
+- [x] 一つのRoleまたはworkers windowから段階導入する。→ tester 1roleのみで実地検証(下記)。
+- [x] monitor、agmsg配送、READY、引き継ぎを確認する。→ 検証成功(下記)。
+- [x] stale bridge、pane誤配置、bootstrap timeoutを再確認する。→ 検証中に実際にstale bridge事故が発生し、原因特定・復旧まで完了(下記)。
+
+**実地検証の経緯**: 本番`homelab`セッションに触れないよう、隔離した別tmuxセッション+別agmsgチーム(`homelab-phase8test`)で`tester`identityを`join.sh`し、新`prep-agent.sh`を実行した。
+
+**検証成功した点**: 新メッセージ内容・配送経路は正しく機能した。実際にCodexエージェントが`docs/ai/core.md`・`role-routing-index.md`・`roles/tester.md`・`role-context-matrix.md`のTester列・`skills/test-strategy/SKILL.md`を読み込み、tester-gate運用を正しく理解した状態で「READY: identity=tester, Role=Tester...」という想定通りの軽量READY報告を返した。
+
+**発生した事故**: `prep-agent.sh`の`SESSION=homelab`固定値により、隔離したつもりの送信が実際には本番`homelab`チーム宛に飛び、かつテスト用codexプロセスが`homelab`+`tester`のロールセッション記録(スレッドID)を上書きした。その結果、本番testerペインの実bridgeプロセスが自動的にkillされ、無関係なスレッド宛に差し替わった(本番testerのCodexプロセス自体は生存、bridge=配送経路のみ喪失)。
+
+**復旧**: `scripts/lib/role-session.sh`の`agmsg_role_session_record`で正しいスレッドIDへ書き戻すと、常駐bridge-launcherが自動的に誤bridgeをkillし正しいbridgeを再起動、手動介入なしで復旧した。本番testerペイン・プロセス・以降の動作に実害は残っていないことを確認済み。
+
+**教訓化**: `docs/ai/memory/lessons/agmsg-bootstrap-live-test-identity-collision.md`として記録。この種のbootstrap変更を実地検証する際は、本番で実際に使われているidentity名を再利用しないことが必須条件だとわかった。
+
+**結論**: 新`prep-agent.sh`は本番投入可能と判断する。次回の自然なセッション再起動時に全7 identityへ適用される。ロールバックが必要な場合は上記`.bak-pre-phase8-*`を`prep-agent.sh`へ戻せばよい。
 
 **この作業を行う意味**
 
