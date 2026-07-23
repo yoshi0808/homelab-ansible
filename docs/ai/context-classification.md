@@ -55,7 +55,7 @@ Context内で対象を指す必要がある場合は、inventory group名・変�
 
 ## 4. ホスト名・構成情報をSkillへ書く例外条件
 
-原則、ホスト名・構成情報はSkill(`~/.agents/skills/`配下の汎用スクリプト等、ホームラボ外でも再利用されうるもの)へ書かない。以下の両方を満たす場合のみ例外とする。
+原則、ホスト名・構成情報はSkill(`~/.agents/skills/`配下の汎用スクリプト、および本リポジトリ`skills/`配下のプロジェクトSkill。いずれもホームラボ外・他プロジェクトで再利用されうるもの)へ書かない。以下の両方を満たす場合のみ例外とする。
 
 1. その情報がなければSkillの動作自体が成立しない(例: 対象ホストを明示しないと安全に実行できないスクリプト)。
 2. 既にpublic GitHub公開済みで、秘匿性のない情報である(IPアドレス・VLAN ID・認証情報は該当しない。ホスト名は個別に判断)。
@@ -82,6 +82,18 @@ Context内で対象を指す必要がある場合は、inventory group名・変�
 - コードを読めば分かる情報を無駄に複製していない(2節)。
 - IPアドレス等の実値がContext/Policy/Skillのどこにも書かれていない(3節、TODO2-2/2-3で実証済み)。
 - `docs/ai/reviews/`と新設分類が競合せず、位置づけが説明できる(5節)。
+
+## 6. Skillの配置とCodex/Claude Codeへの公開方法(TODO5-2、2026-07-23確定)
+
+**共通正本**: `skills/<skill-name>/SKILL.md`(リポジトリ直下)。CodexとClaude Codeで内容を二重管理しない。
+
+**Claude Code側**: `.claude/skills/<skill-name>` から `skills/<skill-name>` への相対symlinkで公開する。Claude Codeは`.claude/skills/<name>/SKILL.md`をプロジェクトスコープで自動検出し、descriptionに基づき自動的に候補として提示する(実機のバイナリ文字列で`.claude/skills/<name>/SKILL.md`規約を確認済み)。
+
+**Codex側**: Codexのネイティブ自動検出は`$CODEX_HOME/skills`(既定`~/.codex/skills`)というユーザーレベル・グローバルな場所のみを見る(`skill-creator`スキルの記載で確認済み)。プロジェクトスコープの自動検出機構が無いため、ホームラボ固有のSkillをそこへ配置すると他プロジェクトのCodexセッションからも見えてしまう(環境台帳化・目的外露出のリスク、2節参照)。このため、CodexへはAGENTS.md→`role-routing-index.md`→`docs/ai/roles/<role>.md`が既に採用している「明示参照」方式をSkillにも適用する。各Roleファイルの「必須Skill」欄に`skills/<name>/SKILL.md`への相対パスを明記し、自動検出には頼らない。
+
+**環境情報混入検査**: `scripts/git-pre-commit-check.sh`の既存IPv4リテラルチェックは`*.md`全体に効いており、`skills/**/*.md`・`.claude/skills/**/*.md`(実体は同一ファイル)も自動的にカバーされる。VLAN ID・VM ID・ホスト名はパターン化しにくいため、4節の例外条件に基づきレビュー時に人手で確認する。
+
+**pilot**: `skills/code-review/SKILL.md`(Reviewerの出力フォーマット)で上記2経路を実証した。詳細は`docs/ai/reviews/agent_skills_reorganization_plan.md` TODO5-2参照。
 
 ## 関連
 

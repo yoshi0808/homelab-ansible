@@ -694,14 +694,18 @@ Role定義が薄く保たれ、同じルールが複数Roleへコピーされて
 **2026-07-23メモ**: 計画時点ではPhase3=紙上の設計、Phase5=実ファイル作成の想定だったが、実際にPhase3(TODO3-2/3-3)を実行した際に`docs/ai/roles/`の5ファイルを直接作成したため、本TODOの完了条件は前倒しで満たされている。Phase5で新規に作る作業は残っていない。
 
 
-### TODO 5-2: Codex・Claude Codeで共有するSkillソースを決める
+### TODO 5-2: Codex・Claude Codeで共有するSkillソースを決める(2026-07-23完了)
 
-- [ ] Skillの共通正本ディレクトリを決める。
-- [ ] 各Skillを `skill-name/SKILL.md` の単位で管理する。
-- [ ] CodexとClaude Codeの探索場所・起動方法の違いを確認する。
-- [ ] 必要ならsymlinkまたは同期スクリプトで各製品へ公開する。
-- [ ] Skill内にIPアドレスや具体的な環境識別情報がないことを検査する。
-- [ ] ホスト名や構成情報を記載した場合、その必要性と参照元をレビューする。
+- [x] Skillの共通正本ディレクトリを決める。→ リポジトリ直下 `skills/<skill-name>/SKILL.md`。
+- [x] 各Skillを `skill-name/SKILL.md` の単位で管理する。→ `skills/code-review/SKILL.md`で実証。
+- [x] CodexとClaude Codeの探索場所・起動方法の違いを確認する。→ Claude Codeは`.claude/skills/<name>/SKILL.md`をプロジェクトスコープで自動検出(実機バイナリで規約確認済み)。Codexは`$CODEX_HOME/skills`(既定`~/.codex/skills`)というユーザーレベル・グローバルな場所のみ自動検出し、プロジェクトスコープの自動検出機構が無いことを`skill-creator`スキルの記載で確認した。
+- [x] 必要ならsymlinkまたは同期スクリプトで各製品へ公開する。→ Claude Codeへは`.claude/skills/<name>`→`skills/<name>`の相対symlinkで公開。Codexはグローバル自動検出への配置(他プロジェクトへの露出リスク)を避け、AGENTS.md→role-routing-index.md→`docs/ai/roles/<role>.md`が既に採用する「明示参照」方式を踏襲(`docs/ai/roles/reviewer.md`の必須Skill欄に`skills/code-review/SKILL.md`のパスを明記)。
+- [x] Skill内にIPアドレスや具体的な環境識別情報がないことを検査する。→ 既存`scripts/git-pre-commit-check.sh`のIPv4リテラルチェックが`*.md`全体(`skills/**`含む)に既に効いており追加実装不要と確認。
+- [x] ホスト名や構成情報を記載した場合、その必要性と参照元をレビューする。→ `docs/ai/context-classification.md` §4の例外条件をそのまま適用する方針とし、同ファイル§6として本TODOの決定事項を記録した。
+
+pilot(`skills/code-review/SKILL.md`、Reviewerのレビュー出力フォーマットのみを`anthropics/knowledge-work-plugins`の`code-review`スキルから採用): 共通正本1件を作成し、`.claude/skills/code-review`からの相対symlinkと、`docs/ai/roles/reviewer.md`からの明示パス参照の両方で公開した。レビューの運用ロジック・重大度判断は引き続き`docs/ai/roles/reviewer.md`が正本で、このSkillは出力フォーマットのみを担い重複させていない。Claude Code側の自動検出(descriptionによる自動提示)は新規プロジェクトSkillのため次回セッション起動時のスキャンで反映される見込みで、本セッション内での実地確認はできていない。
+
+**2026-07-23追記(残り8項目も完了)**: `docs/ai/reviews/agent_skills_adoption_by_role.md`記載の採用9項目全てを`skills/<name>/SKILL.md`として作成し、各Role定義ファイルの「必須Skill」欄から明示参照した(`requirements-analysis`/`goal-tracking`/`architecture-decision-record`/`risk-assessment`/`ansible-implementation-style`/`code-review`/`duplication-reuse-check`/`ansible-security-review`/`test-strategy`)。Tier委任は行わず、内容が文書変更のみ・低リスクであることと直近のfork storm(プロセス過多)対応直後だったことを踏まえ、[[feedback_process_weight_must_match_change_risk]]の軽量レーン方針に従い直接作成した。`requirement.md`/`iac_coverage.md`/`docs/ai/adr/`/`test_plan.md`等の適用先ファイル自体の新設は本TODOの範囲外(各Skillが将来それらを作る際のテンプレートとして機能する)。
 
 **この作業を行う意味**
 

@@ -11,7 +11,9 @@ CCがSkill化に着手できるよう、取り込む実体と出典を明記し�
 
 **実行コード・権限の確認(2026-07-23)**: GitHub APIで`anthropics/knowledge-work-plugins`の`engineering/skills/`・`operations/skills/`・`product-management/skills/`配下を再帰的に確認したところ、blob(ファイル)は27件全てMarkdownで、shell/Python等の実行コードは0件だった。ファイル・ネットワーク・秘密情報へのアクセスを伴うコードはなく、TODO4-2の「実行コード」「権限」評価項目はいずれもリスクなしと判定できる。ライセンスはApache-2.0、446 commitsで活発に保守されている。
 
-**未解決**: 参照元`skill_survey.md`(不採用・保留項目を含む全評価ログ)はこのリポジトリに保存されていない。TODO4-2の完了条件(採用・部分採用・不採用の理由を記録する)を満たすには、このファイルの復元または再作成が必要。
+**2026-07-23追記**: 参照元`skill_survey.md`(不採用・保留項目を含む全評価ログ)は同日中に`docs/ai/reviews/skill_survey.md`として保存済み(commit `79ddcfa`)。TODO4-2の完了条件は充足している。
+
+**2026-07-23追記(Skillコンテンツ化完了)**: 本ファイルの採用9項目のうち、#6(code review)を含む全9項目を`skills/<name>/SKILL.md`として実際に作成した。対応: #1→`skills/requirements-analysis`、#2→`skills/goal-tracking`、#3→`skills/architecture-decision-record`、#4→`skills/risk-assessment`、#5→`skills/ansible-implementation-style`、#6→`skills/code-review`、#7→`skills/duplication-reuse-check`、#8→`skills/ansible-security-review`、#9→`skills/test-strategy`。各Role定義ファイルの「必須Skill」欄からも参照済み。配置方式は`docs/ai/context-classification.md` §6、`docs/ai/reviews/agent_skills_reorganization_plan.md` TODO5-2参照。
 
 ---
 
