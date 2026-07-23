@@ -5,7 +5,7 @@
 参照:
 
 - docs/ai/prompts/core.md
-- docs/ai/prompts/proxmox_patch_policy.md
+- docs/ai/policies/proxmox_patch_policy.md
 
 本書は現在実装されている自律復旧パイプラインの仕様を記述する。実装の変遷や設計判断の経緯は含まない。
 

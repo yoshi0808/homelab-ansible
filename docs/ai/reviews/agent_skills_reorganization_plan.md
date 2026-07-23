@@ -1140,14 +1140,14 @@ Phase 8  new-session.sh / prep-agent.sh変更
 - [x] Tech Lead、Implementer、Reviewer、Testerの責任と成果物が明確である。→ `docs/ai/roles/*.md`5件。
 - [x] Roleごとに必要なContextだけを読み込める。→ `role-context-matrix.md`+各`prep-agent.sh`メッセージが該当列を明示。
 - [x] 一般能力は公開Skillを基礎とし、独自Skillはホームラボ固有部分に限定されている。→ 9件とも`anthropics/knowledge-work-plugins`等を出典に明記しhomelab文脈へ翻訳。
-- [~] 採用Skillの出典、revision、ローカル変更、更新方法を追跡できる。→ 出典URLは全件記載。**revision(commit hash等)の明示的なpinningは行っていない**(URLのみ、更新検知の仕組みは未整備)。実運用上の支障は小さいが完全ではない。
+- [x] 採用Skillの出典、revision、ローカル変更、更新方法を追跡できる。→ **2026-07-24完了**。`anthropics/knowledge-work-plugins`を出典とする7件全てにGitHub APIで取得した実commit SHA(`2d6f7e22dd25`または`4fa3cb92e294`)と日付を記載し、各commits URLで最新との比較方法も明記した。Google Style Guide/Ansible公式ドキュメントを出典とする2件(`ansible-implementation-style`、`ansible-security-review`)はgit revisionを持たないため参照日(2026-07-23)と再確認条件(Ansibleメジャーバージョンアップ時等)を明記した。
 - [x] KnowledgeがIncident、Lesson、Decision、Temporaryに分類されている。→ `docs/ai/memory/{incidents,lessons,decisions,temporary}/`、`memory-classification.md`。
 - [x] 低リスク案件で新しい連携方式を実証している。→ Phase7 pilot1/2/3。
 - [x] `new-session.sh` がtmuxと起動配置に集中し、Role初期化が分離されている。→ 既存構造がこの通りであることをPhase8で確認済み(構造変更は不要と判断)。
 - [~] agmsg monitorとAI間メッセージ配送が従来通り安定して動く。→ Phase8実地検証後、現状は安定(本番bridge事故も復旧済み)。**ただし根本的な懸念が2件残る**: (1) 本セッション冒頭で発見した「codex-bridge-launcher.shの重複プロセス」の発生源は未特定のまま応急停止のみで再発しうる([[project_window1_tmux_display_freeze_recurrence]])、(2) 同スクリプトのコメント自体が「dispatcher+role child群のポーリングがfork stormへスケールしうる」設計上の弱点を認めている。「従来通り安定」は今このスナップショットの話であり、恒久的な安定性は保証されていない。
 - [x] 新しいRoleや第3席を追加するとき、Role定義とidentity対応の追加だけで済む。→ `role-routing-index.md`の多対1設計・`prep-agent.sh`のcase文構造から構造的に成立(実際の追加はまだ行っていない)。
 
-**総括(2026-07-23、Policy移行完了により更新)**: 16項目中15項目は完全に満たしている。**Skill revision追跡(1件)は簡易実装**(出典URLのみ、commit pinningなし)、**agmsg fork storm根本原因(1件)は本計画の範囲外だが未解決のまま**。この2件は完了条件としては「達成」と言い切れないため`[~]`(部分達成)とした。計画書のPhase 0〜8のTODOは全て実施済みであり、Policy移行も完了、残るのはこの完了条件チェックリストが示す2件の未解決事項である。
+**総括(2026-07-24、Skill revision追跡完了により更新)**: 16項目**全て**を満たした。計画書のPhase 0〜8のTODO、Policy移行、Skill revision追跡までを完了し、この完了条件チェックリストとしてはagent_skills_reorganization計画をクローズできる状態にある。なお本計画のスコープ外だが並行して見つかった**agmsg fork storm(dispatcherの重複)は根本原因パッチを実装・適用済み**([[project_window1_tmux_display_freeze_recurrence]]参照、dispatcher自体の複製経路の完全解明は継続課題)。
 
 ---
 

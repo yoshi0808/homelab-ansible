@@ -7,6 +7,8 @@ description: homelab-ansibleのImplementerがshell/Python/Jinja2を含むAnsible
 
 Ansible専用の公式Skillは存在しないため、内部で使う個別言語ごとにベンダー公式の一次情報を直接参照する。SKILL.md形式の非公式ラッパーは導入しない(2026-07-23確定)。本文には要点のみ記載し、原文は転記しない。
 
+**revision追跡**: 以下は全て公式ドキュメントの「latest」参照であり、git commitのような固定revisionを持たない。参照日は2026-07-23。Ansible公式ドキュメントはAnsibleのリリースに追従して内容が変わりうるため、Ansibleのメジャーバージョンアップ時など内容が古くなったと疑われる場合は該当URLを再確認する。Google Style Guideは更新頻度が低く、通常は再確認不要。
+
 ## Shell
 
 出典: Google Shell Style Guide — https://google.github.io/styleguide/shellguide.html

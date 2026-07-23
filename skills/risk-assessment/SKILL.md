@@ -7,6 +7,7 @@ description: homelab-ansibleのTech Leadがrequirement作成時やADR内でリ�
 
 出典: `anthropics/knowledge-work-plugins` の `risk-assessment` スキル(operations、Legal版`legal-risk-assessment`ではなくOperations版を採用)。
 https://github.com/anthropics/knowledge-work-plugins/blob/main/operations/skills/risk-assessment/SKILL.md
+取り込み時点のrevision: commit `4fa3cb92e294`(2026-02-24)。更新確認はhttps://github.com/anthropics/knowledge-work-plugins/commits/main/operations/skills/risk-assessment/SKILL.md で最新commitを確認し、上記revisionと比較する。
 
 ## リスクカテゴリ(homelab文脈への翻訳)
 

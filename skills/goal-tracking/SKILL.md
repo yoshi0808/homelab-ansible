@@ -6,8 +6,8 @@ description: homelab-ansibleのCoordinatorが優先順位付けや意思決定�
 # Goal Tracking(優先順位付け・Decision Memo)
 
 出典: `anthropics/knowledge-work-plugins` の `roadmap-update`(RICE/MoSCoW/ICE、Now/Next/Later)と`stakeholder-update`(Decision Documentation)を参考に採用したもの(product-management)。
-- https://github.com/anthropics/knowledge-work-plugins/blob/main/product-management/skills/roadmap-update/SKILL.md
-- https://github.com/anthropics/knowledge-work-plugins/blob/main/product-management/skills/stakeholder-update/SKILL.md
+- https://github.com/anthropics/knowledge-work-plugins/blob/main/product-management/skills/roadmap-update/SKILL.md — 取り込み時点のrevision: commit `2d6f7e22dd25`(2026-03-13)。更新確認はhttps://github.com/anthropics/knowledge-work-plugins/commits/main/product-management/skills/roadmap-update/SKILL.md
+- https://github.com/anthropics/knowledge-work-plugins/blob/main/product-management/skills/stakeholder-update/SKILL.md — 取り込み時点のrevision: commit `2d6f7e22dd25`(2026-03-13)。更新確認はhttps://github.com/anthropics/knowledge-work-plugins/commits/main/product-management/skills/stakeholder-update/SKILL.md
 
 ## 優先順位付けフレームワーク
 

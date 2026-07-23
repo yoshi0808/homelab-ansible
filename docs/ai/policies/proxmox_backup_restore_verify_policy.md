@@ -7,7 +7,7 @@
 参照:
 
 - docs/ai/prompts/core.md
-- docs/ai/prompts/proxmox_patch_policy.md（prefer* / hacritical タグ、cluster resources、group_vars/proxmox.yml の接続情報）
+- docs/ai/policies/proxmox_patch_policy.md（prefer* / hacritical タグ、cluster resources、group_vars/proxmox.yml の接続情報）
 
 ---
 

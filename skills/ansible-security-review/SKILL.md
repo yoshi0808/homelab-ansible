@@ -7,6 +7,8 @@ description: homelab-ansibleのReviewerがAnsible実装のセキュリティレ�
 
 `anthropics/knowledge-work-plugins`の`code-review`はWebアプリ向け観点が中心でAnsible特有の攻撃面をカバーしないため、Ansible公式ドキュメントを直接の根拠として自作したもの(2026-07-23)。
 
+**revision追跡**: 「その他の観点」節はrecovery pipelineのインシデント実例が根拠で外部revisionを持たない。「変数注入対策」節のAnsible公式ドキュメントは「latest」参照(固定revisionなし、参照日2026-07-23)。Ansibleのメジャーバージョンアップ時など内容が古くなったと疑われる場合は該当URLを再確認する。
+
 ## 変数注入対策(Ansible公式ドキュメントが根拠)
 
 - shellモジュール: https://docs.ansible.com/projects/ansible/latest/collections/ansible/builtin/shell_module.html

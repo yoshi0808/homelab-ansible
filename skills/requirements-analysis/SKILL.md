@@ -7,6 +7,7 @@ description: homelab-ansibleのCoordinator/Tech Leadが新規案件の要求を�
 
 出典: `anthropics/knowledge-work-plugins` の `write-spec` スキル(product-management)を参考に、出力構成のみ採用したもの。
 https://github.com/anthropics/knowledge-work-plugins/blob/main/product-management/skills/write-spec/SKILL.md
+取り込み時点のrevision: commit `2d6f7e22dd25`(2026-03-13)。更新確認はhttps://github.com/anthropics/knowledge-work-plugins/commits/main/product-management/skills/write-spec/SKILL.md で最新commitを確認し、上記revisionと比較する。
 
 ## requirement.mdの8セクション構成
 

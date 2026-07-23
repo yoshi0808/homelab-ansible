@@ -7,7 +7,7 @@
 参照:
 
 - docs/ai/prompts/core.md
-- docs/ai/prompts/cert_renew_cloudkey_policy.md（CloudKey への非公開 API 認証方式を共有）
+- docs/ai/policies/cert_renew_cloudkey_policy.md（CloudKey への非公開 API 認証方式を共有）
 - docs/ai/reviews/unifi_backup_fetch/（要求仕様・実装・レビュー一式）
 
 ---

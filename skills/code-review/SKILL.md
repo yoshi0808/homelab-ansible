@@ -6,6 +6,8 @@ description: homelab-ansibleのReviewer roleがレビュー結果を報告する
 # Code Review (出力フォーマット)
 
 出典: `anthropics/knowledge-work-plugins` の `code-review` スキル(engineering/skills/code-review)を参考に、homelab-ansible向けに出力フォーマットのみを採用したもの。レビューの運用ロジック・重大度判断・エスカレーション条件は `docs/ai/roles/reviewer.md` が優位する。このSkillはそれらを重複記載しない。
+https://github.com/anthropics/knowledge-work-plugins/blob/main/engineering/skills/code-review/SKILL.md
+取り込み時点のrevision: commit `2d6f7e22dd25`(2026-03-13)。更新確認はhttps://github.com/anthropics/knowledge-work-plugins/commits/main/engineering/skills/code-review/SKILL.md で最新commitを確認し、上記revisionと比較する。
 
 ## 出力フォーマット
 

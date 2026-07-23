@@ -7,6 +7,7 @@ description: homelab-ansibleのReviewerが実装差分の重複・再利用漏�
 
 出典: `anthropics/knowledge-work-plugins` の `tech-debt` スキル(engineering)。「Code debt」カテゴリの定義のみ採用。
 https://github.com/anthropics/knowledge-work-plugins/blob/main/engineering/skills/tech-debt/SKILL.md
+取り込み時点のrevision: commit `4fa3cb92e294`(2026-02-24)。更新確認はhttps://github.com/anthropics/knowledge-work-plugins/commits/main/engineering/skills/tech-debt/SKILL.md で最新commitを確認し、上記revisionと比較する。
 
 ## Code debtの定義
 

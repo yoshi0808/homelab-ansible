@@ -7,6 +7,7 @@ description: homelab-ansibleのTech Leadが技術選択(実装方式の決定)�
 
 出典: `anthropics/knowledge-work-plugins` の `architecture` スキル(engineering)を参考に、ADRの型のみ採用したもの。
 https://github.com/anthropics/knowledge-work-plugins/blob/main/engineering/skills/architecture/SKILL.md
+取り込み時点のrevision: commit `2d6f7e22dd25`(2026-03-13)。更新確認はhttps://github.com/anthropics/knowledge-work-plugins/commits/main/engineering/skills/architecture/SKILL.md で最新commitを確認し、上記revisionと比較する。
 
 ## 型
 
