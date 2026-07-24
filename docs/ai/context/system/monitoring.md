@@ -1,5 +1,7 @@
 # System Context: Monitoring
 
+本書はmonitoring環境の事実を記録する非規範Contextである。log収集・保全・検索の許可、禁止、停止条件は [`log_observability_policy.md`](../../policies/log_observability_policy.md) を正本とし、競合時はPolicyを優先する。
+
 ## 領域の役割
 
 `monitoring_servers` groupの`monnie` (`monnie.internal`)は、Prometheus、Grafana、Loki、unpollerを稼働させ、homelabのmetrics、dashboard、logs、ネットワーク観測を担う。`monitoring_healthcheck.yml`と`monitoring_healthcheck` roleは、これらのサービス、待受、memory、root filesystemを観測する。
@@ -32,5 +34,13 @@
 - monitoring pauseは観測を意図的に抑止する操作であり、変更作業の終了時にresumeできたことを確認する。監視停止を長時間放置しない。
 - 証明書や通知経路のprivate key、password、tokenを表示・記録・複製しない。
 - IPアドレス、VLAN ID、VM IDを記載せず、`monnie`または`monnie.internal`で表す。
+
+## 集中log基盤の現状
+
+- `monnie`はremote syslogとlocal journalを集約し、Grafana Alloyからlocal Lokiへ送る唯一のLoki writerである。
+- remote Linux hostはlocal rsyslog、syslog-only applianceは各GUI設定から`monnie`のrsyslog receiverへ合流する。
+- `monnie`のreceiver / AlloyはAnsibleとGit、Ubuntu senderはAnsible、Proxmox senderはmanual、appliance senderは各GUIが管理する。
+- Lokiはremote writerへ公開せず、current transport riskと運用判断はPolicyを正本とする。
+- source数、label、file path、port、allowlist、dashboard query等のrepository詳細はRepository Contextとcodeを正本とする。
 
 想定読者Role: Tech Lead=観測喪失の波及を詳細確認、Implementer/Reviewer/Tester=監視案件時に詳細確認、その他=概要のみ。

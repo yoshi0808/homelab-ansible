@@ -1,29 +1,21 @@
 # cert_renew Policy
 
-作成日: 2026-06-05
-改版日: 2026-06-12
-版: v2.0
-対象: homelab 環境のTLS証明書自動更新（cert_renew role）
-
----
-
-## 変更履歴
-
-| 版 | 日付 | 変更内容 |
-|---|---|---|
-| v1.0 | 2026-06-05 | 初版。ルートCA(Home-RADIUS-CA)直接署名方式。 |
-| v2.0 | 2026-06-12 | 中間CA(Home-TLS-CA)署名方式へ移行。フルチェーン配布・中間CA有効期限監視を追加。ルートCA秘密鍵のオフライン保管に伴う変更。 |
-
----
+本書はhomelabの管理系Web UI用TLS証明書更新に関する正本である。実装詳細はcode / mapを参照し、競合時は本Policyを優先する。
 
 ## 1. 目的
+
+
+<!-- CERT-001 -->
+### 1. 目的
 
 homelab内の管理系Web UIのTLS証明書を自動更新する。
 ブラウザの証明書警告を解消し、短命証明書（45日）運用を維持する。
 
----
+## 2. 対象と実行範囲
 
-## 2. 対象サービス
+
+<!-- CERT-002 -->
+### 2. 対象サービス
 
 | ホスト | サービス | Playbook |
 |---|---|---|
@@ -33,9 +25,10 @@ homelab内の管理系Web UIのTLS証明書を自動更新する。
 | `pve2` | pveproxy | `cert_renew.yml` |
 | `monnie` | Grafana | `cert_renew.yml` |
 
----
 
-## 3. Playbook分離の理由
+### 3. Playbook分離の理由
+
+<!-- CERT-003 -->
 
 `cert_renew_quory.yml` を独立したPlaybookとして分離している理由:
 
@@ -46,18 +39,7 @@ homelab内の管理系Web UIのTLS証明書を自動更新する。
 
 cert_renew_quory.yml は quory のみを対象とする。ansy の証明書はこのPlaybookには含まれない。
 
-## 対応するPlaybook
-
-| Playbook | 役割 |
-|---|---|
-| `cert_renew.yml` | ansy（Semaphore）/ pve1・pve2（pveproxy）/ monnie（Grafana）のTLS証明書を更新する。Semaphoreから実行する。 |
-| `cert_renew_quory.yml` | quory（Semaphore）のTLS証明書を更新する。Semaphore自身の再起動を伴うため、systemd timerから独立実行する。 |
-
-CloudKeyの証明書更新は対象外（`cert_renew_cloudkey_policy.md` / `cloudkey_cert_deploy.yml` を参照）。
-
----
-
-## 4. CA構成
+### 4. CA構成
 
 ### 4.1 CA階層
 
@@ -67,14 +49,18 @@ Home-RADIUS-CA (ルートCA)
         └── リーフ証明書 (各ホスト)
 ```
 
+
+<!-- CERT-005 -->
+<!-- CERT-016 -->
+<!-- CERT-017 -->
 ### 4.2 方式: ファイルコピー方式（中間CA署名）
 
 CA証明書・CA秘密鍵は quory 上の永続ファイルから取得する。
 両 Playbook とも quory 以外での実行を禁止しているため、ansy への CA 配置は不要である。
 
 ```
-/home/yoshi/.cert/ca/home_tls_ca.crt
-/home/yoshi/.cert/ca/home_tls_ca.key
+<controller CA directory>/home_tls_ca.crt
+<controller CA directory>/home_tls_ca.key
 ```
 
 これらのファイルを実行時に `/run/semaphore-ca/`（tmpfs）へコピーし、処理後に削除する。
@@ -82,6 +68,8 @@ CA証明書・CA秘密鍵は quory 上の永続ファイルから取得する。
 Playbookは実行前にソースファイルの存在確認とCA秘密鍵のmode 0600チェックを行い、
 条件を満たさない場合はfailする。
 
+
+<!-- CERT-006 -->
 ### 4.3 ルートCA秘密鍵のオフライン保管（v2.0変更点）
 
 ルートCA(Home-RADIUS-CA)の秘密鍵はオフライン保管に移行済みであり、
@@ -91,13 +79,16 @@ quory上には存在しない。
 - 中間CA(Home-TLS-CA)の証明書・秘密鍵が quory のみに配置される
 - 中間CAのみを用いて日常のTLS証明書を署名する
 
+
+<!-- CERT-007 -->
+<!-- CERT-018 -->
 ### 4.4 CA秘密鍵の保管
 
 | 項目 | 内容 |
 |---|---|
-| 保管場所 | **quory のみ** `/home/yoshi/.cert/ca/home_tls_ca.key`（ansy への配置は不要） |
+| 保管場所 | **quory のみ** `<controller CA directory>/home_tls_ca.key`（ansy への配置は不要） |
 | 権限 | `chmod 600`（必須。Playbookが実行前に検証する） |
-| 所有者 | `yoshi`（推奨。root で読める限りPlaybookの動作は可能） |
+| 所有者 | controller account（推奨。root で読める限りPlaybookの動作は可能） |
 | Git管理 | しない（`.gitignore` で `.cert/` を除外） |
 | バックアップ | quory OS再インストール時に手動で再配置が必要 |
 | 復旧手順 | 下記 §10 参照 |
@@ -111,42 +102,31 @@ Playbookはmode 0600のみを検証し、ownerは検証しない。
 - mode 0600であれば世界から読まれるリスクは排除されている
 - ownerをhardcodeすると環境変更時に壊れる
 
----
+## 3. 対応するPlaybook
 
-## 5. CA証明書の一時展開とcleanup
 
-```
-処理前:  /home/yoshi/.cert/ca/home_tls_ca.{crt,key}（永続）
-         ↓ コピー
-実行中:  /run/semaphore-ca/ca.{crt,key}（tmpfs、処理後に削除）
-         ↓ cleanup
-処理後:  /run/semaphore-ca/ ディレクトリごと削除
-```
+<!-- CERT-004 -->
+### 対応するPlaybook
 
-cleanup失敗は `cert_cleanup_status` ファクトで記録し、最終的にPlaybookがfailする。
+| 区分 | Playbook | 役割 |
+|---|---|---|
+| primary | `cert_renew.yml` | ansy（Semaphore）/ pve1・pve2（pveproxy）/ monnie（Grafana）のTLS証明書を更新する。Semaphoreから実行する。 |
+| primary | `cert_renew_quory.yml` | quory（Semaphore）のTLS証明書を更新する。Semaphore自身の再起動を伴うため、systemd timerから独立実行する。 |
 
----
+上記2本がprimary更新入口である。
 
-## 6. フルチェーン配布（v2.0追加）
+| 区分 | 関連Playbook | 位置づけ |
+|---|---|---|
+| supporting | `ca_trust_deploy.yml` | CA trust配備。primary更新入口ではない |
+| diagnostic | `test_ca_env.yml` | CA環境診断。primary更新入口ではない |
 
-中間CAで署名したリーフ証明書を配布する場合、クライアントはルートCAから中間CAへの
-チェーンを検証する必要がある。リーフ証明書単体の配布ではクライアント側でチェーン検証が失敗する。
+actual renewal role名は`homelab_cert_renew`である。CloudKeyの証明書更新は対象外であり、`cert_renew_cloudkey_policy.md`を参照する。
 
-v2.0 以降、配布するサーバー証明書は以下のフルチェーン形式とする。
+## 4. 判断軸
 
-```
-リーフ証明書（各ホスト固有）
-+
-中間CA証明書（home_tls_ca.crt）
-```
 
-生成タイミング: issue.yml の署名タスク直後に quory（tmpfs）上で cat 連結して作成する。
-
-ファイルパス: `{{ cert_renew_ca_dir }}/certs/{{ inventory_hostname }}.fullchain.crt`
-
----
-
-## 7. 中間CA有効期限監視（v2.0追加）
+<!-- CERT-010 -->
+### 7. 中間CA有効期限監視（v2.0追加）
 
 prepare_ca.yml の実行時に home_tls_ca.crt の残存日数を確認する。
 
@@ -164,22 +144,10 @@ WARNING: Intermediate CA expires in N days!
 中間CAは有効期間10年である。失効前の再発行が唯一の能動的更新イベントであり、
 定期的な目視確認（年1回以上）を推奨する。
 
----
 
-## 8. 失敗検知
-
-| Playbook | 失敗検知方法 |
-|---|---|
-| `cert_renew.yml` | 完了Slack通知を送る。cleanup失敗などPlaybook本体の失敗は fail タスクで検知する。 |
-| `cert_renew_quory.yml` | 完了Slack通知を送る。cleanup失敗はSlack通知後に fail する。加えて systemd unitのexitコードでも検知できる（journalctl / OnFailure=）。 |
-
-通知チャンネルの選択:
-- `alerts`: FAILED または WARNING を含む場合
-- `info`: 正常完了の場合
-
----
-
-## 9. 証明書仕様
+<!-- CERT-012 -->
+<!-- CERT-020 -->
+### 9. 証明書仕様
 
 | 項目 | 値 |
 |---|---|
@@ -188,9 +156,46 @@ WARNING: Intermediate CA expires in N days!
 | 鍵アルゴリズム | EC secp384r1 |
 | SAN | DNS + IPv4（発行時に CA ホストで `getent ahostsv4` により動的取得） |
 
----
+## 5. ライフサイクル・処理フロー
 
-## 10. CA復旧・移行手順
+
+<!-- CERT-008 -->
+<!-- CERT-019 -->
+### 5. CA証明書の一時展開とcleanup
+
+```
+処理前:  <controller CA directory>/home_tls_ca.{crt,key}（永続）
+         ↓ コピー
+実行中:  /run/semaphore-ca/ca.{crt,key}（tmpfs、処理後に削除）
+         ↓ cleanup
+処理後:  /run/semaphore-ca/ ディレクトリごと削除
+```
+
+cleanup失敗は `cert_cleanup_status` ファクトで記録し、最終的にPlaybookがfailする。
+
+
+### 6. フルチェーン配布（v2.0追加）
+
+<!-- CERT-009 -->
+
+中間CAで署名したリーフ証明書を配布する場合、クライアントはルートCAから中間CAへの
+チェーンを検証する必要がある。リーフ証明書単体の配布ではクライアント側でチェーン検証が失敗する。
+
+v2.0 以降、配布するサーバー証明書は以下のフルチェーン形式とする。
+
+```
+リーフ証明書（各ホスト固有）
++
+中間CA証明書（home_tls_ca.crt）
+```
+
+生成タイミング: issue.yml の署名タスク直後に quory（tmpfs）上で cat 連結して作成する。
+
+ファイルパス: `{{ cert_renew_ca_dir }}/certs/{{ inventory_hostname }}.fullchain.crt`
+
+
+<!-- CERT-013 -->
+### 10. CA復旧・移行手順
 
 ### 初回 Home-TLS-CA 移行時の実行手順
 
@@ -218,19 +223,20 @@ Semaphore から実行する場合は Task Template の Extra Variables に `for
 
 運用は両経路とも force_renew=true の月次強制再発行とする。閾値条件(残15日以下)は、月次実行間隔に対して安全マージンが不足するため運用上は使用しない(forceなし手動実行時のフォールバックとして残置)。
 
----
 
 ### 中間CA秘密鍵の再配置（quory OS再インストール時など）
+
+<!-- CERT-014 -->
 
 1. 中間CA秘密鍵バックアップを安全なメディアから取得する
 2. **quory 上にのみ** 配置する（ansy への配置は不要）
 
    ```sh
-   mkdir -p /home/yoshi/.cert/ca
-   cp home_tls_ca.key /home/yoshi/.cert/ca/home_tls_ca.key
-   cp home_tls_ca.crt /home/yoshi/.cert/ca/home_tls_ca.crt
-   chmod 600 /home/yoshi/.cert/ca/home_tls_ca.key
-   chmod 644 /home/yoshi/.cert/ca/home_tls_ca.crt
+   mkdir -p <controller CA directory>
+   cp home_tls_ca.key <controller CA directory>/home_tls_ca.key
+   cp home_tls_ca.crt <controller CA directory>/home_tls_ca.crt
+   chmod 600 <controller CA directory>/home_tls_ca.key
+   chmod 644 <controller CA directory>/home_tls_ca.crt
    ```
 
 3. Playbookを実行して証明書を再発行する
@@ -238,12 +244,29 @@ Semaphore から実行する場合は Task Template の Extra Variables に `for
 ### 中間CA自体の再発行（有効期限切れ前）
 
 1. オフライン保管のルートCA秘密鍵を使用して新しい中間CA証明書を発行する
-2. 新しい `home_tls_ca.{crt,key}` を quory のみの `/home/yoshi/.cert/ca/` に配置する
+2. 新しい `home_tls_ca.{crt,key}` を quory のみの `<controller CA directory>/` に配置する
 3. `force_renew: true` で cert_renew.yml / cert_renew_quory.yml を実行して全ホストの証明書を更新する
 
----
+## 6. 通知方針
 
-## 11. 除外対象
+
+<!-- CERT-011 -->
+### 8. 失敗検知
+
+| Playbook | 失敗検知方法 |
+|---|---|
+| `cert_renew.yml` | 完了Slack通知を送る。cleanup失敗などPlaybook本体の失敗は fail タスクで検知する。 |
+| `cert_renew_quory.yml` | 完了Slack通知を送る。cleanup失敗はSlack通知後に fail する。加えて systemd unitのexitコードでも検知できる（journalctl / OnFailure=）。 |
+
+通知チャンネルの選択:
+- `alerts`: FAILED または WARNING を含む場合
+- `info`: 正常完了の場合
+
+## 7. 制約・禁止事項
+
+
+<!-- CERT-015 -->
+### 11. 除外対象
 
 以下は本roleの管轄外である。
 
@@ -251,3 +274,21 @@ Semaphore から実行する場合は Task Template の Extra Variables に `for
 |---|---|
 | CloudKey の証明書 | Home-TLS-CA 配下へ移行。別ポリシー `cert_renew_cloudkey_policy.md`（cloudkey_cert_deploy role）で管理 |
 | authy の EAP-TLS クライアント/サーバー証明書 | ルートCA直下30年、別管理 |
+
+CA資材の配置、mode、offline root、runtime staging、owner非固定の制約はP2のCA構成を構成する規範であり、本節からも適用する。
+
+## 8. 変更履歴
+
+作成日: 2026-06-05
+改版日: 2026-06-12
+版: v2.0
+対象: homelab 環境のTLS証明書自動更新（cert_renew role）
+
+
+### 変更履歴
+
+| 版 | 日付 | 変更内容 |
+|---|---|---|
+| v1.0 | 2026-06-05 | 初版。ルートCA(Home-RADIUS-CA)直接署名方式。 |
+| v2.0 | 2026-06-12 | 中間CA(Home-TLS-CA)署名方式へ移行。フルチェーン配布・中間CA有効期限監視を追加。ルートCA秘密鍵のオフライン保管に伴う変更。 |
+| v2.1 | 2026-07-25 | 標準8見出しへ再編し、安全境界の意味を維持。 |

@@ -1,288 +1,338 @@
 # Autonomous Recovery Policy
 
-対象: authy / monnie / sophos-fw の異常検知 → 自律復旧パイプライン
-
-参照:
-
-- docs/ai/prompts/core.md
-- docs/ai/policies/proxmox_patch_policy.md
-
-本書は現在実装されている自律復旧パイプラインの仕様を記述する。実装の変遷や設計判断の経緯は含まない。
-
----
+本書は自律復旧の許可、禁止、停止条件、判断軸の正本である。環境事実と実装・運用詳細は対応Contextを参照し、競合時は本Policyを優先する。
 
 ## 1. 目的
 
-authy / monnie / sophos-fw の業務継続を、人間の承認を待たずに自律的な復旧試行で支える。Slackは承認ゲートではなく、手動依頼の入口と結果通知に使う。
+<!-- AR-001 -->
+対象サービスの業務継続を、人間の承認を待たない限定的な自律復旧試行で支える。
 
----
+<!-- AR-002 -->
+Slackは承認gateにせず、手動依頼の入口と結果通知にだけ使う。
 
-## 2. 対象と適用される復旧手段
+## 2. 対象と実行範囲
 
-| 対象 | タグ | VMID | 自己回復(サービスrestart) | pingベースのラダー(VM reboot / failover) |
-|---|---|---|---|---|
-| sophos-fw | `hacritical`, `preferpve1` | 1000 | なし | VM reboot → failover |
-| authy | `hacritical`, `preferpve1` | 101 | freeradius | VM reboot → failover |
-| monnie | `ops`, `preferpve2` | 211 | prometheus / grafana-server / loki / unpoller | VM reboot(failoverなし) |
-| pve1 / pve2 | - | - | 対象外(`proxmox_patch_policy.md`の枠組みに委ねる) | 対象外(read-only調査のみ§4.6の対象) |
-| ansy | - | - | 対象外(開発環境) | - |
+自動pull、OnFailure push、人間によるmanual layerは別経路であり、許可範囲を相互に拡張しない。
 
-この2つの経路は独立した別の障害クラスを扱う。
+<!-- AR-003 -->
+- `sophos-fw`: service restartを許可しない。ping ladderではVM reboot後、未復旧かつfailover条件を満たす場合だけHA failoverを許可する。
+<!-- AR-004 -->
+- `authy`: 許可serviceのrestartを許可する。ping ladderではVM reboot後、未復旧かつfailover条件を満たす場合だけHA failoverを許可する。
+<!-- AR-005 -->
+- `monnie`: 許可serviceのrestartとVM rebootだけを許可し、HA failoverを許可しない。
+<!-- AR-006 -->
+- `pve1` / `pve2`: 自律復旧actionの対象外とし、限定されたread-only調査だけを許可する。
+<!-- AR-007 -->
+- `ansy`: 自律復旧actionの対象外とする。
 
-- **自己回復(サービスrestart)はVM内部の出来事**であり、個別サービスのクラッシュを検知して直す。sophos-fwには自己回復対象サービスが無いため、この経路自体が存在しない。
-- **pingベースのラダーはVM単位の生死判定**であり、対象VM上でどのサービスが動いているかを問わない。pveshで状態を確証したうえで、runningのまま無応答ならVM reboot、hacriticalかつ未復旧ならfailoverへ進む(詳細な分岐は§5.1)。
+<!-- AR-009 -->
+service restartはVM内部のservice crashにだけ用い、対象serviceがない`sophos-fw`にはこの経路を設けない。
 
-pve1/pve2は自律復旧アクション(自己回復・pingベースのラダー)の対象外であり、この点は変更しない(`proxmox_patch_policy.md`の枠組みに委ねる)。一方、read-onlyの調査(investigate)のみ§4.6の対象に含む。復旧アクション(action_services相当)は追加しない。
+<!-- AR-010 -->
+ping ladderはVM単位で判定する。`pvesh`で状態を確証し、runningのまま無応答の場合にVM reboot、`hacritical`かつ未復旧の場合だけHA failoverへ進む。
 
----
+<!-- AR-011 -->
+`pve1` / `pve2`へ`action_services`相当の復旧手段を追加してはならない。
 
-## 3. アカウント構成
+<!-- AR-068 -->
+Slackからの手動依頼は限定wrapper経由のCodex jobとしてだけ受け、結果を同じthreadへ返す。
 
-| Identity | 配置 | 目的 | 保持する鍵・情報 |
-|---|---|---|---|
-| `ann` | 既存の対象ホスト全般 | 既存の定常自動化(patch/evacuate/restore等)専用 | NOPASSWD ALL sudo、forced command無し |
-| `recovery-io` | quory | Slack接続(Socket Mode)。認可チェックのみ | Slack Bot Token / App Token のみ |
-| `recovery-exec` | quory | Codexの呼び出し、調査・復旧の実行。常駐プロセスではなく、recovery-ioまたはOnFailure pushから呼ばれた時だけCodexを起動する | 調査用キー1本、action用キー1本。Slackトークンは持たない |
-| `recovery-exec`(着地用) | authy / monnie | quory側`recovery-exec`からのSSH接続の着地専用アカウント | forced commandのみ、シェルは`/bin/sh` |
-| (yoshi) | quory | `recovery-probe.py`の実行ユーザー。global pauseフラグの読み取りのため`recovery-exec`グループに所属 | - |
+<!-- AR-079 -->
+自動検知できない機能劣化は人間が判断し、Codexを介さずmanual layerの独立playbookを直接実行できる。
 
-`recovery-io`はquoryでのみ稼働する常駐systemdサービス。`recovery-exec`は常駐プロセスを持たない。
+## 3. 対応するPlaybook
 
----
+setup、action、notificationは安全度と目的が異なる。setup入口の列挙を復旧actionの実行許可として扱ってはならず、各入口のtester-gateは実playbook先頭を正本とする。
 
-## 4. 鍵構成
-
-| 鍵 | 保持者 | 対象ホスト | forced commandの性質 |
-|---|---|---|---|
-| 調査用キー(`id_recovery_investigate`) | quory `recovery-exec` | authy / monnie(共用、1本) | パラメータ受領可。対象ホスト側の`recovery-investigate-dispatch.sh`が許可リスト(case文)照合 |
-| action用キー(`id_recovery_action`) | quory `recovery-exec` | authy / monnie(共用、1本) | パラメータ不可。`recovery-action.sh`は接続するだけで固定のサービス再起動一式を実行 |
-| push用キー | authy / monnie 各ホスト固有 | quory `recovery-exec`(着地) | quory側`authorized_keys`のforced commandで`recovery-push-dispatch.sh <ホスト名>`に固定。ホスト側からは引数を渡せない |
-| `ann`の既存鍵 | `ann`自身 | 既存対象ホスト全般 | forced command無し(既存の定常自動化専用、recovery-execは使わない) |
-
-authy/monnieのauthorized_keysは、この2エントリ(investigate/action)のみをAnsible templateで生成し、都度上書きする(drift防止、`authorized_keys.j2`)。
-
-### 4.1 調査系コマンド(investigate)
-
-対象ホストの`/usr/local/sbin/recovery-investigate-dispatch.sh`が`$SSH_ORIGINAL_COMMAND`をcase文で照合する。許可される値は`roles/recovery_exec/defaults/main.yml`の`recovery_exec_targets[].investigate_services`(サービス名 / `journal-<service>`、および期間・優先度指定の`journal-<service>-{1h,24h,err,warn}`)と`investigate_extra`(ノード別の固定コマンド)、および共通システムチェック(`failed`/`disk`/`memory`/`load`/`network`/`ports`/`journal-system`/`dmesg`)。一致しない値は`denied`で拒否する。
-
-#### 4.1.1 調査バリエーションの追加手順
-
-新しい調査コマンド(読み取り専用の確認のみ。復旧コマンドの追加は§4.2の対象外)を増やす場合、原則`roles/recovery_exec/defaults/main.yml`の`recovery_exec_targets[]`を編集するだけでよい。
-
-- **既存サービスの状態確認を増やす**: 該当ノードの`investigate_services`にサービス名を追加する。`<svc>`/`journal-<svc>`のcase分岐と`status`集計表示に自動反映される。
-- **任意の読み取り専用コマンドを追加する**: 該当ノードの`investigate_extra`に`{name, cmd}`を追加する。コマンドが`sudo`を必要とする場合は、`roles/recovery_exec/templates/sudoers-recovery-exec-target.j2`にも対応するNOPASSWDエントリを追加する(`investigate_extra`から自動生成されないため個別対応が必要)。
-
-`recovery_exec_targets`は、quory側wrapper(`roles/recovery_exec/templates/homelab-investigate.sh.j2`)と対象ホスト側dispatch(`recovery-investigate-dispatch.sh.j2`)両方の許可リストを同時にレンダリングする単一のソースであり、この2ファイルを直接編集する必要はない。
-
-追加後に行うこと:
-
-1. `roles/recovery_exec/templates/AGENTS.md.j2`の該当ノードのセクションに説明を追記する(手書きのドキュメントで自動生成されないため、追記しないとCodexがそのチェックの存在を認識しない)
-2. `ansible-playbook playbooks/recovery_exec_setup.yml -l quory`を再実行する(wrapper・dispatch script・AGENTS.mdが同じroleで配備されるため1回で反映される)
-
-全ノード共通のチェック種別自体(`failed`/`disk`/`memory`等と同格の新カテゴリ)を新設する場合に限り、`recovery-investigate-dispatch.sh.j2`と`homelab-investigate.sh.j2`の両方のcase文に直接追記が必要(この部分のみデータ駆動ではない)。`dmesg`共通チェックと、`investigate_services`の各サービスに対する`journal-<svc>-{1h,24h,err,warn}`(期間・優先度指定)は、この方式でテンプレート側に直接実装している(defaults/main.ymlの編集だけでは増えない)。
-
-### 4.2 action系コマンド(復旧)
-
-対象ホストの`/usr/local/sbin/recovery-action.sh`は引数を受け取らず、接続されただけで`recovery_exec_targets[].action_services`に列挙された全サービスを`systemctl reset-failed <svc> || true` → `systemctl restart <svc>`で一括再起動する(個別サービス指定はしない)。`reset-failed`は、OnFailure発火直後の`StartLimitIntervalSec`ウィンドウ内でのrestartがsystemdのstart-limitに拒否されるレースを避けるためのもの。
-
-### 4.3 reportsレポート調査(`homelab-reports`)
-
-quoryローカルの`~/homelab-ansible/reports/<playbook>/`配下のJSONレポート(healthcheck等の実行結果)を参照するための調査コマンド。SSHホップは無く、quory上で完結する。
-
-- `list-playbooks` / `list-reports <playbook> [target]` / `show-report <playbook> [target] <filename>`の3コマンドのみ。`target`は`recovery_investigations/<target>/`のようなネスト構造(自律復旧パイプライン自身の調査ログ)向けの追加path segmentを1つだけ許可するもので、ほとんどのplaybook(フラット構造)では使わない。
-- ベースパス(`~/homelab-ansible/reports`)は固定。`playbook`/`target`/`filename`は`[a-zA-Z0-9_-]+`(filenameは末尾`.json`必須)のみ許可し、スラッシュ・ドットを含む値はトラバーサル防止のため拒否する。`list-reports`は`*.json`のみを列挙する(非JSONファイルが混在するplaybookディレクトリがあるため)。
-- `reports/`は`/home/yoshi`配下にあり、recovery-execは直接読めない。POSIXACL(`recovery-exec:x`)で`/home/yoshi`のtraverseのみを付与し、`reports/`以下(既に0755/644)を直接読む。sudo/setuidによる昇格は使わない(§4.5参照)。
-- `homelab-reports`(引数検証)→ `recovery-reports-helper`(再検証してから読む)の2層構成。investigate系のローカルwrapper→SSH forced commandの2層検証と同じ考え方だが、ここでは権限昇格自体が発生しない。
-
-### 4.4 Semaphore失敗タスク調査(`homelab-semaphore-query`)
-
-quoryの`/var/lib/semaphore/semaphore.db`(SQLite、`yoshi:yoshi 0600`、`journal_mode=delete`。`-wal`/`-shm`副ファイルは無し)を read-only で参照し、Semaphoreタスクの失敗原因を調査するコマンド。
-
-- Codexは`recent-failed <n>` / `task-errors <id>` / `task-hosts <id>` / `task-output <id>`の4種の定型クエリ名と、整数パラメータ(`n`は1-200、`id`)のみを選択する。SQL本文は`homelab-semaphore-query`内に固定文字列として持ち、自由なSQLは受け付けない。
-- `/var/lib/semaphore`のtraverseと`semaphore.db`の読み取りをPOSIX ACL(`recovery-exec:x` / `recovery-exec:r`)で付与する。sudoは使わない(§4.5参照)。`-readonly`フラグにより、万一SQL側に細工があっても書き込みはSQLiteエンジン側で拒否される。
-- 完成したSQL文字列は配列(`exec ... "$sql"`)としてsqlite3へ渡し、シェル経由の文字列連結・再解釈を行わない。
-
-### 4.5 なぜsudoを使わないか(2026-07-05判明)
-
-②③は当初sudoersベースの権限昇格(`(yoshi)`/`(root)`)で設計したが、Slackからの実運用テストで`sudo: The "no new privileges" flag is set, which prevents sudo from running as root.`により失敗することが判明した。
-
-原因は、Codexが`codex exec --sandbox workspace-write`で起動される際にサンドボックス側が`no_new_privileges`を設定するため。このフラグは sudo・setuid・ファイルcapability経由の権限昇格を**sudoersの設定に関わらず一律ブロックする**(Linuxカーネルの`no_new_privileges` prctlの仕様通り)。フラグ自体を解除するとサンドボックス全体の防御が弱まるため不採用。
-
-代わりにPOSIX ACL(`setfacl`相当、`ansible.posix.acl`で付与)を使う。ACLは対象ユーザー(`recovery-exec`)自身が最初から持つ権限ビットを増やすだけで、別ユーザーへの昇格が発生しないため`no_new_privileges`の影響を受けない。
-
-この問題はreviewer・testerのレビュー/テストでは検出されなかった。理由は、tester はAnsible ad-hocの`command`モジュール経由(通常のsudoが効く環境)で検証しており、Codexサンドボックス内の実行パスを実際には通していなかったため。**「テストが通った」ことと「本番の実行経路を通った」ことは別**という教訓であり、副次的に「sudo昇格という環境依存処理」自体が無くなったことで、tester dry-runと本番実行の挙動差も併せて解消される。
-
-補足(§4.6との関係): pve1/pve2向けのsudo(§4.6)はpve1/pve2上のSSHセッション内で完結するため、ここで述べた`no_new_privileges`問題そのものには該当しない。ただし「sudoは呼び出し環境によって想定と異なる挙動をする」という同種の教訓から、pve側では`requiretty`(tty無しsudoの拒否)を別のリスクとして事前に洗い出し、実機確認済み(§4.6、問題なし)。
-
-### 4.6 Proxmoxクラスタ状態調査(`homelab-investigate-pve1` / `homelab-investigate-pve2`)
-
-pve1/pve2のProxmoxクラスタ/HA、レプリケーション、VM/task、storage/ZFS、journalを
-read-onlyで調査するコマンド。pve1/pve2は自律復旧アクションの対象外(§2)であり、
-これは変更しない。追加するのは調査のみで、`action_services`に相当する復旧手段は
-一切追加しない。
-
-- 鍵は`id_recovery_investigate`(authy/monnie用)とは別に、pve専用の`id_recovery_investigate_pve`を新規に1本用意する。許可リストの中身が全く違う(pvesh/ha-manager系 vs freeradius/journal系)ため、目的別に鍵を分け取り違えを防止する。この1本をpve1・pve2両方の`authorized_keys`に登録する(片方が落ちていてももう片方から調査できるようにするため)。
-- `ann`の鍵・権限は使わない(§10)。pve1/pve2にも`ann`とは別の、forced command専用の`recovery-exec`着地アカウントを新設する(authy/monnieと同じ構成)。
-- named check は、引数なしの固定 12 種と、検証済みパラメータを取る 9 種に限定する。
-  - 固定 12 種: `cluster-status` / `cluster-resources` / `ha-status` /
-    `replication-status` / `replication-list` / `cluster-quorum` /
-    `storage-status` / `zpool-health` / `zfs-list` / `journal-replication` /
-    `journal-system` / `journal-cluster`
-  - パラメータ付き 9 種: `replication-read <job-id>` / `vm-status <vmid>` /
-    `vm-config <vmid>` / `vm-tasks <vmid> <limit>` / `task-log <UPID>` /
-    `storage-status-one <storage>` / `zfs-list-vm <vmid>` /
-    `vm-conf-stat <vmid>` / `journal-unit <unit> <window>`
-- セキュリティ境界は二段にする。quory側の`homelab-investigate-pveN` wrapper は
-  allowlist / regex による一次フィルタ(利便性と早期拒否)であり、権限境界ではない。
-  pve側authorized_keysのforced commandで起動する
-  `recovery-investigate-dispatch-pve.sh`が本ゲートであり、`SSH_ORIGINAL_COMMAND`を
-  独立に再パースしてcheck名、exact arity、各パラメータを再検証する。過剰トークン、
-  option化し得る値、shell metachar、範囲外値、非allowlist値はsudo到達前に拒否する。
-- パラメータ検証はdispatchを正本とし、wrapperにも同じ条件をミラーする。vmid /
-  job-id / UPID / storageは完全一致regex、limitは数値形式と1..2000の範囲、unitは
-  `pvescheduler` / `pvestatd` / `pve-cluster` / `corosync` / `pvedaemon`、windowは
-  `30m` / `1h` / `2h` / `6h` / `12h` / `24h`の固定allowlistで検証する。
-  windowはdispatch内部で固定の`--since`値へ変換し、journal出力は300行に固定する。
-- dispatchはsudo argvを、絶対path、固定read-only動詞、検証済みオペランドの順に
-  位置固定で組み立てる。`eval`、sudoコマンド文字列の連結・再shell解釈は行わない。
-  `pvesh create`/`set`/`delete`、`qm set`/`destroy`等の書き込み系動詞はallowlistにも
-  sudoersにも存在させない。
-- sudoersは固定checkを完成形で1:1列挙する。パラメータ付きcheckに限り、read-only
-  動詞を固定したうえで検証済みオペランド位置だけをwildcard化してよい
-  (`qm status *`は可、`qm *`や`pvenode task *`は不可)。journalctlのunitはunitごとに
-  1行ずつ固定し、`journalctl -u *`は禁止する。sudoのwildcardは空白を跨いで一致し得る
-  ため、それ単独を権限境界とせず、dispatchのexact arity / regex / allowlistと固定argvを
-  必須とする。`zfs-list-vm`は既存の固定`zfs list` ruleを使い、非特権grepで絞り込む。
-- `pvesh create`/`set`/`delete`は許可リストに存在しないため構造的に実行できない。
-  `/nodes/<node>/status`相当の個別ノード状態(node-status)は`cluster-resources`の
-  レスポンス(`type=node`のエントリ)で代替する。
-- §4.3/§4.4がACLに切り替えたのに対し、ここでは通常のsudoersを使う。理由は、このsudoがpve1/pve2上のSSHセッション内(sshd経由)で完結し、quory側Codexサンドボックスの`no_new_privileges`問題(§4.5)が発生する経路(quory上でCodexプロセス自身がsudoを呼ぶ経路)を一切通らないため。ACLに変更する必要が無い。Proxmox(Debianベース)のsudoersデフォルトがauthy/monnie(Ubuntu)と異なりforced command経由(tty無し)のsudoを`requiretty`等で拒否する可能性を事前に懸念していたが、2026-07-05にansy起点・quory起点の両方で実機確認済み: 初期3 check (`cluster-status`/`cluster-resources`/`ha-status`) は forced command 経由(no-pty、`sudo -n`)で問題なく成功し、`requiretty`による拒否は発生しなかった。`ha-manager`のフルパスも両ノードで`/usr/sbin/ha-manager`と一致することを確認済み(sudoersの想定通り)。追加checkの絶対path、unit実在、target側sudoers grammar、forced-command経路は配備前/ tester工程で確認する。
-
----
-
-## 5. 検知経路
-
-### 5.1 Pull — `recovery-probe.service`(quory常駐)
-
-`recovery-probe.py`が60秒間隔で全対象をprobeする(`/etc/homelab-recovery/recovery-probe.json`)。
-
-| 対象 | probe | 閾値 |
+| 種別 | Playbook | Policy上の役割 |
 |---|---|---|
-| sophos-fw | icmp + dns(`@sophos-fw.internal`への問い合わせ) | 5回連続失敗(=5分) |
-| authy | icmp + tcp:22 | 同上 |
-| monnie | icmp + tcp:3000 | 同上 |
+| setup | `recovery_probe_setup.yml` | pull probeとmute CLIを配備する |
+| setup | `recovery_exec_setup.yml` | 限定Codex runner、鍵、wrapper、着地経路を配備する |
+| setup | `recovery_io_setup.yml` | Slack I/O bridgeを配備する |
+| setup | `recovery_push_setup.yml` | OnFailure push経路を配備する |
+| setup | `recovery_push_drill_setup.yml` | push drill unitだけを配備する。drill発火は含まない |
+| action | `recovery_ha_failover.yml` | 許可targetのmanualまたはpull最終段HA failoverを行う |
+| action | `recovery_service_restart.yml` | 許可targetのmanual service restartを行う |
+| action | `recovery_vm_reboot.yml` | 許可targetのmanualまたはpull VM rebootを行う |
+| notification | `recovery_probe_notify.yml` | probe通知queueを送信する |
 
-各対象は`host`フィールドでFQDN(`<target>.internal`)を明示している(短縮名はOSレベルDNSで解決できないため必須)。
+<!-- AR-029 -->
+investigate追加後は`recovery_exec_setup.yml`を正規入口としてwrapper、dispatch、Codex向け説明を同時に配備する。
 
-発火時の処理(`fire_ladder()`):
+<!-- AR-080 -->
+manual service restartは`authy` / `monnie`だけを対象とし、`sophos-fw`を対象外とする。
 
-1. 実行中ロック(`ladder.lock`をmkdirで取得。既に実行中ならskip)
-2. flapping判定(直近24時間で3回以上発火していれば、ラダーを実行せずエスカレーション通知のみ)
-3. `pvesh`でVM状態を確証
-   - pve自体に到達不能 → critical通知
-   - VMが`stopped` → `pvesh start`(rebootではなく起動)→ 復旧確認
-   - VMが`not-found` → critical通知
-   - 上記以外(runningなのにping無応答=ハング疑い) → 4へ
-4. `recovery_vm_reboot.yml`を実行(target固定)。復旧すればok通知で終了
-5. 復旧しなければ、対象が`failover: true`(sophos-fw / authy)の場合のみ`recovery_ha_failover.yml`を実行。それでも復旧しなければ人間へエスカレーション通知
+<!-- AR-081 -->
+manual VM rebootは`authy` / `monnie` / `sophos-fw`だけを対象とする。
 
-### 5.2 Push — systemd `OnFailure=`(authy / monnie)
+<!-- AR-082 -->
+manual HA failoverは`authy` / `sophos-fw`だけを対象とし、`monnie`を対象外とする。
 
-各対象サービス(authy: freeradius / monnie: grafana-server・prometheus・loki・unpoller)のunitに`OnFailure=recovery-trigger@%p.service`のdrop-inを配置している。
+## 4. 判断軸
 
-サービスがfailed状態に入ると:
+### Probeとflapping
 
-1. `recovery-trigger@.service`(oneshot)が`recovery-push.sh`を実行
-2. push用キーでquoryの`recovery-exec`へSSH接続(forced command: `recovery-push-dispatch.sh <host>`)
-3. quory側で対象のmute状態を確認、実行中ロック(`mkdir`)を取得
-4. `codex-exec-wrapper exec --cd <workspace> "<host>でサービス障害をOnFailureで検知しました。調査・復旧してください。"`でCodexセッションを起動
+<!-- AR-053 -->
+`sophos-fw`はicmpとdnsの両probeについて5回連続失敗を発火閾値とする。
 
-Codexは`AGENTS.md`の手順(investigate → 判定 → recover → 再investigate → エスカレーション)に従う。VM reboot / failoverへの手段はCodexに渡していない(§6参照)。
+<!-- AR-054 -->
+`authy`はicmpとtcp probeについて5回連続失敗を発火閾値とする。
 
-### 5.3 Slack — `recovery-io.service`(quory常駐)
+<!-- AR-055 -->
+`monnie`はicmpとtcp probeについて5回連続失敗を発火閾値とする。
 
-Slack(`@Homelab`メンション、Socket Mode)からのリクエストを受け、`sudo -H -u recovery-exec codex-exec-wrapper exec --cd <workspace> "<メッセージ>"`でCodexへジョブとして渡す。`-H`はrecovery-execの`~/.codex`を使うために必要。結果はSlackスレッドに日本語で返信される。
+<!-- AR-057 -->
+ladder lockを取得済みなら重複実行をskipする。
 
----
+<!-- AR-058 -->
+直近24時間で3回以上発火していればflappingと判定し、ladderを実行せずescalation通知だけを行う。
 
-## 6. Codex実行環境の安全設計
+### `pvesh`状態分岐と復旧結果
 
-- Codex側で任意コマンドを実行できないよう、execpolicy(`default_policy="deny"`)とし、許可する外部コマンドを以下のwrapperのみに限定する:
-  - `homelab-investigate-{authy,monnie}`(調査)
-  - `homelab-investigate-{pve1,pve2}`(調査。Proxmoxクラスタ/HA・レプリケーション・VM/task・storage/ZFS・journal、read-only。§4.6)
-  - `homelab-reports`(調査。`reports/`配下のJSONレポート参照。§4.3)
-  - `homelab-semaphore-query`(調査。Semaphore失敗タスクの原因解析。§4.4)
-  - `homelab-recover-{authy,monnie}`(復旧)
-  - `homelab-monitoring-{pause,resume,status}`(監視制御)
-- pve1/pve2には`homelab-recover-*`に相当する復旧wrapperを一切用意しない。Codexが
-  呼べるのは§4.6に列挙した固定12種 + パラメータ付き9種のread-only named checkのみで、
-  wrapperとforced-command dispatchの二段検証を通らないコマンドは実行できない。
-- VM reboot(`qm reboot`相当)・HA failover(`ha-manager crm-command relocate`)はCodexのexecpolicyに含まれない。これらは§5.1のpull経路からのみ、決定論的に(target固定の`ansible-playbook`呼び出しとして)実行される。
-- `codex-exec-wrapper`は引数を`exec` / `--cd` / 固定workspaceパス / メッセージ本文の4つに厳密に限定し、個数・各位置の値が一致しなければ拒否する。sandbox・approval・execpolicyに関わるCLIオプションは呼び出し元から一切受け取らず、wrapper内部で固定する(`--sandbox workspace-write`, `approval_policy="never"`, `network_access=true`)。
-- sandboxは実行後の動作(書き込み・ネットワーク到達)を制御する層、execpolicyは「そもそも呼べるコマンドの範囲」を制御する層であり、別物として扱う。sandboxは読み取りを制限しないため、機密ファイル(Slackトークン・SSH鍵)の保護は常にOSファイル権限(0600 + 専用ユーザー所有)が担う。
-- `--sandbox workspace-write`はプロセスに`no_new_privileges`を設定する(2026-07-05、実運用で判明)。これにより、Codexから呼ばれるwrapper内でのsudo・setuid・ファイルcapability経由の権限昇格は、sudoers等の設定に関わらず一律失敗する。**Codexが呼ぶwrapperは権限昇格を前提に設計しない**。読み取り権限が足りない場合はsudoではなくPOSIX ACL(対象ユーザー自身への直接付与)を使う(§4.5)。
+<!-- AR-059 -->
+`pvesh`でVM状態を確証し、Proxmox node自体へ到達できなければactionせずcritical通知する。
 
----
+<!-- AR-060 -->
+VMがstoppedならrebootでなくstartを1回だけ行い、復旧を確認する。
 
-## 7. Mute / 一時停止機構
+<!-- AR-061 -->
+VMがnot-foundならactionを進めずcritical通知する。
 
-2つの独立した仕組みがある。
+<!-- AR-062 -->
+VMがrunningのままping無応答の場合だけVM reboot段へ進む。
 
-| 仕組み | 粒度 | 制御方法 | ファイル |
-|---|---|---|---|
-| 対象別mute | target単位、TTL付き | `homelab-mute set/status/clear`(CLI)、または各playbookが自動設定 | `/var/lib/homelab-recovery/mute/<target>.json`(`{"until": ISO8601, "reason": "..."}`) |
-| グローバルpause | 全target一括、TTLなし(明示的なresumeまで) | `homelab-monitoring-pause/resume/status`(CLI、Slack経由でCodexからも呼べる) | `/var/lib/recovery-exec/workspace/monitoring-paused`(存在すればPAUSED) |
+<!-- AR-063 -->
+target固定のVM rebootを1回だけ実行し、復旧すればok通知して終了する。
 
-いずれも`recovery-probe.py`のループ先頭でチェックされ、有効な場合はそのサイクルの連続失敗カウンタをリセットしてskipする(mute解除直後にすぐ閾値に達することを防ぐ)。push経路(`recovery-push-dispatch.sh`)も対象別muteを個別に確認する。
+<!-- AR-064 -->
+reboot後も未復旧で、かつtargetがfailover許可対象の場合だけHA failoverを1回実行する。それでも未復旧なら人間へescalateする。
 
-対象別muteを自動設定するplaybookと実装上のTTL:
+### Muteとglobal pause
 
-- `proxmox_evacuate_node.yml`: authy / monnie / sophos-fw、120分
-- `proxmox_patch_apply_node.yml`: authy / monnie / sophos-fw、60分
-- `proxmox_restore_vm_placement.yml`: authy / monnie / sophos-fw、90分
-- `ubuntu_nightly.yml`: reboot対象のauthy / monnie、30分
-- `proxmox_patch_weekly_full.yml`: authy / monnie / sophos-fw、360分
-- `ubuntu_vm_full_upgrade.yml`: apply経路のauthy / monnie、45分
+<!-- AR-075 -->
+target別のTTL付きmuteと、明示的なresumeまで継続するTTLなしglobal pauseを、独立したgateとして維持する。
 
-`cert_renew.yml`のmonnie証明書更新は対象別muteではなく、TTLなしのグローバルpauseを設定してからgrafana-serverへ証明書をdeployし、deployが正常終了した場合だけ後続taskでresumeする実装である。resumeは`always` / `rescue`に無いため、deploy失敗時はグローバルpauseが残留し、全targetの監視再開には人間による明示的な`homelab-monitoring-resume`が必要となる。
+<!-- AR-076 -->
+muteまたはglobal pauseが有効ならprobe cycleをskipし、そのtargetの連続失敗counterをresetする。push経路もtarget別muteを確認する。
 
----
+<!-- AR-077 -->
+自動muteは次の契約を維持する: `proxmox_evacuate_node.yml`は`authy` / `monnie` / `sophos-fw`へ120分、`proxmox_patch_apply_node.yml`は同3 targetへ60分、`proxmox_restore_vm_placement.yml`は同3 targetへ90分、`ubuntu_nightly.yml`はreboot対象の`authy` / `monnie`へ30分、`proxmox_patch_weekly_full.yml`は同3 targetへ360分、`ubuntu_vm_full_upgrade.yml`はapply対象の`authy` / `monnie`へ45分。
 
-## 8. 人間による手動レイヤー実行(Semaphore)
+<!-- AR-078 -->
+証明書deployはglobal pause後に実施し、正常終了した場合だけresumeする。失敗してpauseが残った場合は、人間が明示resumeするまで全targetの監視を再開しない。
 
-push(§5.2)・pull(§5.1)のどちらも検知できない障害クラスがある: **systemdはactive、pingも通るが、実際には機能していない**状態(ハング・機能劣化等)。この場合は人間が気づいてSemaphoreから対応する。
+## 5. ライフサイクル・処理フロー
 
-Codexの判断を介さず、3つのレイヤーをそれぞれ独立したplaybookとして人間が直接実行できる。全て`-e target=<対象>`で呼び出す。
+### 共通の経路分離
 
-| playbook | 対象 |
+<!-- AR-008 -->
+service restart経路とping ladderは別障害classとして独立させ、相互の発火条件を代用しない。
+
+<!-- AR-052 -->
+pull probeは全対象を60秒間隔で継続監視する。
+
+<!-- AR-056 -->
+各targetは短縮名でなく明示FQDNで解決する。
+
+### Pull ladder
+
+pullはlock、flapping、`pvesh`の4分岐を順に評価し、P4の条件を満たす段だけを実行する。
+
+<!-- AR-032 -->
+service restartを行う場合はrestart前にreset-failedを行い、start-limit raceを回避する。
+
+### Push
+
+<!-- AR-065 -->
+push経路は許可serviceのOnFailure、target固有key、forced commandに限定する。
+
+<!-- AR-066 -->
+pushはtarget別muteを確認し、実行中lockを取得できない場合は重複起動しない。
+
+<!-- AR-067 -->
+pushで起動されたCodexはinvestigate→判断→recover→再investigate→escalationの順に従い、VM reboot / HA failover手段を持たない。
+
+<!-- AR-071 -->
+VM rebootとHA failoverはCodex execpolicyへ含めず、pull経路のtarget固定・決定論的playbook呼出しにだけ許可する。
+
+### Manual layerと終了
+
+<!-- AR-083 -->
+manual layerはprobeの現在状態を発火条件にせず、人間の判断責任で直接起動できる。ただしtarget allowlist、tag再検証、VM存在確認、HA登録確認を迂回してはならない。
+
+<!-- AR-094 -->
+pushでservice restartが効かなければ、CodexからVM reboot / HA failoverへ進まず人間へescalateする。後段はping無応答条件を独立して満たしたpullか、人間判断のmanual layerだけが実行できる。
+
+## 6. 通知方針
+
+<!-- AR-084 -->
+各経路はreport保存とSlack通知を行う。Slack通知はbest-effortとし、送信失敗を本処理の成否へ影響させない。
+
+<!-- AR-085 -->
+trigger受理時、各ladder段の試行結果、最終escalation時にJSTで通知する。
+
+## 7. 制約・禁止事項
+
+### Account、token、keyの分離
+
+<!-- AR-012 -->
+`ann`は定常自動化専用とし、自律復旧の権限・keyと混用しない。
+
+<!-- AR-013 -->
+`recovery-io`はSlack認可だけを担当し、Slack token以外の復旧権限を持たせない。
+
+<!-- AR-014 -->
+`recovery-exec`は調査・復旧keyを持てるがSlack tokenを持たず、呼び出された時だけCodexを起動する。
+
+<!-- AR-015 -->
+target側`recovery-exec`はforced-command着地専用accountとする。
+
+<!-- AR-016 -->
+probe実行accountにはglobal pauseを読むために必要な権限だけを与える。
+
+<!-- AR-017 -->
+`recovery-exec`に常駐processを持たせてはならない。
+
+<!-- AR-018 -->
+investigate keyが受け取るparameterはdispatch allowlistで検証してから実行する。
+
+<!-- AR-019 -->
+action keyのforced commandはparameterを受け取らず、固定された許可serviceのrestart一式だけを実行する。
+
+<!-- AR-020 -->
+push keyはtarget固有のforced commandへ固定し、target側から引数を渡せないようにする。
+
+<!-- AR-021 -->
+`ann`の既存keyを`recovery-exec`へ流用してはならない。
+
+<!-- AR-022 -->
+`authy` / `monnie`の`authorized_keys`はinvestigate / actionの2 entryだけをtemplateで排他的に管理する。
+
+### Investigate / actionのallowlist
+
+<!-- AR-023 -->
+investigateはservice、journal、extra、common checkのallowlistだけを許可し、一致しない値を拒否する。
+
+<!-- AR-024 -->
+新規investigateにはread-only確認だけを追加でき、復旧commandを追加してはならない。
+
+<!-- AR-025 -->
+service調査の追加はtargetごとの`investigate_services`へ限定して反映する。
+
+<!-- AR-026 -->
+extra調査は固定name / commandとして追加し、sudoが必要なら対応sudoersを個別に同期する。
+
+<!-- AR-027 -->
+`recovery_exec_targets`をwrapperとdispatchの共通allowlist正本とする。
+
+<!-- AR-028 -->
+調査追加時はCodexがそのcheckを認識できる説明も同期する。
+
+<!-- AR-030 -->
+common check categoryを追加する場合だけ両templateへ直接追加し、両側の検証を同期する。
+
+<!-- AR-031 -->
+actionは無引数でallowlist内の全serviceを一括restartし、個別service指定を許可しない。
+
+### Report / Semaphore調査
+
+<!-- AR-033 -->
+report調査は定型3 commandだけを許可する。optional `target`は最大1 path segmentとし、`playbook` / `target` / filename basenameは英数字・underscore・hyphenだけを許可する。component内のslashとdotは拒否するが、filename末尾の固定`.json` suffixだけはdotの例外として必須で許可する。`list-reports`の列挙と`show-report`の表示対象はJSONだけに限定する。
+
+<!-- AR-034 -->
+report読取りは対象accountへの直接ACLで許可し、sudo / setuidによる昇格を使わない。
+
+<!-- AR-035 -->
+report調査はwrapperとhelperの二層で引数を再検証する。
+
+<!-- AR-036 -->
+Semaphore調査は定型4 queryと範囲検証済み整数parameterだけを許可し、自由SQLを受け付けない。
+
+<!-- AR-037 -->
+DBは必要なACLとread-only engine flagで読み、sudoを使わない。
+
+<!-- AR-038 -->
+SQLはargv配列として渡し、shell文字列連結・再解釈を行わない。
+
+### Privilege境界とProxmox調査
+
+<!-- AR-039 -->
+`no_new_privileges`を解除してsandbox防御を弱めてはならない。
+
+<!-- AR-040 -->
+Codex側の不足読取り権限は権限昇格でなく、対象accountへの直接ACLで与える。
+
+<!-- AR-041 -->
+Proxmox node上のSSH session内sudoはCodex sandboxを通らない場合にだけ許可し、quory上Codexからの権限昇格と区別する。
+
+<!-- AR-042 -->
+Proxmox調査はread-onlyに限定し、自律復旧actionを追加してはならない。
+
+<!-- AR-043 -->
+Proxmox調査keyは他targetのinvestigate keyから目的別に1本分離し、両Proxmox nodeの調査にだけ用いる。
+
+<!-- AR-044 -->
+Proxmox着地accountは`ann`から分離し、forced command専用にする。
+
+<!-- AR-045 -->
+Proxmox named checkは、Repository Contextが示す固定checkと検証済みparameter付きcheckの列挙範囲だけを許可する。
+
+<!-- AR-046 -->
+quory側wrapperを一次filter、Proxmox側dispatchを権限の本gateとし、dispatchが独立に再parseして不正token等をsudo到達前に拒否する。
+
+<!-- AR-047 -->
+parameter検証はdispatchを正本、wrapperをmirrorとし、形式、範囲、allowlist、出力量を固定する。
+
+<!-- AR-048 -->
+sudo argvは絶対path、固定read-only動詞、検証済みoperandの順に固定し、`eval`、shell再解釈、書込み動詞を許可しない。
+
+<!-- AR-049 -->
+sudoersは固定checkを1:1列挙し、検証済みparameter位置だけの限定wildcard以外を禁止する。wildcard単独を権限境界にせずdispatch検証を必須とする。
+
+<!-- AR-050 -->
+`pvesh`の書込み動詞を構造的に実行不能とし、node状態はread-only代替checkで取得する。
+
+<!-- AR-051 -->
+追加checkの絶対path、unit実在、sudoers grammar、forced-command経路を配備前とtester工程で確認する。
+
+### Execpolicy、wrapper、file権限
+
+<!-- AR-069 -->
+execpolicyはdefault denyとし、Repository Contextに列挙するinvestigate、report、query、recover、monitoring wrapperだけを許可する。
+
+<!-- AR-070 -->
+Proxmox nodeへrecover wrapperを用意せず、二段検証済みread-only named check以外を実行不能にする。
+
+<!-- AR-072 -->
+Codex wrapperは引数の個数・位置・値を厳密に固定し、sandbox、approval、execpolicy optionを呼出元から受け取らない。
+
+<!-- AR-073 -->
+sandboxとexecpolicyを別の防御層として扱い、tokenとSSH keyはOS file権限と専用ownerで保護する。
+
+<!-- AR-074 -->
+Codex wrapperはsudo、setuid、file capabilityによる権限昇格を前提にせず、不足権限には直接ACLを使う。
+
+### 明示的な禁止事項
+
+<!-- AR-086 -->
+- CodexにBash / Write / Edit / Read / Glob / Grep等の汎用toolを許可してはならない。
+<!-- AR-087 -->
+- action keyのforced commandにparameterを許可してはならない。
+<!-- AR-088 -->
+- investigate forced commandが未検証値を`eval`または展開して実行してはならない。
+<!-- AR-089 -->
+- `action_services` allowlist外の変更操作を自動実行してはならない。
+<!-- AR-090 -->
+- ladderの各段を2回以上自動反復してはならない。
+<!-- AR-091 -->
+- `sophos-fw`上でOS level調査を自動実行してはならない。
+<!-- AR-092 -->
+- `pve1` / `pve2` / `ansy`を復旧action対象にしてはならない。
+<!-- AR-093 -->
+- `recovery-exec`に`ann`のkeyまたはSlack tokenを持たせてはならない。
+
+## 8. 変更履歴
+
+| 日付 | 変更 |
 |---|---|
-| `recovery_service_restart.yml` | `authy` / `monnie`(サービスrestartのみ。sophos-fwは対象外) |
-| `recovery_vm_reboot.yml` | `authy` / `monnie` / `sophos-fw` |
-| `recovery_ha_failover.yml` | `authy` / `sophos-fw`(monnieは対象外) |
-
-いずれもprobeの現在状態やサービス健全性を発火条件にはせず、`target=`が妥当なら人間判断で直接起動できる(発火判断の責任は人間側にある)。ただし対象allowlist・タグ再検証・VM存在確認・HA登録確認などのsafety gateは実装側で維持される。レポート保存・Slack通知(best-effort)は自動経路と共通。
-
----
-
-## 9. 通知
-
-Slack通知は既存の`slack_webhook_alerts`(Vault管理)を流用し、`common_slack/tasks/notify.yml`経由でbest-effort送信する。通知の送信失敗(ネットワーク断など)は本処理の成否に影響しない。通知タイミング: トリガー受理時、各ラダー段の試行結果、最終エスカレーション時。タイムゾーンはJST。
-
----
-
-## 10. 禁止事項
-
-- Codexにツール(Bash/Write/Edit/Read/Glob/Grep等)を許可する
-- action用キーのforced commandにパラメータを許す
-- 調査用キーのforced commandが、受け取った値を許可リスト照合せずにeval・変数展開して実行する
-- `recovery_exec_targets`の`action_services`以外への変更操作を自動実行する
-- ラダーの各段を2回以上自動で繰り返す(実行中ロックとflapping判定で担保)
-- sophos-fw上でOSレベルの調査を自動的に行う(§2の通り、対象外)
-- pve1/pve2/ansyを復旧アクションの対象にする
-- `recovery-exec`にannの鍵・Slackトークンを持たせる
-
----
-
-## 11. 既知の制約
-
-- push経路(OnFailure→Codex)でサービスrestartが効かなかった場合、Codex自身にはVM reboot/failoverへ自動で進む手段が無く、人間へのエスカレーションで終わる。pull経路のラダー(§5.1)はping無応答という別の条件でのみ独立して発動する。VM reboot/failoverまで人間が直接持っていきたい場合は§8の手動レイヤー実行を使う。
+| 2026-07-24 | Git HEADの旧288行版を標準8節へ再編。Policy核を維持し、非規範の環境・Repository・Operations情報をContextへ分離。旧表の数値VM IDは転載せず、inventory / vars / codeを正本とした |

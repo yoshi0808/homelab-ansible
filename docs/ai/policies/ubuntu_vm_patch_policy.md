@@ -1,289 +1,321 @@
-# Ubuntu ノード Patch Policy v1.5
+# Ubuntu VM Patch Policy
 
-作成日: 2026-05-09
-更新日: 2026-07-17
-版: v1.5
-対象: homelab 環境の Ubuntu ノード全般（VM・物理ノード）
-
----
+本書はhomelabのUbuntu nodeに対するpatch、reboot、healthcheck、通知の許可、禁止、停止条件、判断軸の正本である。環境事実と実装・運用詳細は対応Contextを参照し、競合時は本Policyを優先する。
 
 ## 1. 目的
 
-この文書は、homelab 環境における Ubuntu ノードのパッチ運用方針を定義する。
+<!-- UV-001 -->
+homelabのUbuntu nodeに対するpatch運用方針を定義する。
 
-Proxmox ホストとは異なり、Ubuntu ノードは Ubuntu Pro による自動パッチ適用を基本とする。
+<!-- UV-002 -->
+Ubuntu nodeはUbuntu Proによる自動patch適用を基本とする。
 
-Ansible の役割は、パッチ適用そのものではなく以下に限定する。
+Ansibleの役割はpatch適用そのものではなく、次の範囲に限定する。
 
-- ノードの特性に応じた reboot タイミングの制御
-- センシティブな VM における reboot 後のサービス疎通確認
-- センシティブな VM の日次 healthcheck
-- 異常・reboot 実行時の通知
+<!-- UV-003 -->
+- nodeの特性に応じたreboot timingを制御する。
+<!-- UV-004 -->
+- sensitive VMのreboot後にservice疎通を確認する。
+<!-- UV-005 -->
+- sensitive VMの日次healthcheckを行う。
+<!-- UV-006 -->
+- 異常時とreboot実行時に通知する。
 
----
+## 2. 対象と実行範囲
 
-## 2. 対象ノードと特性
+nodeごとに方針1「計画的reboot」または方針2「自動reboot」を選ぶ。
 
-### 2.1 基本的な考え方
+<!-- UV-007 -->
+停止影響の大きいserviceを持つVMは方針1とし、深夜の計画的rebootをAnsibleで管理する。
 
-ノードの特性に応じて、以下の 2 つの方針を使い分ける。
+<!-- UV-008 -->
+開発、backup、検証、infra管理node等は方針2とし、自動rebootとする。
 
-1. Wi-Fi 認証や管理系サービスなどダウンすると困るサービスを保有する VM については、深夜の計画的 reboot を Ansible で管理する。
-2. 開発環境・バックアップ機能・検証環境・インフラ管理ノード等は自動 reboot とする。
+<!-- UV-009 -->
+`authy`は方針1とし、`reboot_required`の場合だけ計画的にrebootしてhealthcheckする。
 
-### 2.2 ノード一覧
+<!-- UV-010 -->
+`monnie`は方針1とし、`reboot_required`の場合だけ計画的にrebootしてhealthcheckする。
 
-| ノード | 役割 | 種別 | reboot 方針 | reboot 時刻 | healthcheck | 理由 |
-|---|---|---|---|---|---|---|
-| `authy` | FreeRADIUS / WPA3 Enterprise / EAP-TLS 認証基盤 | VM | 深夜に計画的 reboot（Ansible 管理） | 03:30（reboot_required時のみ） | あり | サービス停止が家庭内 Wi-Fi 認証断につながる |
-| `monnie` | 監視基盤（Prometheus / Grafana / Loki） | VM | 深夜に計画的 reboot（Ansible 管理） | 03:30（reboot_required時のみ） | あり | 監視基盤が停止すると障害検知が機能しなくなる |
-| `ansy` | Ansible 開発環境 | VM | 自動 reboot（unattended-upgrades 任せ） | 不定 | なし | 開発 VM で再構築可能。コードは GitHub、VM は Proxmox バックアップで保護済み |
-| `quory` | Ansible 実行基盤 / Proxmox QDevice | 物理ノード | 自動 reboot（時刻固定） | 03:00 | なし | 自身が Ansible 実行基盤のため ubuntu_nightly.yml による管理不可 |
+<!-- UV-011 -->
+`ansy`は方針2とし、rebootをunattended-upgradesに任せ、Ansible healthcheckの対象にしない。
 
-将来 Ubuntu ノードが追加された場合は、本表に追記し、どちらの方針を採用するかを明記する。
+<!-- UV-012 -->
+`quory`は方針2とし、固定時刻に自動rebootさせ、`ubuntu_nightly.yml`の管理対象にしない。
 
----
+<!-- UV-013 -->
+Ubuntu nodeを追加する場合はSystem Contextの対象表へ追記し、方針1または方針2のどちらを採用するか明示する。
 
-## 3. パッチ適用方針
+<!-- UV-014 -->
+security patch、ESM patch、ESM Apps patchの定常更新はUbuntu Proとunattended-upgradesが自動実行する。
 
-### 3.1 Ubuntu Pro に任せる
+<!-- UV-025 -->
+non-apt productはgeneric registryへ登録済みの対象だけを、`dry_run=true`のmonthly実行時に確認する。
 
-セキュリティ系パッケージの定常更新は Ubuntu Pro + unattended-upgrades が自動で行う。Ansibleによる定常的な自動適用は行わず、対象外の通常更新だけを§3.3の月次判定と確認付き手動applyで扱う。
+<!-- UV-026 -->
+non-apt productの初期対象は`monnie`へmanual installされたPrometheusだけとする。
 
-対象:
+## 3. 対応するPlaybook
 
-- セキュリティパッチ（`${distro_id}:${distro_codename}-security`）
-- ESM パッチ（`${distro_id}ESM:${distro_codename}-infra-security`）
-- ESM Apps パッチ（`${distro_id}ESMApps:${distro_codename}-apps-security`）
+次の5入口を本Policyに関連する索引として列挙する。列挙自体は変更操作の許可を意味せず、実行可否は本Policyの各UV規範、playbook先頭のtester-gate、入力gateをすべて満たす場合に限る。
 
-### 3.2 サービス自動再起動について
+| Playbook | Policy上の役割 |
+|---|---|
+| `radius_healthcheck.yml` | `authy`のread-only healthcheck |
+| `monitoring_healthcheck.yml` | `monnie`のread-only healthcheck |
+| `ubuntu_nightly.yml` | 方針1 VMのreboot lifecycleに従属する条件付きrebootとpost-check |
+| `ubuntu_vm_full_upgrade.yml` | monthly read-only判定と確認付きsingle-node manual apply |
+| `prometheus_update_check.yml` | non-apt版確認の関連入口。ただしUV-035〜UV-039との既知実装不一致を持ち、本表から変更許可を導かない |
 
-パッケージ更新時、apt の post-install スクリプトによりサービスが自動再起動される場合がある。
+`prometheus_update_check.yml`の現行playbook / roleが確認入力に基づくupdate、rollback、service restart機能を持つ一方、旧Policy §3.4はそれらを禁止している。この不一致は [`playbook-map.md`](../context/ansible/playbook-map.md) に記録済みの未解決事項であり、本書の構造変更では拡大も縮小も解消もしない。
 
-以下の理由で許容する。
+<!-- UV-053 -->
+本Policy対応playbookは方針1 VMだけを対象とし、方針2 nodeをAnsible管理対象にしない。
 
-- 更新は深夜帯に行われる
-- 深夜帯はサービスへの需要がほぼない
-- homelab 環境として実害がほぼない
+<!-- UV-054 -->
+方針1 VMには、そのVMが提供するserviceに応じた専用healthcheck playbookを用意する。
 
-サービスを Package-Blacklist に追加して手動管理に切り替えることは、対応忘れのリスクが高いため採用しない。
+<!-- UV-058 -->
+healthcheck playbookはmanualで単体実行してよい。
 
-### 3.3 月次full-upgrade判定
+<!-- UV-059 -->
+`ubuntu_nightly.yml`は方針1 groupだけを対象とする共通の深夜reboot入口とする。
 
-Ubuntu Pro / unattended-upgradesの対象外となる通常更新は、`ubuntu_vm_full_upgrade.yml`で月次に判定し、ノード単位で`#patches`へ通知する。月次実行は`dry_run=true`のread-only判定であり、実適用は確認文字列を伴う単一ノードの手動applyに限定する。
+## 4. 判断軸
 
-通知にはinstall / remove / phasing保留の件数とパッケージ別バージョンを表示する。`apt-mark showhold`でhold中のパッケージをread-only収集し、1件以上ある月だけphasing保留の直後に`holdにより保留: N件（パッケージ名）`を表示する。hold一覧は説明・照合用であり、Status・重要パッケージ・件数閾値・apply判定には使用しない。
+### Monthly full-upgradeとnon-apt
 
-monnieのunpollerリポジトリでは、`3.3.1+git → 3.3.1+git`のように同一バージョン文字列が更新候補として継続表示されることがある。これはリポジトリメタデータ由来の既知事象として、そのまま候補表示に残す。同一文字列だけを根拠に除外するとepoch・revision・アーキテクチャ等の差異を誤って隠す可能性があるため、専用の除外判定は設けない。
+<!-- UV-018 -->
+Ubuntu Pro / unattended-upgradesの対象外となる通常更新はmonthlyにnode単位で判定し、`#patches`へ通知する。
 
-### 3.4 非apt管理プロダクトの月次更新確認
+<!-- UV-021 -->
+hold packageはread-onlyで収集し、1件以上ある月だけphasing保留の直後に件数とnameを表示する。
 
-`ubuntu_vm_full_upgrade`はホスト別の汎用registryに登録した非apt管理プロダクトも、`dry_run=true`の月次実行時だけ確認する。第1弾の対象はmonnieへ手動インストールしたPrometheusのみ。現在版はmonnie自身から`http://localhost:9090/api/v1/status/buildinfo`をread-only HTTP GETして取得し、最新版はGitHub Releases APIのprometheus/prometheus latest stableをread-only HTTPS GETして取得する。GitHubの`v`タグprefixを除去し、両方が数値バージョンとして取得できた場合だけ比較する。
+<!-- UV-022 -->
+hold一覧をStatus、重要package、件数閾値、apply判断に使用しない。
 
-ノード単位通知には次のいずれかを`apt外:`行で表示し、report JSONの`nonapt`にもname / current / latest / state / current・latest rc / HTTP status / noteを保存する。
+<!-- UV-023 -->
+`unpoller`の同一version文字列候補は既知のrepository metadata事象として候補表示に残す。
 
-- 更新あり: `apt外: prometheus CURRENT → LATEST (更新あり・手動更新が必要)`
-- 最新: `apt外: prometheus CURRENT (最新)`
-- 取得または比較失敗: `apt外: prometheus 取得/比較失敗(current rc=X / latest rc=Y)`
+<!-- UV-024 -->
+同一version文字列だけを根拠とする専用除外判定を設けない。
 
-両方の取得成功と数値比較により更新ありが確定した場合だけ、Statusを最低`REVIEW_REQUIRED`へ昇格し、`status_reason`へ`non-apt update available: prometheus CURRENT → LATEST`を追加する。既存の`BLOCKED` / `MAJOR_UPGRADE_DETECTED`は降格させない。取得・JSON parse・version比較の失敗はbest-effort / fail-quietとして通知とreportにのみ残し、Statusを変更せずplaybookも失敗させない。
+<!-- UV-027 -->
+non-apt versionはcurrentとlatestをread-only GETし、両方を数値versionとして取得できた場合だけ比較する。
 
-この経路はバージョン確認専用であり、自動download・自動更新・service restartを一切行わない。Prometheusの更新は人間がNotion「Prometheus / Grafana / unifi-poller セットアップ手順」に従って手作業で行う。`dry_run=false`のapt apply経路では非aptチェック自体を実行しない。
+<!-- UV-032 -->
+両方の取得成功と数値比較によりupdateありが確定した場合だけ、Statusを最低`REVIEW_REQUIRED`へ昇格し、reasonを追加する。
 
----
+<!-- UV-033 -->
+既存の`BLOCKED`または`MAJOR_UPGRADE_DETECTED`をnon-apt結果によって降格させない。
 
-## 4. reboot 方針
+<!-- UV-034 -->
+取得、JSON parse、version比較の失敗はbest-effort / fail-quietとして通知とreportだけに残し、Statusを変更せずplaybookも失敗させない。
 
-### 4.1 計画的 reboot（方針1のVM）
+### Rebootとhealthcheck
 
-`Unattended-Upgrade::Automatic-Reboot "false"` に設定する。
+<!-- UV-042 -->
+方針1はnightlyで`reboot_required`を確認し、必要な場合だけrebootする。
 
-reboot のタイミングは Ansible が制御する。
+<!-- UV-047 -->
+方針2はunattended-upgradesが`reboot_required`を検出した場合に自動rebootする。
 
-深夜に `ubuntu_nightly.yml` が reboot_required を確認し、必要な場合のみ reboot する。
+<!-- UV-051 -->
+方針1ではreboot-required fileが存在すればreboot要と判定する。
 
-reboot 後、対象 VM のサービス状態と疎通を確認する。
+<!-- UV-052 -->
+方針1ではneedrestartがreboot要と判定した場合もreboot要とする。UV-051と本条件の関係はORである。
 
-例:
-- authy の場合は freeradius の状態と 1812/udp・1813/udp の Listen を確認する。
-- monnie の場合は prometheus（9090/tcp）・grafana（3000/tcp）・loki（3100/tcp）の Listen を確認する。
+<!-- UV-056 -->
+healthcheckが`WARNING`または`CRITICAL`なら通知対象と判定する。
 
-### 4.2 自動 reboot（方針2のノード）
+## 5. ライフサイクル・処理フロー
 
-`Unattended-Upgrade::Automatic-Reboot "true"` に設定する。
+### 定常更新とmanual apply
 
-unattended-upgrades が reboot_required を検出した場合、自動で reboot する。
+<!-- UV-016 -->
+aptのpost-install scriptによるservice自動restartは、更新を深夜の低需要時に行いhomelabでの実害がほぼないことを条件に許容する。
 
-Ansible による管理・監視・healthcheck は行わない。
+monthly full-upgradeはhealthcheck、simulation、分類、通知の順に判定し、manual applyでは確認gateを先に通す。実装の詳細はRepository Context、運用順序はOperations Contextを参照する。
 
-例:
+### 方針1のreboot
 
-- ansy: Ansible コードが GitHub に、VM 自体が Proxmox バックアップで保護されているため、自動 reboot で問題ない。
-- quory: 自身が Ansible 実行基盤のため ubuntu_nightly.yml による管理ができない。`Automatic-Reboot-Time "03:00"` で時刻を固定する。
+<!-- UV-040 -->
+方針1 VMは`Unattended-Upgrade::Automatic-Reboot`をfalseにする。
 
-### 4.3 reboot 判定（方針1のVMのみ）
+<!-- UV-041 -->
+方針1 VMのreboot timingはAnsibleが制御する。
 
-以下のいずれかを満たす場合、reboot が必要と判定する。
+<!-- UV-043 -->
+reboot後は対象VMのservice状態と疎通を確認する。
 
-- `/var/run/reboot-required` が存在する
-- `needrestart` が reboot 要と判定する
+<!-- UV-044 -->
+`authy`のpost-checkはFreeRADIUSの状態と1812/udp、1813/udpのlistenを確認する。
 
----
+<!-- UV-045 -->
+`monnie`のpost-checkはPrometheusの9090/tcp、Grafanaの3000/tcp、Lokiの3100/tcpのlistenを確認する。
 
-## 5. Playbook 構成
+### 方針2のreboot
 
-方針1のVM（authy・monnie など）のみを対象とする。方針2のノード（ansy・quory など）は Ansible 管理対象としない。
+<!-- UV-046 -->
+方針2 nodeは`Unattended-Upgrade::Automatic-Reboot`をtrueにする。
 
-| Playbook | 目的 | 実行タイミング | 変更有無 |
-|---|---|---|---|
-| `radius_healthcheck.yml` | FreeRADIUS 稼働確認・日次レポート | 朝（05:30） | なし |
-| `monitoring_healthcheck.yml` | Prometheus / Grafana / Loki 稼働確認・日次レポート | 朝（05:35） | なし |
-| `ubuntu_nightly.yml` | reboot_required 確認 → 条件付き reboot → サービス確認 → 通知 | 深夜（03:30） | あり（reboot） |
-| `ubuntu_vm_full_upgrade.yml` | 月次full-upgrade判定・ノード単位通知 → 確認付き手動apply | 毎月2日（dry-run）/ 必要時（apply） | dry-runなし / applyあり |
+<!-- UV-049 -->
+`ansy`は再構築とbackupを前提に自動rebootを許容する。
 
-healthcheck は VM が提供するサービスに応じた専用 playbook を用意する。
+<!-- UV-050 -->
+`quory`は自身がAnsible実行基盤であるためnightlyで管理せず、`Automatic-Reboot-Time`を固定する。
 
-`ubuntu_nightly.yml` は方針1の VM 共通の深夜 reboot playbook とする。
+### Nightlyとhealthcheck
 
-### 5.1 healthcheck playbook
+<!-- UV-055 -->
+healthcheckはread-onlyでservice状態を収集、判定、reportする。
 
-read-only。各 VM のサービス稼働状態を収集・判定・レポートする。
+<!-- UV-057 -->
+朝のhealthcheckで前夜reboot後のservice稼働を確認する。
 
-正常以外（WARNING / CRITICAL）の場合は通知する。
+<!-- UV-060 -->
+nightlyは最初に`reboot_required`を確認する。
 
-朝の healthcheck で「前夜に reboot した・サービスは生きている」を確認できる。
+<!-- UV-061 -->
+`reboot_required=false`ならrebootせず、通知もしない。
 
-手動での単体実行も可。
+<!-- UV-062 -->
+`reboot_required=true`ならreboot実行前に開始通知する。
 
-### 5.2 ubuntu_nightly.yml
+<!-- UV-063 -->
+開始gate通過後にrebootを1回実行する。
 
-深夜専用の複合 playbook。対象は `radius_servers` と `monitoring_servers` グループ。
+<!-- UV-064 -->
+reboot後は起動完了を待つ。
 
-処理フロー:
+<!-- UV-065 -->
+起動後に対象VMのservice状態を確認する。
 
-```text
-1. reboot_required を確認する
-2. reboot_required = false の場合、何もしない（通知なし）
-3. reboot_required = true の場合:
-   a. reboot 実行通知を送る
-   b. reboot する
-   c. 起動完了を待つ
-   d. 対象 VM のサービス状態を確認する
-   e. 確認結果を通知する（OK / CRITICAL）
-```
+<!-- UV-066 -->
+post-check結果を`OK`または`CRITICAL`として通知する。
 
----
+### Scheduler
+
+<!-- UV-079 -->
+systemd timerは`quory`上で実行する。
+
+<!-- UV-080 -->
+`authy` nightlyを規定timerで毎日03:30にscheduleする。
+
+<!-- UV-081 -->
+`authy` healthcheckを規定timerで毎日05:30にscheduleする。
+
+<!-- UV-082 -->
+monitoring healthcheckを規定timerで毎日05:35にscheduleする。
 
 ## 6. 通知方針
 
-### 6.1 通知条件
+<!-- UV-020 -->
+monthly判定の通知にはinstall、remove、phasing保留の件数とpackage別versionを表示する。
 
-| 状況 | 通知 |
+<!-- UV-028 -->
+non-apt updateありの場合はcurrentからlatestへの変化とmanual updateが必要であることを通知し、reportへ保存する。
+
+<!-- UV-029 -->
+non-apt latestの場合はcurrent versionとlatest状態を通知し、reportへ保存する。
+
+<!-- UV-030 -->
+non-apt取得または比較失敗の場合はcurrent / latestのreturn codeを通知し、reportへ保存する。
+
+<!-- UV-031 -->
+reportの`nonapt`にはname、current、latest、state、current / latest return code、HTTP status、noteを保存する。
+
+<!-- UV-067 -->
+nightlyで`reboot_required=false`なら通知しない。
+
+<!-- UV-068 -->
+reboot後のpost-checkが`OK`なら、reboot実施と`OK`を通知する。
+
+<!-- UV-069 -->
+reboot後のpost-checkが`NG`なら`CRITICAL`を通知する。
+
+<!-- UV-070 -->
+full-upgradeのmonthly dry-runとmanual applyはnode単位で通知し、通常は`#patches`、`BLOCKED`の場合だけ`#alerts`を使う。
+
+<!-- UV-071 -->
+healthcheckが`OK`なら通知しない。
+
+<!-- UV-072 -->
+healthcheckが`WARNING`なら通知する。
+
+<!-- UV-073 -->
+healthcheckが`CRITICAL`なら通知する。
+
+<!-- UV-074 -->
+深夜通知は翌朝確認する運用を許容する。
+
+<!-- UV-075 -->
+Slack通知は`common_slack` role経由で行い、WebhookはAnsible Vaultで管理する。
+
+<!-- UV-076 -->
+nightly、full-upgrade、healthcheckを次のchannel / statusへ割り当てる。
+
+| 状況 | channel | status |
+|---|---|---|
+| nightly: reboot開始 | `#info` | `info` |
+| nightly: reboot正常完了 | `#info` | `ok` |
+| nightly: service異常 | `#alerts` | `critical` |
+| nightly: reboot timeout | `#alerts` | `critical` |
+| full-upgrade: monthly dry-run / manual apply | 通常`#patches`、`BLOCKED`だけ`#alerts` | Statusに応じた`info` / `ok` / `warning` / `critical` |
+| healthcheck: `WARNING` | `#alerts` | `warning` |
+| healthcheck: `CRITICAL` | `#alerts` | `critical` |
+
+<!-- UV-077 -->
+通知失敗はbest-effortとして扱い、呼出元playを停止しない。
+
+<!-- UV-078 -->
+Slack移行済みtaskからmail varsを参照せず、mail moduleを使用しない。
+
+## 7. 制約・禁止事項
+
+### Patch適用
+
+<!-- UV-015 -->
+Ansibleで定常的な自動patch適用を行わず、Ubuntu Pro対象外の通常更新だけをmonthly判定と確認付きmanual applyで扱う。
+
+<!-- UV-017 -->
+serviceを`Package-Blacklist`へ追加してmanual管理へ切り替える方式を採用しない。
+
+<!-- UV-019 -->
+monthly実行は`dry_run=true`のread-only判定に限定し、実適用は確認文字列を伴うsingle-node manual applyだけを許可する。
+
+### Non-apt Prometheusの凍結境界
+
+次の5条件は旧Policy §3.4 L91の独立した規範である。`prometheus_update_check.yml`の現行実装との不一致を理由に、統合、緩和、厳格化してはならない。
+
+<!-- UV-035 -->
+このnon-apt確認経路はPrometheus artifactの自動downloadを一切行わない。
+
+<!-- UV-036 -->
+このnon-apt確認経路はPrometheusの自動更新を一切行わない。
+
+<!-- UV-037 -->
+このnon-apt確認経路はPrometheusのservice restartを一切行わない。
+
+<!-- UV-038 -->
+Prometheusの更新は人間がNotion「Prometheus / Grafana / unifi-poller セットアップ手順」に従って手作業で行う。
+
+<!-- UV-039 -->
+`dry_run=false`のapt apply経路ではnon-apt check自体を実行しない。
+
+### Rebootと対象境界
+
+<!-- UV-048 -->
+方針2 nodeをAnsible管理、監視、healthcheckの対象にしない。
+
+## 8. 変更履歴
+
+| 日付 | 変更 |
 |---|---|
-| ubuntu_nightly: reboot_required = false | なし |
-| ubuntu_nightly: reboot 実行 → サービス確認 OK | あり（reboot した旨 + OK） |
-| ubuntu_nightly: reboot 実行 → サービス確認 NG | あり（CRITICAL） |
-| ubuntu_vm_full_upgrade: 月次dry-run / 手動apply | あり（ノード単位。通常は#patches、BLOCKEDのみ#alerts） |
-| healthcheck: OK | なし |
-| healthcheck: WARNING | あり |
-| healthcheck: CRITICAL | あり |
+| 2026-05-09 | 初版作成 |
+| 2026-07-17 | 旧v1.5へ更新 |
+| 2026-07-24 | Git HEADの旧289行版を標準8節へ再編。Policy核を維持して非規範のSystem / Repository / Operations情報をContextへ分離し、§3.4の既知実装不一致を未解決のまま見える化 |
 
-### 6.2 通知タイミングと確認
-
-深夜の通知はスマートフォンの睡眠モード中に送信される。
-
-翌朝に確認する運用で問題ない。
-
-### 6.3 通知方法
-
-`roles/common_slack/tasks/notify.yml` を `ansible.builtin.include_tasks` で呼び出し、Slack Incoming Webhook で送信する。
-
-Webhook URL は Ansible Vault 暗号化済みの `inventories/vars/slack.yml` に定義する。
-
-```yaml
-slack_webhook_info: "..."    # #info チャンネル
-slack_webhook_alerts: "..."  # #alerts チャンネル
-slack_webhook_patches: "..." # #patches チャンネル（月次full-upgrade判定・apply）
-```
-
-呼び出し方:
-
-```yaml
-- name: Send Slack notification
-  ansible.builtin.include_tasks: "{{ playbook_dir }}/../roles/common_slack/tasks/notify.yml"
-  vars:
-    slack_channel: "info"     # info / alerts
-    slack_status: "ok"        # ok / warning / critical / error / info
-    slack_title: "タイトル"
-    slack_message: "本文"
-```
-
-チャンネル割り当て:
-
-| 状況 | チャンネル | status |
-|---|---|---|
-| ubuntu_nightly: reboot 開始通知 | #info | info |
-| ubuntu_nightly: 正常完了（reboot OK） | #info | ok |
-| ubuntu_nightly: CRITICAL（サービス異常） | #alerts | critical |
-| ubuntu_nightly: reboot タイムアウト | #alerts | critical |
-| ubuntu_vm_full_upgrade: 月次dry-run / 手動apply | #patches（BLOCKEDのみ#alerts） | Statusに応じてinfo / ok / warning / critical |
-| healthcheck: WARNING | #alerts | warning |
-| healthcheck: CRITICAL | #alerts | critical |
-
-通知失敗（Vault 復号エラー・Webhook 到達不能など）は best-effort として扱い、呼び出し元 play を止めない。
-
-`inventories/vars/mail.yml` は現在も Git 管理対象として存在するが、Slack 移行対象のタスクからは参照しない。`community.general.mail` モジュールも使用しない。
-
----
-
-## 7. systemd timer 設定方針
-
-systemd timer は quory 上で実行する。
-
-| timer | 実行対象 | 実行時刻 |
-|---|---|---|
-| `ansible-authy-reboot-if-required.timer` | `ubuntu_nightly.yml` | 毎日 03:30 |
-| `ansible-authy-healthcheck.timer` | `radius_healthcheck.yml` | 毎日 05:30 |
-| `ansible-monitoring-healthcheck.timer` | `monitoring_healthcheck.yml` | 毎日 05:35 |
-
-Semaphore UI 導入後は、systemd timer から Semaphore UI の Schedule へ移行する。
-
----
-
-## 8. 深夜リブートスケジュール全体（参考）
-
-| 時刻 | 対象 | 備考 |
-|---|---|---|
-| 01:00 | UniFi Console | UniFi コントローラー reboot |
-| 02:00 | UniFi Device | AP・スイッチ reboot |
-| 03:00 | quory | unattended-upgrades 自動 reboot（reboot_required 時のみ） |
-| 03:30 | authy / monnie | ubuntu_nightly.yml による計画的 reboot（reboot_required 時のみ） |
-
----
-
-## 9. 現在の設定確認（2026-05-27 時点）
-
-### authy
-
-`50unattended-upgrades` の重要設定:
-
-```
-Unattended-Upgrade::Automatic-Reboot "false";
-```
-
-### monnie
-
-`/etc/apt/apt.conf.d/52unattended-upgrades-local`:
-
-```
-Unattended-Upgrade::Automatic-Reboot "false";
-```
-
-### quory
-
-`/etc/apt/apt.conf.d/52unattended-upgrades-local`:
-
-```
-Unattended-Upgrade::Automatic-Reboot "true";
-Unattended-Upgrade::Automatic-Reboot-Time "03:00";
-```
+<!-- UV-083 -->
+Semaphore UI導入後にsystemd timerからSemaphore Scheduleへ移行する計画は、Policy上の許可を変更せず、Operations Contextで追跡する。

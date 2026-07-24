@@ -1,5 +1,7 @@
 # System Context: Proxmox
 
+本書は環境事実を記録する非規範Contextである。patchの許可、禁止、停止条件は [`proxmox_patch_policy.md`](../../policies/proxmox_patch_policy.md)、backup restore verificationの許可、禁止、停止条件は [`proxmox_backup_restore_verify_policy.md`](../../policies/proxmox_backup_restore_verify_policy.md) を正本とし、競合時は該当Policyを優先する。
+
 ## 領域の役割
 
 `proxmox` groupは`pve1` (`pve1.internal`)と`pve2` (`pve2.internal`)から成るProxmox VEクラスタである。ゲストの稼働基盤であり、healthcheck、hardware check、snapshot check、patch dry-run、単一ノードpatch、rolling patchの対象になる。
@@ -35,5 +37,20 @@
 - `pve2`先行の順序を変えない。`pve1`へ進む判断はdry-runと先行ノードの結果を確認した後に行う。
 - snapshot report等に実行時のゲスト識別子が含まれ得るが、それをContextやレビュー文書へ転載しない。
 - IPアドレス、VLAN ID、VM ID、認証情報、秘密情報を記載しない。到達先はinventory名またはFQDNで表す。
+
+## patch分類とcontrol nodeの配置
+
+- patch dry-runで使う分類CLIはansy、quory、またはmacOS側で動き、Proxmox hostへは配置しない。
+- ansyはProxmox上のVMとして動く開発・限定実行環境、quoryはcluster外の本番Ansible実行基盤である。
+- weekly fullはcluster外control nodeを前提とする。ansyの実際の所在は変化し得るため、実行時preflightの検出を正本とする。
+- 導入時期や到着前後の経緯は現行構成ではなく案件履歴なので、本書へ固定しない。
+
+## backup restore verificationの環境事実
+
+- monthly productionの制御点は`quory`、development / manual CLIの制御点は`ansy`である。
+- 検証対象とrestore nodeはProxmox側のVM tagを情報源とし、Ansible inventoryへ対象VMを固定列挙しない。
+- backup sourceはvzdump backupを提供するstorageである。明示指定がない場合に参照するstorage種別とcontent条件はRepository Contextとcodeを正本とする。
+- restore先は検証専用storageと専用固定restore VMIDである。storage名と数値VM IDはvars / codeを正本とし、本Contextへ固定しない。
+- backup restore verificationは本番VMのconfigを選定情報として参照するが、restore / boot / cleanupの変更対象は使い捨ての専用restore VMに分離される。
 
 想定読者Role: Tech Lead=依存とrolling順序を詳細確認、Implementer/Reviewer/Tester=Proxmox案件時に全体を詳細確認、その他=概要のみ。

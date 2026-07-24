@@ -1,117 +1,231 @@
-# Log / Observability Policy v2.1
+# Log / Observability Policy
 
-- 対象システム: monnie を中心とする集中ログ基盤（UniFi/pve/Sophos/Ubuntu の syslog・monnie journal → Loki → Grafana）と、その将来拡張（エラーフック/アラート）。
-- 起案: 2026-07-16（claude 設計・Yoshinobu 承認）。Phase 1 実機 PASS。
-- 監査証跡: `docs/ai/reviews/promtail_to_alloy/`（現状調査・要件・実装・レビュー・テスト）。
+本書はhomelabの集中log収集、保全、検索に関する許可、禁止、停止条件、判断軸の正本である。current topologyとrepository構成は対応Contextを参照し、競合時は本Policyを優先する。
 
-## 変更履歴
+## 1. 目的
 
-- v1.0 (2026-07-16): 新規。promtail(EOL)→Grafana Alloy 移行 Phase 1 完了を機に、ログ観測基盤の方針を正本化。
-- v2.0 (2026-07-17): Phase 2。Loki 書き込みを monnie ローカルに限定したまま、pve/Sophos の rsyslog ファネル合流と `level` 標準化を正本化。
-- v2.1 (2026-07-18): Ubuntu nodes を含む現行構成へ更新。monnie 観測スタックの info/debug 自己ノイズ抑止、正規化 file 本文の message-only 化、Grafana の 1500行上限と warning+error 既定を正本化。
+<!-- LOG-001 -->
+本Policyはlogの収集・保全・検索を扱い、service障害の検知・復旧を扱うautonomous recoveryとは目的を分離する。
 
-## 1. 位置づけ
+<!-- LOG-002 -->
+現行scopeはlogの収集・保全・検索である。log-based alertは現行scopeに含めない。
 
-本書は monnie を中心とするログ収集・観測基盤の正本。`autonomous_recovery_policy.md`（サービス障害の検知→復旧ラダー）とは目的が異なる。本書は「ログの収集・保全・検索」と「（将来の）ログベースのエラーアラート」を扱う。core.md §10 に従い、本システムを扱う AI は core.md に加えて本書を必ず参照する。
+## 2. 対象と実行範囲
 
-## 2. アーキテクチャ（2平面）
+<!-- LOG-003 -->
+collection pathはLokiへ至る一本に統一し、目的別の別collection pipelineを建てない。
 
-- **収集平面**: 全ソース → Loki。ラベルで区別。DRY のため収集経路は1本に統一する（目的別に別パイプラインを建てない）。
-- **監視/フック平面（将来 Phase 3）**: Loki/Grafana のルールでエラーを拾い Slack へ。別パイプラインではなく、ラベル＋アラートルールとして収集平面の上に薄く載せる。
+<!-- LOG-005 -->
+log agentはGrafana Alloyに統一し、EOLのPromtailを現行agentとして扱わない。
 
-エージェントは **Grafana Alloy に統一**（promtail は EOL）。
+<!-- LOG-006 -->
+syslogだけを送信できるapplianceはmonnieのaggregation pointへ送る。
 
-### 2.1 ソースクラス（能力別）
+<!-- LOG-007 -->
+monnieではlocal Alloyがjournalとrsyslog outputを読み、local Lokiへpushする。
 
-- **アプライアンス（syslog しか出せない）**: UniFi(AP/switch)、Sophos、他ネット機器 → syslog(UDP514) → monnie の集約点。
-- **monnie**: ローカル Alloy が journald と rsyslog 出力ファイルを読み、localhost の Loki へ push する。
-- **リモート Linux ホスト**: pve1/pve2/ansy/quory/authy → journald → ローカル rsyslog → UDP514 → monnie の集約点。アプライアンスと同じ受信ファネルへ合流する。
+<!-- LOG-008 -->
+remote Linux hostはjournaldからlocal rsyslogを経てmonnieの同一受信funnelへ合流する。
 
-**Loki への書き込みは monnie ローカルの Alloy だけが行う。** リモートホストへ Alloy/Loki credential や Grafana repository を広げず、未認証 Loki port をネットワークへ公開しない。
+<!-- LOG-009 -->
+Lokiへwriteするagentはmonnie local Alloyだけに限定する。
 
-### 2.2 syslog 集約の方式（D1 決定 2026-07-16）
+<!-- LOG-012 -->
+CloudKeyのsender settingはGUI管理とし、Ansibleが直接編集しない。
 
-**rsyslog を syslog 集約役（UDP514 受信・source-IP allowlist・振り分け）に残し、Alloy が生成ファイルを tail する。** 理由: rsyslog は多ソースの受信・allowlist・RFC3164/5424 混在を堅牢にこなす。Alloy 直受信（`loki.source.syslog`）で rsyslog を廃止する案は採らない（受信層の作り直しリスクが高い）。
+<!-- LOG-013 -->
+Sophosのsender settingはGUI管理とし、repositoryはreceiver readinessまでを管理する。
 
-## 3. 現状構成（Phase 2 設計）
+<!-- LOG-014 -->
+Proxmox nodeのsender configurationはmanual管理とし、Ansible管理対象へ含めない。
 
-```
-pve1/pve2: journald → rsyslog → UDP514 ────────────────┐
-ansy/quory/authy: journald → rsyslog → UDP514 ─────────┤
-Sophos: GUI 管理の syslog 送信 → UDP514 ──────────────┼→ monnie rsyslog(imudp)
-UniFi機器/コントローラ → UDP514 ──────────────────────┘
-  → source-IP allowlist で振り分け
-     ├ CloudKey源   → /var/log/unifi.log
-     ├ switch/AP源  → /var/log/unifi-devices.log
-     ├ pve1/pve2    → /var/log/pve-nodes.log
-     ├ Sophos       → /var/log/sophos-fw.log
-     └ Ubuntu nodes → /var/log/ubuntu-nodes.log
-  → Alloy(loki.source.file ×5) + Alloy(loki.source.journal)
-  → loki.write localhost:3100/loki/api/v1/push → Loki → Grafana
-```
+<!-- LOG-015 -->
+Ubuntu senderはsender role、monnie receiverはAlloy roleで管理する。
 
-- CloudKey の送信先設定: `ace.setting` の key=`rsyslogd`（サイト単位、enabled、宛先 monnie:514/UDP）。UniFi GUI 管理（Ansible 直接編集はしない）。
-- Sophos の送信先設定は SFOS GUI 管理（monnie:514/UDP）。repo は受信準備までを管理する。
-- pve の rsyslog package、journald drop-in、転送設定は **手動管理**。参照設定と適用・巻き戻し手順の正本は `docs/ai/reviews/promtail_to_alloy/2026-07-17_009_implement.md`。Ansible の管理対象にはしない。
-- ansy/quory/authy の rsyslog 転送は送信側 role、monnie の受信 allowlist/file は Alloy role が管理する。
-- **収集6系統のラベル契約**:
-  - `unifi`: `/var/log/unifi.log` → `job=unifi`, `host=uckg2`
-  - `network-devices`: `/var/log/unifi-devices.log` → `job=network-devices`、log 行の2番目トークンを `host` に抽出
-  - `pve-nodes`: `/var/log/pve-nodes.log` → `job=pve-nodes`、正規化済み行の2番目トークンを `host` に抽出
-  - `sophos-fw`: `/var/log/sophos-fw.log` → `job=sophos-fw`, `host=sophos-fw`
-  - `ubuntu-nodes`: `/var/log/ubuntu-nodes.log` → `job=ubuntu-nodes`、正規化済み行の2番目トークンを `host` に抽出
-  - `system`(journal): `job=ubuntu-nodes`, `host=monnie`、`__journal__systemd_unit` → `unit` relabel
-- **severity 契約**: `level` は `error|warning|info|debug` の4値。journal は priority 0--3/4/5--6/7 を順に対応させる。pve/Sophos/Ubuntu nodes は monnie rsyslog の受信テンプレートで行頭へ確定値を書き、Alloy が抽出する。既存 UniFi 2系統は明示 severity を安全に認識できる行だけ best-effort で付与し、不明行は誤分類せず `level` 無しとする。
-- **本文契約**: rsyslog の正規化 file 3系統（pve/Sophos/Ubuntu nodes）は `<level> <host> <RFC3339時刻> <message>` から level/host をラベル化した後、Loki へは `<message>` だけを保存する。UniFi 2系統と monnie journal の raw 本文は変更しない。
-- **自己ノイズ抑止**: monnie journal だけは、観測スタックの exact unit（defaults の full unit 名リスト）かつ `level=info|debug` を収集前に drop する。warning/error は障害観測用に保持し、file 経由の他ノードには適用しない。
-- Loki push: `http://localhost:3100/loki/api/v1/push`（認証なし）。
-- Grafana の統合ログパネルは query/display 上限を1500行とし、`level` 変数の既定を warning+error とする。info/debug は利用者が変数で明示選択でき、host/search と `line_format "{{ .host }} | {{ __line__ }}"` は維持する。
+<!-- LOG-029 -->
+Lokiへのpushはmonnie localhostへ限定する。
 
-## 対応するPlaybook
+source、現行stream、管理ownerの具体構成は [System Context](../context/system/monitoring.md)、playbook / role / configの横断関係は [Repository Context](../context/ansible/log-observability.md) を参照する。
 
-- `playbooks/alloy_setup.yml`（role: `alloy`）: monnie(`monitoring_servers`) の rsyslog 受信振り分け、logrotate、Alloy source/config を管理する。tester-gate: `check-mode-native`。**APPLY は本番ログ経路変更のため人間ゲート（Yoshinobu の明示判断）必須**。
+## 3. 対応するPlaybook
 
-## 4. Alloy 運用方針
+次の2入口を関連indexとして列挙する。列挙自体はAPPLYの許可を意味せず、各tester-gateと人間gateを満たす場合に限る。
 
-- **導入**: apt（既存 Grafana Labs リポ `apt.grafana.com stable main`）。手動運用でなく role 管理（config は git 正本、ホスト直編集禁止）。role の apt は `state: present`（版上げしない）。
-- **版上げ**: 月次 `ubuntu_vm_full_upgrade`（apt）が担う。`alloy_setup.yml` は版上げ用ではなく、冪等な cutover/再プロビジョン用（再実行しても版は上がらない）。**Alloy はメジャー更新で River config 構文が変わり得る**ため、monnie の重要パターン（`ubuntu_vm_full_upgrade_important_per_node.monnie`）に `alloy.*` を登録し、月次更新時に REVIEW_REQUIRED（人間レビュー）へ上げる。
-- **config**: `/etc/alloy/config.alloy`（`root:alloy 0640`）。収集ソースは role defaults の `alloy_file_sources` / `alloy_journal_sources` 変数。storage: `/var/lib/alloy/data`（実 unit を正本とする）。HTTP listen: loopback `localhost:12345`。
-- **rsyslog**: 既存 `/etc/rsyslog.d/10-unifi.conf` は変更しない。Phase 2 source は別 config で名前を実行時解決した source-IP allowlist、専用3ファイル、4値 severity 行頭テンプレートを管理する。新規ファイルは送信開始前に存在しなくても正常とする。配備済み config は解決済みIPを保持し、DNSを自動再解決しない。DHCP/DNS変更後は `alloy_setup.yml` を再実行して allowlist を更新する。
-- **cutover 安全則**: install は auto-start 抑止(`policy_rc_d: 101`) → 実 unit/user/storage/CLI contract と `alloy validate` を assert → 合格時のみ promtail stop+disable → alloy start。二重 tail を残さない。start 失敗時は rescue で promtail を復元。promtail の package/config/positions は削除せず rollback 用に維持する。
-- **positions**: Alloy 自身の storage で管理（promtail positions は移植しない）。既存 UniFi file は `tail_from_end=true`、送信開始前に存在し得ない正規化 file は `tail_from_end=false` として最初の行を保持する。cutover 境界の小さな gap/overlap は許容。
-- **journald 読取**: alloy user は `adm` + `systemd-journal` 所属が必要。alloy active だけでなく、Loki に journal stream の実データが出ることを検証する（active だけを成功条件にしない）。
-- **本番変更前の mute**: monnie は自律復旧対象（recovery_probe が pull 監視）。cutover 等の本番変更前は `homelab-mute set monnie <分>` で mute する（promtail 自体は復旧対象外だが monnie ノードとして念のため）。
+| Playbook | 主role | Policy上の役割 |
+|---|---|---|
+| `alloy_setup.yml` | `alloy` | monnie receiver、Alloy config、validated cutover |
+| `rsyslog_forward_to_monnie.yml` | `rsyslog_forward_to_monnie` | Ubuntu senderのsingle-host rollout |
 
-## 5. Phase ロードマップ
+<!-- LOG-032 -->
+両入口はcheck-mode-nativeである。APPLYはproduction logging pathを変更するためYoshinobuの明示判断を必要とする。
 
-- **Phase 1（完了 2026-07-16）**: monnie の promtail → Alloy 1:1 移植。rsyslog/Loki/Grafana 不変。
-- **Phase 2（実装 2026-07-17、実機検証待ち）**: pve1/pve2 と Sophos を monnie rsyslog 集約へ追加し、全ソースの **severity(`level`) ラベルを4値へ標準化**。動的 host 抽出と静的 host の同時指定禁止も role で assert。
-- **Phase 2 拡張（稼働 2026-07-17）**: ansy/quory/authy を同じ rsyslog ファネルへ追加し、`job=ubuntu-nodes` と動的 host で統合。2026-07-18 に自己ノイズ抑止・message-only 本文・dashboard 上限/既定を是正。
-- **Phase 3**: エラーフック（Grafana 管理アラート、必要なら Loki ruler + Alertmanager）→ Slack。既存 recovery/Slack 経路と統合し二重化しない（例: `pve replication error` ログ → Slack → recovery 調査の入口）。
+## 4. 判断軸
 
-## 6. 制約・禁止事項
+### streamとlabel contract
 
-- **syslog 転送は平文 UDP 514**（全ソース: UniFi/CloudKey/pve/Sophos）。暗号化・認証なし。
-  同一 LAN 上での盗聴・送信元偽装が理論上可能で、**rsyslog の source-IP allowlist は
-  ルーティング振り分けであって認証ではない**。経路は homelab 内部 LAN に閉じている
-  （2026-07-17 に Yoshinobu へ提示済み。将来オプション: pve→monnie は両端 rsyslog のため
-  homelab CA + TLS(6514/TCP) へ上げられる。アプライアンス側は TLS 非対応のため平文が残る）。
-- 収集は Loki 一本に統一。目的別の別収集パイプラインを建てない。
-- rsyslog を syslog 集約役として維持する（Alloy 直受信で置換しない）。
-- Loki/UFW を Phase 2 では変更しない。Loki 3100 をリモートへ公開しない。
-- Alloy config はホスト直編集禁止（role/git を正本とする）。
-- 本番 cutover/変更を伴う APPLY は人間ゲート（Yoshinobu）。tester は既定で APPLY しない。
-- 秘密・IP をリポジトリに書かない。実機検証は tester 工程。
-- ログ量と monnie の VM Disk/Loki 使用量を継続観測する。retention・容量設定の変更は本是正に混ぜず、適用後の実測に基づく別レビューで扱う。
+<!-- LOG-016 -->
+CloudKey streamは`unifi`のlabel contractで扱う。
 
-## 7. 不採用の代替案と管理境界
+<!-- LOG-017 -->
+network-device streamはlog本文からhostをdynamic抽出する。
 
-- **pve ローカル Alloy + Loki リモート push**: UFW 3100 開放、認証なし Loki の露出、Grafana repository/package をハイパーバイザへ追加する必要があるため不採用。unit 精度や配送保証が将来必須になった場合だけ再検討する。
-- **systemd-journal-remote**: monnie に別 listener/port と取込経路が必要になるため不採用。
-- **Alloy の syslog 直受信**: 確立済み rsyslog allowlist/振り分けを再構築するリスクがあり不採用。
-- **管理境界**: monnie の rsyslog/Alloy/logrotate は Ansible + Git 管理。pve の rsyslog/journald 転送は Yoshinobu の手動管理で、設定正本は本 policy と Phase 2 implement 文書。Sophos/UniFi の送信設定は各 GUI 管理。
+<!-- LOG-018 -->
+Proxmox streamはnormalized lineからhostをdynamic抽出する。
 
-## 8. 実機検証状況
+<!-- LOG-019 -->
+Sophos streamはstatic host contractを使う。
 
-- **2026-07-16 Phase 1**: monnie で APPLY PASS（alloy `1.17.1-1`、`ok=33 changed=7 failed=0`、rescue なし）。3系統の Loki 実データ（cutover 後 timestamp）・journald 実読・service 排他（promtail inactive/disabled・二重 tail 無し）・rsyslog 非回帰（UDP514 継続・2ファイル増加）を確認。監査: `docs/ai/reviews/promtail_to_alloy/2026-07-16_001..006`。
-- **既知の非ブロッキング**: 起動時に `remotecfg "noop client"` の error 1行（remote config 未使用の local deploy では正常。以降 ready・全 component 評価・3-stream push・positions 生成が成功）。将来の継続監視で反復しないか確認する価値あり。
+<!-- LOG-020 -->
+Ubuntu remote streamはnormalized lineからhostをdynamic抽出する。
+
+<!-- LOG-021 -->
+monnie journalはsystem streamとし、systemd unitをrelabelする。
+
+<!-- LOG-022 -->
+`level`は`error`、`warning`、`info`、`debug`の4値に限定する。
+
+<!-- LOG-023 -->
+journal priorityは定義済みの対応により4 levelへ分類する。
+
+<!-- LOG-024 -->
+normalized sourcesはrsyslogがlevelを行頭へ確定し、Alloyが抽出する。
+
+<!-- LOG-025 -->
+UniFi sourcesは明示severityを安全に認識できる場合だけbest-effortでlevelを付与し、不明な行を誤分類しない。
+
+<!-- LOG-026 -->
+normalized file sourcesはlevel / hostをlabel化した後、Lokiへmessage本文だけを保存する。
+
+<!-- LOG-027 -->
+monnie journalは観測stackのexact unitかつ`info`または`debug`の場合だけ収集前にdropする。
+
+<!-- LOG-028 -->
+warning / errorは保持し、remote file sourcesへmonnie固有self-noise dropを適用しない。
+
+<!-- LOG-030 -->
+統合dashboardはquery / display上限とwarning+error defaultを維持し、info/debugを利用者が明示選択できるようにする。
+
+<!-- LOG-031 -->
+dashboardのhost / search filtersとhostを含むline formatを維持する。
+
+### version、resolution、cutoverの合格条件
+
+<!-- LOG-034 -->
+Alloy major update疑いはmonthly apt判断でhuman reviewへ上げる。
+
+<!-- LOG-037 -->
+sender nameはdeployment時にresolveし、配置済みallowlistがDNSを自動再解決する前提を置かない。
+
+<!-- LOG-039 -->
+package / unit / user / storage / CLI contractとcandidate config validationが合格した場合だけPromtail停止とAlloy開始へ進む。
+
+<!-- LOG-041 -->
+positionsはPromtailから移植せず、既存sourceと新規sourceで定義されたtail startを使い、cutover境界の小さなgap / overlapを受容する。
+
+<!-- LOG-042 -->
+Alloy activeだけを成功条件にせず、journal streamの実dataがLokiへ到達することを確認する。
+
+## 5. ライフサイクル・処理フロー
+
+<!-- LOG-033 -->
+Alloyはexisting Grafana repositoryからrole管理でinstallし、setup入口のpackage stateはpresentとしてversion-upを行わない。
+
+<!-- LOG-036 -->
+existing UniFi rsyslog configurationを変更せず、追加sourceは別configurationで管理する。
+
+<!-- LOG-038 -->
+sender addressが変わった場合はsetup入口を再実行してallowlistを更新する。
+
+receiver cutoverは次の順序を維持する。
+
+1. package auto-startを抑止する。
+2. runtime contractとcandidate configurationを検証する。
+3. 合格時だけPromtailをstop / disableする。
+4. Alloyをstartしてactive、ready、runtime log、real streamを検証する。
+
+<!-- LOG-040 -->
+Alloy startまたはruntime validationに失敗した場合はPromtailをrestoreし、Promtail package / config / positionsをrollback用に維持する。
+
+<!-- LOG-043 -->
+production cutover等の変更前にはmonnieのautonomous recoveryをmuteし、終了後の確認と解除は既存Operations Contextに従う。
+
+sender rolloutは一度に1 hostだけを対象にし、前段のend-to-end確認後に次hostへ進む。具体順序とsingle-task実装はRepository Contextとcodeを正本とする。
+
+## 6. 通知方針
+
+<!-- LOG-047 -->
+該当なし（未実装）。
+
+## 7. 制約・禁止事項
+
+<!-- LOG-010 -->
+remote hostへAlloy / Loki credentialやGrafana repositoryを広げず、unauthenticated Loki portをnetworkへ公開しない。
+
+<!-- LOG-011 -->
+rsyslogをsyslog aggregationとsource allowlist / routingに維持し、Alloy direct syslog receiveへ置換しない。
+
+<!-- LOG-035 -->
+Alloy configurationはGit / roleを正本とし、hostで直接編集しない。
+
+<!-- LOG-048 -->
+syslog transportはplaintextであり、eavesdroppingとsender spoofingのriskがある。source allowlistはroutingであってauthenticationではない。
+
+<!-- LOG-049 -->
+TLSは対応可能なsenderだけのfuture optionであり、applianceのplaintext transportが残ることを認識する。
+
+<!-- LOG-050 -->
+collectionはLoki一本に統一する。
+
+<!-- LOG-051 -->
+rsyslogをaggregation roleとして維持する。
+
+<!-- LOG-052 -->
+現scopeでLoki / UFWを変更せず、Loki endpointをremoteへ公開しない。
+
+<!-- LOG-053 -->
+Alloy configurationのhost直接編集を禁止する。
+
+<!-- LOG-054 -->
+production APPLYはhuman gateとし、testerは既定でAPPLYしない。
+
+<!-- LOG-055 -->
+secretまたはIP literalをrepositoryへ記載せず、runtime validationはtester工程へ分離する。
+
+<!-- LOG-056 -->
+log volumeとmonitoring nodeのcapacityを継続観測し、retention / capacity変更を別reviewで扱う。
+
+<!-- LOG-057 -->
+Proxmox node local Alloy + remote Loki push案は採らない。unit精度またはdelivery guaranteeが必須になった場合だけ再検討する。
+
+<!-- LOG-058 -->
+systemd-journal-remote案は採らない。
+
+<!-- LOG-059 -->
+Alloy direct syslog receive案は採らない。
+
+<!-- LOG-060 -->
+monnie receiverはAnsible / Git、Proxmox senderはmanual、appliance senderは各GUIというmanagement boundaryを維持する。
+
+## 8. 変更履歴
+
+| 版 | 日付 | 変更 |
+|---|---|---|
+| v1.0 | 2026-07-16 | PromtailからAlloyへのPhase 1移行を契機にPolicyを新設 |
+| v2.0 | 2026-07-17 | remote syslog funnelと4-value severity contractを追加 |
+| v2.1 | 2026-07-18 | Ubuntu sources、self-noise suppression、message-only body、dashboard defaultsを更新 |
+| v2.2 | 2026-07-25 | 標準8節へ再編しcurrent factsをContextへ分離。notificationは未実装と明記 |
+
+<!-- LOG-004 -->
+log-based Slack alertはlabels / alert rulesをcollection plane上へ載せるPhase 3構想であり、現行機能ではない。
+
+<!-- LOG-044 -->
+2026-07-16のPhase 1完了はhistorical resultとして保持し、現行notification contractにしない。
+
+<!-- LOG-045 -->
+2026-07-17時点のPhase 2実装済み / validation待ち状態は時点履歴として本書の現行状態へ固定しない。
+
+<!-- LOG-046 -->
+2026-07-17から18のPhase 2 extension稼働・是正は時点履歴として扱う。
+
+<!-- LOG-061 -->
+過去の実機PASSとknown non-blocking事象は [Phase 1 investigation](../reviews/policy_standardization/2026-07-25_021_investigation_remaining_policies_rewrite.md) に保持し、現行の許可条件へ昇格させない。

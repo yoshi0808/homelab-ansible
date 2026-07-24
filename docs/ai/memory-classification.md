@@ -29,6 +29,8 @@ Claude Memoryの`user`/`feedback`/`project`/`reference`とは別の分類体系�
 | `decisions/` | 承認済み設計判断 | 恒久。前提が変わったら見直す(3節) | Shellは収集、判定はAnsible側 |
 | `temporary/` | 作業中だけ必要な情報 | 案件クローズ時に削除 | request-42のテストが未完了 |
 
+`incidents/`のファイル形式(ファイル名規則・記載項目・原因分類タグ)は`skills/incident-recording/SKILL.md`が正本。修正して正常動作の確認が取れた時点で1回記録する。
+
 ## 3. 昇格・廃止ルール(TODO6-2)
 
 ```text
@@ -39,13 +41,19 @@ Lesson
 Skill
   ↓ (全Role共通の不変原則になった場合のみ。極めて稀)
 core.md
+
+Incident
+  ↓ (`skills/incident-recording/SKILL.md`の原因分類タグが月次振り返りで繰り返し検出された場合)
+Policy または Skill (該当業務のPolicyファイル新設・改訂、または該当作業のSkill新設・改訂)
 ```
 
 - **Incident→Lesson**: 上記条件を満たした時点でTech LeadまたはCoordinatorが判断する。昇格後、元のIncidentファイルは本文を削除し「Lesson `<path>`へ昇格済み」の1行だけ残す(二重保持しない)。
 - **Lesson→Skill**: 単なる注意喚起ではなく、具体的な手順・テンプレートとして再利用できる形に育った場合。昇格後、Lesson側は「Skill `<path>`へ昇格済み」の1行だけ残す。
 - **Skill→core**: 全Roleが例外なく毎回必要とする不変原則になった場合のみ。ハードルは高く保ち、安易に昇格させない。
+- **Incident→Policy/Skill(直接、Lessonを経由しない)**: Incidentの`原因分類`タグ(`skills/incident-recording/SKILL.md`参照)が月次振り返りで複数件にわたり繰り返し検出された場合、個別の再利用可能な気づきを待たず、直接Policy改訂(許可/禁止/停止条件の明文化が必要な場合)またはSkill新設・改訂(再利用手順の整備が必要な場合)を検討する。判断はTech LeadまたはCoordinatorが行う。一度きりの気づきは従来どおりLesson経由とする。
 - **Temporaryの削除条件**: 紐づく案件(agmsgの依頼・`docs/ai/reviews/<target>/`)がクローズした時点で削除する。
 - **Decisionの見直し**: 定期レビューはしない。前提条件(依存する環境事実・技術選定)が変わったとYoshinobu・Tech Lead・Coordinatorのいずれかが気づいた時点で見直す。
+- **Incidentの月次振り返り**: Coordinatorが月次で`docs/ai/memory/incidents/`を振り返り、上記のPolicy/Skill直接昇格の要否を判断する。
 
 ## 4. Role別のKnowledge参照範囲(TODO6-3)
 

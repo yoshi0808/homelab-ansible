@@ -1,217 +1,293 @@
-# Proxmox Backup Restore Verify Policy v1.0
+# Proxmox Backup Restore Verify Policy
 
-作成日: 2026-06-14
-版: v1.0
-対象: コアVM（Sophos / authy / monnie 等、`verify` タグ付きVM）の月次リストア検証
-
-参照:
-
-- docs/ai/prompts/core.md
-- docs/ai/policies/proxmox_patch_policy.md（prefer* / hacritical タグ、cluster resources、group_vars/proxmox.yml の接続情報）
-
----
+本書はProxmox上のcore VM backupを実restoreして検証する際の許可、禁止、停止条件、判断軸の正本である。環境事実と実装詳細は対応Contextを参照し、競合時は本Policyを優先する。
 
 ## 1. 目的
 
-コアVMの vzdump バックアップが、実際にリストアして起動できることを月次で検証する。
-「バックアップが取れているつもりで壊れていた」（サイレント破損）を、本番に影響を与えずに
-検出することが目的。
+<!-- BRV-001 -->
+core VMのbackupを実際にrestoreしてbootできることをmonthlyに検証し、silent corruptionを本番へ影響させず検出する。
 
-検証は使い捨ての VMID 999 へリストアして行い、本番VMには config 読み取り以外で触れない。
+<!-- BRV-002 -->
+検証は専用固定restore VMIDへ行い、本番VMにはconfig read以外で触れない。
 
----
+## 2. 対象と実行範囲
 
-## 2. 対象と実行
+<!-- BRV-003 -->
+検証対象は`verify` tagを持つVMからmonthly rotationで選ばれた1台とする。
 
-| 項目 | 内容 |
+<!-- BRV-004 -->
+restore先は`verify_restore_vmid`で定義された専用固定restore VMIDだけとし、検証後に使い捨てる。
+
+<!-- BRV-006 -->
+monthly productionは`quory`、development / manual CLIは`ansy`を実行元とする。
+
+<!-- BRV-008 -->
+restoreには設定された専用storageを使用する。
+
+<!-- BRV-009 -->
+controlled applyとして専用restore VMのcreate / start / deleteを許可する。本番VMのreboot / migrateは許可しない。
+
+<!-- BRV-010 -->
+対象決定のためinventory / group vars / host varsを変更せず、Proxmox tagで動的に決定する。
+
+<!-- BRV-016 -->
+VMの増減時はtagだけでrotation indexを振り直す。月番号固定方式のため検証履歴を永続化しない。
+
+<!-- BRV-022 -->
+backup sourceへのaccess要件を満たすため、検証lifecycleを実行するPlayはroot権限で実行する。この権限を本Policy外の操作許可へ拡張しない。
+
+<!-- BRV-042 -->
+monthlyは`quory`から固定時刻のsingle scheduleで実行する。
+
+<!-- BRV-072 -->
+現行scopeはmonthly rotation、latest backupの特定、restore、NIC isolation、boot、health判定、destroy、安全装置、minimal lock、Slack通知である。
+
+## 3. 対応するPlaybook
+
+次の1入口を本Policyに関連する索引として列挙する。列挙自体は実行許可を意味せず、本Policyの全規範、playbook先頭のtester-gate、入力gateを満たす場合に限る。
+
+| Playbook | Policy上の役割 |
 |---|---|
-| 検証対象VM | `verify` タグを持つVMのうち、月次ローテーションで当たった1台 |
-| リストア先VMID | **999 固定**（検証専用・使い捨て） |
-| 実行ノード | 対象VMの `prefer<node>` タグで決まるノード（例: authy/Sophos → pve1、monnie → pve2） |
-| 実行元 | quory（本番・月次スケジュール）/ ansy（開発・手動 CLI） |
-| バックアップ元 | vzdump NFS ストレージ（Synology、PVE の dump フォルダ）。未指定時は NFS かつ content に backup を含むストレージを自動検出 |
-| リストア先ストレージ | `local-zfs`（本 homelab の全VM） |
-| 安全度 | controlled apply（999 の作成・起動・削除を伴う。本番VMは reboot/migrate しない） |
+| `proxmox_backup_restore_verify.yml` | 対象VMを決定し、backupを専用固定restore VMIDへ実restoreしてboot、health、cleanupを検証する |
 
-実装ファイル:
+<!-- BRV-011 -->
+本Policyに対応するplaybookは`proxmox_backup_restore_verify.yml`の1本とする。
 
-- playbooks/proxmox_backup_restore_verify.yml（2プレイ: 決定 → 検証）
-- roles/proxmox_backup_restore_verify/（tasks/main.yml, defaults/main.yml）
+この入口のtester-gateは`risk-accepted`であり、`--check`を指定してもrestore / start / stop / destroyを含む本実行になる。`tester_mode=true`は拒否される。実行にはYoshinobuの明示判断を必要とし、`--check`をdry-runまたはread-only許可として扱わない。
 
-inventory / group_vars / host_vars は変更しない（対象はタグで動的決定）。
+## 4. 判断軸
 
-## 対応するPlaybook
+### 対象とbackupの選定
 
-| Playbook | 役割 |
+<!-- BRV-005 -->
+restore nodeは対象VMの`prefer<node>` tagで決定し、決定できなければ停止する。
+
+<!-- BRV-007 -->
+backup storageが未指定の場合は、NFS typeかつcontentにbackupを含むstorageを自動検出する。
+
+<!-- BRV-012 -->
+cluster resourcesから対象を決定し、Ansible側に対象VM listを持たずProxmox tagだけで増減に対応する。
+
+<!-- BRV-013 -->
+monthly rotationでは`verify` tagを持つQEMU VMだけを列挙する。
+
+<!-- BRV-014 -->
+対象候補をVM ID昇順にsortし、deterministicな順序を得る。
+
+<!-- BRV-015 -->
+`(現在月 - 1) % 候補list長`のindexによりmonthly対象を確定する。
+
+<!-- BRV-017 -->
+`target_vmid`を指定した場合はrotationだけを無視し、指定されたQEMU VMをmanual対象にできる。
+
+<!-- BRV-018 -->
+manual指定対象が存在しなければ停止する。
+
+<!-- BRV-019 -->
+restore nodeを対象VMの`prefer<node>` tagから決定できなければ停止する。
+
+<!-- BRV-020 -->
+本番VM configのagentが`1`または`enabled=1`を含む場合だけagent期待とし、それ以外をagent無しとする。
+
+<!-- BRV-025 -->
+対象VMのbackupから、storage content APIのctimeが最も新しいものを選ぶ。
+
+manual bypassはrotationだけを迂回する。存在確認、restore node tag、agent期待、本番非変更、専用固定restore先、destroy guardは迂回しない。
+
+### 正常性
+
+<!-- BRV-035 -->
+期待levelは本番VMのagent設定、実測はrestore VMのboot結果とし、実測が期待へ到達したかで合否を決める。
+
+<!-- BRV-036 -->
+agent対応VMはguest agentのosinfo取得成功を合格とする。
+
+<!-- BRV-037 -->
+agent無しVMはboot後の規定settle期間を経過してもrunningであることを合格とする。
+
+### lockと開始前残骸
+
+<!-- BRV-041 -->
+同時実行禁止を補助するminimal lockを使用するが、完全なdistributed mutexとは扱わない。
+
+<!-- BRV-043 -->
+`ansy`からmanual実行する場合は、人間がmonthly実行と重複しないことを確認する。
+
+<!-- BRV-044 -->
+pmxcfs上のofficial lockをatomic mkdirで取得する。
+
+<!-- BRV-045 -->
+lockが既存なら待機せず即時停止し、通知して非ゼロ終了する。
+
+<!-- BRV-046 -->
+lock directoryはemptyに保ち、pmxcfs標準の120秒stale回収を有効にする。crashした実行のlockはmanual削除なしで自動回収される。
+
+<!-- BRV-024 -->
+専用固定restore VMIDに既存VMがあれば、そのVMへ触れずcritical通知して中断する。
+
+<!-- BRV-051 -->
+開始時に専用固定restore VMが存在すれば既存物へ触れず、critical通知して停止する。
+
+### ownership、cleanup、終了
+
+<!-- BRV-052 -->
+cleanupではowner tokenが自runと一致する場合にdestroyする。
+
+<!-- BRV-053 -->
+owner tokenが未刻印の場合は、同時実行禁止の前提下で自runの途中失敗とみなしdestroyを許可する。
+
+<!-- BRV-054 -->
+別runのowner tokenがある場合はdestroyせず、対象へ触れない。この分岐だけを新たなcleanup failureまたは非ゼロ終了条件にはしない。
+
+<!-- BRV-057 -->
+cleanupは「restoreを試行した」AND「開始前残骸でない」の両方を満たす場合だけ開始する。
+
+<!-- BRV-058 -->
+cleanup開始後はrestore VMのlive stateを再取得する。
+
+<!-- BRV-059 -->
+restore VMが現存しownershipが真の場合だけ、stopをbest-effortで試みてからdestroy / purgeする。stop失敗だけをcleanup failureにしない。
+
+<!-- BRV-060 -->
+destroy失敗によりrestore VMが残る場合は`cleanup_ok=false`とする。
+
+<!-- BRV-061 -->
+verification失敗OR cleanup失敗のいずれかで非ゼロ終了する。other-owner分岐、lock解放失敗、report保存失敗を新しい失敗条件へ追加しない。
+
+### reviewで保持する判断
+
+<!-- BRV-076 -->
+lock ownershipの深掘りより、本質的な危害防止と結果整合をreviewの重点とする。
+
+<!-- BRV-077 -->
+latestかつ正しいtarget VMのbackupを選べることを確認する。
+
+<!-- BRV-078 -->
+NIC isolation後にbootし、有効な正常性判定ができることを確認する。
+
+<!-- BRV-080 -->
+failure時に専用restore VMをownership条件どおり安全に処理できることを確認する。
+
+<!-- BRV-081 -->
+Slack通知、report、終了codeが実結果と一致することを確認する。
+
+## 5. ライフサイクル・処理フロー
+
+<!-- BRV-021 -->
+選定結果をdynamic groupへ渡し、検証Playは選定されたnodeだけでroleを実行する。
+
+処理順序は次のとおりとする。
+
+<!-- BRV-023 -->
+1. minimal lockを取得し、その後に開始前restore残骸を確認する。
+<!-- BRV-026 -->
+2. 選定したbackupを専用固定restore VMIDへrestoreする。
+<!-- BRV-027 -->
+3. restore後、descriptionへ一意のowner tokenを刻印する。
+<!-- BRV-028 -->
+4. boot前に全NIC deviceを削除し、IPを指定しない。
+<!-- BRV-029 -->
+5. NIC切断後の専用restore VMをstartする。
+<!-- BRV-030 -->
+6. start後に本Policyの正常性を判定する。
+
+<!-- BRV-031 -->
+lifecycle失敗はrescueで捕捉する。
+
+<!-- BRV-032 -->
+成否にかかわらずalwaysでcleanup、lock解放、report、通知、条件付きre-failをこの順に行う。
+
+<!-- BRV-033 -->
+restore / set / start / stop / destroy / guest commandの実行条件、OK / NG判定、fail制御はAnsible task側で明示する。
+
+<!-- BRV-048 -->
+lockは取得した場合だけ、empty directoryをrmdirして解放する。解放失敗だけを新しいcleanup failureまたは非ゼロ終了条件にしない。
+
+## 6. 通知方針
+
+<!-- BRV-062 -->
+通知はcommon Slack taskを使用し、best-effortとする。通知失敗は検証結果または終了codeを変更しない。
+
+<!-- BRV-063 -->
+通知priorityはcritical、error、okの順とする。
+
+| 状況 | channel | status |
+|---|---|---|
+| verification OK | info | ok |
+| restore失敗または正常性未達 | alerts | error |
+| 開始前restore残骸またはdestroy失敗 | alerts | critical |
+
+<!-- BRV-064 -->
+verification OKはinfo channelへokで通知する。
+
+<!-- BRV-065 -->
+restore失敗または正常性未達はalerts channelへerrorで通知する。
+
+<!-- BRV-066 -->
+開始前restore残骸またはdestroy失敗はalerts channelへcriticalで通知する。
+
+<!-- BRV-067 -->
+JSON reportを設定されたreport directoryへ保存する。保存失敗だけを新しい非ゼロ終了条件にしない。
+
+## 7. 制約・禁止事項
+
+<!-- BRV-034 -->
+破壊操作またはOK / NG / fail判断を専用shell scriptへ移さない。
+
+<!-- BRV-038 -->
+agent無しVMはrunning継続だけで合格とし、特定製品を特別扱いしない。
+
+<!-- BRV-039 -->
+agent無し判定blockは将来serial console判定へ交換可能な形で分離するが、現行基準へserial判定を追加しない。
+
+<!-- BRV-040 -->
+同時実行を運用で禁止する。
+
+<!-- BRV-047 -->
+lock refresher、期限更新、生存監視、孤児管理を持たない。
+
+<!-- BRV-049 -->
+本番への危害防止をlockに依存させない。
+
+<!-- BRV-050 -->
+destroy対象を専用固定restore VMIDへhard assertし、それ以外を絶対にdestroyしない。
+
+<!-- BRV-055 -->
+stale回収窓を超えて低頻度の同時実行が重なる場合、一時検証1 cycleの損失を残余riskとして受容する。
+
+<!-- BRV-056 -->
+BRV-055の場合も最悪影響は使い捨て検証に限定され、本番影響はない。
+
+<!-- BRV-068 -->
+本番VMにはconfig read以外で触れない。
+
+<!-- BRV-069 -->
+秘密情報を扱わない。
+
+<!-- BRV-070 -->
+IP literalをfileへ書かない。NIC isolationはdevice削除で行い、IPを指定しない。
+
+<!-- BRV-071 -->
+変更系として許可するのは専用restore VMのcreate / start / stop / deleteだけであり、本番VMはconfig read-onlyとする。
+
+<!-- BRV-073 -->
+agent無しVMのserial console文字列matchを現行scopeへ含めない。
+
+<!-- BRV-074 -->
+backup freshness checkを現行scopeへ含めず、取得側整備後の別playbookとする。
+
+<!-- BRV-079 -->
+destroy対象が構造的に専用固定restore VMIDへ限定されることを確認する。
+
+<!-- BRV-082 -->
+本番VMへ変更操作が及ばないことを確認する。
+
+## 8. 変更履歴
+
+<!-- BRV-075 -->
+月番号固定方式のため、verification historyの永続化を現行scopeへ含めない。この判断を将来の永続化まで禁止する規範へ拡張しない。
+
+| 日付 | 変更 |
 |---|---|
-| `proxmox_backup_restore_verify.yml` | コアVMのvzdumpバックアップを月次でVMID 999へリストアし、実際に起動できることを検証する（2プレイ: 対象VM決定 → 検証）。 |
-
----
-
-## 3. 対象VMの決定（Play 1, run_once on proxmox）
-
-cluster resources（`pvesh get /cluster/resources`）から決定する。Ansible 側に対象VMリストを
-持たず、Proxmox 側のタグ付けだけで増減に対応する。
-
-### 3.1 月次ローテーション
-
-1. `verify` タグを持つ QEMU VM を列挙する。
-2. vmid 昇順でソートし、決定的な順序リストを得る。
-3. `(現在の月 - 1) % リスト長` でインデックスを決め、今月の対象VMを確定する。
-
-VMの増減は Proxmox のタグ付けのみで対応でき、インデックスは自動で振り直される。
-検証履歴の永続化は不要（月番号固定方式のため）。
-
-### 3.2 手動バイパス
-
-`-e target_vmid=<id>` が渡された場合はローテーションを無視し、その VMID を直接対象にする
-（開発・手動用）。存在しなければ fail。
-
-### 3.3 リストア先ノードと agent 期待レベル
-
-- リストア先ノードは対象VMの `prefer<node>` タグから決定する（無ければ fail）。
-- 対象VMの config（`pvesh .../config`、read-only）の `agent` 設定で期待レベルを決める。
-  `agent == '1'` または `enabled=1` を含むなら agent 期待、それ以外は agent 無し。
-- 決定結果は `add_host` で動的グループ `brv_restore_targets` に渡し、Play 2 がその
-  ノード上で role を実行する（`hosts:` を hostvars で動的指定すると syntax-check が
-  パース時に失敗するため、動的グループを使う）。
-
----
-
-## 4. ライフサイクル（Play 2 / role, block・rescue・always）
-
-become: true（root）で実行する（NFS のアクセス権が root に絞られているため）。
-
-```text
-Phase -1 最小ロック取得（§6）
-Phase 0  999 残骸ガード（既存なら触れず critical 通知して中断）
-Phase 1  最新 vzdump バックアップ特定（ctime 最新※）
-Phase 2  qmrestore で 999 へリストア → 999 description に owner トークン刻印
-Phase 3  NIC 切断（net デバイス削除、IP は指定しない）
-Phase 4  qm start で 999 起動
-Phase 5  正常性判定（§5）
-rescue   失敗を捕捉
-always   999 cleanup（§7）→ ロック解放 → レポート保存 → Slack 通知 → 結果に応じ再 fail
-```
-※バックアップ作成時刻（storage content API の ctime フィールド）が最新
-
-shell / Ansible の責務分離: qmrestore / qm set / start / stop / destroy / guest cmd は
-Ansible tasks 側で実行条件を明示制御する。OK/NG 判定と fail 制御も Ansible tasks 側に置く。
-専用 shell スクリプトは持たない（core.md §7 / §9）。
-
----
-
-## 5. 正常性判定
-
-期待レベル（どこまで要求するか）は本番VMの agent 設定で決まる。実測は 999 を起動して測る。
-判定は実測が期待レベルに届いているか。
-
-| VM種別 | 合格基準 | 手段 |
-|---|---|---|
-| agent 対応（agent:1） | osinfo 取得成功 | `qm agent 999 get-osinfo` をポーリング |
-| agent 無し（未設定/0） | 起動後 N 秒経過してもなお running | `qm status` |
-
-- agent 無しVMは running 継続のみで合格扱い（Sophos を特別扱いしない）。
-- agent 無しの判定 block は分離してあり、次フェーズで serial0 コンソール文字列マッチへ
-  差し替えられる。
-
----
-
-## 6. ロック方針（3者合意・最小ガード）
-
-### 6.1 位置づけ
-
-同時実行は **運用で禁止** する。ロックはその補助の最小ガードであり、完全な分散排他では
-ない。
-
-- 月次は quory から固定時刻の単一スケジュール。
-- 手動（ansy）は、人が月次と重複しないことを確認して実行する。
-
-### 6.2 実装
-
-- 公式の pmxcfs ロック（`/etc/pve/priv/lock/brv-restore-verify` への atomic `mkdir`）で
-  取得する。既存なら即 fail・通知・非ゼロ終了（待機しない）。
-- ロックディレクトリは **空** に保つ。これにより pmxcfs 標準の 120秒陳腐化回収が効き、
-  クラッシュした実行のロックは手動削除なしで自動回収される。
-- refresher / 期限更新 / 生存監視 / 孤児管理は **持たない**（最小化）。
-- 解放は空ディレクトリの `rmdir`（取得した場合のみ）。
-
-### 6.3 本番への危害防止（ロックに依存しない）
-
-破壊的操作の安全は、ロックではなく以下で担保する。
-
-- destroy 対象を 999 に固定する hard assert（999 以外は絶対に destroy しない）。
-- 開始前 999 残骸ガード（既存 999 には触れない。残骸検出時は critical 通知して中断）。
-- 999 description への一意 owner トークン刻印。cleanup では、トークンが自分のもの、または
-  未刻印（＝同時実行禁止前提下で自分の途中失敗）の場合のみ destroy し、別実行のトークンが
-  あれば触れない（cheap defence in depth）。
-
-### 6.4 受容した残余リスク
-
-ロック保持が 120秒を超える窓で、低頻度の同時実行が万一重なった場合、最悪で使い捨て 999 の
-検証が1サイクル無駄になる。**本番影響はない。** これを運用判断として受容する
-（docs/ai/reviews/proxmox_backup_restore_verify/2026-06-14_012_final.md）。
-
----
-
-## 7. cleanup と終了判定（always）
-
-- cleanup は「リストアを試行した」かつ「開始前残骸でない」場合のみ実行する。
-- live state を再取得し、999 が現存し所有判定が真なら `qm stop`（best-effort）→ `qm destroy
-  999 --purge 1`。
-- destroy に失敗して 999 が残った場合は `cleanup_ok=false`。
-- 終了コードは、検証失敗（rescue 捕捉）または cleanup 失敗のいずれかで非ゼロにする。
-
----
-
-## 8. 通知
-
-roles/common_slack/tasks/notify.yml を include_tasks で呼ぶ（best-effort）。優先順位は
-critical > error > ok。
-
-| 状況 | チャンネル | status |
-|---|---|---|
-| 検証 OK（期待レベル達成） | info | ok |
-| 検証 NG（リストア失敗 / 正常性未達） | alerts | error |
-| 999 残骸検出 or destroy 失敗 | alerts | critical |
-
-レポートは `{{ reports_base_dir }}/proxmox-backup-verify/` に JSON 保存する。
-
----
-
-## 9. 制約
-
-- 本番VM（既存 VMID）には config 読み取り以外で触らない。
-- 秘密情報を扱わない。
-- IP リテラルをファイルに書かない（core.md §3）。NIC 切断は net デバイス削除で行い、IP を
-  指定しない。
-- read-only / 変更系の区別: 変更系。999 の作成・起動・停止・削除を行う。本番VMは config
-  読み取りのみ。
-
----
-
-## 10. スコープ
-
-### 初回実装（実装済み）
-
-ローテーション選定 / 最新バックアップ特定 + qmrestore / NIC 切断起動 / 正常性判定 /
-999 の destroy + 安全装置 / 最小ロック / Slack 通知。
-
-### 次フェーズ（除外）
-
-- agent 無しVM（Sophos）の serial0 コンソール文字列マッチ（判定 block は分離済み）。
-- バックアップ鮮度チェック（別 playbook、取得側整備後）。
-- 検証履歴の永続化（月番号固定方式のため不要）。
-
----
-
-## 11. 今後のレビュー観点（合意）
-
-ロック所有権の深掘りより、本質に重心を置く。
-
-- 最新かつ正しい対象VMのバックアップを選べるか
-- NIC 切断後に起動して有効な正常性判定ができるか
-- destroy 対象が構造的に 999 に固定されているか
-- 失敗時に 999 を安全に処理できるか
-- Slack 通知 / レポート / 終了コードが実結果と一致するか
-- 本番VMへ変更操作が及ばないか
+| 2026-06-14 | v1.0。monthly restore verification、minimal lock、ownership、cleanup、通知を定義 |
+| 2026-07-24 | 標準8節へ再編。環境事実とcross-file実装契約をContextへ分離し、専用restore VMIDの数値実値をPolicyから除去 |

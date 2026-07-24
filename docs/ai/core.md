@@ -90,3 +90,10 @@ identity名だけから責務や権限を推測しない。identity対応とtrio
 新しいルールを本ファイルへ追加する前に、全Roleが毎回読む必要がある不変原則か確認する。Role固有手順、環境詳細、個別Policy、一般的な実装手順、過去のIncident、案件固有要求は、それぞれRole、Context、Policy、Skill、Knowledge、Issueへ置く。
 
 旧 `core.md` の各項目の移動判断は `docs/ai/core-migration-map.md` を参照する。
+
+## 変更履歴
+
+| 日付 | 変更 |
+|---|---|
+| 2026-07-22 | 旧共通promptから全AI Role共通原則を分離し、現行coreを正本化 |
+| 2026-07-25 | 共通原則本文を変更せず、正本保守のため変更履歴を追加 |

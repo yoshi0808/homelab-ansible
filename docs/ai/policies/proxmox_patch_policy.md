@@ -1,2007 +1,430 @@
-# Proxmox Patch Policy v2.0
+# Proxmox Patch Policy
 
-作成日: 2026-05-09  
-版: v2.0  
-対象: pve1 / pve2 / 将来の Sophos Firewall VM 移行前提
-
----
+本書はProxmox VE hostのpatchに関する許可、禁止、停止条件の正本である。実装構成は[Repository Context](../context/ansible/proxmox-patch.md)、運用手順は[Operations Context](../context/operations/proxmox-patch.md)、環境事実は[System Context](../context/system/proxmox.md)を参照する。Contextは非規範であり、本書と競合する場合は本書を優先する。
 
 ## 1. 目的
 
-この文書は、Proxmox VE ホストに対するパッチ適用を安全に判断・実施・停止するための運用ポリシーを定義する。
+<!-- SB-001 -->
+本Policyは、Proxmox VE hostへのpatchを安全に判断、適用、停止するため、次を必須目的とする。
 
-特に、過去に Proxmox の upgrade 中にホストが停止・復旧不能になった経験を踏まえ、以下を重視する。
+- 判断を人間の気分や記憶へ依存させない。
+- 軽微な通常patchを自動化し、対応忘れを防ぐ。
+- 重要コンポーネント更新を自動適用しない。
+- pve2を先行検証nodeとし、pve1を保護する。
+- host OSはrollbackでなく再インストールを復旧原則とする。
+- VM / CT、replication、backupを守る。
+- Sophos Firewall VMをProxmoxへ移行する前にpatch運用を確立する。
 
-- パッチ適用を人間の気分や記憶に依存させない
-- 軽微な通常パッチは自動化し、対応忘れを防ぐ
-- 重要コンポーネント更新は自動適用しない
-- pve2 を先行検証ノードとして使う
-- pve1 を保護する
-- Proxmox ホスト OS は rollback ではなく再インストール前提で考える
-- VM / CT / replication / backup を守る
-- Sophos Firewall VM を Proxmox に移行する前に、Proxmox パッチ運用を確立する
+## 2. 対象と実行範囲
 
----
+### 2.1 基本範囲
 
-## 2. 基本方針
+<!-- SB-002 -->
+Proxmox patchは通常のLinux server更新より慎重に扱う。kernel、ZFS、NIC・firmware・driver、cluster、corosync、管理面、QEMU・container、storage・replication、network stack・bridge・segmentへの影響が、家庭内network、VM稼働、cluster安定性へ直結し得ることを考慮する。
 
-### 2.1 パッチ適用はメンテナンス作業である
+<!-- SB-003 -->
+重要コンポーネントでない更新だけから成る場合は`PATCH_READY`とし、土曜朝の自動適用を許可する。
 
-Proxmox ホストへのパッチ適用は、通常の Linux サーバー更新より慎重に扱う。
+<!-- SB-004 -->
+重要コンポーネント更新、removeを伴う更新、major upgrade疑いは自動適用しない。`MAINTENANCE_REQUIRED`、`BLOCKED`、`MAJOR_UPGRADE_DETECTED`のいずれかとして、人間判断または別計画へ移す。
 
-特に以下の領域に影響する更新は、家庭内ネットワーク・VM 稼働・クラスタ安定性に直結する。
+<!-- SB-005 -->
+`MAINTENANCE_REQUIRED`に軽微な更新が含まれても、通常運用では部分適用しない。Proxmox更新は`apt-get dist-upgrade`による一括更新を基本とし、依存関係とpackage状態を通常flowから分岐させない。
 
-- kernel
-- ZFS
-- NIC / firmware / driver
-- pve-cluster
-- corosync
-- pve-manager
-- qemu-server
-- Proxmox storage / replication 周り
-- network stack / bridge / VLAN 周り
+<!-- SB-006 -->
+部分適用を検討できるのは、通常patch運用から切り離した明示的な例外maintenanceだけである。
 
-### 2.2 軽微パッチは自動適用する
+### 2.2 node順序とguest
 
-重要コンポーネントに該当しない更新のみで構成される場合、`PATCH_READY` として扱い、土曜朝に自動適用する。
+<!-- SB-011 -->
+- pve2を先に処理する。
+- pve1が正常な場合のみpve2を更新する。
+- pve2が壊れた場合はpve1を守り、pve1が生きている間にpve2を再インストールする。
+- pve1へ進めるのは、pve2更新後のhealthcheckがOKの場合だけである。
 
-軽微な通常パッチについては、手動対応忘れの方が運用リスクになりやすいため、自動化する。
+<!-- SB-012 -->
+apply前にVM / CTの所在を必ず確認する。`PATCH_READY`自動flowには退避と復帰を含める。
 
-### 2.3 重要コンポーネント更新は自動適用しない
+<!-- SB-013 -->
+VM / CTのhome nodeはProxmox tagを正本とし、外部YAMLを正本にしない。tagは`prefer<node名>`形式とし、対象node名と一致するtagを持つguestだけをそのnodeへの復帰対象とする。
 
-重要コンポーネントに該当する更新、remove を伴う更新、major upgrade 疑いがある更新は自動適用しない。
+<!-- SB-018 -->
+VM / CT migrationは`PATCH_READY`自動適用flow内で許可する。
 
-これらは `MAINTENANCE_REQUIRED` / `BLOCKED` / `MAJOR_UPGRADE_DETECTED` として扱い、人間判断または別計画に移す。
+<!-- SB-019 -->
+QEMU VMのlocal disk migrationは`proxmox_evacuate_allow_local_disk_migration`と`proxmox_restore_allow_local_disk_migration`に従う。有効時はlocal diskを伴うlive migrationを行い、無効時はlocal disk optionを付けずにmigrationを試み、失敗したら停止する。無効は対象除外を意味せず、local diskの自動検出・除外は行わない。HA管理guestはmaintenance modeで退避するため、このflagの対象外である。
 
-### 2.4 部分適用は通常運用では行わない
+### 2.3 control node別の範囲
 
-`MAINTENANCE_REQUIRED` が検出された場合、重要コンポーネント以外の軽微なパッケージが同時に含まれていても、通常運用では部分適用しない。
+<!-- SB-047 -->
+pve1 / pve2のreboot影響を受けないProxmox cluster外のcontrol nodeから実行する場合だけ、pve2からpve1までのfull flowを自動実行してよい。
 
-理由:
+<!-- SB-048 -->
+control nodeがProxmox上のVMである場合、pve1 / pve2の連続自動patchを行わない。実行できるのはcontrol nodeが存在しない側の単一node patchだけであり、control node自身を同一playbook内でmigrationして続行しない。所在変更は人間が別作業として明示的に行う。
 
-- Proxmox 更新は `apt-get dist-upgrade` による一括更新を基本とする
-- 部分適用は依存関係やパッケージ組み合わせの判断を人間が背負う
-- 自動化対象としては安全ではない
-- 軽微パッケージだけ先に当てる運用は、パッケージ状態を分岐させる
+<!-- SB-076 -->
+`PATCH_READY`自動適用ではcontrol nodeをpatch対象node上に置かない。
 
-例外的に部分適用を検討する場合は、通常パッチ運用ではなく、明示的な例外メンテナンスとして扱う。
+<!-- SB-077 -->
+管理対象host自身からAnsibleを実行しない。cluster内control nodeではfull flowを実行せず、同一playbook内で自己migrationしない。
 
----
+<!-- SB-078 -->
+reboot影響を受けないcluster外control nodeからだけ、pve2、pve1、VM復帰までのfull flowを自動実行してよい。
 
-## 3. 判断軸
+<!-- SB-090 -->
+Ansible実行端末はansyまたはquoryに限定する。管理対象host自身から実行せず、weekly fullはProxmox nodeからの実行をpreflightで拒否する。
 
-本ポリシーでは、判断軸を以下の2つに絞る。
+## 3. 対応するPlaybook
 
-```text
-Status  = 適用安全度
-Urgency = 対応緊急度
-```
+### 3.1 安全度と入口
 
-### 3.1 Status
+<!-- SB-020 -->
+入口は次の4安全度に固定し、自動実行範囲を分類どおりに制限する。
 
-Status は、「自動適用してよいか」「手動判断が必要か」「通常フローを止めるか」を表す。
+| 安全度 | Playbook / 作業 | 許可範囲 |
+|---|---|---|
+| safe | `proxmox_healthcheck.yml` | read-only状態収集。自動可 |
+| semi-safe | `proxmox_patch_dryrun.yml` | package metadata更新、simulation、分類。実patchなし。自動可 |
+| controlled apply | `proxmox_evacuate_node.yml`、`proxmox_restore_vm_placement.yml` | guest配置変更。条件付き可 |
+| unsafe | `proxmox_patch_apply_node.yml`、`proxmox_patch_weekly_full.yml`、major / maintenance apply | OS patchを含む。明記された条件下だけ可。major / maintenanceは自動禁止 |
 
-| Status | 意味 | 自動適用 |
+### 3.2 healthcheckとdry-run
+
+<!-- SB-021 -->
+healthcheckは単一nodeへの`--limit`を許可するが、結果が`WARNING`または`CRITICAL`ならpatch applyを禁止する。
+
+<!-- SB-022 -->
+quorumなし、ZFS異常、apt / dpkg異常、重要service停止、systemd failed unit、root filesystem危険域、report生成失敗のいずれかをhealthcheck失敗とする。
+
+<!-- SB-023 -->
+dry-runはpve1 / pve2固定pairを対象とし、単一node実行を許可しない。実行対象のpve1 / pve2両nodeのhealthcheckがOKの場合だけ開始する。package metadata更新とsimulationは行うがpackage本体を変更せず、実patchを適用しない。
+
+<!-- SB-025 -->
+dry-runは次の順でStatusを決める。
+
+- 更新なし: `NO_UPDATES`
+- apt simulation失敗: `BLOCKED`
+- major upgrade疑い: `MAJOR_UPGRADE_DETECTED`
+- 重要コンポーネント更新: `MAINTENANCE_REQUIRED`
+- removeあり: 置換関係に応じて`MAINTENANCE_REQUIRED`または`BLOCKED`
+- 重要コンポーネント更新もremoveもなし: `PATCH_READY`
+
+### 3.3 evacuate
+
+<!-- SB-026 -->
+evacuateはdestination nodeとtarget nodeのhealthcheckがともにOKで、targetが許可nodeである場合だけ開始する。non-HA migration失敗またはmaintenance mode有効化timeoutで停止する。
+
+<!-- SB-087 -->
+`target_node`はpve1またはpve2だけを許可する。`destination_node`は反対側nodeとして自動決定し、外部から指定させない。
+
+### 3.4 apply
+
+<!-- SB-027 -->
+apply nodeは指定した単一nodeに限り、`PATCH_READY`の自動適用または`MAINTENANCE_REQUIRED`の手動適用だけを許可する。`MAINTENANCE_REQUIRED`は手動apply modeと正しい明示的確認文字列を必須とする。
+
+<!-- SB-028 -->
+対象nodeのhealthcheck、利用する反対nodeのhealthcheck、事前dry-runまたは直前re-dry-runのStatus、control node分離、guest退避の全条件を満たさなければ停止する。`BLOCKED`または`MAJOR_UPGRADE_DETECTED`なら停止する。
+
+<!-- SB-031 -->
+apply node単体ではguest退避、別nodeへの自動続行、home nodeへの最終復帰、`BLOCKED`解除を行わず、`MAJOR_UPGRADE_DETECTED`を適用対象にしない。
+
+<!-- SB-088 -->
+apply対象はpve1またはpve2として指定した単一nodeに限定し、apply前に対象node上へrunning guestが残っていないことを確認する。
+
+### 3.5 weekly fullとrestore
+
+<!-- SB-032 -->
+weekly fullは、cluster外control node、両nodeのhealthcheck OK、dry-run `PATCH_READY`、guest退避・復帰可能、明示的に許可されたcontrollerという全条件を要求し、pve2から開始する。許可controllerの既定はquoryだけとし、別のcluster外hostを使う場合は`proxmox_patch_weekly_full_allowed_controllers`を実行時変数で明示overrideする。
+
+<!-- SB-033 -->
+control node、healthcheck、Status、evacuate、apply、node復帰、post-healthcheckの各gateで失敗したら停止する。pve2がNGの状態でpve1へ進まない。
+
+<!-- SB-034 -->
+restoreはhome tagの対象だけを戻す。non-HA migration失敗、maintenance mode解除timeout、HA guest復帰timeout、post-restore healthcheck NGのいずれかで停止する。
+
+<!-- SB-035 -->
+`MAINTENANCE_REQUIRED`は人間のmaintenance判断、`MAJOR_UPGRADE_DETECTED`は別project、`BLOCKED`はContingency Planへ移し、これらを通常自動flowで処理しない。
+
+## 4. 判断軸
+
+### 4.1 StatusとUrgency
+
+<!-- SB-007 -->
+| Status | 条件の要旨 | 自動適用 |
 |---|---|---|
 | `NO_UPDATES` | 更新候補なし | 不要 |
-| `PATCH_READY` | 重要コンポーネントに該当しない通常更新のみ | 可 |
-| `MAINTENANCE_REQUIRED` | 重要コンポーネント更新、または remove を含む | 不可 |
+| `PATCH_READY` | 重要コンポーネントでない通常更新のみ | 可 |
+| `MAINTENANCE_REQUIRED` | 重要コンポーネント更新または許容可能なremove | 不可 |
 | `BLOCKED` | 通常更新計画として信用できない | 禁止 |
-| `MAJOR_UPGRADE_DETECTED` | 通常パッチではなくメジャーアップグレード疑い | 禁止 |
+| `MAJOR_UPGRADE_DETECTED` | major upgrade疑い | 禁止 |
 
-### 3.2 Urgency
+<!-- SB-008 -->
+Urgencyは人間が判断・対応する速度を表す別軸であり、自動適用の許可条件ではない。
 
-Urgency は、「どれくらい急いで人間が判断すべきか」を表す。
+<!-- SB-009 -->
+認証なしRCE、管理画面RCE、公開済みexploit、ransomware悪用、VM escape、認証bypass、root権限取得可能なLPE、backup・token・secret漏えいのいずれかは`URGENT`として即対応する。
 
-Urgency は自動適用の許可条件ではない。
+<!-- SB-010 -->
+local user必須、特定機能有効時だけ、DoSだけ、XSSだけ、物理access必須、特定CPU・deviceだけの条件は、LPEか、機能利用有無、可用性、管理面露出、家庭環境、該当hardwareをそれぞれ確認して`HIGH`候補を判断する。
 
-| Urgency | 意味 |
+### 4.2 重要コンポーネントとStatus詳細
+
+<!-- SB-036 -->
+次を重要コンポーネントとする。
+
+- `proxmox-ve`
+- `proxmox-kernel-*`
+- `pve-manager`
+- `pve-cluster`
+- `pve-ha-manager`
+- `qemu-server`
+- `pve-container`
+- `libpve-*`
+- `corosync`
+- `zfsutils-linux`
+- `zfs-zed`
+- `ifupdown2`
+- `firmware-*`
+- `intel-microcode`
+- `amd64-microcode`
+- `systemd`
+- `udev`
+
+重要更新は`MAINTENANCE_REQUIRED`、重要removeで置換先不明は`BLOCKED`、重要removeでも後継・置換が同時に見える場合は`MAINTENANCE_REQUIRED`とする。
+
+<!-- SB-037 -->
+`NO_UPDATES`は通知とreport保存だけを行い、applyしない。
+
+<!-- SB-038 -->
+`PATCH_READY`にはhealthcheck OK、`apt-get check`成功、simulation成功、removeなし、major疑いなし、重要更新なしのすべてが必要である。pve2へ先行適用し、post-healthcheck OKの場合だけpve1へ進む。NGならpve1へ進まず停止・通知する。
+
+<!-- SB-039 -->
+`MAINTENANCE_REQUIRED`は自動適用も部分適用もせず、毎週dry-runで再評価し、保留期間に固定上限を設けない。人間がmaintenance枠を確保してpve2から手動実施するか判断する。
+
+<!-- SB-040 -->
+`BLOCKED`は両nodeへの適用と部分適用を禁止し、自動apply timerを停止し、復旧・回避・再構成routeへ移す。復帰条件を満たすまでapplyを禁止する。
+
+<!-- SB-041 -->
+次のいずれかに該当する場合は`MAJOR_UPGRADE_DETECTED`とする。
+
+- Proxmox major versionが変わる疑いがある。
+- Debian suiteが変わる疑いがある。
+- repository suiteを変更した直後である。
+- base packageが大量に更新される。
+- install / removeが大量にある。
+- `pve-manager`のmajor versionが変わる疑いがある。
+
+`MAJOR_UPGRADE_DETECTED`は通常patchから除外し、自動適用せず別project化する。Roadmap / Release Notesを参照してpve2検証計画を作り、pve1を最後にする。
+
+### 4.3 remove
+
+<!-- SB-042 -->
+removeを検出しても即`BLOCKED`にはしない。simulation成功、後継・置換packageの同時install、major疑いなし、中核packageが単に失われる状態でない、という全条件を満たす場合は`MAINTENANCE_REQUIRED`とし、自動適用せず人間が判断する。
+
+<!-- SB-043 -->
+simulation失敗、`apt-get check`失敗、後継不明の重要remove、中核packageが消えるだけに見える状態、repository / dependency破綻疑いのいずれかは`BLOCKED`とする。
+
+### 4.4 Urgency詳細
+
+<!-- SB-044 -->
+UrgencyはStatusと分離し、simulation出力だけで決めない。security repository由来、changelog / NEWS、分類結果、公式Security Advisory、SSH・TLS・auth・QEMU・kernel・firewall・network exposureとの関係を材料にする。
+
+<!-- SB-045 -->
+- `LOW`: timezone、editor、documentation、小規模utility等の軽微な通常更新。
+- `NORMAL`: bug fix、minor package、routine maintenance、security要素が明確でない重要コンポーネント更新。
+- `HIGH`: security repository由来、CVE等の明記、公式advisory関連、`openssl`、`openssh`、`curl`、`libc`、`apt`、`dpkg`、QEMU、kernel等のsecurity-sensitive package、firewall・network service・authentication・TLS関連。
+- `URGENT`: 重大脆弱性または既知悪用が疑われ、RCE、認証bypass、VM escape、internet exposureへ重大な影響がある更新。
+
+<!-- SB-046 -->
+`URGENT`は過剰に自動昇格せず、公式advisory、changelog、人間判断で昇格する。Urgencyが`HIGH`または`URGENT`でも、Statusが`MAINTENANCE_REQUIRED`、`BLOCKED`、`MAJOR_UPGRADE_DETECTED`なら自動適用しない。
+
+### 4.5 reboot、情報源、AI分類
+
+<!-- SB-024 -->
+AI分類は補助に限り、最終Statusを直接決定しない。
+
+<!-- SB-030 -->
+許可されたpost-healthcheck retryでOKへ戻れば`SUCCESS`、全試行で`CRITICAL`なら`CRITICAL`として扱う。
+
+<!-- SB-066 -->
+週次dry-runでは対象packageのchangelogを最優先し、major / minor疑いまたは中核packageが広範囲に動く場合はRoadmap / Release Notesを参照する。changelog全文をreportへ保存し通知は要約とし、人間が全文を毎回読む運用にしない。単純grepだけで重要該当性やUrgencyを決めず、Ansible tasksが機械結果と構造化分類をもとに最終Statusを決める。
+
+<!-- SB-068 -->
+Roadmap / Release Notes、Proxmox公式更新手順、Proxmox Security Advisories、Debian Security Trackerを、それぞれrelease全体像、公式更新方法、Proxmox security、Debian package securityの確認に用いる。changelogだけでは変更の全体像が見えない場合もRoadmap / Release Notesを参照する。
+
+<!-- SB-071 -->
+AIはchangelog分類と説明生成を補助するが、実行engineでも最終適用判断者でもない。
+
+<!-- SB-072 -->
+AIが出すUrgencyは候補に限り、Ansible tasksが本Policyの判断条件と照合して最終Status / Urgencyを確定する。
+
+<!-- SB-074 -->
+simulation・収集はAnsible / shell、changelog意味分類と説明候補はAI、重要componentとsecurity sourceの機械判定、最終Status / Urgency、apply可否はAnsible tasks、実patchはAnsibleが担う。
+
+<!-- SB-089 -->
+dry-run時の`reboot_expected`は推定、apply後の`reboot_required`は事実として区別する。reboot要否はreboot-required fileだけでなく、実行中kernelと導入済みkernel packageの差も使って判定する。
+
+## 5. ライフサイクル・処理フロー
+
+### 5.1 標準flow
+
+1. control nodeの配置と対象を確認する。
+2. pve1 / pve2のhealthcheckを行う。
+3. fixed pair dry-runでStatusを確定する。
+4. `PATCH_READY`だけ自動flowへ進める。
+5. pve2をevacuate、apply、必要ならreboot、post-healthcheck、restoreする。
+6. pve2の全gateがOKの場合だけpve1を同じ順序で処理する。
+7. 結果を通知する。
+
+詳細なMode別手順は[Operations Context](../context/operations/proxmox-patch.md)を参照する。
+
+<!-- SB-014 -->
+guestはtagにより分類する。`prefer<node名>`があり`hacritical`がないguestはnon-HAとして明示migrationする。`hacritical`があるguestはHA管理としてmaintenance modeで退避し、復帰時は明示relocateする。tagなしguestは明示migration対象外だが、runningのまま残れば最終確認で停止する。
+
+<!-- SB-015 -->
+pve2 apply前にdestination nodeとpve2のhealthcheck OK、guest分類・退避完了、pve2がapply / reboot可能という全条件を満たす。
+
+<!-- SB-016 -->
+pve1 apply前にpve1のrunning guest一覧化、必要guestのpve2退避、pve2が健康な退避先であること、pve1がapply / reboot可能という全条件を満たす。
+
+<!-- SB-017 -->
+各nodeのpatch、reboot、post-healthcheck完了後にそのnodeをrestoreし、最終的にhome配置、running状態、post-restore healthcheck OKのすべてを確認する。
+
+<!-- SB-029 -->
+post-healthcheck retryを許可するのは、reboot実施済みで結果が`CRITICAL`または`UNKNOWN`の場合だけである。rebootを伴わない`CRITICAL` / `UNKNOWN`はretryせず実障害として扱う。
+
+<!-- SB-049 -->
+事前に手動適用され、土曜dry-runで`NO_UPDATES`ならapplyしない。pve2だけ手動適用済みの場合、Mode Aはpve1へ進む余地があるが、Mode Bはcontrol node所在条件を満たすpve1単一node patchだけを許可する。
+
+<!-- SB-057 -->
+`PATCH_READY`適用後にreboot-requiredを検出した場合は対象nodeを自動rebootし、SSH、Proxmox API、GUIの復帰を待ってpost-healthcheckを行う。OKの場合だけ次へ進み、`WARNING` / `CRITICAL`なら進まない。
+
+<!-- SB-058 -->
+`MAINTENANCE_REQUIRED`の週は自動・部分適用せず、毎週dry-runで再評価する。Urgencyが高くても、人間がmaintenance枠を確保してpve2から手動実施するか判断する。
+
+### 5.2 BLOCKEDからの復帰
+
+<!-- SB-060 -->
+`BLOCKED`ではtimerを止め、apply playbookを禁止し、両nodeへ適用しない。Sophos移行前なら移行を延期し、移行後ならSophos稼働nodeを固定して不要な移動をせず、pve1の安定を最優先する。
+
+<!-- SB-061 -->
+simulation失敗時は通常flowを停止してrepository / apt sourceを修正し、dry-runが`PATCH_READY`または`MAINTENANCE_REQUIRED`へ戻るまでapplyしない。
+
+<!-- SB-062 -->
+置換先のない重要removeではその更新setを適用せず、repository / dependencyを修正し、重要remove予定が消えるまでapplyしない。
+
+<!-- SB-063 -->
+`apt-get check`失敗時は通常flowを停止してapt / dpkgを修復し、check成功までapplyしない。
+
+<!-- SB-064 -->
+major upgrade疑いでは通常flowを停止し、`MAJOR_UPGRADE_DETECTED`として別計画へ移し、pve2検証計画を作り、pve1を対象外にする。
+
+<!-- SB-065 -->
+通常patchへ戻すには、`apt-get check`成功、simulation成功、重要remove予定なしまたは置換として`MAINTENANCE_REQUIRED`分類可能、major疑いなし、healthcheck OK、dry-run Statusが`PATCH_READY`または`MAINTENANCE_REQUIRED`、という六条件をすべて満たす。
+
+### 5.3 手動適用と復旧
+
+<!-- SB-080 -->
+Mode A、Mode B、`MAINTENANCE_REQUIRED`手動applyはいずれも、該当するcontrol node条件、healthcheck、Status、guest退避、必要な明示確認、post-healthcheckを満たす。pve1はpve2成功後にだけ別途判断する。
+
+<!-- SB-081 -->
+Proxmox host OSのrollbackは原則行わない。壊れた場合は再インストールする。
+
+<!-- SB-082 -->
+node別の復旧手順と再構築に必要な情報を準備し、host設定はfile rollbackでなく再構築する。具体的な再構築情報は[Operations Context](../context/operations/proxmox-patch.md)を参照する。
+
+<!-- SB-085 -->
+Sophos Firewall VMがProxmox上で稼働している場合は、Sophos停止によるnetwork影響を許容できる時間帯だけpatchし、必要なnetwork interface / segment割当を確認し、Sophos VM移動後に通信を確認する。手順は[Operations Context](../context/operations/proxmox-patch.md)を参照する。
+
+## 6. 通知方針
+
+<!-- SB-056 -->
+停止時はsummary通知に停止理由を含め、週末中に対応する。
+
+<!-- SB-069 -->
+`NO_UPDATES`、`PATCH_READY`成功、`PATCH_READY`のpve2停止、`MAINTENANCE_REQUIRED`、`BLOCKED`、`MAJOR_UPGRADE_DETECTED`を通知する。停止・BLOCKED・MAJORは成功より強い表示にする。
+
+<!-- SB-070 -->
+- 成功通知: 各nodeのapply・post-healthcheck、reboot要否、更新package、必要最小限のchangelog要約を含める。
+- pve2停止通知: 停止理由、pve1へ進んでいないこと、対応要否、失敗taskまたはhealthcheck、report pathを含める。
+- `MAINTENANCE_REQUIRED`: Status、Urgency、理由、重要component、remove / install / upgrade関係、changelog要約、Roadmap要否、推奨action、分類結果を含める。
+- `BLOCKED`: 適用禁止、timer停止、両node未適用、選択したcontingency route、復帰条件を含める。
+
+changelog全文はreportへ保存し、通知本文には要約だけを載せる。
+
+## 7. 制約・禁止事項
+
+### 7.1 共通禁止と停止条件
+
+<!-- SB-050 -->
+applyが失敗したら次nodeへ進まない。
+
+<!-- SB-051 -->
+reboot後にSSH、Proxmox API、GUIが戻らなければ次nodeへ進まない。
+
+<!-- SB-052 -->
+post-healthcheckが`WARNING`または`CRITICAL`なら次nodeへ進まない。
+
+<!-- SB-053 -->
+apt / dpkg失敗、systemd failed unit、cluster・corosync・ZFS・replication異常のいずれかがあれば次nodeへ進まない。
+
+<!-- SB-054 -->
+VM / CTの退避失敗、復帰への影響、稼働への影響のいずれかがあれば次nodeへ進まない。
+
+<!-- SB-055 -->
+control nodeがtarget node上にあり継続不能なら次nodeへ進まない。
+
+<!-- SB-059 -->
+`MAINTENANCE_REQUIRED`をplaybookで手動applyする場合、playbook規定形式の明示的確認文字列を必須とし、確認がなければ停止する。
+
+### 7.2 AIと実行場所
+
+<!-- SB-067 -->
+AI分類結果は最終判断の入力に限る。AIに`apt-get dist-upgrade`、`BLOCKED`解除、patch適用判断をさせない。
+
+<!-- SB-073 -->
+AIにupgrade、reboot、Proxmox host上の直接実行、Proxmox設定変更、`BLOCKED` / `MAJOR_UPGRADE_DETECTED`解除、Policyに反するStatus上書き、pve1 / pve2へのapply判断、apply timer有効化をさせない。
+
+<!-- SB-075 -->
+分類CLIはansy、quory、macOSだけで実行する。pve1、pve2、authy、Sophos Firewall VMでは実行・導入せず、Proxmox patch apply中に導入・更新しない。
+
+<!-- SB-079 -->
+control nodeがpatch対象node上にいる場合はapplyを停止する。control nodeがpve1 / pve2の両方のsequence中に停止し得る場所にある場合はfull flowを実行しない。
+
+### 7.3 Sophos安全前提
+
+<!-- SB-083 -->
+Sophos Firewall VMをProxmoxへ移行する前に、次の条件をすべて満たす。時点依存の達成証跡は[Phase 1調査](../reviews/policy_standardization/2026-07-24_005_investigation_proxmox_patch_policy_rewrite.md)で追跡する。
+
+- pve2でpatch dry-run運用を確認する。
+- pve2で`PATCH_READY`自動適用を1回以上成功させる。
+- pve2 reboot後のhealthcheck OKを確認する。
+- pve1 / pve2両方のhealthcheck OKを確認する。
+- pve2再インストール手順を用意する。
+- Proxmox network設定の再構築メモを用意する。
+- Sophos VMのbackup / restore手順を用意する。
+- Sophos VMの稼働node方針を決める。
+- Sophos VMの退避・停止・移動方針を決める。
+- 家庭内network停止時の手順を用意する。
+
+<!-- SB-084 -->
+Sophos Firewall VMがProxmox上で稼働している場合、Sophos VMがpatch対象node上にいるなら、そのnodeを直接patchしない。先に別nodeへ移動できるか確認する。
+
+<!-- SB-086 -->
+Sophos Firewall VMがProxmox上で稼働している場合、Sophos稼働nodeへの`MAINTENANCE_REQUIRED`適用は通常より慎重に扱う。internetに面することを踏まえ、Urgency `HIGH` / `URGENT`は早めに判断する。
+
+## 8. 変更履歴
+
+| 日付 | 変更 |
 |---|---|
-| `LOW` | 軽微な通常更新 |
-| `NORMAL` | 一般的な更新 |
-| `HIGH` | セキュリティ関連、または早めの対応が望ましい更新 |
-| `URGENT` | 前提条件なしに重大な被害が起きるリスク。即対応。 |
-
-### URGENT 判断基準
-
-以下の条件に該当する場合は `URGENT` とし、即対応とする。
-
-| 条件 | 判断 |
-|---|---|
-| 認証なし RCE | 即対応 |
-| 管理画面 RCE | 即対応 |
-| exploit 公開済み | 即対応 |
-| ransomware 利用中 | 即対応 |
-| VM escape | 即対応 |
-| 認証バイパス | 即対応 |
-| root 権限取得可能（LPE） | 即対応 |
-| backup / token / secret 漏えい | 即対応 |
-
-### HIGH 判断基準
-
-以下の条件に該当する場合は `HIGH` とし、早めの対応が望ましい。
-
-| 条件 | 判断 |
-|---|---|
-| ローカルユーザー必須 | 中〜高（LPE なら URGENT を検討） |
-| 特定機能を有効化している場合のみ | 使用有無を確認 |
-| DoS のみ | 可用性次第 |
-| XSS のみ | 管理画面なら中〜高 |
-| 物理アクセス必須 | 家庭環境なら低め |
-| 特定 CPU / デバイスのみ | 該当性確認 |
-
-例:
-
-| 状況 | Status | Urgency |
-|---|---|---|
-| tzdata / vim 等の通常更新 | `PATCH_READY` | `LOW` |
-| OpenSSL / OpenSSH のセキュリティ更新 | `PATCH_READY` | `HIGH` |
-| kernel LPE 修正 | `MAINTENANCE_REQUIRED` | `URGENT` |
-| 重要コンポーネント remove かつ置換先不明 | `BLOCKED` | `HIGH` |
-| Proxmox major upgrade 疑い | `MAJOR_UPGRADE_DETECTED` | `NORMAL` |
-
----
-
-## 4. ノードの役割
-
-| ノード | 役割 | パッチ順序 |
-|---|---|---|
-| `pve2` | 先行検証・縮退運用・再構築許容ノード | 最初 |
-| `pve1` | 主系・安定運用ノード | pve2 成功後 |
-| Sophos Firewall VM 稼働ノード | 家庭内ネットワーク中核 | 最後・慎重 |
-
-基本方針:
-
-- pve2 で先に試す
-- pve1 が正常な状態でのみ pve2 を更新する
-- pve2 が壊れた場合は、pve1 が生きているうちに pve2 を再インストールする
-- pve1 への適用は、pve2 更新後の healthcheck が OK の場合のみ行う
-
----
-
-## 5. VM 配置・退避・復帰方針
-
-### 5.1 基本方針
-
-パッチ対象ノードを reboot する可能性があるため、patch apply 前に VM / CT の所在を確認する。
-
-PATCH_READY の自動適用では、VM / CT の退避と復帰も自動フローに含める。
-
-用語:
-
-```text
-current node:
-  現在 VM / CT が稼働しているノード
-
-home node:
-  通常時に VM / CT を置きたい規定ノード
-
-evacuation:
-  パッチ対象ノードから一時的に VM / CT を退避すること
-
-restore placement:
-  パッチ完了後に VM / CT を home node へ戻すこと
-```
-
-### 5.2 home node の考え方
-
-VM / CT ごとに home node を定義する。
-
-現在の Ansible 構成では、以下のファイルに Proxmox グループの接続情報が定義されている。
-
-```text
-inventories/homelab/group_vars/proxmox.yml
-```
-
-例:
-
-```yaml
-ansible_user: ann
-ansible_ssh_private_key_file: ~/.ssh/id_ann
-```
-
-`group_vars/proxmox.yml` は接続情報を中心に維持し、VM / CT 配置ポリシーは混在させない。
-
-VM / CT の home node は、Proxmox 上のタグで管理する。YAMLファイルによる外部定義は使用しない。
-
-タグ命名規則:
-
-```text
-prefer<node名>
-```
-
-例: `pve1` が home node であれば `preferpve1` タグを付与する。
-
-Proxmox の Web UI または CLI でVM/CTに付与する:
-
-```bash
-# VM 101 に preferpve1 タグを付与する例
-pvesh set /nodes/pve2/qemu/101/config --tags preferpve1
-```
-
-Ansible での判定:
-
-```yaml
-selectattr('tags', 'search', '(^|;)prefer' ~ inventory_hostname ~ '(;|$)')
-```
-
-`inventory_hostname`（例: `pve1`）と一致する `prefer<node名>` タグを持つVM/CTが、そのノードへ復帰すべき対象として扱われる。
-
-#### hacritical タグ
-
-Proxmox HA マネージャーで管理するVM/CTには、`hacritical` タグを付与する。
-
-```text
-hacritical
-```
-
-タグの組み合わせによる分類:
-
-| タグ構成 | 分類 | evacuate時の挙動 | restore時の挙動 |
-|---|---|---|---|
-| `preferpve*` あり、`hacritical` なし | non-HA VM/CT | `qm migrate` / `pct migrate` で手動退避 | `qm migrate` / `pct migrate` で home node へ戻す |
-| `hacritical` あり | HA管理 VM/CT（タグが印） | maintenance mode enable により HA が自動退避 | maintenance mode disable 後、`ha-manager crm-command relocate` を明示的に発行して復帰 |
-| タグなし | 明示 migration の対象外 | migrate しない。ただし running のまま残れば force stop の対象になる | 対象外 |
-
-`hacritical` タグは、そのVM/CTが HA 管理対象であることを Ansible に伝える印である。実際の HA 登録状態を pvesh で照会して分類するのではなく、タグの有無だけを判断基準とする。
-
-evacuate ロールは、non-HA VM/CT を手動 migrate した後、`ha-manager crm-command node-maintenance enable <node>` で maintenance mode を有効化し、HA がその後の退避を担う。non-HA migrate でも `hacritical` でもない VM/CT は migrate 対象にはならないが、最終確認で running のまま残っていた場合は `qm stop` / `pct stop` で強制停止する。
-
-restore ロールは、non-HA VM/CT を手動 migrate で home node に戻した後、`ha-manager crm-command node-maintenance disable <node>` で maintenance mode を無効化する。Proxmox HA はメンテナンス解除後に稼働中 VM/CT を自動リロケートしないため、`hacritical` + `prefer<target>` を持ち target node 以外にいる各 VM/CT に対して明示的に `ha-manager crm-command relocate vm:<vmid> <target_node>` を発行する。その後、HA VM/CT が home node に戻り running になるまで待機する。
-
-現在の evacuation / restore report は、migrated / force-stopped の VM ID 配列と HA VM 数を JSON で保存する。weekly_full の完了メールにも個別 VM の詳細は含まない。
-
-将来の推奨表示（未実装）:
-
-```text
-VM 101 example-vm-101:
-  current node: pve2
-  home node:    pve1  (tag: preferpve1)
-  action:       migrate back to pve1
-```
-
-### 5.3 pve2 apply 前
-
-pve2 に PATCH_READY を適用する前に、以下を行う。
-
-1. destination node（pve1）の healthcheck が OK であることを確認する
-2. pve2 の healthcheck が OK であることを確認する
-3. pve2 上の VM / CT を一覧化する
-4. タグに基づいて分類する（non-HA migrate 対象 / HA管理対象）
-5. `preferpve*` タグあり + `hacritical` なしの VM / CT を pve1 へ migrate する
-6. maintenance mode を enable し、HA 管理 VM / CT の退避を待つ
-7. 退避後に running のまま残った VM / CT を force stop する
-8. pve2 が patch apply / reboot 可能な状態であることを確認する
-
-### 5.4 pve1 apply 前
-
-pve1 に PATCH_READY を適用する前に、以下を行う。
-
-1. pve1 上の running VM / CT を一覧化する
-2. pve1 を reboot できるよう、必要な VM / CT を pve2 へ一時退避する
-3. pve2 が健康であり、退避先として使えることを確認する
-4. pve1 が patch apply / reboot 可能な状態であることを確認する
-
-### 5.5 patch 完了後の VM 復帰
-
-各ノードの patch / reboot / post-patch healthcheck が完了した後、そのノードを restore する。
-
-weekly_full フローでは、pve2 の post-patch healthcheck OK 後に pve2 を restore し、その後 pve1 の evacuate へ進む。pve1 の post-patch healthcheck OK 後に pve1 を restore する。
-
-最終状態では、以下を確認する。
-
-- VM / CT が期待する home node にいる
-- VM / CT が running である
-- Proxmox healthcheck が OK（restore ロール内の post-restore healthcheck）
-
-### 5.6 自動 migration の扱い
-
-VM / CT の migrate は、PATCH_READY 自動適用フロー内で許可する。
-
-QEMU VM の local disk live migration は変数で制御する。
-
-```text
-evacuate 用（role defaults: false、group_vars/proxmox.yml: true）:
-  proxmox_evacuate_allow_local_disk_migration
-
-restore 用（role defaults: false、group_vars/proxmox.yml: true）:
-  proxmox_restore_allow_local_disk_migration
-```
-
-各変数の意味:
-
-| 値 | 挙動 |
-|---|---|
-| `true` | `qm migrate --with-local-disks` で live migration を実行する（本 homelab: local-zfs 環境で明示的に承認済み） |
-| `false` | `--with-local-disks` を付けずに migration を試行する。local disk を持つ VM は migration コマンドが失敗し、ロールが停止する |
-
-local disk の検出・除外処理は実装にない。`false` は「対象から除外」ではなく「オプションを省いて試行・失敗時に停止」である。
-
-HA 管理 VM / CT（`hacritical` タグあり）は、maintenance mode による HA 自動退避を使うため、このフラグの影響を受けない。
-
----
-
-## 6. Playbook 分離方針
-
-safe / semi-safe / controlled apply / unsafe を明確に分離する。
-
-種別は増やしすぎない。  
-本ポリシーでは以下の4分類に固定する。
-
-| 種別 | 意味 |
-|---|---|
-| safe | read-only。状態収集のみ |
-| semi-safe | 状態更新はあるが、実パッチ適用はしない |
-| controlled apply | VM/CT migration など、制御された変更を行う |
-| unsafe | OSパッチ適用、major upgrade、重要コンポーネント手動適用など |
-
-また、Ansible control node が Proxmox クラスタ内 VM の場合と、quory のようなクラスタ外物理ノードの場合で、実行できる単位を分ける。
-
-### 6.1 Playbook 一覧
-
-| 種別 | Playbook | 内容 | 自動実行 |
-|---|---|---|---|
-| safe | `proxmox_healthcheck.yml` | read-only healthcheck | 可 |
-| semi-safe | `proxmox_patch_dryrun.yml` | `apt update` + simulation + changelog収集 + Codex分類 | 可 |
-| controlled apply | `proxmox_evacuate_node.yml` | patch対象ノードを reboot 可能な状態にする（migration / HA退避 / force stop） | 条件付き可 |
-| unsafe | `proxmox_patch_apply_node.yml` | 1ノード単位の `PATCH_READY` 実パッチ適用 | 条件付き可 |
-| unsafe | `proxmox_patch_weekly_full.yml` | pve2 → pve1 → VM復帰の全体制御 | quory / 外部control nodeのみ可 |
-| controlled apply | `proxmox_restore_vm_placement.yml` | VM / CT を home node へ戻す | 条件付き可 |
-| unsafe | major upgrade / maintenance apply | 重要コンポーネント更新の手動適用 | 自動禁止 |
-
-補足:
-
-- `proxmox_patch_apply_node.yml` は `PATCH_READY` のみを扱う場合でも、実際にOSパッチを適用するため `unsafe` とする。
-- `proxmox_patch_weekly_full.yml` は内部で実パッチ適用を含むため `unsafe` とする。
-- `proxmox_evacuate_node.yml` と `proxmox_restore_vm_placement.yml` は VM/CT の配置を変更するが、OSパッチは適用しないため `controlled apply` とする。
-
----
-
-### 6.2 `proxmox_healthcheck.yml`
-
-#### 目的
-
-Proxmox ノードが現在パッチ適用可能な健康状態かを確認する。
-
-#### 対象
-
-- pve1
-- pve2
-- `--limit` による単一ノード実行も可
-
-#### 安全度
-
-```text
-safe
-read-only
-```
-
-#### 処理概要
-
-1. 対象ノードに疎通できることを確認する
-2. Proxmox / Debian 基本情報を収集する
-3. `pveversion` を収集する
-4. `pvecm status` を収集する
-5. quorum 状態を判定する
-6. `zpool status` を収集する
-7. ZFS pool が ONLINE であることを確認する
-8. `pvesr status` を収集する
-9. replication の異常有無を確認する
-10. `systemctl --failed` を収集する
-11. `pve-cluster` / `corosync` / `pvedaemon` / `pveproxy` などの service 状態を確認する
-12. root filesystem 使用率を確認する
-13. `apt-get check` を実行し、apt / dpkg の破綻がないことを確認する
-14. `/var/run/reboot-required` の有無を確認する
-15. VM / CT の所在と稼働状態を収集する
-16. JSON report を control node 側に保存する
-17. `OK` / `WARNING` / `CRITICAL` を判定する
-18. `WARNING` / `CRITICAL` の場合は patch apply を禁止する
-
-#### 出力
-
-- healthcheck JSON report
-- 標準出力サマリー
-- `OK` / `WARNING` / `CRITICAL`
-
-#### 失敗条件
-
-- quorum なし
-- ZFS 異常
-- apt / dpkg 異常
-- 重要 service 停止
-- systemd failed units あり
-- root filesystem 危険域
-- report 生成失敗
-
----
-
-### 6.3 `proxmox_patch_dryrun.yml`
-
-#### 目的
-
-更新候補を取得し、今回の更新セットを `NO_UPDATES` / `PATCH_READY` / `MAINTENANCE_REQUIRED` / `BLOCKED` / `MAJOR_UPGRADE_DETECTED` に分類する。
-
-#### 対象
-
-- pve1
-- pve2
-- pve1 / pve2 の固定ペアで実行する（単一ノード実行は非対応）
-
-#### 安全度
-
-```text
-semi-safe
-apt-get update あり（パッケージリストの更新のみ、パッケージ本体は変更しない）
-実パッチ適用なし
-```
-
-#### 処理概要
-
-1. 対象ノードの healthcheck が OK であることを確認する
-2. `apt-get update` を実行し、パッケージリストを最新化する
-3. `apt-get check` を実行し、apt / dpkg の整合性を確認する
-4. `apt-get -s dist-upgrade` を実行する
-5. simulation の成功/失敗を収集する
-6. `Inst` / `Remv` / `Conf` / kept back などを抽出する
-7. 更新対象パッケージ一覧を作成する
-8. remove 予定パッケージ一覧を作成する
-9. newly installed package 一覧を作成する
-10. 重要コンポーネント該当候補を抽出する
-11. Debian security repository 由来候補を抽出する
-12. 対象パッケージの `apt changelog` を取得する
-13. changelog 全文を report ディレクトリに保存する
-14. dry-run report JSON を生成する
-15. Codex CLI に dry-run report / changelog / policy を渡す
-16. Codex CLI から構造化分類 JSON を受け取る
-17. Ansible tasks が最終 Status / Urgency を判定する
-18. メール本文を生成する
-19. 必要に応じて通知する
-20. apply は行わない
-
-#### Codex CLI の役割
-
-- changelog を読む
-- 重要コンポーネント該当性を分類する
-- remove が置換に見えるか分類する
-- security-sensitive か分類する
-- urgency 候補を出す
-- メール本文向けの要約を作る
-
-Codex CLI は最終 Status を直接決定しない。
-
-#### 出力
-
-- dry-run JSON report（unified JSON。changelog diff を含む）
-- Codex classification JSON
-- final report JSON
-- 日本語 MD report（changelog 差分の全文と分析結果を含む）
-- final Status / Urgency
-
-#### Status 判定
-
-- 更新なし → `NO_UPDATES`
-- apt simulation 失敗 → `BLOCKED`
-- major upgrade 疑い → `MAJOR_UPGRADE_DETECTED`
-- 重要コンポーネント更新あり → `MAINTENANCE_REQUIRED`
-- remove あり、置換判断が必要 → `MAINTENANCE_REQUIRED` または `BLOCKED`
-- 重要コンポーネント更新なし、removeなし → `PATCH_READY`
-
----
-
-### 6.4 `proxmox_evacuate_node.yml`
-
-#### 目的
-
-patch 対象ノードを reboot 可能な状態にする。
-
-対象 VM / CT は分類に応じて migration、HA 退避、または force stop する。non-HA VM / CT は反対側ノードへ migrate し、HA 管理 VM / CT は maintenance mode により HA が自動退避する。それ以外の running VM / CT は反対側へ移動せず対象ノード上で force stop する。
-
-この playbook は、patch apply の前提処理として使う。
-
-#### 対象
-
-`target_node` 変数で対象ノードを指定する。`destination_node` は target の反対側ノードとして playbook が自動決定する（外部から指定しない）。
-
-```bash
-ansible-playbook -i inventories/homelab/hosts.yml playbooks/proxmox_evacuate_node.yml \
-  -e target_node=pve2
-```
-
-#### 安全度
-
-```text
-controlled apply
-VM/CT migration を伴う
-OSパッチ適用なし
-```
-
-#### 実行条件
-
-- destination node の healthcheck が OK（playbook レベルで実行）
-- target node の healthcheck が OK（role 内で実行）
-- target_node が pve1 / pve2 のいずれかであること（destination_node は反対側ノードとして自動決定）
-
-#### 処理概要
-
-playbook（`proxmox_evacuate_node.yml`）が以下の順で処理する。
-
-1. target_node の入力をバリデーションする
-2. destination_node（target の反対側ノード）の healthcheck が OK であることを確認する
-3. target_node を対象に `proxmox_evacuate_node` role を実行する
-   - target node の healthcheck が OK であることを確認する
-   - クラスタリソースを取得する（`pvesh get /cluster/resources`）
-   - target node 上の VM / CT を一覧化する
-   - タグに基づいて分類する
-     - `preferpve*` タグあり + `hacritical` なし → non-HA migrate 対象
-     - `hacritical` タグあり → HA 管理対象（maintenance mode で退避）
-     - その他（タグなし等）→ migrate 対象外（running で残存した場合は force stop）
-   - non-HA QEMU VM を destination_node へ migrate する（running なら `--online 1`、`proxmox_evacuate_allow_local_disk_migration: true` なら `--with-local-disks`）
-   - non-HA LXC コンテナを destination_node へ migrate する（running なら `--restart 1`）
-   - `ha-manager crm-command node-maintenance enable <target_node>` で maintenance mode を有効化する
-   - maintenance mode が active になるまで待機する（`ha-manager status` でポーリング）
-   - HA 管理 VM / CT が target node を離れるまで待機する（`pvesh` でポーリング）
-   - target node 上に running のまま残った VM / CT を強制停止する（`qm stop` / `pct stop`）
-   - evacuation report を保存する
-
-#### 停止条件
-
-- destination node の healthcheck が OK ではない
-- target node の healthcheck が OK ではない
-- non-HA VM / CT の migration 失敗
-- maintenance mode の有効化タイムアウト
-
-#### 出力
-
-- evacuation report（JSON）
-- migrated VM / CT 一覧
-- force-stopped VM / CT 一覧
-- HA 管理 VM / CT 数
-
----
-
-### 6.5 `proxmox_patch_apply_node.yml`
-
-#### 目的
-
-`PATCH_READY` の自動適用、または `MAINTENANCE_REQUIRED` の手動適用を、指定した1ノードに対して行う。
-
-#### 対象
-
-apply 対象ノードを実行時に指定する（`pve1` または `pve2` のいずれか）。
-
-#### 安全度
-
-```text
-unsafe
-単一ノード限定
-OSパッチ適用あり
-```
-
-#### 実行条件
-
-- 対象ノードの healthcheck が OK
-- 退避先または反対側ノードを利用する場合は、実行前段・上位 playbook・手動手順のいずれかで反対側ノードの healthcheck が OK であることを確認済み
-- 事前 dry-run または apply 直前の re-dry-run により、対象ノードの Status を確認済み
-- control node が対象ノード上にいない
-- 対象ノード上の VM / CT が退避済み
-- `BLOCKED` / `MAJOR_UPGRADE_DETECTED` は適用禁止
-- `MAINTENANCE_REQUIRED` の場合は手動 apply モードかつ明示的確認が必要
-
-#### 処理概要
-
-1. 対象ノードを確認する
-2. control node が対象ノード上にいないことを確認する
-3. 対象ノードの healthcheck が OK であることを確認する
-4. 退避先または反対側ノードを利用する場合は、実行前段・上位 playbook・手動手順で反対側ノードの healthcheck が OK であることを確認する
-5. 事前 dry-run または apply 直前の re-dry-run により、対象ノードの Status を確認する
-6. Status に応じた apply モードを判定する
-   - `PATCH_READY`: 自動 apply モードで続行する
-   - `MAINTENANCE_REQUIRED`: 手動 apply モードかつ明示的確認文字列が正しい場合のみ続行する
-   - `BLOCKED` / `MAJOR_UPGRADE_DETECTED`: 停止する
-7. 対象ノード上に running VM / CT が残っていないことを確認する
-8. 対象ノードにパッケージを適用する
-9. apply 結果を保存する
-10. reboot-required があれば対象ノードを reboot する
-11. SSH / Proxmox API / GUI の復帰を待つ
-12. 対象ノードの post-healthcheck を実行する
-13. 結果を report に保存する
-14. summary mail を生成する
-
-#### reboot 要否の判定原則
-
-/var/run/reboot-required の有無だけでは
-kernel 更新後の reboot 要否を正確に検出できない場合がある。
-
-reboot 要否は以下を組み合わせて判定する:
-- /var/run/reboot-required の有無
-- 現在動作中の kernel バージョン（uname -r）と
-  インストール済み kernel パッケージのバージョンの比較
-
-#### post-healthcheck リトライ設定
-
-reboot 直後の post-healthcheck が CRITICAL または UNKNOWN になる場合がある。
-サービスが起動しきる前にチェックが走ること、またはスクリプト自体が一時的に失敗することが原因であることが多い。
-
-この問題に対応するため、**「reboot実施済み かつ CRITICAL または UNKNOWN」の場合に**、
-一定時間待機してから post-healthcheck をリトライする仕組みがある。
-
-- CRITICAL: JSON は取得できたが health 判定が NG
-- UNKNOWN: healthcheck スクリプト自体が失敗した（コマンドエラー・不正JSON など）
-
-reboot を伴わない CRITICAL / UNKNOWN はリトライしない（本物の障害として扱う）。
-
-設定変数（`roles/proxmox_patch_apply_node/defaults/main.yml`）:
-
-| 変数 | デフォルト | 意味 |
-|---|---|---|
-| `proxmox_patch_apply_hc_retry_count` | `2` | リトライの最大試行回数。内部で `range(N+1)` 回ループし、各試行の冒頭に待機する |
-| `proxmox_patch_apply_hc_retry_delay` | `60` | 各リトライ試行の冒頭で待機する秒数 |
-
-計算式:
-
-```text
-リトライ最大試行回数 = retry_count + 1
-最大待機時間        = (retry_count + 1) × retry_delay 秒
-  （各試行の先頭で delay 秒待機するため、試行回数分の待機が発生する）
-```
-
-デフォルト設定（retry_count=2、retry_delay=60）での動作例:
-
-```text
-reboot完了
-→ post-healthcheck 1回目: CRITICAL   （初回）
-→ 60秒待機                            （リトライ試行1の冒頭 pause）
-→ post-healthcheck 2回目: CRITICAL   （リトライ試行1）
-→ 60秒待機                            （リトライ試行2の冒頭 pause）
-→ post-healthcheck 3回目: OK         （リトライ試行2）
-→ SUCCESS として扱う
-```
-
-最大待機時間 = (2+1) × 60 = 180秒
-
-リトライ後に OK になった場合はSUCCESSとして扱い、summary mail の件名も `[SUCCESS]` になる。
-すべての試行でCRITICALのままだった場合は CRITICALとして報告する。
-
-チューニング例:
-
-```text
-サービスの起動が遅い環境:
-  proxmox_patch_apply_hc_retry_count: 3
-  proxmox_patch_apply_hc_retry_delay: 90
-  → リトライタスク最大4回試行、最大待機 (3+1)×90 = 360秒
-
-素早く判断したい場合:
-  proxmox_patch_apply_hc_retry_count: 1
-  proxmox_patch_apply_hc_retry_delay: 30
-  → リトライタスク最大2回試行、最大待機 (1+1)×30 = 60秒
-```
-
-変更方法:
-
-```bash
-# 実行時に一時的に変更
-ansible-playbook proxmox_patch_apply_node.yml \
-  -e proxmox_patch_apply_hc_retry_count=3 \
-  -e proxmox_patch_apply_hc_retry_delay=90
-
-# または defaults/main.yml を直接編集して恒久変更
-```
-
-#### やらないこと
-
-- VM / CT の退避は行わない
-- もう一方のノードへ自動で進まない
-- VM / CT を home node へ最終復帰しない
-- `BLOCKED` を解除しない
-- `MAJOR_UPGRADE_DETECTED` は適用対象外
-
-#### 出力
-
-- apply report
-- post-healthcheck report
-- summary mail
-
----
-
-### 6.6 `proxmox_patch_weekly_full.yml`
-
-#### 目的
-
-土曜朝の全体自動パッチを制御する。
-
-pve2 から開始し、pve2 の post-healthcheck が OK の場合のみ pve1 へ進む。各ノードのパッチ完了後、そのノードの VM / CT を restore する。
-
-#### 対象
-
-- pve2
-- pve1
-- VM / CT home node 定義
-
-#### 安全度
-
-```text
-unsafe
-quory / 外部 control node のみ
-OSパッチ適用あり
-```
-
-#### 実行条件
-
-- control node が Proxmox クラスタ外にある（cluster VM 名リストに含まれない、かつ pve1/pve2 ではない）
-- pve1 / pve2 の reboot 影響を受けない
-- pve1 / pve2 healthcheck が OK
-- dry-run Status が `PATCH_READY`
-- VM / CT の退避と復帰が可能
-- 許可された control node から実行している（デフォルトは `quory` のみ。別のホストを使う場合は `proxmox_patch_weekly_full_allowed_controllers` を extra vars で明示 override が必要）
-
-```bash
-# 例: 別の外部ホストから実行する場合
-ansible-playbook proxmox_patch_weekly_full.yml \
-  -e '{"proxmox_patch_weekly_full_allowed_controllers":["myhost"]}'
-```
-
-#### 処理概要
-
-1. control node が Proxmox クラスタ外にあることを確認する（cluster VM名リストと照合）
-2. pve1 / pve2 healthcheck を実行する
-3. どちらか WARNING / CRITICAL なら停止する
-4. dry-run を実行する（`proxmox_patch_dryrun.yml`）
-5. Status を判定する
-   - `NO_UPDATES`: skip フラグをセットし正常終了する（dry-run ロールが通知済み）
-   - `MAINTENANCE_REQUIRED` / `BLOCKED` / `MAJOR_UPGRADE_DETECTED`: fail で停止する
-   - `PATCH_READY`: 次フェーズへ進む
-6. pve2 を evacuate する（`proxmox_evacuate_node.yml`）
-7. pve2 に patch apply する（`proxmox_patch_apply_node.yml`）
-8. pve2 post-patch healthcheck を実行する（NG なら停止）
-9. pve2 を restore する（`proxmox_restore_vm_placement.yml`）
-10. pve1 を evacuate する（`proxmox_evacuate_node.yml`）
-11. pve1 に patch apply する（`proxmox_patch_apply_node.yml`）
-12. pve1 post-patch healthcheck を実行する（NG なら停止）
-13. pve1 を restore する（`proxmox_restore_vm_placement.yml`）
-14. summary mail を送信する
-
-restore ロール（`proxmox_restore_vm_placement`）は内部で post-restore healthcheck を実行する。独立した final healthcheck ステップは存在しない。
-
-#### 停止条件
-
-- control node が Proxmox クラスタ内にいる（cluster VM として動いている、または pve1/pve2 自身）
-- healthcheck が WARNING / CRITICAL
-- dry-run Status が `PATCH_READY` ではない
-- VM / CT の evacuate 失敗
-- apply 失敗
-- reboot 後に対象ノードが戻らない
-- post-patch healthcheck NG
-- pve2 NG の状態で pve1 へ進もうとした場合
-
-#### 出力
-
-- evacuation reports（各ノード）
-- per-node apply reports
-- restore reports（各ノード）
-- summary mail
-
----
-
-### 6.7 `proxmox_restore_vm_placement.yml`
-
-#### 目的
-
-VM / CT を home node へ戻す。home node はタグで管理する。
-
-#### 対象
-
-- `target_node` に `prefer<target_node>` タグを持つ VM / CT（タグが正本）
-- pve1
-- pve2
-
-#### 安全度
-
-```text
-controlled apply
-VM migration を伴う
-OSパッチ適用なし
-```
-
-#### 処理概要
-
-1. クラスタリソースを取得する
-2. `prefer<target_node>` タグあり + `hacritical` なし + target node にいない VM / CT を migrate 対象として特定する
-3. non-HA QEMU VM を target_node へ migrate する（running なら `--online 1`、local disk migration が有効なら `--with-local-disks`）
-4. non-HA LXC コンテナを target_node へ migrate する（running なら `--restart 1`）
-5. 停止したまま target_node に到着した VM / CT を起動する（`qm start` / `pct start`）
-6. `ha-manager crm-command node-maintenance disable <target_node>` で maintenance mode を無効化する
-7. maintenance mode が inactive になるまで待機する（`ha-manager status` でポーリング）
-8. `hacritical` + `prefer<target_node>` を持ち target_node 以外にいる HA VM / CT を特定する
-9. 各 HA VM / CT に `ha-manager crm-command relocate vm:<vmid> <target_node>` を発行する
-10. `hacritical` + `prefer<target_node>` を持つ HA VM / CT が target_node に戻り running になるまで待機する
-11. target_node の post-restore healthcheck を実行する
-12. restore report を保存する
-
-#### 停止条件
-
-- non-HA VM / CT の migration 失敗
-- maintenance mode の無効化タイムアウト
-- HA VM / CT の復帰タイムアウト
-- post-restore healthcheck NG
-
----
-
-### 6.8 major upgrade / maintenance apply
-
-#### 目的
-
-`MAINTENANCE_REQUIRED` または `MAJOR_UPGRADE_DETECTED` の場合に、人間がメンテナンス枠で実施する。
-
-#### 方針
-
-この文書では自動化しない。
-
-```text
-MAINTENANCE_REQUIRED:
-  手動メンテナンス判断
-
-MAJOR_UPGRADE_DETECTED:
-  別プロジェクト化
-
-BLOCKED:
-  Contingency Plan
-```
-
----
-
-## 7. 重要コンポーネント
-
-以下に該当するパッケージが更新対象に含まれる場合、通常パッチ扱いしない。
-
-```text
-proxmox-ve
-proxmox-kernel-*
-pve-manager
-pve-cluster
-pve-ha-manager
-qemu-server
-pve-container
-libpve-*
-corosync
-zfsutils-linux
-zfs-zed
-ifupdown2
-firmware-*
-intel-microcode
-amd64-microcode
-systemd
-udev
-```
-
-重要コンポーネントの扱い:
-
-```text
-重要コンポーネント更新あり
-  → MAINTENANCE_REQUIRED
-
-重要コンポーネント remove あり、かつ置換先不明
-  → BLOCKED
-
-重要コンポーネント remove あり、ただし後継・置換パッケージが同時に見える
-  → MAINTENANCE_REQUIRED
-```
-
----
-
-## 8. Status 判定ルール
-
-### 8.1 NO_UPDATES
-
-条件:
-
-- 更新候補なし
-
-行動:
-
-- メールで通知する（件名に `NO_UPDATES` を明示する）
-- パッチ適用しない
-- report を保存する
-
----
-
-### 8.2 PATCH_READY
-
-条件:
-
-- healthcheck が OK
-- `apt-get check` 成功
-- `apt-get -s dist-upgrade` 成功
-- remove なし
-- major upgrade 疑いなし
-- 重要コンポーネント更新なし
-
-意味:
-
-```text
-重要コンポーネントに該当しない通常更新のみ。
-自動適用してよい。
-```
-
-行動:
-
-- 土曜朝に pve2 へ自動適用
-- pve2 post-healthcheck OK なら pve1 へ自動適用
-- pve2 post-healthcheck NG なら pve1 へ進まない
-- pve2 で止めて通知する
-
----
-
-### 8.3 MAINTENANCE_REQUIRED
-
-条件:
-
-- 重要コンポーネント更新あり
-- remove あり
-- 重要コンポーネント remove ありだが、後継・置換パッケージが同時に見える
-- apt simulation は成功している
-- major upgrade 疑いではない
-
-意味:
-
-```text
-危険確定ではないが、通常パッチとして扱わない。
-自動適用しない。
-人間がメンテナンス枠で pve2 から実施するか判断する。
-```
-
-行動:
-
-- 自動適用しない
-- 軽微パッケージも含めて通常パッチは保留する
-- 部分適用しない
-- 毎週 dry-run で再評価する
-- 保留期間に固定上限は設けない
-- urgency が HIGH / URGENT に上がった場合でも自動適用しない
-- ユーザーがメンテナンス枠を確保して手動実施するか判断する
-
----
-
-### 8.4 BLOCKED
-
-条件:
-
-- `apt-get check` 失敗
-- `apt-get -s dist-upgrade` 失敗
-- 重要コンポーネント remove あり、かつ後継・置換パッケージが確認できない
-- `proxmox-ve` / `pve-cluster` / `zfsutils-linux` などが消えるだけに見える
-- repository / dependency の破綻が疑われる
-
-意味:
-
-```text
-通常の更新計画として信用できない。
-通常パッチ運用を停止する。
-```
-
-行動:
-
-- pve1 / pve2 のどちらにも適用しない
-- PATCH_READY 相当の軽微な更新が含まれていても部分適用しない
-- 自動 apply timer を停止する
-- 復旧・回避・再構成ルートへ移行する
-- apply は再開条件を満たすまで禁止する
-
----
-
-### 8.5 MAJOR_UPGRADE_DETECTED
-
-条件:
-
-- Proxmox major version が変わる疑い
-- Debian suite が変わる疑い
-- repository suite を変更した直後
-- base package が大量に更新される
-- install / remove が大量
-- `pve-manager` の major version が変わる疑い
-
-意味:
-
-```text
-通常パッチではなく、メジャーアップグレード案件。
-```
-
-行動:
-
-- 通常パッチ運用から除外
-- 自動適用しない
-- 別プロジェクト化
-- Roadmap / Release Notes を参照
-- pve2 検証計画を作る
-- pve1 は最後
-
----
-
-## 9. remove の扱い
-
-`apt-get dist-upgrade` では、依存関係解決のために package remove が計画されることがある。
-
-remove が検出された場合、単純に即 BLOCKED とはしない。  
-removed / newly installed / upgraded の組み合わせを見て、後継パッケージへの置換である可能性を区別する。
-
-### 9.1 MAINTENANCE_REQUIRED とする remove
-
-以下の場合は `BLOCKED` ではなく `MAINTENANCE_REQUIRED` とする。
-
-- apt simulation が成功している
-- remove と同時に後継・置換と思われる package install がある
-- Proxmox major upgrade 疑いではない
-- `proxmox-ve` などの中核メタパッケージが失われるだけの状態ではない
-
-この場合、自動適用は行わず、メールで remove / install / upgrade の対応関係を提示し、ユーザーがメンテナンス枠で判断する。
-
-### 9.2 BLOCKED とする remove
-
-以下の場合は `BLOCKED` とする。
-
-- apt simulation が失敗している
-- `apt-get check` が失敗している
-- 重要コンポーネントが remove される一方で、後継・置換パッケージが確認できない
-- `proxmox-ve` / `pve-cluster` / `zfsutils-linux` などが消えるだけに見える
-- repository / dependency の破綻が疑われる
-
----
-
-## 10. Urgency 判定
-
-Urgency は、対応をどれくらい急ぐべきかを表す。  
-Status とは別軸であり、自動適用の許可条件ではない。
-
-`apt-get -s dist-upgrade` の出力だけでは urgency は判定できない。  
-初期実装では、以下を材料として urgency を決める。
-
-- candidate version が Debian security repository 由来か
-- `apt changelog` / NEWS に security / CVE / vulnerability が明記されているか
-- Codex CLI による changelog 分類
-- Proxmox Security Advisories の有無
-- package が SSH / TLS / auth / qemu / kernel / firewall / network exposure に関係するか
-
-### 10.1 LOW
-
-軽微な通常更新。
-
-例:
-
-- timezone
-- editor
-- documentation
-- small utility
-
-### 10.2 NORMAL
-
-一般的な更新。
-
-例:
-
-- bug fix
-- minor package update
-- routine maintenance update
-- 重要コンポーネント更新だが security 要素が明確でないもの
-
-### 10.3 HIGH
-
-セキュリティ関連、または早めの対応が望ましい更新。
-
-HIGH とする条件:
-
-- candidate version が Debian security repository 由来
-- `apt changelog` / NEWS に CVE / security / vulnerability が明記されている
-- Proxmox Security Advisories に関連がある
-- openssl / openssh / curl / libc / apt / dpkg / qemu / kernel など security-sensitive な package が含まれる
-- firewall / network service / authentication / TLS に関係する更新
-
-Debian security repository 由来の判定は、初期実装では `apt-get -s dist-upgrade` の `Inst` 行、または `apt-cache policy <package>` を補助的に使う。
-
-例:
-
-```bash
-LC_ALL=C apt-get -s dist-upgrade \
-  | awk '/^Inst / && /security\.debian\.org|-security|Debian-Security/i { print "HIGH:", $2 }'
-```
-
-ただし、単純な grep だけで最終判定せず、Codex CLI による changelog 分類と併せて扱う。
-
-### 10.4 URGENT
-
-重大脆弱性、または既知悪用が疑われる更新。
-
-例:
-
-- known exploited vulnerability
-- remote code execution
-- authentication bypass
-- VM escape / hypervisor escape
-- firewall / internet exposure に関わる重大問題
-
-`URGENT` は初期実装では自動昇格しすぎない。  
-公式 advisory、changelog、ユーザー判断により昇格する。
-
-Urgency が HIGH / URGENT でも、Status が `MAINTENANCE_REQUIRED` / `BLOCKED` / `MAJOR_UPGRADE_DETECTED` の場合は自動適用しない。
-
----
-
-## 11. 土曜朝の自動パッチ運用
-
-### 11.1 実行モード
-
-土曜朝の自動パッチには、control node の配置に応じて2つの実行モードを定義する。
-
-#### Mode A: quory / 外部 control node
-
-条件:
-
-- control node が Proxmox クラスタ外にある
-- pve1 / pve2 の reboot 影響を受けない
-- quory のような物理ノードから実行する
-
-この場合のみ、以下の全体フローを自動実行してよい。
-
-```text
-pve2 evacuate (non-HA migrate / HA退避 / force stop)
-↓
-pve2 patch
-↓
-pve2 reboot if required
-↓
-pve2 post-patch healthcheck
-↓
-pve2 restore (VM/CT を home node へ戻す + post-restore healthcheck)
-↓
-pve1 evacuate (non-HA migrate / HA退避 / force stop)
-↓
-pve1 patch
-↓
-pve1 reboot if required
-↓
-pve1 post-patch healthcheck
-↓
-pve1 restore (VM/CT を home node へ戻す + post-restore healthcheck)
-↓
-summary mail
-```
-
-#### Mode B: ansy / Proxmox 上の control node
-
-条件:
-
-- control node が ansy である
-- ansy が pve1 または pve2 上の VM として動いている
-
-この場合、pve1 / pve2 の連続自動パッチは行わない。
-
-実行可能なのは、control node が存在しない側の単一ノード patch のみ。
-
-例:
-
-```text
-ansy が pve1 上にいる:
-  pve2 の単一ノード patch は可
-  pve1 の patch は不可
-
-ansy が pve2 上にいる:
-  pve1 の単一ノード patch は可
-  pve2 の patch は不可
-```
-
-ansy 自身を playbook 内で自動 migrate して、同一playbookで続行する運用はしない。  
-control node の所在変更は、別作業としてユーザーが明示的に行う。
-
-### 11.2 スケジュール
-
-```text
-毎週土曜朝
-```
-
-Mode A 推奨例:
-
-```text
-05:00 healthcheck (pve1/pve2)
-05:05 patch dry-run
-       → NO_UPDATES: 正常終了（dry-run ロールが通知）
-       → PATCH_READY 以外: 停止
-05:10 pve2 VM/CT退避
-05:20 pve2 apply
-05:30 pve2 reboot if required
-05:40 pve2 post-patch healthcheck
-05:50 pve2 restore (VM/CT を home node へ戻す)
-06:00 pve1 VM/CT退避
-06:10 pve1 apply
-06:20 pve1 reboot if required
-06:30 pve1 post-patch healthcheck
-06:40 pve1 restore (VM/CT を home node へ戻す)
-06:50 summary mail
-```
-
-Mode B では単一ノードのみを対象にする。
-
-例:
-
-```text
-05:00 healthcheck
-05:05 patch dry-run
-05:10 control node placement check
-05:15 target node VM/CT所在確認・退避
-05:25 target node apply
-05:35 target node reboot if required
-05:45 target node post-healthcheck
-05:50 summary mail
-```
-
-時刻は仮置きであり、実装時に調整する。
-
-### 11.3 Mode A 実行フロー
-
-Mode A は、quory / 外部 control node からのみ実行する。
-
-```text
-1.  control node が Proxmox クラスタ外にあることを確認
-2.  pve1 healthcheck
-3.  pve2 healthcheck
-4.  どちらか WARNING / CRITICAL なら停止
-5.  pve1 / pve2 dry-run（クラスタ固定ペア対象）
-6.  Status 判定
-    NO_UPDATES: skip フラグをセット・正常終了（dry-run ロールが通知）
-    PATCH_READY 以外: 停止
-7.  pve2 を evacuate（non-HA migrate → maintenance enable → HA退避待機 → 残存running を force stop）
-8.  pve2 に自動適用
-9.  pve2 で reboot-required があれば自動 reboot
-10. pve2 post-patch healthcheck（NG なら停止）
-11. pve2 を restore（non-HA migrate back → 停止VMを起動 → maintenance disable → LRM待機 → HA relocate → HA復帰待機 → post-restore healthcheck）
-12. pve1 を evacuate
-13. pve1 に自動適用
-14. pve1 で reboot-required があれば自動 reboot
-15. pve1 post-patch healthcheck（NG なら停止）
-16. pve1 を restore（non-HA migrate back → 停止VMを起動 → maintenance disable → LRM待機 → HA relocate → HA復帰待機 → post-restore healthcheck）
-17. summary mail
-```
-
-### 11.4 Mode B 実行フロー
-
-Mode B は、ansy が Proxmox 上の VM として動いている場合の暫定運用である。
-
-```text
-1. control node の所在確認
-2. target node が control node の稼働ノードではないことを確認
-3. target node healthcheck
-4. 退避先または反対側ノードを利用する場合は、実行前段・上位 playbook・手動手順で反対側ノードの healthcheck を確認
-5. healthcheck が WARNING / CRITICAL なら停止
-6. target node patch dry-run または apply 直前の re-dry-run
-7. Status 判定
-8. PATCH_READY 相当ではない場合は自動 apply しない
-9. target node 上の VM / CT 所在確認
-10. target node 上の VM / CT を必要に応じて反対側ノードへ退避
-11. target node に自動適用
-12. target node で reboot-required があれば自動 reboot
-13. target node post-healthcheck
-14. summary mail
-```
-
-Mode B では、反対側ノードへ自動で続行しない。  
-もう一方のノードを patch する場合は、control node を patch 対象外の場所へ移した後、別の実行として行う。
-
-### 11.5 金曜に手動適用した場合
-
-金曜夕方の通知を受けてユーザーが手動でパッチ適用した場合、土曜朝の自動パッチは空振りになってよい。
-
-土曜朝の dry-run で更新候補がなくなっている場合は、以下として扱う。
-
-```text
-Status:
-  NO_UPDATES
-
-Action:
-  apply しない
-  必要なら report のみ保存
-```
-
-金曜に pve2 のみ手動適用済みで pve1 が未適用の場合、Mode A では土曜朝に pve1 へ進む余地がある。  
-Mode B では control node の所在条件を満たす場合のみ、pve1 の単一ノード patch を実行する。
-
-### 11.6 停止する条件
-
-以下の場合、次のノードには進まない。
-
-- apply が失敗
-- reboot 後に SSH / Proxmox API / GUI が戻らない
-- post-healthcheck が WARNING / CRITICAL
-- apt / dpkg が失敗
-- systemd failed units が出た
-- pve-cluster / corosync / ZFS / replication に異常
-- VM / CT の退避に失敗
-- VM / CT の復帰に影響がある
-- VM / CT の稼働に影響がある
-- control node が target node 上にあり、継続実行できない
-
-summary mail で停止理由を通知し、週末中に対応する。
-
-### 11.7 reboot-required の扱い
-
-`PATCH_READY` の自動適用後に reboot-required が検出された場合、対象ノードを自動 reboot する。
-
-dry-run 時点では reboot-required は確定しない。  
-dry-run では `reboot_expected` を推定し、apply 後に `reboot_required` を事実として扱う。
-
-reboot-required の検出は `/var/run/reboot-required` の存在確認を基本とする。ただし、カーネルパッケージの更新を伴う場合は、実行中のカーネルバージョンとインストール済みカーネルバージョンの差分によっても reboot 要否を判定する。
-
-対象ノードで reboot-required が検出された場合:
-
-1. 対象ノードを自動 reboot する
-2. SSH / Proxmox API / GUI の復帰を待つ
-3. post-healthcheck を実行する
-4. post-healthcheck が OK の場合のみ次の処理へ進む
-5. post-healthcheck が WARNING / CRITICAL の場合、次のノードには進まない
-
----
-
-## 12. MAINTENANCE_REQUIRED 時の保留方針
-
-`MAINTENANCE_REQUIRED` が検出された場合、その週の自動パッチ適用は行わない。
-
-重要コンポーネント以外の軽微な更新が同時に含まれていても、通常運用では部分適用しない。
-
-保留期間に固定上限は設けない。
-
-毎週の dry-run により状態を再評価し、urgency や対象パッケージの変化を確認する。
-
-urgency が `HIGH` または `URGENT` になった場合でも自動適用は行わず、ユーザーがメンテナンス枠を確保して pve2 から手動実施するか判断する。
-
-playbook を使って手動 apply を行う場合、明示的確認文字列を実行時変数として指定しなければならない。この確認がない場合、playbook は自動的に停止する。確認文字列は playbook が規定した形式に沿う。
-
----
-
-## 13. BLOCKED 時の Contingency Plan
-
-`BLOCKED` は、通常パッチ運用を停止する状態である。
-
-`BLOCKED` が検出された場合、pve1 / pve2 のどちらにもパッチを適用しない。  
-PATCH_READY 相当の軽微な更新が含まれていても、部分適用は行わない。
-
-### 13.1 Immediate actions
-
-- patch apply timer を停止する
-- apply 系 playbook の実行を禁止する
-- pve1 / pve2 の両方に適用しない
-- Sophos 移行前であれば移行を延期する
-- Sophos 移行後であれば Sophos 稼働ノードを固定し、不要な移動を行わない
-- pve1 の安定稼働を最優先する
-
-### 13.2 Route selection
-
-`BLOCKED` の原因に応じて、以下のいずれかのルートに移行する。
-
-#### apt simulation failed
-
-- 通常パッチ運用を停止する
-- repository / apt source 修正ルートへ移行する
-- 修正後に dry-run を再実行する
-- `PATCH_READY` または `MAINTENANCE_REQUIRED` に戻るまで apply しない
-
-#### important component remove without replacement
-
-- その更新セットは適用しない
-- repository / dependency 修正ルートへ移行する
-- 重要コンポーネントの remove 予定が消えるまで apply しない
-
-#### apt-get check failed
-
-- 通常パッチ運用を停止する
-- apt / dpkg 修復ルートへ移行する
-- `apt-get check` が成功するまで apply しない
-
-#### major upgrade suspected
-
-- 通常パッチ運用を停止する
-- `MAJOR_UPGRADE_DETECTED` として扱う
-- major upgrade 計画へ移行する
-- pve2 検証計画を作る
-- pve1 は対象外にする
-
-### 13.3 Return condition
-
-以下をすべて満たすまで通常パッチ運用に戻さない。
-
-- `apt-get check` が成功する
-- `apt-get -s dist-upgrade` が成功する
-- 重要コンポーネントの remove 予定がない、または置換関係として `MAINTENANCE_REQUIRED` に分類できる
-- major upgrade 疑いがない
-- `proxmox_healthcheck` が OK
-- dry-run status が `PATCH_READY` または `MAINTENANCE_REQUIRED` に戻る
-
----
-
-## 14. 公式情報と changelog の扱い
-
-### 14.1 基本方針
-
-通常の週次 patch dry-run では、対象パッケージの changelog を最優先する。
-
-Roadmap / Release Notes は、メジャー / マイナーリリース疑いがある場合、または Proxmox 中核パッケージが広範囲に動く場合に参照する。
-
-### 14.2 changelog
-
-コマンド例:
-
-```bash
-apt changelog pve-manager
-apt changelog pve-cluster
-apt changelog qemu-server
-apt changelog zfsutils-linux
-apt changelog corosync
-```
-
-運用:
-
-- changelog 全文は report に保存する
-- メール本文には要約だけ載せる
-- 人間が changelog 全文を毎回読む運用にはしない
-- 単純な grep だけで重要コンポーネント該当性や urgency を判定しない
-- Codex CLI が changelog を読み、構造化分類 JSON を生成する
-- 最終 status は、dry-run の機械的結果と Codex CLI の構造化分類をもとに Ansible tasks が判定する
-
-### 14.3 changelog 分類の考え方
-
-`apt changelog` は長く、人間がすべて読む運用は現実的ではない。
-
-そのため、対象パッケージの changelog は Codex CLI に渡し、以下を構造化して出力させる。
-
-- 重要コンポーネントに該当するか
-- 該当する場合、その理由
-- remove が置換に見えるか
-- major / minor upgrade 疑いがあるか
-- security-sensitive な変更があるか
-- urgency の候補
-- 判断に使った changelog の根拠
-- confidence
-
-Codex CLI は自然文の説明だけでなく、JSON で分類結果を返す。
-
-例:
-
-```json
-{
-  "package": "qemu-server",
-  "important_component": true,
-  "important_reason": "VM lifecycle and QEMU integration component",
-  "security_sensitive": false,
-  "urgency": "NORMAL",
-  "major_upgrade_suspected": false,
-  "replacement_suspected": false,
-  "evidence": [
-    "changelog mentions VM start/stop behavior"
-  ],
-  "confidence": "medium"
-}
-```
-
-この分類結果は、最終 status 判定の入力として使う。
-
-ただし Codex CLI は、`apt-get dist-upgrade` を実行したり、`BLOCKED` を解除したり、パッチ適用を判断したりしない。
-
-### 14.4 Roadmap / Release Notes
-
-Proxmox では、Roadmap ページ内の各バージョン節が Release Notes として案内される。
-
-用途:
-
-- Proxmox VE 全体の大きな変更点確認
-- major / minor release の確認
-- pve-manager / QEMU / LXC / HA など、大きめの変更概要確認
-
-Roadmap を参照する条件:
-
-- `MAJOR_UPGRADE_DETECTED`
-- Proxmox major version が変わる疑い
-- Proxmox minor version が変わる疑い
-- pve-manager / qemu / lxc / ha / sdn など広範囲の中核更新
-- changelog だけでは変更の全体像が見えない場合
-
-URL:
-
-```text
-https://pve.proxmox.com/wiki/Roadmap
-```
-
-### 14.5 Proxmox VE System Software Updates
-
-用途:
-
-- Proxmox 公式の更新手順確認
-- `apt-get update` / `apt-get dist-upgrade` を使う根拠
-
-URL:
-
-```text
-https://pve.proxmox.com/wiki/System_Software_Updates
-```
-
-### 14.6 Proxmox Security Advisories
-
-用途:
-
-- Proxmox project または core dependencies に関する security advisory 確認
-
-URL:
-
-```text
-https://forum.proxmox.com/threads/official-proxmox-security-advisories-forum-available.149771/
-```
-
-### 14.7 Debian Security Tracker
-
-用途:
-
-- Debian 由来パッケージの CVE / DSA / security 状態確認
-
-URL:
-
-```text
-https://security-tracker.debian.org/
-```
-
-## 15. メール通知ルール
-
-### 15.1 通知対象
-
-| Status | メール |
-|---|---|
-| `NO_UPDATES` | 送る（件名に明示） |
-| `PATCH_READY` 自動適用成功 | 送る |
-| `PATCH_READY` pve2 で停止 | 強めに送る |
-| `MAINTENANCE_REQUIRED` | 送る |
-| `BLOCKED` | 強めに送る |
-| `MAJOR_UPGRADE_DETECTED` | 強めに送る |
-
-### 15.2 件名案
-
-```text
-[Proxmox Patch] PATCH_READY applied successfully
-[Proxmox Patch][STOPPED] pve2 post-healthcheck failed
-[Proxmox Patch Dry-run] MAINTENANCE_REQUIRED
-[Proxmox Patch Dry-run][BLOCKED] automatic patch stopped
-[Proxmox Patch Dry-run][MAJOR] major upgrade suspected
-```
-
-### 15.3 PATCH_READY 成功メール
-
-含める内容:
-
-- pve2 apply result
-- pve2 post-healthcheck result
-- pve1 apply result
-- pve1 post-healthcheck result
-- reboot-required: yes/no
-- 更新パッケージ一覧
-- changelog summary は必要最小限
-
-### 15.4 pve2 で停止した場合
-
-含める内容:
-
-- pve2 で停止した理由
-- pve1 には進んでいないこと
-- 対応が必要であること
-- failed task / healthcheck NG の内容
-- report path
-
-### 15.5 MAINTENANCE_REQUIRED メール
-
-含める内容:
-
-- Status
-- Urgency
-- 判定理由
-- 重要コンポーネント一覧
-- remove / install / upgrade の関係
-- changelog summary
-- Roadmap 参照が必要か
-- 推奨アクション
-- Codex CLI による分類・要約結果
-
-### 15.6 BLOCKED メール
-
-含める内容:
-
-- Status
-- 適用禁止であること
-- 自動 apply timer を止めたこと
-- pve1 / pve2 どちらにも適用していないこと
-- どの contingency route に入ったか
-- return condition
-
----
-
-## 16. Codex CLI 利用方針
-
-### 16.1 Codex CLI の役割
-
-Codex CLI は、patch dry-run report と changelog を読み、構造化された分類結果と説明メールを生成するために使う。
-
-Codex CLI は単なる説明文生成だけでなく、以下の分類を補助する。
-
-- 重要コンポーネントに該当するか
-- remove が置換に見えるか
-- major / minor upgrade 疑いがあるか
-- security-sensitive な変更があるか
-- urgency を LOW / NORMAL / HIGH / URGENT のどれに置くべきか
-- メールに載せるべき changelog 要約
-
-ただし、Codex CLI は最終的なパッチ適用判断者ではない。
-
-重要ルール:
-
-```text
-Codex は changelog 分類エンジン。
-Codex は説明生成エンジン。
-Codex は実行エンジンではない。
-```
-
-### 16.2 Codex CLI の入力
-
-Codex CLI に渡す入力:
-
-- dry-run JSON（Ansible が生成。important_component / security_repo / is_new 等のフラグ含む）
-- 更新対象パッケージの changelog 差分（現在インストール済みバージョン以降のエントリのみ）
-- 新規インストールパッケージの場合は最新エントリ1件のみ
-- `docs/ops/proxmox_patch_policy.md`（URGENT / HIGH 判断基準テーブルを含む）
-
-Ansible 側で事前に判定した情報（重要コンポーネント該当性、セキュリティリポジトリ由来か、新規インストールか、remove を伴うかなど）も入力として付与する。
-
-### 16.3 Codex CLI の出力
-
-Codex CLI は、最低限以下の情報を構造化して出力する。
-
-- 重要コンポーネント更新の一覧と理由
-- 重要コンポーネント削除の一覧
-- 置換が疑われるか
-- major upgrade が疑われるか
-- security-sensitive な更新の一覧
-- urgency 候補（LOW / NORMAL / HIGH / URGENT）
-- changelog から識別した脆弱性タイプ（LPE / RCE / DoS / XSS など）
-- メール件名と本文
-- レポート MD
-
-urgency 候補は Codex の識別結果に基づく候補であり、最終判定は Ansible tasks が行う。
-
-Ansible tasks はこの出力を読み、patch policy の URGENT / HIGH 判断基準テーブルと照合して最終 status / urgency を確定する。
-
-### 16.4 Codex CLI にやらせないこと
-
-Codex CLI に以下はさせない。
-
-- `apt-get dist-upgrade` の実行
-- `apt upgrade` / `apt full-upgrade` の実行
-- reboot 実行
-- Proxmox ホスト上での直接実行
-- Proxmox 設定変更
-- `BLOCKED` の解除
-- `MAJOR_UPGRADE_DETECTED` の解除
-- policy に反する status 上書き
-- pve1 / pve2 への apply 判断
-- apply timer の有効化
-
-### 16.5 最終判定の責務分離
-
-責務は以下のように分離する。
-
-| 処理 | 担当 |
-|---|---|
-| apt simulation 実行 | Ansible / shell |
-| package list 収集 | Ansible / shell |
-| changelog 差分取得 | Ansible / shell |
-| important_component 判定 | Ansible tasks（パッケージ名リストと照合） |
-| security_repo 判定 | Ansible / shell（リポジトリ名判定） |
-| changelog 内の CVE タイプ識別 | Codex CLI（LPE / RCE / DoS 等） |
-| urgency 候補生成 | Codex CLI |
-| URGENT / HIGH 条件への照合 | Ansible tasks（patch policy テーブルと照合） |
-| 最終 status / urgency 判定 | Ansible tasks |
-| 日本語メール本文生成 | Codex CLI |
-| 日本語レポート MD 生成 | Codex CLI |
-| patch apply | Ansible |
-| apply 可否制御 | Ansible tasks |
-
-### 16.6 実行場所
-
-Codex CLI は以下で実行する。
-
-- ansy
-- quory
-- macOS
-
-実行しない場所:
-
-- pve1
-- pve2
-- authy
-- Sophos Firewall VM
-
-### 16.7 Codex CLI セットアップ
-
-Codex CLI のインストールと初期設定は、このポリシー文書の範囲外とする。
-
-本ポリシーでは、以下を前提とする。
-
-- ansy / quory / macOS のいずれかで Codex CLI が利用可能である
-- Codex CLI は別チャット / 別手順書で導入する
-- Proxmox ホストには Codex CLI をインストールしない
-- Proxmox patch apply の実行中に Codex CLI の導入・更新は行わない
-
-Codex CLI の導入確認は、patch dry-run 実装前の事前準備として扱う。
-
-### 16.8 Ansible control node の配置ルール
-
-PATCH_READY 自動適用では、Ansible control node が patch 対象ノード上に存在してはならない。
-
-理由:
-
-- patch 対象ノードを reboot した場合、control node 自体が停止する
-- apply / reboot / post-healthcheck / 次ノードへの処理が継続できない
-- pve1 / pve2 の連続適用フローが破綻する
-
-### 16.8.0 Ansible 実行端末の前提
-
-homelab 環境で Ansible を実行する端末は ansy または quory に限定する。
-
-| 端末 | 種別 | 役割 |
-|---|---|---|
-| `ansy` | Proxmox 上の VM | Ansible 開発環境。テスト実行・実装・レビューを行う。weekly full は実行しない |
-| `quory` | 物理ノード（クラスタ外） | 本番 Ansible 実行基盤。weekly full を含む full flow が可能 |
-
-pve1 / pve2 / authy / monnie など、管理対象ホスト自身での Ansible 実行は行わない。
-
-`proxmox_patch_weekly_full.yml` は preflight で `groups['proxmox']` に含まれるホスト（pve1 / pve2）からの実行を明示的に拒否する。
-
-### 16.8.1 quory 到着前
-
-quory 到着前に ansy で運用する場合、ansy が Proxmox 上の VM なら full flow は実行しない。
-
-```text
-ansy が pve1 上にいる:
-  pve2 の単一ノード patch のみ可
-
-ansy が pve2 上にいる:
-  pve1 の単一ノード patch のみ可
-```
-
-ansy 自身を同一playbook内で migrate して処理を継続する運用はしない。
-
-### 16.8.2 quory 到着後
-
-quory 到着後は、quory を Ansible control node とする。
-
-```text
-quory:
-  Proxmox クラスタ外の物理 control node
-
-許可:
-  pve2 → pve1 → VM復帰 の full flow
-```
-
-quory が pve1 / pve2 の reboot 影響を受けない場合、土曜朝の full flow を自動実行してよい。
-
-### 16.8.3 apply 停止条件
-
-control node が patch 対象ノード上にいる場合、apply は停止する。
-
-control node が pve1 / pve2 の両方の patch sequence 中に停止し得る場所にある場合、full flow は実行しない。
-
-### 16.9 初期テスト方針
-
-quory 到着前は ansy で手動実行する。
-
-目的:
-
-- Codex CLI の分類品質確認
-- changelog 要約の品質確認
-- 重要コンポーネント該当性の判定品質確認
-- urgency 判定品質確認
-- メール本文の読みやすさ確認
-- PATCH_READY / MAINTENANCE_REQUIRED / BLOCKED の説明品質確認
-- 誤った推奨が出ないか確認
-
-## 17. 実適用時の標準手順
-
-### 17.1 Mode A: PATCH_READY full flow
-
-quory / 外部 control node から実行する。
-
-```text
-1.  control node が Proxmox クラスタ外にあることを確認
-2.  pve1 healthcheck OK
-3.  pve2 healthcheck OK
-4.  pve1 / pve2 dry-run status PATCH_READY（クラスタ固定ペア対象）
-    (NO_UPDATES の場合は正常終了・dry-run ロールが通知済み)
-5.  pve2 evacuate
-6.  pve2 apply
-7.  pve2 reboot if required
-8.  pve2 post-patch healthcheck OK
-9.  pve2 restore (non-HA VM/CT を home へ + maintenance disable → LRM待機 → HA relocate → HA復帰待機 + post-restore healthcheck OK)
-10. pve1 evacuate
-11. pve1 apply
-12. pve1 reboot if required
-13. pve1 post-patch healthcheck OK
-14. pve1 restore (non-HA VM/CT を home へ + maintenance disable → LRM待機 → HA relocate → HA復帰待機 + post-restore healthcheck OK)
-15. summary mail
-```
-
-### 17.2 Mode B: PATCH_READY single-node flow
-
-ansy が Proxmox 上の VM として動いている暫定運用で使う。
-
-```text
-1. control node の所在確認
-2. target node が control node の稼働ノードではないことを確認
-3. target node healthcheck OK
-4. 退避先または反対側ノードを利用する場合は、実行前段・上位 playbook・手動手順で反対側ノードの healthcheck OK を確認
-5. target node の事前 dry-run または apply 直前 re-dry-run で PATCH_READY 相当を確認
-6. target node VM / CT 所在確認
-7. target node VM / CT 退避
-8. target node apply
-9. target node reboot if required
-10. target node post-healthcheck OK
-11. summary mail
-```
-
-Mode B では、もう一方のノードへ自動で進まない。
-
-### 17.3 MAINTENANCE_REQUIRED 手動適用
-
-```text
-1. メール内容確認
-2. changelog summary 確認
-3. 必要に応じて Roadmap / Security Advisory 確認
-4. pve2 の重要 VM / CT 退避
-5. メンテナンス枠を確保
-6. pve2 healthcheck OK
-7. pve2 手動 apply
-8. reboot if needed
-9. pve2 post-healthcheck
-10. pve2 安定確認
-11. pve1 は別途判断
-```
-
-### 17.4 Mode C: MAINTENANCE_REQUIRED 手動 apply（playbook 使用）
-
-MAINTENANCE_REQUIRED が検出された場合に、手動 apply モードを使って playbook 経由で適用する。
-
-```text
-1. 通知メールで MAINTENANCE_REQUIRED の内容を確認する
-2. changelog summary を確認する
-3. 必要に応じて Roadmap / Security Advisory を確認する
-4. メンテナンス枠を確保する
-5. 対象ノードの healthcheck を確認する
-6. 対象ノード上の VM / CT の退避を確認する
-7. 手動 apply モードと明示的確認変数を指定して playbook を実行する
-8. apply と reboot（必要な場合）が完了したことを確認する
-9. post-healthcheck を実行し、OK であることを確認する
-```
-
-pve1 は pve2 成功後に別途判断する。
-
----
-
-## 18. 復旧方針
-
-### 18.1 基本方針
-
-```text
-Proxmox ホスト OS の rollback は原則しない。
-壊れたら再インストールする。
-```
-
-### 18.2 pve2 が壊れた場合
-
-- pve1 を守る
-- pve1 が生きているうちに pve2 を再インストールする
-- pve2 をクラスタに戻す
-- replication / storage / network を再構成する
-
-### 18.3 pve1 が壊れた場合
-
-- pve2 に VM / CT が退避済みであることを前提に復旧する
-- pve1 を再インストールする
-- クラスタ復帰手順を別途整備する
-
-### 18.4 バックアップ対象
-
-Proxmox ホスト設定は「ファイルを戻して復元」ではなく、再構築メモとして保存する。
-
-保存すべき情報:
-
-- hostname
-- management IP
-- Server VLAN IP
-- NIC 名
-- NIC 割当
-- bridge 設定
-- VLAN 設定
-- ZFS pool 名
-- storage 設定
-- apt repository
-- SSH 公開鍵
-- cluster join 方針
-- replication 設定
-- `/etc/network/interfaces`
-- `/etc/hosts`
-- `/etc/hostname`
-
----
-
-## 19. Sophos 移行前の必須条件
-
-Sophos Firewall VM を Proxmox に移行する前に、以下を満たす。
-
-- pve2 で patch dry-run 運用を確認
-- pve2 で `PATCH_READY` 自動適用を 1 回以上成功
-- pve2 reboot 後に healthcheck OK を確認
-- pve1 / pve2 両方で healthcheck OK
-- pve2 再インストール手順がある
-- Proxmox ネットワーク設定の再構築メモがある
-- Sophos VM の backup / restore 手順がある
-- Sophos VM の稼働ノード方針が決まっている
-- Sophos VM の退避 / 停止 / 移動方針が決まっている
-- 家庭内ネットワーク停止時の手順がある
-
----
-
-## 20. Sophos 移行後の追加ルール
-
-Sophos Firewall VM が Proxmox 上で稼働している場合、以下を追加する。
-
-- Sophos VM が対象ノード上にいる場合、そのノードを直接パッチしない
-- 先に Sophos VM を別ノードへ移動できるか確認する
-- Sophos 停止時の家庭内ネットワーク影響を許容できる時間帯のみ実施する
-- WAN / LAN / FAMILY / NAS / Guest などの NIC / VLAN 割当を確認してから実施する
-- Sophos VM 移動後に通信確認を行う
-- Sophos 稼働ノードへの `MAINTENANCE_REQUIRED` 適用は、通常より慎重に扱う
-- Sophos が Internet に面していることを踏まえ、urgency HIGH / URGENT は早めに判断する
-
----
-
-## 21. 今後の実装順序
-
-1. `docs/ops/proxmox_patch_policy.md` を確定
-2. Proxmox 上の VM/CT に `prefer<node名>` タグを付与
-3. `proxmox_healthcheck` 実装
-4. `proxmox_patch_dryrun` 実装
-5. `proxmox_evacuate_node.yml` 実装
-6. `proxmox_restore_vm_placement.yml` 実装
-7. ansy で dry-run 手動実行
-8. `apt changelog` 取得処理を実装
-9. Codex CLI で changelog 分類 JSON 生成テスト
-10. Ansible tasks で最終 status 判定テスト
-11. Codex CLI でメール本文生成テスト
-12. メール送信テスト
-13. `proxmox_evacuate_node.yml` を pve2 対象で検証
-14. `proxmox_patch_apply_node.yml` を pve2 単一ノードで検証
-15. `proxmox_evacuate_node.yml` を pve1 対象で検証
-16. `proxmox_patch_apply_node.yml` を pve1 単一ノードで検証
-17. quory 到着後に `proxmox_patch_weekly_full.yml` を検証
-18. `MAINTENANCE_REQUIRED` のメール品質確認
-19. `BLOCKED` の Contingency Plan 通知品質確認
-20. quory 到着後に systemd timer 化
-21. Sophos 移行判断
-
-
-## 22. 参考リンク
-
-- Proxmox VE System Software Updates  
-  https://pve.proxmox.com/wiki/System_Software_Updates
-
-- Proxmox VE Roadmap / Release Notes  
-  https://pve.proxmox.com/wiki/Roadmap
-
-- Proxmox Security Advisories Forum  
-  https://forum.proxmox.com/threads/official-proxmox-security-advisories-forum-available.149771/
-
-- Debian Security Tracker  
-  https://security-tracker.debian.org/
-
-- Codex CLI  
-  https://developers.openai.com/codex/cli
-
-- Codex non-interactive mode  
-  https://developers.openai.com/codex/noninteractive
+| 2026-07-24 | v2.0の安全境界を維持したまま標準8節へ再編。実装、運用、環境、時点依存計画をContext / reviewへ分離し、旧§22を付録Aへ移した |
+| 2026-05-09 | v2.0作成 |
+
+## 付録A 出典
+
+- [Proxmox VE System Software Updates](https://pve.proxmox.com/wiki/System_Software_Updates)
+- [Proxmox VE Roadmap / Release Notes](https://pve.proxmox.com/wiki/Roadmap)
+- [Proxmox Security Advisories Forum](https://forum.proxmox.com/threads/official-proxmox-security-advisories-forum-available.149771/)
+- [Debian Security Tracker](https://security-tracker.debian.org/)
+- [Codex CLI](https://developers.openai.com/codex/cli)
+- [Codex non-interactive mode](https://developers.openai.com/codex/noninteractive)
