@@ -13,6 +13,19 @@ proxmox_restore_ha_timeout: 300
 # Poll interval in seconds while waiting for HA to restore VMs
 proxmox_restore_ha_poll_interval: 10
 
+# External HTTP endpoint used to confirm that the restored firewall path is
+# actually routing traffic again. Use a DNS name; do not use an IP literal.
+proxmox_restore_external_check_url: "https://example.com/"
+
+# Per-request timeout in seconds for the external HTTP HEAD probe
+proxmox_restore_external_request_timeout: 5
+
+# Delay in seconds between failed external reachability attempts
+proxmox_restore_external_poll_interval: 15
+
+# Approximate total budget in seconds for external reachability confirmation
+proxmox_restore_external_timeout: 300
+
 # Seconds to wait after starting a stopped VM before checking running state
 proxmox_restore_vm_start_delay: 10
 

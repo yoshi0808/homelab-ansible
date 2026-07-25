@@ -12,6 +12,28 @@
   delegate_to: localhost
   become: false
 
+- name: Validate external reachability gate settings
+  ansible.builtin.assert:
+    that:
+      - proxmox_restore_external_check_url is string
+      - proxmox_restore_external_check_url is match('^https?://[A-Za-z0-9.-]+(?::[0-9]+)?(?:/\\S*)?$')
+      - proxmox_restore_external_check_url is not search('://[^/]*@')
+      - proxmox_restore_external_check_url is not search('://(?:[0-9]{1,3}\\.){3}[0-9]{1,3}(?:[:/]|$)')
+      - proxmox_restore_external_request_timeout is integer
+      - proxmox_restore_external_request_timeout > 0
+      - proxmox_restore_external_poll_interval is integer
+      - proxmox_restore_external_poll_interval > 0
+      - proxmox_restore_external_timeout is integer
+      - proxmox_restore_external_timeout > 0
+      - proxmox_restore_external_timeout >= proxmox_restore_external_request_timeout
+    fail_msg: >-
+      External reachability settings must use an HTTP(S) DNS-name URL without
+      credentials or an IP literal, and integer timeouts/intervals must be
+      positive with overall timeout >= request timeout.
+    quiet: true
+  delegate_to: localhost
+  become: false
+
 # =============================================================================
 # Initialize result facts
 # =============================================================================
@@ -26,6 +48,9 @@
     _restore_vms_started: []
     _restore_post_hc_status: "UNKNOWN"
     _restore_maintenance_disabled: false
+    _restore_external_reachability_status: "NOT_RUN"
+    _restore_external_probe_attempts: 0
+    _restore_external_probe_elapsed_seconds: 0
 
 - name: Ensure report directory exists
   ansible.builtin.file:
@@ -254,6 +279,81 @@
               list | length) == 0)
           when: _ha_prefer_target | length > 0
 
+        # The helper uses a monotonic deadline. Every request timeout and sleep
+        # is capped by its remaining budget, independent of failure speed.
+        - name: Probe external reachability through Sophos
+          block:
+            - name: Install temporary external reachability helper
+              ansible.builtin.copy:
+                src: external-reachability.py
+                dest: >-
+                  /tmp/proxmox-restore-external-reachability-{{ _restore_run_ts }}.py
+                mode: "0700"
+              changed_when: false
+
+            - name: Run external reachability helper on target node
+              ansible.builtin.command:
+                argv:
+                  - python3
+                  - >-
+                    /tmp/proxmox-restore-external-reachability-{{ _restore_run_ts }}.py
+                  - --url
+                  - "{{ proxmox_restore_external_check_url }}"
+                  - --request-timeout
+                  - "{{ proxmox_restore_external_request_timeout }}"
+                  - --poll-interval
+                  - "{{ proxmox_restore_external_poll_interval }}"
+                  - --overall-timeout
+                  - "{{ proxmox_restore_external_timeout }}"
+              register: _restore_external_probe_result
+              changed_when: false
+
+            - name: Parse external reachability helper result
+              ansible.builtin.set_fact:
+                _restore_external_probe_payload: >-
+                  {{ _restore_external_probe_result.stdout | from_json }}
+
+            - name: Validate external reachability helper result
+              ansible.builtin.assert:
+                that:
+                  - _restore_external_probe_payload.status in ['REACHABLE', 'UNCONFIRMED']
+                  - _restore_external_probe_payload.attempts is integer
+                  - _restore_external_probe_payload.attempts >= 1
+                  - _restore_external_probe_payload.elapsed_seconds is number
+                  - _restore_external_probe_payload.elapsed_seconds >= 0
+                  - >-
+                    _restore_external_probe_payload.elapsed_seconds <=
+                    (proxmox_restore_external_timeout +
+                     proxmox_restore_external_request_timeout)
+                fail_msg: "External reachability helper returned invalid JSON data."
+                quiet: true
+
+            - name: Record external reachability probe result
+              ansible.builtin.set_fact:
+                _restore_external_reachability_status: >-
+                  {{ _restore_external_probe_payload.status }}
+                _restore_external_probe_attempts: >-
+                  {{ _restore_external_probe_payload.attempts | int }}
+                _restore_external_probe_elapsed_seconds: >-
+                  {{ _restore_external_probe_payload.elapsed_seconds | float }}
+          always:
+            - name: Remove temporary external reachability helper
+              ansible.builtin.file:
+                path: >-
+                  /tmp/proxmox-restore-external-reachability-{{ _restore_run_ts }}.py
+                state: absent
+              changed_when: false
+
+        - name: Abort when external reachability through Sophos is unconfirmed
+          ansible.builtin.fail:
+            msg: >-
+              HA復帰済みだがSophos経由の外部到達性未確認のため、
+              post-restore healthcheckへ進みません。
+              人間が状態を確認し、必要な場合に限り
+              ansible-playbook playbooks/recovery_vm_reboot.yml
+              -e target=sophos-fw を手動実行してください。
+          when: _restore_external_reachability_status != 'REACHABLE'
+
         # =====================================================================
         # Phase 4: Healthcheck on target node
         # =====================================================================
@@ -291,6 +391,9 @@
             'maintenance_disabled': _restore_maintenance_disabled,
             'vms_migrated_back': _restore_vms_migrated,
             'vms_started': _restore_vms_started,
+            'external_reachability_status': _restore_external_reachability_status,
+            'external_probe_attempts': _restore_external_probe_attempts,
+            'external_probe_elapsed_seconds': _restore_external_probe_elapsed_seconds,
             'post_healthcheck_status': _restore_post_hc_status
           } | to_nice_json }}"
         dest: "{{ proxmox_restore_report_dir }}/{{ _restore_run_ts }}_{{ inventory_hostname }}_restore.json"
