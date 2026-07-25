@@ -63,6 +63,7 @@ ubuntu_vm_full_upgrade_important_per_node:
     - 'prometheus.*'
     - 'grafana.*'
     - 'loki.*'
+    - 'unpoller.*'
     - 'alloy.*'
     - 'docker.*'
   ansy:
@@ -97,7 +98,7 @@ ubuntu_vm_full_upgrade_products:
     - label: "FreeRADIUS/WPA3認証基盤"
       patterns: "{{ ubuntu_vm_full_upgrade_important_per_node.authy }}"
   monnie:
-    - label: "Prometheus/Grafana/Loki監視基盤"
+    - label: "Prometheus/Grafana/Loki/unpoller監視基盤"
       patterns: "{{ ubuntu_vm_full_upgrade_important_per_node.monnie }}"
   ansy:
     - label: "Ansible開発環境"

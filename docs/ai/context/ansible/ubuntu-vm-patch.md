@@ -14,7 +14,7 @@
 | `ubuntu_vm_full_upgrade.yml` | `dev_nodes:control_nodes:radius_servers:monitoring_servers` | `ubuntu_vm_full_upgrade`、`recovery_mute`、healthcheck roles | monthly simulation /分類と確認付きsingle-node applyを接続する |
 | `prometheus_update_check.yml` | `localhost`、`monnie` | `prometheus_update_check`、`common_slack` | version確認と、現行実装上は確認入力付きupdate / rollback補助を持つ |
 
-この一覧は実装入口の索引であり、変更操作の許可ではない。特に`prometheus_update_check.yml`のupdate / rollback / restart機能はPolicyのUV-035〜UV-039と不一致である。 [`playbook-map.md`](playbook-map.md) の既知不一致を見える化するだけで、Contextから許可を追加しない。
+この一覧は実装入口の索引であり、変更操作の許可ではない。`prometheus_update_check.yml`のupdate / rollback / restart機能はPolicyのUV-035〜UV-039が許可・禁止境界として定める(2026-07-25、旧Policyとの不一致は解消済み)。
 
 ## Full-upgrade判定契約
 
@@ -39,13 +39,13 @@
 
 通常更新のmonthly判定はこれらの定常自動適用と役割を分ける。実際のarchive設定とunattended-upgrades設定は対象host上のconfigを正本とし、このContextは現在値を保証しない。
 
-## Non-apt収集契約と既知不一致
+## Non-apt収集契約とPrometheus管理
 
 `ubuntu_vm_full_upgrade`のgeneric registryは、productごとにcurrent / latestのread-only JSON endpoint、version抽出、tag prefix、timeout、noteを持つ。初期登録は`monnie`のPrometheusで、currentは同hostのbuild information API、latestはPrometheusのGitHub Releases latest stableから取得し、latest tagの`v` prefixを除去する。両取得に成功し数値versionとして比較できる場合だけupdate有無を確定し、取得やparseに失敗した結果はreportへ残す。
 
 node通知の`apt外:`行は、updateありならcurrentからlatestとmanual updateが必要なこと、latestならcurrentとlatest状態、失敗ならcurrent / latest return codeを表示する。JSON reportの`nonapt`はname、current、latest、state、current / latest return code、HTTP status、noteを持つ。正確な文字列組立とschemaはrole tasksを正本とする。
 
-一方、独立した`prometheus_update_check` roleは現行code上、明示`dry_run`、target version、rollback入力、backup、download、service healthを扱う。これはPolicyの「確認専用」「自動download /自動更新 / service restartを一切行わない」と一致しない。本標準化ではcodeもPolicy意味も変更せず、実行可否を本Contextで再定義しない。
+一方、独立した`prometheus_update_check` roleは現行code上、明示`dry_run`、target version、rollback入力、backup、download、service healthを扱う。これはPolicy §7のUV-035〜UV-039が定める許可・禁止境界(2026-07-25更新)と一致する。実行可否の正本はPolicyであり、本Contextは現状の実装契約を記録するに留める。
 
 ## Nightlyとhealthcheck
 
@@ -68,7 +68,7 @@ Slackは`common_slack/tasks/notify.yml`を通じて送信し、Webhook変数はV
 ## 論理group境界
 
 - `ubuntu_vm_full_upgrade.yml`はgroup2「アプリ・パッケージ更新」の本Policy主入口である。
-- `prometheus_update_check.yml`はgroup2のnon-apt関連入口だが、既知不一致を解消するまで変更機能の許可を意味しない。
+- `prometheus_update_check.yml`はgroup2のnon-apt関連入口であり、変更機能(update / rollback)の許可はPolicy §7のUV-035〜UV-039を正本とする。
 - `ubuntu_nightly.yml`はpackage更新入口でなくreboot lifecycleの従属入口である。
 - `codex_update_check.yml`はgroup2の横断indexに含まれるが、本Policyのowner外であり、対応5入口へ含めない。
 - `radius_healthcheck.yml` / `monitoring_healthcheck.yml`はgroup1からも参照されるが、本Policy ownerのままであり、更新入口へ分類しない。

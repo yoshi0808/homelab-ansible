@@ -65,9 +65,9 @@ non-apt productの初期対象は`monnie`へmanual installされたPrometheusだ
 | `monitoring_healthcheck.yml` | `monnie`のread-only healthcheck |
 | `ubuntu_nightly.yml` | 方針1 VMのreboot lifecycleに従属する条件付きrebootとpost-check |
 | `ubuntu_vm_full_upgrade.yml` | monthly read-only判定と確認付きsingle-node manual apply |
-| `prometheus_update_check.yml` | non-apt版確認の関連入口。ただしUV-035〜UV-039との既知実装不一致を持ち、本表から変更許可を導かない |
+| `prometheus_update_check.yml` | non-apt Prometheusの確認・manual update・rollbackの専用入口。UV-035〜UV-039が許可・禁止境界を定める |
 
-`prometheus_update_check.yml`の現行playbook / roleが確認入力に基づくupdate、rollback、service restart機能を持つ一方、旧Policy §3.4はそれらを禁止している。この不一致は [`playbook-map.md`](../context/ansible/playbook-map.md) に記録済みの未解決事項であり、本書の構造変更では拡大も縮小も解消もしない。
+`prometheus_update_check.yml`はmonnieのnon-apt Prometheusを対象に、確認(`dry_run=true`)・manual apply(`dry_run=false`)・rollback(`rollback=true`)を1本のplaybookで扱う。旧Policy §3.4は実装拡張前の「確認+通知のみ」設計を凍結した規範であり、実装がその範囲を超えて拡張された結果、不一致が生じていた。本書はこの不一致を実装に合わせて解消し、UV-035〜UV-039を現行実装の許可・禁止境界として再定義する。
 
 <!-- UV-053 -->
 本Policy対応playbookは方針1 VMだけを対象とし、方針2 nodeをAnsible管理対象にしない。
@@ -111,6 +111,9 @@ non-apt versionはcurrentとlatestをread-only GETし、両方を数値version�
 
 <!-- UV-034 -->
 取得、JSON parse、version比較の失敗はbest-effort / fail-quietとして通知とreportだけに残し、Statusを変更せずplaybookも失敗させない。
+
+<!-- UV-084 -->
+方針1 VMの主力serviceに影響するpackageがmonthly full-upgrade候補に含まれる場合、通知でその影響を明示し、他候補に埋没させない。対象serviceと具体的package patternはRepository Context / role defaultsを正本とする。
 
 ### Rebootとhealthcheck
 
@@ -198,16 +201,16 @@ post-check結果を`OK`または`CRITICAL`として通知する。
 ### Scheduler
 
 <!-- UV-079 -->
-systemd timerは`quory`上で実行する。
+systemd timerを使う場合は`quory`上で実行する。定常job(nightly reboot判定、healthcheck等)の実行基盤(systemd timerまたはSemaphore Schedule)と正確な時刻はOperations Contextを正本とし、実行基盤の変更はpatch / reboot許可を拡張しない。
 
 <!-- UV-080 -->
-`authy` nightlyを規定timerで毎日03:30にscheduleする。
+`authy`のnightly reboot判定(`ubuntu_nightly.yml`)は日次で自動実行する。
 
 <!-- UV-081 -->
-`authy` healthcheckを規定timerで毎日05:30にscheduleする。
+`authy`のhealthcheck(`radius_healthcheck.yml`)は日次で自動実行する。
 
 <!-- UV-082 -->
-monitoring healthcheckを規定timerで毎日05:35にscheduleする。
+monitoring healthcheck(`monitoring_healthcheck.yml`)は日次で自動実行する。
 
 ## 6. 通知方針
 
@@ -285,24 +288,24 @@ serviceを`Package-Blacklist`へ追加してmanual管理へ切り替える方式
 <!-- UV-019 -->
 monthly実行は`dry_run=true`のread-only判定に限定し、実適用は確認文字列を伴うsingle-node manual applyだけを許可する。
 
-### Non-apt Prometheusの凍結境界
+### Non-apt Prometheusの許可・禁止境界
 
-次の5条件は旧Policy §3.4 L91の独立した規範である。`prometheus_update_check.yml`の現行実装との不一致を理由に、統合、緩和、厳格化してはならない。
+次の5条件は`prometheus_update_check.yml`による非apt Prometheus管理の許可・禁止境界である。
 
 <!-- UV-035 -->
-このnon-apt確認経路はPrometheus artifactの自動downloadを一切行わない。
+定期実行(`dry_run=true`)はPrometheus artifactのdownloadを一切行わない。downloadは`dry_run=false`による明示的なmanual apply実行時にだけ発生する。
 
 <!-- UV-036 -->
-このnon-apt確認経路はPrometheusの自動更新を一切行わない。
+Prometheusのupdateは`dry_run=false`という明示的なextra-var指定なしには発生しない。`dry_run`未指定はfail-closedでassert失敗し、自動updateを構造的に防止する。
 
 <!-- UV-037 -->
-このnon-apt確認経路はPrometheusのservice restartを一切行わない。
+Prometheusのservice restartは、`dry_run=false`かつ`not ansible_check_mode`によるbinary swap成功後にだけ発生する。確認専用実行(`dry_run=true`)および`--check`実行ではrestartを一切行わない。
 
 <!-- UV-038 -->
-Prometheusの更新は人間がNotion「Prometheus / Grafana / unifi-poller セットアップ手順」に従って手作業で行う。
+Prometheusのupdateとrollbackは、人間が`prometheus_update_check.yml`を`-e dry_run=false`(update)または`-e rollback=true -e dry_run=false`(rollback)で明示的に実行することで行う。実行判断は人間が行うが、artifactのdownload・検証・backup・binary差し替え・restart・health確認は本playbookが一括して行う。update失敗時はbackupから自動でrollbackする。手動でrollbackするPlaybookを用意する。
 
 <!-- UV-039 -->
-`dry_run=false`のapt apply経路ではnon-apt check自体を実行しない。
+`dry_run=false`のapt full-upgrade適用経路(`ubuntu_vm_full_upgrade.yml`)ではnon-apt Prometheusのcheckを実行しない。
 
 ### Rebootと対象境界
 
@@ -316,6 +319,5 @@ Prometheusの更新は人間がNotion「Prometheus / Grafana / unifi-poller セ�
 | 2026-05-09 | 初版作成 |
 | 2026-07-17 | 旧v1.5へ更新 |
 | 2026-07-24 | Git HEADの旧289行版を標準8節へ再編。Policy核を維持して非規範のSystem / Repository / Operations情報をContextへ分離し、§3.4の既知実装不一致を未解決のまま見える化 |
-
-<!-- UV-083 -->
-Semaphore UI導入後にsystemd timerからSemaphore Scheduleへ移行する計画は、Policy上の許可を変更せず、Operations Contextで追跡する。
+| 2026-07-25 | UV-035〜UV-039を`prometheus_update_check.yml`の現行実装(dry_run gate・manual update・rollback)に合わせて再定義し、Policy/実装不一致を解消 |
+| 2026-07-25 | UV-079〜UV-082をSemaphore移行済みの実態に合わせて再定義し、具体的な時刻表記をOperations Contextへ委譲。単独で浮いていたUV-083をUV-079へ統合し削除。主力product明示の規範としてUV-084を追加し、`ubuntu_vm_full_upgrade`のunpoller対応(実装)と対応付け |

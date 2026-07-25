@@ -23,7 +23,7 @@
 5. apply中のservice restart影響を考慮し、対象となる自律復旧muteが設定されたことを確認する。
 6. apply、reboot要否、起動完了、post-check、通知、reportを確認する。
 
-Prometheusのmanual updateはPolicyが指定する人間向けセットアップ手順を使い、本runbookから`prometheus_update_check.yml`の変更機能を許可しない。Policy /実装不一致の解消は別Issueである。
+Prometheusのmanual updateとrollbackは`prometheus_update_check.yml`を人間が明示実行することで行う(Policy §7 UV-035〜UV-039、2026-07-25更新)。実行判断は人間が行い、artifactのdownload・backup・binary差し替え・restart・health確認はplaybookが一括して行う。
 
 ## Nightlyと朝healthcheck
 
@@ -40,13 +40,13 @@ healthcheckはmanual standaloneでも使える。異常時はreportと通知を�
 
 ## Schedule
 
-| Timer | 入口 | 現行schedule方針 | 実行基盤 |
-|---|---|---|---|
-| `ansible-authy-reboot-if-required.timer` | `ubuntu_nightly.yml` | 毎日03:30 | `quory`上のsystemd timer |
-| `ansible-authy-healthcheck.timer` | `radius_healthcheck.yml` | 毎日05:30 | `quory`上のsystemd timer |
-| `ansible-monitoring-healthcheck.timer` | `monitoring_healthcheck.yml` | 毎日05:35 | `quory`上のsystemd timer |
+| 入口 | 実行基盤 |
+|---|---|
+| `ubuntu_nightly.yml`(`authy`のnightly reboot判定) | Semaphore UI schedule。旧`ansible-authy-reboot-if-required.timer`(`quory`上のsystemd timer、毎日03:30)から移行済み |
+| `radius_healthcheck.yml`(`authy`のhealthcheck) | Semaphore UI schedule。旧`ansible-authy-healthcheck.timer`(`quory`上のsystemd timer、毎日05:30)から移行済み |
+| `monitoring_healthcheck.yml`(monitoring healthcheck) | Semaphore UI schedule。旧`ansible-monitoring-healthcheck.timer`(`quory`上のsystemd timer、毎日05:35)から移行済み |
 
-timer名と配備値は`systemd_timers` roleのvars / codeを正本とする。Semaphore UI導入後はScheduleへ移行する計画だが、schedulerの変更はpatch / reboot許可を拡張しない。旧Policyの参考用全体scheduleは時点依存情報であり、本書へ他systemの時刻を複製しない。
+移行済みの根拠は`roles/systemd_timers/defaults/main.yml`のコメント化されたentry(「以下のエントリはSemaphore UIスケジュールに移行済み」)。現在唯一有効なsystemd timerは`cert-renew-quory`(`quory`上、`cert_renew_quory.yml`、月初00:35)である。正確な時刻とschedule有効性はSemaphore UIを正本とし、UI設定はリポジトリ外で変化し得るため本書は複製・保証しない。
 
 ## 障害時の確認
 

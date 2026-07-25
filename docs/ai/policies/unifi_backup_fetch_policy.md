@@ -16,7 +16,7 @@
 | 項目 | cloudkey_cert_deploy | unifi_backup_fetch（本ポリシー） |
 |---|---|---|
 | 目的 | Web UI TLS 証明書の配備 | システムバックアップの取得・保管 |
-| 実行ホスト | localhost（quory / ansy） | **pve1**（NFS マウント保有ホスト） |
+| 実行ホスト | localhost（quory / ansy） | **pve1 優先・pve2 フェイルオーバー**（NFS マウント保有ホスト。ADR-001参照） |
 | 認証 | UniFi OS 非公開 API ログイン | 同左（ローカルアカウント） |
 | 主な変更先 | CloudKey 上の証明書 | CloudKey 上で新規バックアップ生成 + Synology へ書込/削除 |
 | 安全度 | 変更系 | 変更系（CloudKey 設定は変えない） |
@@ -44,12 +44,12 @@ Network アプリ単体バックアップ（`.unf`）は取得しない。OS バ
 | 項目 | 内容 |
 |---|---|
 | 取得元 | CloudKey Gen2 Plus（`cloudkey.internal`、私設 CA = Home-TLS-CA） |
-| 保存先 | `<backup destination>/`（pve1 上の既存 NFS マウント） |
-| 実行ホスト | **pve1**（`connection: local` は使わず、pve1 上で `become: true`/root で実行） |
+| 保存先 | `<backup destination>/`（pve1・pve2 双方に存在するProxmox cluster storage経由のNFSマウント） |
+| 実行ホスト | **pve1 優先・pve2 フェイルオーバー**（`connection: local` は使わず、選定されたホスト上で `become: true`/root で実行。preflightで到達可能な1ホストのみを選び、両方到達不能なら理由付きでfailする。詳細: `docs/ai/adr/001-unifi_backup_fetch-pve1-shutdown-target.md`） |
 | 実行元 | quory（本番・週次）/ ansy（開発・CLI） |
 | 安全度 | 変更系（CloudKey 上でバックアップ生成、Synology へ書込/削除） |
 
-pve1 で root 実行する理由は、NFS のアクセス権が root に絞られているため。
+選定されたホストで root 実行する理由は、NFS のアクセス権が root に絞られているため。
 CloudKey へは必ずホスト名で接続する（私設 CA + `Origin` ヘッダ必須。IP 直叩き禁止）。
 
 
@@ -73,7 +73,7 @@ systemd timer で**週次**実行する（Semaphore UI 導入後は Schedule へ
 
 | Playbook | 役割 |
 |---|---|
-| `unifi_backup_fetch.yml` | CloudKey Gen2 PlusのUniFi OSシステムバックアップを週次で取得し、pve1経由でSynology NASに世代保管する。 |
+| `unifi_backup_fetch.yml` | CloudKey Gen2 PlusのUniFi OSシステムバックアップを週次で取得し、pve1優先・pve2フェイルオーバー経由でSynology NASに世代保管する。 |
 
 実装ファイルの詳細（role / defaults / Vault変数）は §11「構成ファイル」を参照。
 
@@ -114,11 +114,11 @@ tester gateはrisk-acceptedであり、check有無にかかわらず変更を生
 <!-- UNIFI-011 -->
 <!-- UNIFI-012 -->
 
-ファイル名に埋め込まれたタイムスタンプ（エポックミリ秒）と**実行ホスト pve1 の現在時刻**
+ファイル名に埋め込まれたタイムスタンプ（エポックミリ秒）と**選定された実行ホスト（pve1 または pve2）の現在時刻**
 （`date +%s%3N`）を比較し、差の絶対値が **既定 60 秒**を超える場合は fail する。
 
 - 目的: 古いキャッシュや意図しないファイルを「最新」と誤認して保存しないため。
-- 前提: pve1 と CloudKey の時刻が NTP 同期していること。大きくずれると Phase 3 で fail する。
+- 前提: 実行ホスト（pve1 / pve2 いずれも）と CloudKey の時刻が NTP 同期していること。大きくずれると Phase 3 で fail する。pve2側の同期状態は`playbooks/time_sync_check.yml`が500msの厳しい閾値で独立監視している。
 - 一時的に緩める場合は extra-vars: `-e unifi_backup_freshness_max_seconds=120`。
 
 ## 5. ライフサイクル・処理フロー
@@ -190,7 +190,7 @@ always   一時ファイル掃除 → サマリ生成 → Slack 通知 → 失�
 - 秘密情報・バックアップ実体をリポジトリにコミットしない。
 - CloudKey の設定は変更しない（生成・取得のみ）。
 - read-only 系と混ぜず、変更系 playbook として独立させる。
-- pve1 が CloudKey へ到達できること・正しい機器であること（TLS subject/issuer）を前提とする。
+- 選定された実行ホスト（pve1 / pve2）が CloudKey へ到達できること・正しい機器であること（TLS subject/issuer）を前提とする。
 ```
 
 
@@ -237,6 +237,7 @@ always   一時ファイル掃除 → サマリ生成 → Slack 通知 → 失�
 |---|---|---|
 | v1.0 | 2026-06-15 | 初版。UniFi OS システムバックアップを週次取得し Synology NFS へ保存する方式を定義。pve1 実機で E2E 検証済み。 |
 | v1.1 | 2026-07-25 | 標準8見出しへ再編し、孤立code fenceを修正。 |
+| v1.2 | 2026-07-25 | pve1夏季平日シャットダウン運用対応(ADR-001)。実行ホストをpve1固定からpve1優先・pve2フェイルオーバーへ変更したことを反映。 |
 
 
 <!-- UNIFI-017 -->

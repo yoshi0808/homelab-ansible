@@ -42,8 +42,8 @@
 | `time_sync_ntp_reference.yml` | Ubuntu/Proxmoxへquoryを追加NTP参照として配備 | `pve1:pve2:ansy:monnie:authy` | `time_sync_ntp_reference` | change / time config / service restart | `docs/ai/policies/time_sync_check_policy.md` | quory名前解決、chrony conf.d |
 | `ubuntu_nightly.yml` | reboot-requiredを確認し条件付きreboot・service確認・通知 | `radius_servers`, `monitoring_servers` | playbook内tasks, `recovery_mute`, `monitoring_healthcheck`, `common_slack` | conditional reboot | `docs/ai/policies/ubuntu_vm_patch_policy.md`, `docs/ai/policies/autonomous_recovery_policy.md` | reboot-required flag、post-healthcheck、mute/通知 |
 | `ubuntu_vm_full_upgrade.yml` | 月次simulation・分類、確認付き単一host full-upgradeとreboot | `dev_nodes:control_nodes:radius_servers:monitoring_servers` | `ubuntu_vm_full_upgrade`, `recovery_mute`, healthcheck roles | patch / guarded apply / possible reboot | `docs/ai/policies/ubuntu_vm_patch_policy.md`, `docs/ai/policies/autonomous_recovery_policy.md` | `dry_run`、対象/確認入力、apt/non-apt取得、post-healthcheck |
-| `unifi_backup_fetch.yml` | CloudKey backupを取得・鮮度確認・世代整理・通知 | `pve1`（CloudKeyへ接続） | `unifi_backup_fetch`, `common_slack` | change / backup write / retention delete | `docs/ai/policies/unifi_backup_fetch_policy.md` | `inventories/vars/cloudkey.yml`、CloudKey API、backup保存先 |
+| `unifi_backup_fetch.yml` | CloudKey backupを取得・鮮度確認・世代整理・通知 | `pve1`優先・`pve2`フェイルオーバー（preflightで到達可能な1hostを動的選定、`unifi_backup_fetch_target`経由でCloudKeyへ接続。ADR-001） | `unifi_backup_fetch`, `common_slack` | change / backup write / retention delete | `docs/ai/policies/unifi_backup_fetch_policy.md` | `inventories/vars/cloudkey.yml`、CloudKey API、backup保存先 |
 
 ## Policy整合の注意
 
-`prometheus_update_check.yml` のPolicy候補である `docs/ai/policies/ubuntu_vm_patch_policy.md` §3.4は、非apt Prometheusの自動download・自動更新・service restartを禁止している。一方、現行playbook/roleは確認入力に基づく更新・rollback機能を持つ。この不一致はIssue化候補であり、この地図では解消しない。
+`prometheus_update_check.yml` のPolicy ownerである `docs/ai/policies/ubuntu_vm_patch_policy.md` §7 UV-035〜UV-039(2026-07-25更新)は、現行playbook/roleが持つ確認・manual update・rollback機能を許可・禁止境界として定める。旧Policyとの不一致は解消済み。

@@ -7,11 +7,14 @@
       "Edit(playbooks/**)",
       "Edit(roles/**)",
       "Edit(scripts/**)",
+      "Edit(./**)",
       "Write(docs/ai/reviews/**)",
       "Write(prompts/**)",
       "Write(playbooks/**)",
       "Write(roles/**)",
-      "Write(scripts/**)"
+      "Write(scripts/**)",
+      "Write(./**)",
+      "Bash(bash scripts/check-tester-gate.sh*)"
     ],
     "ask": [
       "Bash(rm*)",
