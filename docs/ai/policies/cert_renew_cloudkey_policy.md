@@ -45,9 +45,11 @@ Home-TLS-CA（中間CA）署名の短命証明書（45日）で自動更新す�
 | 実行元（開発） | ansy（CLI 実行を許可） |
 
 通信先はAnsible管理対象ホスト（ann + SSH）ではなく**外部のCloudKey API**である。
-証明書の署名は実行元（quory または ansy）の 実行controller localで行い、CloudKeyへは
-API経由でアップロードする。`localhost`（connection: local）で実行する。
-冒頭で実行ホストが quory / ansy であることを assert する。
+証明書の署名は実行controller localで行い、CloudKeyへはAPI経由でアップロードする。
+`localhost`（connection: local）で実行する。
+
+実行ホストを特定名へ限定する規範は本Policyに置かない。実行権限の実体はSSH鍵`ann`の
+保有者であり、実行元の列挙は上表のとおり現状の運用形態を示すに留める。
 
 ### CA構成
 
@@ -66,21 +68,27 @@ Home-RADIUS-CA (ルートCA)
 | `controller CA directory/radius_ca.crt` | ルートCA証明書（フルチェーン構築用） |
 
 <!-- CCK-005 -->
-cert_renew がフルチェーンに含めるのは中間CAまでだが、CloudKey（UniFi OS）は
-**私設CAではルートCAまで含めないと検証に失敗する**ため、配布証明書は
-リーフ + 中間CA + ルートCA の3階層フルチェーンとする。
+CloudKey（UniFi OS）へアップロードする証明書は、リーフ + 中間CA + ルートCAの3階層
+フルチェーンとする。これはUniFi OSが私設CAのリーフを受理する際にルートCAまで含めた
+鎖を要求するというデバイス固有の実装要件であり、`cert_renew`のサーバ配布物
+（リーフ + 中間CA）との差分はこの要件だけを理由とする。
+
+<!-- CCK-021 -->
+CCK-005はCloudKeyへ**アップロードする鎖**の形式に関する規範であり、クライアント側の
+トラストストアに何を配布するかとは別レイヤーである。トラストストアの規範は
+[`cert_renew_policy.md`](cert_renew_policy.md) を正本とし、本Policyで重複定義しない。
 
 ### 4.1 資材配置（cert_renew との差分）
 
-cert_renew では assert により quory 限定のため ansy に CA は不要と判断し
-ansy から CA を削除した。本仕組みは **ansy からの実行も許可する**ため、
-quory / ansy 両ホストの `controller CA directory/` に以下を配置する。
-用途が異なるため cert_renew_policy.md と矛盾しない。
+署名に必要な資材を実行controllerの `controller CA directory/` へ配置する。
 
-- 中間CA: 証明書 + 秘密鍵（`home_tls_ca.{crt,key}`）
-- ルートCA: 証明書のみ（`radius_ca.crt`）
+- 中間CA: 証明書 + 秘密鍵（`home_tls_ca.{crt,key}`）— 署名に使用する
+- ルートCA: 証明書のみ（`radius_ca.crt`）— CCK-005の3階層鎖を組むために使用する
 
-CA秘密鍵はGit管理しない（`.gitignore` で `.cert/` を除外）。
+<!-- CCK-022 -->
+ここで配置する秘密鍵は**中間CAの秘密鍵に限る**。ルートCAの秘密鍵はオフライン保管であり
+controller上に存在させない（正本は [`cert_renew_policy.md`](cert_renew_policy.md) CERT-006）。
+中間CA秘密鍵はGit管理しない（`.gitignore` で `.cert/` を除外）。
 
 ### certificate specification
 
@@ -90,7 +98,7 @@ CA秘密鍵はGit管理しない（`.gitignore` で `.cert/` を除外）。
 | 署名CA | Home-TLS-CA（中間CA） | cert_renew と同じ |
 | 鍵アルゴリズム | **RSA 2048** | UniFi OSはECDSAを受け付けない |
 | 鍵フォーマット | **PKCS#1**（`BEGIN RSA PRIVATE KEY`） | PKCS#8では登録に失敗する |
-| 有効期間 | 45日 | cert_renew と統一。force運用（毎回新規発行） |
+| 有効期間 | 45日 | 期間は cert_renew と統一。更新トリガはCCK-023を参照 |
 | SAN | DNS:cloudkey.internal + IPv4（`getent ahostsv4` で動的取得） | IPはハードコードしない |
 | keyUsage | critical, digitalSignature, keyEncipherment | |
 | extendedKeyUsage | serverAuth | |
@@ -99,6 +107,13 @@ CA秘密鍵はGit管理しない（`.gitignore` で `.cert/` を除外）。
 
 リーフの発行は `community.crypto`（openssl_privatekey / openssl_csr /
 x509_certificate provider=ownca）で行う。
+
+<!-- CCK-023 -->
+更新トリガは**無条件のforce運用**とする。既存証明書の残存有効期間を判定せず、実行ごとに
+新規発行してアップロードする。`cert_renew`が既定で残存期間による条件付き更新を行い
+`force_renew`引数で強制するのに対し、本Playbookは条件判定と強制切替の引数をどちらも
+持たない。この非対称は意図されたものであり、CloudKeyのAPIが同名証明書の衝突を避けるため
+毎回新規idで登録する必要があることに起因する。有効期間45日に対し月次実行で更新される。
 
 ### 除外対象
 
@@ -267,3 +282,4 @@ account名、credential保管path、Vault password fileの実値はPolicyへ記�
 |---|---|---|
 | v1.0 | 2026-06-13 | 初版。CloudKeyを内蔵Let's Encrypt運用からHome-TLS-CA配下へ移行。UniFi OS 非公開API経由の証明書デプロイ方式を定義。 |
 | v1.1 | 2026-07-25 | 標準8見出しへ再編し、規範の意味を変えず認証実値を正本参照へ置換 |
+| v1.2 | 2026-07-26 | 実行ホストを特定名へ限定する記述を削除(実行権限の実体はSSH鍵`ann`保有者であり、Policyの対象外)。CCK-005を「CloudKeyへアップロードする鎖の形式」に限定し、トラストストアとの別レイヤー性をCCK-021として明示。§4.1の秘密鍵の主語を中間CAへ限定しCCK-022でルートCA秘密鍵のオフライン保管をCERT-006へ相互参照。無条件force運用の更新トリガをCCK-023として明文化。 |

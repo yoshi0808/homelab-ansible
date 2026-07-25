@@ -1,18 +1,14 @@
 ---
-- name: Slurp CA certificate from source host
-  ansible.builtin.slurp:
-    src: "{{ cert_renew_ca_src_crt }}"
-  register: ca_cert_slurp
-  delegate_to: "{{ cert_renew_ca_host }}"
-  run_once: true
+# トラストストアへ配布するのはルートCAだけである(cert_renew_policy.md CERT-021)。
+# 中間CA(Home-TLS-CA)はサーバがハンドシェイクで提示するため、トラストアンカーとして
+# 配布する必要はない。全6エンドポイントがroot-onlyのCAfileで Verify return code: 0 に
+# なることを実測確認したうえで配布を廃止した(CERT-022、2026-07-25の実測)。
+# 既に配布済みの home-tls-ca.crt は下の absent タスクで回収する。
 
-- name: Deploy CA certificate to system trust store
-  ansible.builtin.copy:
-    content: "{{ ca_cert_slurp.content | b64decode }}"
-    dest: /usr/local/share/ca-certificates/home-tls-ca.crt
-    owner: root
-    group: root
-    mode: "0644"
+- name: Remove previously deployed intermediate CA from system trust store
+  ansible.builtin.file:
+    path: /usr/local/share/ca-certificates/home-tls-ca.crt
+    state: absent
   notify: update-ca-certificates
 
 - name: Slurp ROOT CA certificate from source host

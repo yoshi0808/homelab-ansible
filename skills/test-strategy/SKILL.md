@@ -21,6 +21,20 @@ unit / integration / e2e の3層でtest planを構成する。
 2. apply(限定対象への実適用)
 3. 事後健全性チェック(healthcheck系roleでの確認)
 
+## 実行コマンドの組み立て(2026-07-26、実地の反復失敗から)
+
+Testerが自分のsandboxからplaybookを実行する際は、temp pathを実行ユーザーごとに分離する。
+固定パスにすると別ユーザー(`ann` / `yoshi`)の残骸と衝突してUNREACHABLEになる。
+
+```
+ANSIBLE_LOCAL_TEMP=/tmp/ansible-local \
+ANSIBLE_REMOTE_TEMP='/tmp/ansible-remote-$USER' ansible-playbook ...
+```
+
+`ANSIBLE_REMOTE_TEMP`は**シングルクォート必須**である。ダブルクォートにすると`$USER`が
+実行元で先に展開され、リモート側で意図しないパスになりUNREACHABLEになる。2026-07-26の
+`ca_trust_deploy`適用時に実際にこの誤りでansyが初回UNREACHABLEとなり、再実行で解消した。
+
 ## 適用先
 
 `test_plan.md`のテンプレート構造。

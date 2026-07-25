@@ -1,9 +1,13 @@
 ---
-# ca_trust_deploy.yml - Home-TLS-CA をノードのシステム信頼ストアに配布
+# ca_trust_deploy.yml - ルートCA(Home-RADIUS-CA)をノードのシステム信頼ストアに配布
 # 変更系: /usr/local/share/ca-certificates/ への書き込み + update-ca-certificates
 #
 # 対象: ansy, quory, monnie, authy, pve1, pve2
 # CA秘密鍵は不要（証明書のみ取得）。cert_renew_ca_host(quory)からSSHで取得する。
+#
+# 配布するのはルートCAだけである(docs/ai/policies/cert_renew_policy.md CERT-021)。
+# 中間CA(Home-TLS-CA)はサーバがハンドシェイクで提示するためトラストアンカーとして
+# 不要であり、過去に配布済みの home-tls-ca.crt は role 側で absent 回収する。
 #
 # tester-gate: risk-accepted — tester_mode/tester_gate を廃止。--check の有無に
 # かかわらず常に本実行する。理由: copy モジュールの content 差分比較による本来の
@@ -30,7 +34,7 @@
           for real. See docs/ai/prompts/core.md §18 "移行中の例外".
         quiet: true
 
-    - name: Deploy Home-TLS-CA to system trust store
+    - name: Deploy ROOT CA to system trust store and retire the intermediate
       ansible.builtin.import_role:
         name: homelab_cert_renew
         tasks_from: deploy_ca_trust
