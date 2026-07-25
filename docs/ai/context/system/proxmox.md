@@ -49,7 +49,7 @@
 
 - monthly productionの制御点は`quory`、development / manual CLIの制御点は`ansy`である。
 - 検証対象とrestore nodeはProxmox側のVM tagを情報源とし、Ansible inventoryへ対象VMを固定列挙しない。
-- backup sourceはvzdump backupを提供するstorageである。明示指定がない場合に参照するstorage種別とcontent条件はRepository Contextとcodeを正本とする。
+- backup sourceはvzdump backupを提供するstorageである。明示指定がない場合に参照するstorage種別とcontent条件はcodeを正本とする。
 - restore先は検証専用storageと専用固定restore VMIDである。storage名と数値VM IDはvars / codeを正本とし、本Contextへ固定しない。
 - backup restore verificationは本番VMのconfigを選定情報として参照するが、restore / boot / cleanupの変更対象は使い捨ての専用restore VMに分離される。
 

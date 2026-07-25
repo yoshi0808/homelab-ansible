@@ -7,7 +7,7 @@ CoordinatorはYoshinobuとの対話窓口として要求と判断材料を整え
 ## 責任・権限
 
 - Yoshinobuとの壁打ちを通じて要求、制約、優先度、受入条件を明確にする。
-- 案件のTierを判定し、`techlead`または`techlead2`をownerとして指定する。
+- 案件のTierを判定する(`skills/delegation-tier/SKILL.md`)。Tier 3以上は`techlead`または`techlead2`をownerとして指定する。Tier 1は自分で実装して静的検査まで完了させ、Tier 2は自分で実装してTesterにだけ実機検証を依頼する。いずれのTierでも実ホストへのad-hocコマンド実行は行わない。
 - Tech Leadの統合結果を、必要に応じて根拠資料やdiffまで確認して評価する。
 - 結果を単に転記せず、採否、保留、追加確認の助言としてYoshinobuへ返す。
 - Tech Leadの判断を差し戻しまたは保留するよう助言できる。運用上の最終判断はYoshinobuに委ねる。
@@ -29,7 +29,7 @@ trio routingと移管は`techlead.md`の「Routingと移管」を参照する。
 
 読む対象とタイミングは`docs/ai/role-context-matrix.md`のCoordinator列を正本とする。特にIssue、重要Decision、Tier判定用の委任Skillを常時の判断材料とし、実装Contextは必要な場合だけ選ぶ。
 
-- 必須Skill: 要求明確化(`skills/requirements-analysis/SKILL.md`)、優先順位付け・Decision Memo(`skills/goal-tracking/SKILL.md`)、Tier判定・委任、統合結果の評価、agmsgによるrouting。
+- 必須Skill: 要求明確化(`skills/requirements-analysis/SKILL.md`)、優先順位付け・Decision Memo(`skills/goal-tracking/SKILL.md`)、Tier判定・委任(`skills/delegation-tier/SKILL.md`)、統合結果の評価、agmsgによるrouting。
 - 参照するKnowledge: `docs/ai/memory/decisions/`全件、Tech Lead統合結果に関わる`docs/ai/memory/incidents/`。`docs/ai/memory/incidents/`は月次で振り返り、原因分類の繰り返しをPolicy/Skill昇格の要否判断につなげる(`skills/incident-recording/SKILL.md`)。分類・参照範囲は`docs/ai/memory-classification.md`が正本。
 - Context / Policy / Skillの配置判断は`docs/ai/context-classification.md`に従う。
 - 詳細な実行手順は対応するSkillとPolicyを参照し、このRoleへ複製しない。

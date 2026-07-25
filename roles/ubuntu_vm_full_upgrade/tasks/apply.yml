@@ -24,7 +24,7 @@
   when: inventory_hostname in ['authy', 'monnie']
   vars:
     recovery_mute_target: "{{ inventory_hostname }}"
-    recovery_mute_minutes: 45
+    recovery_mute_minutes: 120
     recovery_mute_reason: "ubuntu_vm_full_upgrade: {{ inventory_hostname }} full-upgrade + reboot in progress"
 
 - name: Run apt full-upgrade

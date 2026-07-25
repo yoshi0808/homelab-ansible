@@ -2,7 +2,7 @@
 
 本書は複数roleにまたがるpatch運用の順序と復旧情報を示す非規範Contextである。実行の許可、禁止、停止条件は [`proxmox_patch_policy.md`](../../policies/proxmox_patch_policy.md) が正本であり、競合時はPolicyを優先する。実行前に必ずPolicyを読み、本書だけを根拠にapplyしない。
 
-## Mode別の処理順
+## control node条件別の処理順
 
 ### cluster外control nodeのfull flow
 
@@ -85,7 +85,7 @@ IP、VLAN ID、VM ID、認証情報の実値はContextへ記載せず、inventor
 
 ## Sophos VM稼働時
 
-Policyの全安全前提を満たした後も、patch対象node上のSophos VMを先に別nodeへ移動できるか確認する。移動する場合は必要なinterface / segment割当を確認し、移動後に家庭内networkの通信を確認する。停止影響を許容できるmaintenance枠でだけ行う。
+Sophos VMは他のguestと同じく退避対象である。退避時は必要なinterface / segment割当を確認し、移動後に家庭内networkの通信を確認する。HA relocateはVM再起動を伴いinternet接続が切断されるため、停止影響を許容できるmaintenance枠でだけ行い、自律復旧のmuteが設定されていることを確認する。
 
 本節は確認順を示すだけで、直接patchの許可や例外を作らない。
 
@@ -93,4 +93,5 @@ Policyの全安全前提を満たした後も、patch対象node上のSophos VM�
 
 - [Policy](../../policies/proxmox_patch_policy.md)
 - [System Context](../system/proxmox.md)
-- [Repository Context](../ansible/proxmox-patch.md)
+- [playbook map](../ansible/playbook-map.md)
+- [role map](../ansible/role-map.md)

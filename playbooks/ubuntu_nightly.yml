@@ -64,7 +64,7 @@
       ansible.builtin.set_fact:
         nightly_report:
           host: "{{ inventory_hostname }}"
-          executed_at: "{{ lookup('pipe', 'date +%Y-%m-%dT%H:%M:%S+09:00') }}"
+          executed_at: "{{ lookup('pipe', \"TZ='Asia/Tokyo' date '+%Y-%m-%dT%H:%M:%S+09:00'\") }}"
           reboot_required: false
           rebooted: false
           result: "SKIPPED"
@@ -87,7 +87,7 @@
       ansible.builtin.set_fact:
         nightly_report:
           host: "{{ inventory_hostname }}"
-          executed_at: "{{ lookup('pipe', 'date +%Y-%m-%dT%H:%M:%S+09:00') }}"
+          executed_at: "{{ lookup('pipe', \"TZ='Asia/Tokyo' date '+%Y-%m-%dT%H:%M:%S+09:00'\") }}"
           reboot_required: true
           rebooted: false
           result: "CHECK_MODE_WOULD_REBOOT"
@@ -119,7 +119,7 @@
       when: not ansible_check_mode
       vars:
         recovery_mute_target: "{{ inventory_hostname }}"
-        recovery_mute_minutes: 30
+        recovery_mute_minutes: 120
         recovery_mute_reason: "ubuntu_nightly: {{ inventory_hostname }} reboot in progress"
 
     - name: Send reboot start notification
@@ -193,7 +193,7 @@
           ansible.builtin.set_fact:
             nightly_report:
               host: "{{ inventory_hostname }}"
-              executed_at: "{{ lookup('pipe', 'date +%Y-%m-%dT%H:%M:%S+09:00') }}"
+              executed_at: "{{ lookup('pipe', \"TZ='Asia/Tokyo' date '+%Y-%m-%dT%H:%M:%S+09:00'\") }}"
               reboot_required: true
               rebooted: true
               freeradius: "{{ freeradius_active.stdout.strip() }}"
@@ -242,7 +242,7 @@
             slack_message: |
               Host: {{ inventory_hostname }}
               reboot タイムアウトまたは SSH 接続不能。手動確認が必要。
-              Time: {{ lookup('pipe', 'date +%Y-%m-%dT%H:%M:%S+09:00') }}
+              Time: {{ lookup('pipe', "TZ='Asia/Tokyo' date '+%Y-%m-%dT%H:%M:%S+09:00'") }}
 
         - name: Re-raise reboot failure
           ansible.builtin.fail:
@@ -312,7 +312,7 @@
       ansible.builtin.set_fact:
         nightly_report:
           host: "{{ inventory_hostname }}"
-          executed_at: "{{ lookup('pipe', 'date +%Y-%m-%dT%H:%M:%S+09:00') }}"
+          executed_at: "{{ lookup('pipe', \"TZ='Asia/Tokyo' date '+%Y-%m-%dT%H:%M:%S+09:00'\") }}"
           reboot_required: false
           rebooted: false
           result: "SKIPPED"
@@ -335,7 +335,7 @@
       ansible.builtin.set_fact:
         nightly_report:
           host: "{{ inventory_hostname }}"
-          executed_at: "{{ lookup('pipe', 'date +%Y-%m-%dT%H:%M:%S+09:00') }}"
+          executed_at: "{{ lookup('pipe', \"TZ='Asia/Tokyo' date '+%Y-%m-%dT%H:%M:%S+09:00'\") }}"
           reboot_required: true
           rebooted: false
           result: "CHECK_MODE_WOULD_REBOOT"
@@ -367,7 +367,7 @@
       when: not ansible_check_mode
       vars:
         recovery_mute_target: "{{ inventory_hostname }}"
-        recovery_mute_minutes: 30
+        recovery_mute_minutes: 120
         recovery_mute_reason: "ubuntu_nightly: {{ inventory_hostname }} reboot in progress"
 
     - name: Send reboot start notification
@@ -415,7 +415,7 @@
           ansible.builtin.set_fact:
             nightly_report:
               host: "{{ inventory_hostname }}"
-              executed_at: "{{ lookup('pipe', 'date +%Y-%m-%dT%H:%M:%S+09:00') }}"
+              executed_at: "{{ lookup('pipe', \"TZ='Asia/Tokyo' date '+%Y-%m-%dT%H:%M:%S+09:00'\") }}"
               reboot_required: true
               rebooted: true
               services: "{{ monitoring_report.services }}"
@@ -467,7 +467,7 @@
             slack_message: |
               Host: {{ inventory_hostname }}
               reboot タイムアウトまたは SSH 接続不能。手動確認が必要。
-              Time: {{ lookup('pipe', 'date +%Y-%m-%dT%H:%M:%S+09:00') }}
+              Time: {{ lookup('pipe', "TZ='Asia/Tokyo' date '+%Y-%m-%dT%H:%M:%S+09:00'") }}
 
         - name: Re-raise reboot failure
           ansible.builtin.fail:

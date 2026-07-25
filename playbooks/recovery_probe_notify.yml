@@ -31,6 +31,6 @@
         slack_message: |
           {{ nt_message }}
 
-          検知時刻: {{ nt_queued_at | default('(unknown)') }}
-          送信時刻: {{ lookup('pipe', "TZ='Asia/Tokyo' date '+%Y-%m-%dT%H:%M:%S+09:00'") }}
+          検知時刻: {{ nt_queued_at | default('(unknown)') | regex_replace('\+09:00$', ' JST') }}
+          送信時刻: {{ lookup('pipe', "TZ='Asia/Tokyo' date '+%Y-%m-%dT%H:%M:%S+09:00'") | regex_replace('\+09:00$', ' JST') }}
           (検知と送信の時刻差は、インターネット断中のキュー保留によるもの)

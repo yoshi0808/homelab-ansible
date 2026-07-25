@@ -1,6 +1,6 @@
 # Proxmox Patch Policy
 
-本書はProxmox VE hostのpatchに関する許可、禁止、停止条件の正本である。実装構成は[Repository Context](../context/ansible/proxmox-patch.md)、運用手順は[Operations Context](../context/operations/proxmox-patch.md)、環境事実は[System Context](../context/system/proxmox.md)を参照する。Contextは非規範であり、本書と競合する場合は本書を優先する。
+本書はProxmox VE hostのpatchに関する許可、禁止、停止条件の正本である。playbook / roleの索引は[playbook map](../context/ansible/playbook-map.md)と[role map](../context/ansible/role-map.md)、運用手順は[Operations Context](../context/operations/proxmox-patch.md)、環境事実は[System Context](../context/system/proxmox.md)を参照する。実装詳細はコードを正本とする。Contextは非規範であり、本書と競合する場合は本書を優先する。
 
 ## 1. 目的
 
@@ -13,7 +13,6 @@
 - pve2を先行検証nodeとし、pve1を保護する。
 - host OSはrollbackでなく再インストールを復旧原則とする。
 - VM / CT、replication、backupを守る。
-- Sophos Firewall VMをProxmoxへ移行する前にpatch運用を確立する。
 
 ## 2. 対象と実行範囲
 
@@ -23,7 +22,7 @@
 Proxmox patchは通常のLinux server更新より慎重に扱う。kernel、ZFS、NIC・firmware・driver、cluster、corosync、管理面、QEMU・container、storage・replication、network stack・bridge・segmentへの影響が、家庭内network、VM稼働、cluster安定性へ直結し得ることを考慮する。
 
 <!-- SB-003 -->
-重要コンポーネントでない更新だけから成る場合は`PATCH_READY`とし、土曜朝の自動適用を許可する。
+重要コンポーネントでない更新だけから成る場合は`PATCH_READY`とし、自動適用を許可する。実行scheduleの実値はscheduler設定とOperations Contextを正本とする。
 
 <!-- SB-004 -->
 重要コンポーネント更新、removeを伴う更新、major upgrade疑いは自動適用しない。`MAINTENANCE_REQUIRED`、`BLOCKED`、`MAJOR_UPGRADE_DETECTED`のいずれかとして、人間判断または別計画へ移す。
@@ -276,10 +275,13 @@ dry-run時の`reboot_expected`は推定、apply後の`reboot_required`は事実�
 6. pve2の全gateがOKの場合だけpve1を同じ順序で処理する。
 7. 結果を通知する。
 
-詳細なMode別手順は[Operations Context](../context/operations/proxmox-patch.md)を参照する。
+control node条件別の詳細手順は[Operations Context](../context/operations/proxmox-patch.md)を参照する。
 
 <!-- SB-014 -->
-guestはtagにより分類する。`prefer<node名>`があり`hacritical`がないguestはnon-HAとして明示migrationする。`hacritical`があるguestはHA管理としてmaintenance modeで退避し、復帰時は明示relocateする。tagなしguestは明示migration対象外だが、runningのまま残れば最終確認で停止する。
+guestはtagにより分類する。`prefer<node名>`があり`hacritical`がないguestはnon-HAとして明示migrationする。`hacritical`があるguestはHA管理としてmaintenance modeで退避し、復帰時は明示relocateする。tagなしguestは明示migration対象にしない。
+
+<!-- SB-091 -->
+退避完了後、対象nodeにrunning状態のguestを残さない。tagの有無や分類に関わらず、残存するrunning guestは強制停止する。これはtagなしguest向けの個別処理ではなく、migration失敗やHA退避漏れも捕捉する終端不変条件である。
 
 <!-- SB-015 -->
 pve2 apply前にdestination nodeとpve2のhealthcheck OK、guest分類・退避完了、pve2がapply / reboot可能という全条件を満たす。
@@ -293,9 +295,6 @@ pve1 apply前にpve1のrunning guest一覧化、必要guestのpve2退避、pve2�
 <!-- SB-029 -->
 post-healthcheck retryを許可するのは、reboot実施済みで結果が`CRITICAL`または`UNKNOWN`の場合だけである。rebootを伴わない`CRITICAL` / `UNKNOWN`はretryせず実障害として扱う。
 
-<!-- SB-049 -->
-事前に手動適用され、土曜dry-runで`NO_UPDATES`ならapplyしない。pve2だけ手動適用済みの場合、Mode Aはpve1へ進む余地があるが、Mode Bはcontrol node所在条件を満たすpve1単一node patchだけを許可する。
-
 <!-- SB-057 -->
 `PATCH_READY`適用後にreboot-requiredを検出した場合は対象nodeを自動rebootし、SSH、Proxmox API、GUIの復帰を待ってpost-healthcheckを行う。OKの場合だけ次へ進み、`WARNING` / `CRITICAL`なら進まない。
 
@@ -305,7 +304,7 @@ post-healthcheck retryを許可するのは、reboot実施済みで結果が`CRI
 ### 5.2 BLOCKEDからの復帰
 
 <!-- SB-060 -->
-`BLOCKED`ではtimerを止め、apply playbookを禁止し、両nodeへ適用しない。Sophos移行前なら移行を延期し、移行後ならSophos稼働nodeを固定して不要な移動をせず、pve1の安定を最優先する。
+`BLOCKED`ではtimerを止め、apply playbookを禁止し、両nodeへ適用しない。Sophos稼働nodeを固定して不要な移動をせず、pve1の安定を最優先する。
 
 <!-- SB-061 -->
 simulation失敗時は通常flowを停止してrepository / apt sourceを修正し、dry-runが`PATCH_READY`または`MAINTENANCE_REQUIRED`へ戻るまでapplyしない。
@@ -325,7 +324,7 @@ major upgrade疑いでは通常flowを停止し、`MAJOR_UPGRADE_DETECTED`とし
 ### 5.3 手動適用と復旧
 
 <!-- SB-080 -->
-Mode A、Mode B、`MAINTENANCE_REQUIRED`手動applyはいずれも、該当するcontrol node条件、healthcheck、Status、guest退避、必要な明示確認、post-healthcheckを満たす。pve1はpve2成功後にだけ別途判断する。
+cluster外control nodeからのfull flow、Proxmox上control nodeからの単一node flow、`MAINTENANCE_REQUIRED`手動applyはいずれも、該当するcontrol node条件(§2.3)、healthcheck、Status、guest退避、必要な明示確認、post-healthcheckを満たす。pve1はpve2成功後にだけ別途判断する。
 
 <!-- SB-081 -->
 Proxmox host OSのrollbackは原則行わない。壊れた場合は再インストールする。
@@ -334,7 +333,7 @@ Proxmox host OSのrollbackは原則行わない。壊れた場合は再インス
 node別の復旧手順と再構築に必要な情報を準備し、host設定はfile rollbackでなく再構築する。具体的な再構築情報は[Operations Context](../context/operations/proxmox-patch.md)を参照する。
 
 <!-- SB-085 -->
-Sophos Firewall VMがProxmox上で稼働している場合は、Sophos停止によるnetwork影響を許容できる時間帯だけpatchし、必要なnetwork interface / segment割当を確認し、Sophos VM移動後に通信を確認する。手順は[Operations Context](../context/operations/proxmox-patch.md)を参照する。
+Sophos停止によるnetwork影響を許容できる時間帯だけpatchし、必要なnetwork interface / segment割当を確認し、Sophos VM移動後に通信を確認する。手順は[Operations Context](../context/operations/proxmox-patch.md)を参照する。
 
 ## 6. 通知方針
 
@@ -393,30 +392,17 @@ control nodeがpatch対象node上にいる場合はapplyを停止する。contro
 
 ### 7.3 Sophos安全前提
 
-<!-- SB-083 -->
-Sophos Firewall VMをProxmoxへ移行する前に、次の条件をすべて満たす。時点依存の達成証跡は[Phase 1調査](../reviews/policy_standardization/2026-07-24_005_investigation_proxmox_patch_policy_rewrite.md)で追跡する。
+<!-- SB-092 -->
+Sophos Firewall VMも他のguestと同じ退避規則(SB-012、SB-018)に従う。稼働中であれば反対nodeへ退避してからpatchし、Sophos専用の退避除外や個別の移動可否判断を設けない。
 
-- pve2でpatch dry-run運用を確認する。
-- pve2で`PATCH_READY`自動適用を1回以上成功させる。
-- pve2 reboot後のhealthcheck OKを確認する。
-- pve1 / pve2両方のhealthcheck OKを確認する。
-- pve2再インストール手順を用意する。
-- Proxmox network設定の再構築メモを用意する。
-- Sophos VMのbackup / restore手順を用意する。
-- Sophos VMの稼働node方針を決める。
-- Sophos VMの退避・停止・移動方針を決める。
-- 家庭内network停止時の手順を用意する。
-
-<!-- SB-084 -->
-Sophos Firewall VMがProxmox上で稼働している場合、Sophos VMがpatch対象node上にいるなら、そのnodeを直接patchしない。先に別nodeへ移動できるか確認する。
-
-<!-- SB-086 -->
-Sophos Firewall VMがProxmox上で稼働している場合、Sophos稼働nodeへの`MAINTENANCE_REQUIRED`適用は通常より慎重に扱う。internetに面することを踏まえ、Urgency `HIGH` / `URGENT`は早めに判断する。
+<!-- SB-093 -->
+Sophos Firewall VMのHA relocateはstop → migrate → startであり、VM再起動を伴う。この間はinternet接続が切断される。これは退避・復帰の仕様であり障害ではない。切断中はicmp / dns probeが連続失敗し得るため、自律復旧の誤発火防止は[autonomous_recovery_policy.md](autonomous_recovery_policy.md)が定めるmute契約に依拠する。patch系playbookの自動muteが設定されていることを確認し、muteなしでSophos稼働nodeのpatchを進めない。
 
 ## 8. 変更履歴
 
 | 日付 | 変更 |
 |---|---|
+| 2026-07-25 | 移行完了済みのSophos前提(SB-083、SB-001の1 bullet、SB-060 / SB-085の条件節)を削除し、退避の一般規則で足りるSB-084とUrgency判断境界のないSB-086を廃止。代わりにHA relocateによるVM再起動・internet断とautonomous_recovery_policyのmute契約への依拠をSB-092 / SB-093として明記。定義が存在しない`Mode A` / `Mode B`参照および汎用形の「Mode別」表記を条件記述へ統一(Operations Contextの該当見出しも同時に改称)。冗長かつ曜日が事実誤りのSB-049を削除。SB-014を分類規則と終端不変条件(SB-091)へ分離。退番: SB-049 / SB-083 / SB-084 / SB-086(再利用しない) |
 | 2026-07-24 | v2.0の安全境界を維持したまま標準8節へ再編。実装、運用、環境、時点依存計画をContext / reviewへ分離し、旧§22を付録Aへ移した |
 | 2026-05-09 | v2.0作成 |
 

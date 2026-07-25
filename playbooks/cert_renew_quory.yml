@@ -141,7 +141,7 @@
 
               Results:
               {{ cert_renew_summary }}
-              Executed at: {{ lookup('pipe', 'date +%Y-%m-%dT%H:%M:%S+09:00') }}
+              Executed at: {{ lookup('pipe', "TZ='Asia/Tokyo' date '+%Y-%m-%dT%H:%M:%S+09:00'") }}
 
     - name: Fail if CA cleanup was not successful
       ansible.builtin.fail:

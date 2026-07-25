@@ -59,7 +59,7 @@ probeが正常でもmanual layerを選べるが、その発火判断は人間が
 5. Codex向け説明を更新し、quoryを対象に正規setup playbookで関連artifactを同時配備する。
 6. 配備前 / tester工程でallowlist外拒否、arity、parameter、path、sudoers grammar、forced-command経路を検証する。
 
-具体的なfile、variable、template、named check一覧はRepository Contextとコードを参照する。
+具体的なfile、variable、template、named check一覧はコードを参照する。
 
 ## 障害後の復旧と監視再開
 

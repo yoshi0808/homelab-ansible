@@ -249,6 +249,13 @@ lock refresher、期限更新、生存監視、孤児管理を持たない。
 <!-- BRV-049 -->
 本番への危害防止をlockに依存させない。
 
+<!-- BRV-083 -->
+危害防止は次の3つが独立に成立することで担保する。lockはこの3つの代替にならず、lockが機能しない場合でも各々が単独で破壊対象を制限する。
+
+1. 専用固定restore VMIDへのhard assert(BRV-050)。
+2. 開始前の残骸確認による停止(BRV-051、BRV-024)。
+3. owner tokenによるcleanup対象の限定(BRV-052、BRV-053、BRV-054のown / 未刻印 / other分岐)。
+
 <!-- BRV-050 -->
 destroy対象を専用固定restore VMIDへhard assertし、それ以外を絶対にdestroyしない。
 

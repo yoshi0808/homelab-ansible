@@ -45,7 +45,7 @@ Ubuntu senderはsender role、monnie receiverはAlloy roleで管理する。
 <!-- LOG-029 -->
 Lokiへのpushはmonnie localhostへ限定する。
 
-source、現行stream、管理ownerの具体構成は [System Context](../context/system/monitoring.md)、playbook / role / configの横断関係は [Repository Context](../context/ansible/log-observability.md) を参照する。
+source、現行stream、管理ownerの具体構成は [System Context](../context/system/monitoring.md)、playbook / roleの索引は [playbook map](../context/ansible/playbook-map.md) と [role map](../context/ansible/role-map.md) を参照する。config、template、dashboard JSONの実体はcodeを正本とする。
 
 ## 3. 対応するPlaybook
 
@@ -149,7 +149,7 @@ Alloy startまたはruntime validationに失敗した場合はPromtailをrestore
 <!-- LOG-043 -->
 production cutover等の変更前にはmonnieのautonomous recoveryをmuteし、終了後の確認と解除は既存Operations Contextに従う。
 
-sender rolloutは一度に1 hostだけを対象にし、前段のend-to-end確認後に次hostへ進む。具体順序とsingle-task実装はRepository Contextとcodeを正本とする。
+sender rolloutは一度に1 hostだけを対象にし、前段のend-to-end確認後に次hostへ進む。具体順序とsingle-task実装はcodeを正本とする。
 
 ## 6. 通知方針
 

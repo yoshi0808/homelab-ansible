@@ -19,7 +19,7 @@ Slackは承認gateにせず、手動依頼の入口と結果通知にだけ使�
 <!-- AR-004 -->
 - `authy`: 許可serviceのrestartを許可する。ping ladderではVM reboot後、未復旧かつfailover条件を満たす場合だけHA failoverを許可する。
 <!-- AR-005 -->
-- `monnie`: 許可serviceのrestartとVM rebootだけを許可し、HA failoverを許可しない。
+- `monnie`: 許可serviceのrestartとVM rebootだけを許可し、HA failoverを許可しない。HA管理対象外(`hacritical` tagなし)であるためHA failoverという手段自体が存在しない。非HA guestとしての通常migrationはpatch flowの権限であり、自律復旧の行動集合には含めない。
 <!-- AR-006 -->
 - `pve1` / `pve2`: 自律復旧actionの対象外とし、限定されたread-only調査だけを許可する。
 <!-- AR-007 -->
@@ -73,13 +73,13 @@ manual HA failoverは`authy` / `sophos-fw`だけを対象とし、`monnie`を対
 ### Probeとflapping
 
 <!-- AR-053 -->
-`sophos-fw`はicmpとdnsの両probeについて5回連続失敗を発火閾値とする。
+`sophos-fw`はicmpとdnsの両probeについて5回連続失敗を発火閾値とする(AR-052の60秒間隔での5回、すなわち約5分)。
 
 <!-- AR-054 -->
-`authy`はicmpとtcp probeについて5回連続失敗を発火閾値とする。
+`authy`はicmpとtcp probeについて5回連続失敗を発火閾値とする(AR-052の60秒間隔での5回、すなわち約5分)。
 
 <!-- AR-055 -->
-`monnie`はicmpとtcp probeについて5回連続失敗を発火閾値とする。
+`monnie`はicmpとtcp probeについて5回連続失敗を発火閾値とする(AR-052の60秒間隔での5回、すなわち約5分)。
 
 <!-- AR-057 -->
 ladder lockを取得済みなら重複実行をskipする。
@@ -116,7 +116,9 @@ target別のTTL付きmuteと、明示的なresumeまで継続するTTLなしglob
 muteまたはglobal pauseが有効ならprobe cycleをskipし、そのtargetの連続失敗counterをresetする。push経路もtarget別muteを確認する。
 
 <!-- AR-077 -->
-自動muteは次の契約を維持する: `proxmox_evacuate_node.yml`は`authy` / `monnie` / `sophos-fw`へ120分、`proxmox_patch_apply_node.yml`は同3 targetへ60分、`proxmox_restore_vm_placement.yml`は同3 targetへ90分、`ubuntu_nightly.yml`はreboot対象の`authy` / `monnie`へ30分、`proxmox_patch_weekly_full.yml`は同3 targetへ360分、`ubuntu_vm_full_upgrade.yml`はapply対象の`authy` / `monnie`へ45分。
+自動muteは次の契約を維持する。段階単位のplaybookは一律120分とし、待ち時間を個別に最適化しない。`proxmox_evacuate_node.yml`は`authy` / `monnie` / `sophos-fw`へ120分、`proxmox_patch_apply_node.yml`は同3 targetへ120分、`proxmox_restore_vm_placement.yml`は同3 targetへ120分、`ubuntu_nightly.yml`はreboot対象の`authy` / `monnie`へ120分、`ubuntu_vm_full_upgrade.yml`はapply対象の`authy` / `monnie`へ120分。
+
+`proxmox_patch_weekly_full.yml`だけは例外として同3 targetへ360分を設定する。これは両nodeを跨ぐ多時間orchestration全体を先頭で一括して覆う毛布であり、段階単位の120分へ揃えない。段階mute間の待ちが延びた場合(reboot後のhealthcheck retry等)に被覆が切れ、internetに面する`sophos-fw`で誤発火する経路を塞ぐためである。mute設定は`max(既存until, now + minutes)`で既存の窓を短縮しないため、毛布と段階muteは安全に併存する。
 
 <!-- AR-078 -->
 証明書deployはglobal pause後に実施し、正常終了した場合だけresumeする。失敗してpauseが残った場合は、人間が明示resumeするまで全targetの監視を再開しない。
@@ -275,7 +277,7 @@ Proxmox調査keyは他targetのinvestigate keyから目的別に1本分離し、
 Proxmox着地accountは`ann`から分離し、forced command専用にする。
 
 <!-- AR-045 -->
-Proxmox named checkは、Repository Contextが示す固定checkと検証済みparameter付きcheckの列挙範囲だけを許可する。
+Proxmox named checkは、`recovery_exec` roleのdispatch templateが列挙する固定checkと検証済みparameter付きcheckの範囲だけを許可する。
 
 <!-- AR-046 -->
 quory側wrapperを一次filter、Proxmox側dispatchを権限の本gateとし、dispatchが独立に再parseして不正token等をsudo到達前に拒否する。
@@ -298,7 +300,7 @@ sudoersは固定checkを1:1列挙し、検証済みparameter位置だけの限�
 ### Execpolicy、wrapper、file権限
 
 <!-- AR-069 -->
-execpolicyはdefault denyとし、Repository Contextに列挙するinvestigate、report、query、recover、monitoring wrapperだけを許可する。
+execpolicyはdefault denyとし、target investigate、Proxmox investigate、report、Semaphore query、target recover、monitoring controlの限定wrapper群だけを許可する。wrapper名と引数grammarは`recovery_exec` roleのfiles / templatesを正本とする。
 
 <!-- AR-070 -->
 Proxmox nodeへrecover wrapperを用意せず、二段検証済みread-only named check以外を実行不能にする。

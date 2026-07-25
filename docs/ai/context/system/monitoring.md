@@ -41,6 +41,6 @@
 - remote Linux hostはlocal rsyslog、syslog-only applianceは各GUI設定から`monnie`のrsyslog receiverへ合流する。
 - `monnie`のreceiver / AlloyはAnsibleとGit、Ubuntu senderはAnsible、Proxmox senderはmanual、appliance senderは各GUIが管理する。
 - Lokiはremote writerへ公開せず、current transport riskと運用判断はPolicyを正本とする。
-- source数、label、file path、port、allowlist、dashboard query等のrepository詳細はRepository Contextとcodeを正本とする。
+- source数、label、file path、port、allowlist、dashboard query等のrepository詳細はcodeを正本とする。
 
 想定読者Role: Tech Lead=観測喪失の波及を詳細確認、Implementer/Reviewer/Tester=監視案件時に詳細確認、その他=概要のみ。

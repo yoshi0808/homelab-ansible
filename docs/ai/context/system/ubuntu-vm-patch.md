@@ -31,4 +31,4 @@ group所属は [`inventory-map.md`](../ansible/inventory-map.md)、認証基盤�
 - `monnie`のPrometheusはnon-aptでmanual installされた対象としてregistryに登録されている。
 - `authy` / `monnie`のpatchまたはreboot中はautonomous recoveryとの競合を避けるため、該当playbookがtarget別muteを利用する。
 
-具体的なservice名、port、registry、mute値、report pathはPolicyとRepository Contextおよびcodeを参照する。本Contextから実行許可を導かない。
+具体的なservice名、port、registry、mute値、report pathはPolicyとcodeを参照する。本Contextから実行許可を導かない。

@@ -113,7 +113,7 @@ non-apt versionはcurrentとlatestをread-only GETし、両方を数値version�
 取得、JSON parse、version比較の失敗はbest-effort / fail-quietとして通知とreportだけに残し、Statusを変更せずplaybookも失敗させない。
 
 <!-- UV-084 -->
-方針1 VMの主力serviceに影響するpackageがmonthly full-upgrade候補に含まれる場合、通知でその影響を明示し、他候補に埋没させない。対象serviceと具体的package patternはRepository Context / role defaultsを正本とする。
+方針1 VMの主力serviceに影響するpackageがmonthly full-upgrade候補に含まれる場合、通知でその影響を明示し、他候補に埋没させない。対象serviceと具体的package patternはrole defaultsを正本とする。
 
 ### Rebootとhealthcheck
 
@@ -139,7 +139,7 @@ healthcheckが`WARNING`または`CRITICAL`なら通知対象と判定する。
 <!-- UV-016 -->
 aptのpost-install scriptによるservice自動restartは、更新を深夜の低需要時に行いhomelabでの実害がほぼないことを条件に許容する。
 
-monthly full-upgradeはhealthcheck、simulation、分類、通知の順に判定し、manual applyでは確認gateを先に通す。実装の詳細はRepository Context、運用順序はOperations Contextを参照する。
+monthly full-upgradeはhealthcheck、simulation、分類、通知の順に判定し、manual applyでは確認gateを先に通す。実装の詳細はcodeと[playbook map](../context/ansible/playbook-map.md)、運用順序はOperations Contextを参照する。
 
 ### 方針1のreboot
 
