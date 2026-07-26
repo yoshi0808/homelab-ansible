@@ -6,11 +6,30 @@
 # _final_status が未定義(UNKNOWN扱い)になり、この結果に依存する
 # proxmox_patch_weekly_full.yml の続行判定が --check 実行のたびに偽のエラーで
 # 落ちるバグがあった。tasks: + check_mode: false で修正。
+#
+# 2026-07-26: any_errors_fatal を撤去(ADR-002 decision a-1)。単一node実行を
+# 許可するため、片方nodeがUNREACHABLEでも到達できた側のnodeでdry-runを継続
+# する。roles/proxmox_patch_dryrun/tasks/main.yml のPhase 2冒頭に到達node
+# 0件(=両node到達不能)の場合にfailするガードtaskがある。
+#
+# 既知の制約(2026-07-26、decoy inventoryによる実地検証、詳細は
+# docs/ai/reviews/proxmox_patch_dryrun/2026-07-26_003_implement.md): pve1・
+# pve2の両方が失敗/到達不能になった場合、Ansibleのlinear strategyがこの
+# playの残りtaskを一切スケジュールしなくなるため、上記ガードtask
+# (run_once + delegate_to: localhost)自体が発火しない。この場合の停止・
+# 非サイレント成功はAnsible自身のUNREACHABLE/FAILED表示とplaybook全体の
+# 非ゼロ終了によって担保される(ガードtaskの独自メッセージは出ない)。
+# localhostをhosts:に加えて確実に発火させる案を検討・実地検証したが、
+# (a) roles/proxmox_healthcheck(対象外)の内部taskがansible_play_hostsを
+# 前提にしており、localhostが到達しても実行しない構造のため通常運行時から
+# 壊れる、(b) 別playへ分離すると本playbookをimport_playbookする
+# proxmox_patch_weekly_full.ymlが依存するhostvars[groups['proxmox'][0]]
+# ['_final_status']の格納先が変わり同ファイル(対象外)の修正が必要になる、
+# のいずれも4ファイル限定のscope外の変更を要するため見送った。
 - name: Proxmox patch dry-run
   hosts: proxmox
   gather_facts: true
   become: true
-  any_errors_fatal: true
 
   tasks:
     - name: Run proxmox_healthcheck and proxmox_patch_dryrun (always for real)

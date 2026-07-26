@@ -151,6 +151,12 @@
   gather_facts: false
   vars:
     _status: "{{ hostvars[groups['proxmox'][0]]['_final_status'] | default('UNKNOWN') }}"
+    # 2026-07-26 review 2026-07-26_004 Critical Issue #2: a single-node
+    # dry-run (SB-094) is a valid dry-run outcome but must never satisfy this
+    # fixed-pair apply gate (AC5). node_summaries is keyed by node name, so
+    # this is empty unless the dry-run that produced _status actually covered
+    # every groups['proxmox'] member.
+    _dryrun_missing_nodes: "{{ groups['proxmox'] | difference((hostvars[groups['proxmox'][0]]['_final_report'] | default({}))['node_summaries'] | default({}) | list) }}"
     # Patching intentionally skipped AND the dry-run role already notified Slack
     # → end the job as a normal (success) exit, not a failure.
     _weekly_full_skip_statuses:
@@ -168,14 +174,18 @@
         - name: End this play (normal exit - patching intentionally skipped)
           ansible.builtin.meta: end_play
 
-    - name: Fail if dry-run status is a genuine error or unexpected
+    - name: Fail if dry-run status is a genuine error, unexpected, or did not cover both nodes
       ansible.builtin.fail:
         msg: >-
-          Dry-run status is {{ _status }}.
-          Weekly full patch apply requires PATCH_READY (or a clean skip:
+          Dry-run status is {{ _status }}, missing node summaries for:
+          {{ _dryrun_missing_nodes | join(', ') if _dryrun_missing_nodes | length > 0 else 'none' }}.
+          Weekly full patch apply requires PATCH_READY with both
+          {{ groups['proxmox'] | join(', ') }} present (or a clean skip:
           {{ _weekly_full_skip_statuses | join(', ') }}). Stopping.
-          (BLOCKED = apt/dpkg broken; UNKNOWN = unexpected - manual action required.)
-      when: _status != 'PATCH_READY'
+          (BLOCKED = apt/dpkg broken; UNKNOWN = unexpected; missing nodes =
+          a single-node dry-run cannot satisfy this fixed-pair gate per
+          SB-094 - manual action required.)
+      when: _status != 'PATCH_READY' or _dryrun_missing_nodes | length > 0
 
 # ---------------------------------------------------------------------------
 # Step 2c: Set recovery mute for the full patch window

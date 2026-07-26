@@ -9,7 +9,9 @@
   when: proxmox_report.result.status != 'OK'
 
 # =============================================================================
-# Phase 1: Collect dry-run data on each proxmox host (pve1, pve2 in parallel)
+# Phase 1: Collect dry-run data on each proxmox host in parallel (normally
+# pve1+pve2; a host that fails healthcheck/gather_facts/this phase is simply
+# excluded from Phase 2 onward, see _reached_nodes below)
 # =============================================================================
 
 - name: Copy dryrun collect script
@@ -39,6 +41,97 @@
 # Phase 2: Merge on localhost
 # =============================================================================
 
+# _expected_nodes: hosts targeted at play start (after --limit, before any
+# in-play failure). _reached_nodes: hosts still active at this point (in-play
+# failures already dropped out). Their difference is a node that was targeted
+# but failed to reach here -- either truly UNREACHABLE or a healthcheck task
+# failure (requirement.md AC1; review 2026-07-26_004 Critical Issue #1: these
+# two causes are NOT distinguished, the wording below deliberately does not
+# assert which one happened); a node missing from _expected_nodes entirely
+# was never targeted, i.e. excluded by an explicit --limit (requirement.md
+# AC3). ADR-002 decision d-2.
+- name: Determine expected and reached proxmox node sets
+  ansible.builtin.set_fact:
+    _expected_nodes: "{{ ansible_play_hosts_all }}"
+    _reached_nodes: "{{ ansible_play_hosts }}"
+  run_once: true
+  delegate_to: localhost
+  become: false
+
+# Guard (ADR-002 decision a-1): any_errors_fatal was removed from the play so
+# that one unreachable node no longer aborts the whole run. That means Phase 2
+# must explicitly refuse to proceed when no proxmox node survived Phase 1,
+# instead of silently producing an empty or misleading report (requirement.md
+# AC4).
+#
+# KNOWN LIMITATION (documented after empirical testing, 2026-07-26 -- see
+# docs/ai/reviews/proxmox_patch_dryrun/2026-07-26_003_implement.md): this
+# `when` reliably fires and stops the run when ONE of pve1/pve2 fails while
+# the other stays up (the AC1/AC3 partial cases). It does NOT fire when BOTH
+# pve1 and pve2 fail/are unreachable in the same run: once every host in this
+# play has failed, Ansible's linear strategy stops scheduling any further
+# task for the play, including this one, regardless of delegate_to. In that
+# scenario the playbook still does not proceed to merge, does not produce an
+# empty or misleading report, and does not exit 0 -- Ansible's own per-host
+# UNREACHABLE/FAILED reporting and non-zero playbook exit code cover AC4's
+# safety intent -- but this guard's own message will not be the one shown.
+# Designs that make this guard itself fire in that scenario were evaluated
+# and rejected because they require changes outside this task's 4-file scope
+# (see the implement record for the two candidates and why each was
+# rejected).
+- name: Fail if no proxmox node reached the merge phase
+  ansible.builtin.fail:
+    msg: >-
+      Proxmox patch dry-run: no node reached the merge phase
+      (expected={{ _expected_nodes | join(', ') }}, reached=none).
+      Stopping instead of producing an empty or misleading report.
+  run_once: true
+  delegate_to: localhost
+  become: false
+  when: _reached_nodes | length == 0
+
+- name: Determine node reachability for notification text and report
+  ansible.builtin.set_fact:
+    _unreachable_nodes: "{{ _expected_nodes | difference(_reached_nodes) }}"
+    _limit_excluded_nodes: "{{ groups['proxmox'] | difference(_expected_nodes) }}"
+  run_once: true
+  delegate_to: localhost
+  become: false
+
+- name: Build node reachability note text
+  ansible.builtin.set_fact:
+    _node_reachability_note: >-
+      {%- if _unreachable_nodes | length > 0 -%}
+      {{ _unreachable_nodes | join(', ') }} は今回の結果に含まれていません(到達不能または健全性チェック失敗)。{{ _reached_nodes | join(', ') }} のみの結果です。
+      {%- elif _limit_excluded_nodes | length > 0 -%}
+      --limit により {{ _limit_excluded_nodes | join(', ') }} を明示的に除外した単一ノード実行です({{ _reached_nodes | join(', ') }} のみ対象)。
+      {%- else -%}
+      {%- endif -%}
+  run_once: true
+  delegate_to: localhost
+  become: false
+
+# BUG FIX (2026-07-26, Tester report 2026-07-26_005_test_result.md, confirmed
+# by real pve1/pve2 execution): when the `else` branch above is taken (both
+# _unreachable_nodes and _limit_excluded_nodes empty -- the normal fixed-pair
+# case, i.e. every single day both nodes are healthy), the template above
+# consists entirely of Jinja control markup with zero rendered characters.
+# Ansible's Templar converts such a "pure Jinja, empty result" template to
+# Python None instead of an empty string, so _node_reachability_note becomes
+# None rather than ''. Every `| length` check on it downstream then crashes
+# with "object of type 'NoneType' has no len()" -- decoy verification during
+# implementation only inspected the value, it never piped it through an
+# actual `| length` filter the way the real tasks below do, so this was
+# missed until Tester ran it against real, healthy pve1/pve2. This task
+# re-coerces None back to a real '' immediately after the value is built, so
+# _node_reachability_note is never None from this point on.
+- name: Coerce None (from an empty pure-Jinja template) back to a real empty string
+  ansible.builtin.set_fact:
+    _node_reachability_note: "{{ _node_reachability_note | default('', true) }}"
+  run_once: true
+  delegate_to: localhost
+  become: false
+
 - name: Record run timestamp
   ansible.builtin.set_fact:
     dryrun_timestamp: "{{ lookup('pipe', 'date +%Y%m%dT%H%M%S') }}"
@@ -57,7 +150,7 @@
 
 - name: Save node dryrun data to temp file for merging
   ansible.builtin.copy:
-    content: "{{ [hostvars['pve1'].node_dryrun, hostvars['pve2'].node_dryrun] | to_json }}"
+    content: "{{ _reached_nodes | map('extract', hostvars, 'node_dryrun') | list | to_json }}"
     dest: "/tmp/proxmox_dryrun_nodes_{{ dryrun_timestamp }}.json"
   run_once: true
   delegate_to: localhost
@@ -85,16 +178,22 @@
   delegate_to: localhost
   become: false
 
-# Pre-determine cluster status before Codex (mechanical checks)
+# Pre-determine cluster status before Codex (mechanical checks). Iterates
+# unified_dryrun.node_summaries (dict keyed by node name, already node-count
+# agnostic per proxmox-dryrun-merge.py) instead of a fixed pve1/pve2 pair, so
+# this holds unchanged whether one node or the full fixed pair took part.
 - name: Determine pre-Codex cluster status
   ansible.builtin.set_fact:
     _pre_status: >-
-      {%- if not (unified_dryrun.node_summaries['pve1'].apt_update_ok | bool) or
-             not (unified_dryrun.node_summaries['pve2'].apt_update_ok | bool) or
-             not (unified_dryrun.node_summaries['pve1'].apt_check_ok | bool) or
-             not (unified_dryrun.node_summaries['pve2'].apt_check_ok | bool) or
-             not (unified_dryrun.node_summaries['pve1'].sim_ok | bool) or
-             not (unified_dryrun.node_summaries['pve2'].sim_ok | bool) -%}
+      {%- set _ns = namespace(all_ok=true) -%}
+      {%- for _summary in unified_dryrun.node_summaries.values() -%}
+      {%- if not (_summary.apt_update_ok | bool) or
+             not (_summary.apt_check_ok | bool) or
+             not (_summary.sim_ok | bool) -%}
+      {%- set _ns.all_ok = false -%}
+      {%- endif -%}
+      {%- endfor -%}
+      {%- if not _ns.all_ok -%}
       BLOCKED
       {%- elif unified_dryrun.cluster_summary.total_unique_updates == 0 and
                unified_dryrun.cluster_summary.total_unique_removes == 0 -%}
@@ -223,8 +322,16 @@
       classification: "{{ unified_dryrun.classification }}"
       update_count: "{{ unified_dryrun.cluster_summary.total_unique_updates }}"
       remove_count: "{{ unified_dryrun.cluster_summary.total_unique_removes }}"
-      reboot_required_pve1: "{{ hostvars['pve1'].node_dryrun.reboot_required }}"
-      reboot_required_pve2: "{{ hostvars['pve2'].node_dryrun.reboot_required }}"
+      # Schema intentionally kept as fixed pve1/pve2 keys (requirement.md P1
+      # scope; a dynamic node-keyed redesign is deferred until repo-external
+      # consumers, e.g. a Semaphore dashboard, are confirmed absent). Only the
+      # value derivation is made node-count agnostic: read from
+      # unified_dryrun.node_summaries (already dynamically keyed by
+      # proxmox-dryrun-merge.py) instead of hostvars['pve1']/['pve2'], which
+      # do not exist for a node that never reached Phase 1. A node absent from
+      # this run yields null ("not evaluated this run"), never false.
+      reboot_required_pve1: "{{ unified_dryrun.node_summaries['pve1'].reboot_required if 'pve1' in unified_dryrun.node_summaries else none }}"
+      reboot_required_pve2: "{{ unified_dryrun.node_summaries['pve2'].reboot_required if 'pve2' in unified_dryrun.node_summaries else none }}"
   run_once: true
   delegate_to: localhost
   become: false
@@ -257,7 +364,11 @@
       クラスター Status: {{ _final_status }}
 
       {% if _final_status == 'NO_UPDATES' %}
+      {% if _node_reachability_note | default('', true) | length == 0 %}
       pve1/pve2 ともに更新候補なし。
+      {% else %}
+      {{ _reached_nodes | join('/') }} に更新候補なし。{{ _node_reachability_note }}
+      {% endif %}
       {% elif _final_status == 'BLOCKED' %}
       apt シミュレーションが失敗しました。手動確認が必要です。
 
@@ -288,14 +399,18 @@
 
 - name: Set notification content for NO_UPDATES
   ansible.builtin.set_fact:
-    _notify_subject: "[Proxmox Patch Dry-run] NO_UPDATES - {{ groups['proxmox'] | join(', ') }} 更新候補なし"
+    _notify_subject: "[Proxmox Patch Dry-run] NO_UPDATES - {{ _reached_nodes | join(', ') }} 更新候補なし"
     _notify_body: |
       Proxmox Patch Dry-run を実行しました。
 
       実行日時: {{ dryrun_timestamp }}
-      対象ノード: {{ groups['proxmox'] | join(', ') }}
+      対象ノード: {{ _reached_nodes | join(', ') }}
 
+      {% if _node_reachability_note | default('', true) | length == 0 -%}
       pve1/pve2 ともに更新候補がありません。パッチ適用は不要です。
+      {%- else -%}
+      {{ _reached_nodes | join('/') }} に更新候補がありません。パッチ適用は不要です。
+      {%- endif %}
   run_once: true
   delegate_to: localhost
   become: false
@@ -308,7 +423,7 @@
       Proxmox Patch Dry-run で apt シミュレーションが失敗しました。
 
       実行日時: {{ dryrun_timestamp }}
-      対象ノード: {{ groups['proxmox'] | join(', ') }}
+      対象ノード: {{ _reached_nodes | join(', ') }}
 
       Status: BLOCKED
       自動パッチ適用は停止します。手動で apt の状態を確認してください。
@@ -321,6 +436,21 @@
   delegate_to: localhost
   become: false
   when: _final_status == 'BLOCKED'
+
+# Applies to every status branch above (Codex-classified, NO_UPDATES,
+# BLOCKED) so a node missing from this run (AC1 -- UNREACHABLE or healthcheck
+# failure, cause not asserted, see review 2026-07-26_004 Critical Issue #1)
+# or an intentional --limit single-node run (AC3) is disclosed regardless of
+# the resulting Status. A
+# no-op (unchanged _notify_body) whenever both nodes took part normally, so
+# fixed-pair notifications are byte-for-byte unchanged (AC2).
+- name: Append node reachability note to notification body
+  ansible.builtin.set_fact:
+    _notify_body: "{{ _notify_body }}\n{{ _node_reachability_note }}"
+  run_once: true
+  delegate_to: localhost
+  become: false
+  when: _node_reachability_note | default('', true) | length > 0
 
 - name: Set Slack channel and status for dryrun result
   ansible.builtin.set_fact:

@@ -9,14 +9,14 @@
 | Core(`docs/ai/core.md`) | 全Role共通の不変原則 |
 | **Knowledge**(`docs/ai/memory/`、本ファイルの対象) | プロジェクト全体で共有すべき知識。特定AI製品に紐づかない、リポジトリ内の共有資産 |
 | Skill(`skills/`) | 再利用可能な能力・手順 |
-| Claude Memory(`~/.claude/projects/.../memory/`) | Claude Code固有の経験・運用。Codex系Roleからは見えない |
+| Claude Memory(`~/.claude/projects/.../memory/`) | Coordinator(このClaude Codeセッション)固有の経験・運用。Coordinatorが起動するAgent tool subagentは前提としてこの内容を見ない(subagentは都度コールドスタートし、渡されたprompt以外の文脈を持たない) |
 
-**判定ルールは1つだけ**: 「この知識を知らないことで、Codex系Role(`implementer`/`reviewer`/`tester`/`techlead2`等)の判断や実装が変わるか」。
+**判定ルールは1つだけ**: 「この知識を知らないことで、Coordinatorが起動するsubagent(Tech Lead/Implementer/Reviewer/Tester役)の判断や実装が変わるか」。(2026-07-26改訂: 旧「Codex系Role」の判定基準を、Codex撤退後のsubagent体制に合わせて言い換えた。判定の実質は変わらない)
 
 - Yes → Knowledge(`docs/ai/memory/`)へ書く。
-- No(Yoshinobuとのコミュニケーションスタイル、Claude Code自身の作業習慣など、Claude Code固有の運用に閉じるもの)→ Claude Memoryのままでよい。
+- No(Yoshinobuとのコミュニケーションスタイル、Coordinator自身の作業習慣など、Coordinatorの運用に閉じるもの)→ Claude Memoryのままでよい。
 
-**Knowledgeは Claude Memoryのコピーではない**。Claude Memoryはこれまで通りClaude Codeが単独で活用し続け、そのうちCodex系Roleの判断にも必要になったものだけを都度Knowledgeへ書き出す(遅延移行)。既存Claude Memory(現在数十件)は一括移行しない。
+**KnowledgeはClaude Memoryのコピーではない**。Claude MemoryはこれまでどおりCoordinatorが単独で活用し続け、そのうちsubagentの判断にも必要になったものだけを都度Knowledgeへ書き出す(遅延移行)。既存Claude Memory(現在数十件)は一括移行しない。
 
 ## 2. Knowledgeの内部分類(TODO6-1)
 

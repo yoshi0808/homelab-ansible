@@ -100,7 +100,7 @@ Context内で対象を指す必要がある場合は、inventory group名・変�
 - IPアドレス等の実値がContext/Policy/Skillのどこにも書かれていない(3節、TODO2-2/2-3で実証済み)。
 - `docs/ai/reviews/`と新設分類が競合せず、位置づけが説明できる(5節)。
 
-## 6. Skillの配置とCodex/Claude Codeへの公開方法(TODO5-2、2026-07-23確定)
+## 6. Skillの配置とCodex/Claude Codeへの公開方法(TODO5-2、2026-07-23確定。2026-07-26時点でCodexは本プロジェクトから撤退済みのため「Codex側」部分は歴史的経緯として残す)
 
 **共通正本**: `skills/<skill-name>/SKILL.md`(リポジトリ直下)。CodexとClaude Codeで内容を二重管理しない。
 

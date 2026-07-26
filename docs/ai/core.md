@@ -1,6 +1,6 @@
 # homelab-ansible AI共通原則
 
-このファイルは、CodexとClaude Codeを含む全AI Roleが作業開始時に読む共通原則の正本である。製品別入口はリポジトリ直下の `AGENTS.md` と `CLAUDE.md` とし、共通原則をそれらへ複製しない。
+このファイルは、Claude CodeによるCoordinatorと、Coordinatorが必要に応じて呼び出すsubagent(Tech Lead / Implementer / Reviewer / Tester相当)が作業開始時に読む共通原則の正本である。製品別入口はリポジトリ直下の `AGENTS.md` と `CLAUDE.md` とし、共通原則をそれらへ複製しない。
 
 ## 目的と正本
 
@@ -68,7 +68,7 @@ Role、Context、Policy、Skill、Knowledgeの新配置は段階的に作成す�
 - KnowledgeはIncident、Lesson、Decisionなど、再利用する価値が確認された知識を記録する。一時的な失敗を直ちに恒久ルールへ昇格させない。
 - Issueは今回の要求と受入条件、PR/diffは今回の変更を表す。当面はagmsgの依頼、`docs/ai/reviews/`、作業ツリーがこれらを担う。
 
-identity名だけから責務や権限を推測しない。identity対応とtrio routingは `docs/ai/role-routing-index.md` を正本とする。
+identity名だけから責務や権限を推測しない。identityとRoleの対応、Roleの実現方式(Coordinator直接実施かsubagent呼び出しか)は `docs/ai/role-routing-index.md` を正本とする。
 
 ## Ansible変更の共通ゲート
 
