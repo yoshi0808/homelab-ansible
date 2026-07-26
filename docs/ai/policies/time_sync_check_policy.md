@@ -45,15 +45,25 @@ homelab管理ネットワーク向けのallow設定が既に設定済み・123/u
 <!-- TIME-007 -->
 ### CloudKeyのNTPサーバー一覧はGUI管理（time_sync_ntp_referenceの対象外）
 
-CloudKeyのNTPサーバー設定はUniFi OSのGUIで管理されており「Auto」設定がある。
-再起動・GUI保存操作で`/etc/systemd/timesyncd.conf`が再生成される可能性があり、
-Ansibleでの直接ファイル編集はGUI管理と衝突しうる（sophos-fwと同様の判断）。
-このため`time_sync_ntp_reference.yml`はcloudkeyを対象にしない。quory参照の
-追加が必要な場合は、ユーザーがGUIから手動で登録する運用とする
+CloudKey（UniFi controller）がadopted device（AP/スイッチ）へ配布するNTPサーバー
+一覧（`ace.setting`、`ntp_server_1..4`）はUniFi OSのGUIで管理されており「Auto」
+設定がある。再起動・GUI保存操作でDBが再生成される可能性があり、Ansibleでの
+直接編集はGUI管理と衝突しうる（sophos-fwと同様の判断）。このため
+`time_sync_ntp_reference.yml`はcloudkeyを対象にしない。quory参照の追加が
+必要な場合は、ユーザーがGUIから手動で登録する運用とする
 （2026-06-25実施: `ntp.nict.jp`/`ntp.jst.mfeed.ad.jp`/`quory.internal`）。
 
+2026-07-16、adopted APのbusybox ntpdが`quory.internal`のAAAA問い合わせに対する
+Sophos DNSのNXDOMAIN応答をhard failureとして扱い`bad address`で失敗する事象が
+判明した（CloudKey自身はglibcリゾルバのため同名を問題なく解決でき、この問題は
+再現しない）。Sophos側でのNXDOMAIN是正は不可能なため、`ntp_server_3`を
+`quory.internal`からquoryのIPアドレスへ、GUI経由でユーザー自身が変更済みである
+（IPリテラルは本ファイルへ書かない。core.md §3）。
+
 `time_sync_check.yml`側のcloudkey判定（`timedatectl timesync-status`の数値
-Offset取得）はNTPサーバー一覧の管理方法に関わらず動作する。
+Offset取得）はCloudKey自身のsystemd-timesyncd（Ubiquiti/Debian pool参照、上記の
+adopted device向けNTPサーバー一覧とは別系統）を見ており、その管理方法・値に
+関わらず動作する。
 
 
 <!-- TIME-016 -->
@@ -133,6 +143,10 @@ Phase 4  cloudkeyのtimedatectl timesync-status数値Offset確認。
 Phase 5  結果集約・閾値判定・Slack通知。
 ```
 
+<!-- TIME-019 -->
+Phase 2〜4は対象ホストごとに独立して収集・判定する。1ホストへの接続/収集失敗は
+そのホストの結果を「未収集」として扱うにとどめ、他ホストの収集・判定を継続する。
+1ホストの失敗を理由に他ホストの検証を打ち切らない。
 
 <!-- TIME-010 -->
 shell / Ansible の責務分離: 各ホストでの時刻・offset情報の取得は
@@ -147,12 +161,27 @@ command/expectで行い、差分計算・閾値判定・fail制御はAnsible tas
 
 `roles/common_slack/tasks/notify.yml`を`include_tasks`で呼ぶ（best-effort）。
 
-| 状況 | チャンネル | status |
-|---|---|---|
-| 全ホスト閾値内 | 通知なし | — |
-| 閾値超えホストあり | #alerts | warning |
-| quory自身のNTP同期異常（Phase 1で中断） | #alerts | critical |
-| 個別ホストへの接続失敗 | #alerts | error |
+<!-- TIME-020 -->
+severityはホストの状態区分ごとに独立して決め、ジョブのfail/非failとは別軸で扱う
+（healthcheck系共通の慣習。`docs/ai/context/operations/healthcheck.md` §2）。
+
+| 状況 | チャンネル | status | ジョブの終了 |
+|---|---|---|---|
+| 全ホスト閾値内 | 通知なし | — | 正常終了 |
+| quory自身のNTP同期異常（Phase 1で中断） | #alerts | critical | 非ゼロ終了 |
+| 収集できたホストに閾値超過（実際の時刻不一致）がある | #alerts | error | 非ゼロ終了 |
+| 個別ホストへの接続/収集失敗（疎通不可・停止中等） | #alerts | warning | 正常終了 |
+
+<!-- TIME-021 -->
+個別ホストへの接続/収集失敗は、対象ホストが計画停止中（例: pve1の平日夏季
+シャットダウン運用）であっても発生しうる正常な運用状態を含むため、実際の
+時刻不一致（error）より重大度を低くする。両方が同時に発生した場合は、通知
+全体のstatusをより高い重大度（error）に倒す。
+
+<!-- TIME-022 -->
+個別ホストへの接続/収集失敗だけでは、ジョブを非ゼロ終了させない。quory自身の
+同期異常、または収集できたホストでの閾値超過が1件以上ある場合にのみ非ゼロ
+終了する。1ホストの接続失敗を理由に他ホストの検証結果を無効化しない。
 
 ## 7. 制約・禁止事項
 
@@ -212,3 +241,4 @@ role / playbook）
 |---|---|---|
 | v1.0 | 2026-06-25 | 初版。quory基準の自己報告方式によるNTP同期チェックと、quory参照追加の準備playbookを定義。 |
 | v1.1 | 2026-07-25 | 標準8見出しへ再編し、安全境界の意味を維持。 |
+| v1.2 | 2026-07-26 | Yoshinobuの再点検を反映。CloudKeyのquory参照はhostnameでなくIP登録済みである事実(2026-07-16のAP busybox resolver問題)にTIME-007を訂正。個別ホスト接続失敗とquoryの実際の同期異常の重大度を入れ替え(接続失敗→warning、閾値超過→error)、個別ホスト失敗だけではジョブを非ゼロ終了させず他ホストの検証を継続する方針をTIME-019/021/022として明記。 |

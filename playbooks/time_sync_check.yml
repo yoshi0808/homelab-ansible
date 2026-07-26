@@ -30,18 +30,20 @@
 #   - sophos-fwのみ、自己申告する同期ズレが取得できないため、quoryとの
 #     date直接比較で代替する（前提が他ホストと異なる例外）。
 #
-# Fail条件（仕様）:
+# Fail条件（仕様。2026-07-26改訂: docs/ai/policies/time_sync_check_policy.md
+# TIME-020〜022。pve1の計画停止等、疎通不可でも起こりうる状態を実際の時刻
+# 不一致より軽い扱いにするためseverityを入替）:
 #
 #   - quory自身が「未収集」または「未同期(許容値超え含む)」の場合:
 #     Phase 1でcritical/error通知し、他ホストへ一切接続せずplaybook全体を
 #     fail（非ゼロ終了）させる。
-#   - 個別ホストへの接続・収集に失敗した場合（quory以外）:
-#     time_sync_error_hosts に分類され、warning通知ではなくerror通知。
+#   - 個別ホストの許容値超え（収集はできたが閾値を超えている＝実際の時刻
+#     不一致）の場合: time_sync_desync_hosts に分類され、error通知。
 #     1件以上あればplaybook全体をfailさせる。
-#   - 個別ホストの許容値超え（収集はできたが閾値を超えている）の場合:
-#     time_sync_warning_hosts に分類され、warning通知。
-#     **playbook自体はfailしない**（収集失敗とは区別する。
-#     radius_healthcheck等の既存判定方針に合わせている）。
+#   - 個別ホストへの接続・収集に失敗した場合（quory以外。対象ホストが
+#     計画停止中でも起こりうる）:
+#     time_sync_unreachable_hosts に分類され、warning通知。
+#     **playbook自体はfailしない**（実際の時刻不一致とは区別する）。
 #   - 全ホストが許容値内の場合: Slack通知は行わない（成功時は静か）。
 #
 # 主要な処理フロー:

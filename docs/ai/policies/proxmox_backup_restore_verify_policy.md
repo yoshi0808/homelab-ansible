@@ -53,7 +53,9 @@ monthlyは`quory`から固定時刻のsingle scheduleで実行する。
 <!-- BRV-011 -->
 本Policyに対応するplaybookは`proxmox_backup_restore_verify.yml`の1本とする。
 
-この入口のtester-gateは`risk-accepted`であり、`--check`を指定してもrestore / start / stop / destroyを含む本実行になる。`tester_mode=true`は拒否される。実行にはYoshinobuの明示判断を必要とし、`--check`をdry-runまたはread-only許可として扱わない。
+この入口のtester-gateは`risk-accepted`である(core.md §18の判断基準: 対象は専用固定restore VMIDに限定され本番VMへの実害がないこと、かつ実restoreを省略すると検証自体の意味が失われることの2条件を満たす)。`--check`を指定してもrestore / start / stop / destroyを含む本実行になり、挙動は変わらない。`tester_mode`/`tester_gate`は廃止済みの概念であり本Playbookでも参照しない(`tester_mode=true`を指定した場合はassertでfailする)。
+
+この分類自体はYoshinobuが判断済み(2026-07-06)であり、monthly実行のたびに個別の実行判断を必要としない。`quory`からのmonthly schedule実行(BRV-042)、`ansy`からのmanual実行(BRV-006)のいずれも同じ扱いとする。
 
 ## 4. 判断軸
 
@@ -64,6 +66,9 @@ restore nodeは対象VMの`prefer<node>` tagで決定し、決定できなけれ
 
 <!-- BRV-007 -->
 backup storageが未指定の場合は、NFS typeかつcontentにbackupを含むstorageを自動検出する。
+
+<!-- BRV-084 -->
+rotationの目的は、`verify` tagを持つVM群のbackup restore検証を年間で均等に行うことであり、どの月にどのVMを検証するかを個別には規定しない。`(現在月 - 1) % 候補list長`による決定論的インデックス(BRV-013〜BRV-015)で、対象VMの増減にかかわらずこの均等性を維持する。
 
 <!-- BRV-012 -->
 cluster resourcesから対象を決定し、Ansible側に対象VM listを持たずProxmox tagだけで増減に対応する。
@@ -271,9 +276,6 @@ BRV-055の場合も最悪影響は使い捨て検証に限定され、本番影�
 <!-- BRV-069 -->
 秘密情報を扱わない。
 
-<!-- BRV-070 -->
-IP literalをfileへ書かない。NIC isolationはdevice削除で行い、IPを指定しない。
-
 <!-- BRV-071 -->
 変更系として許可するのは専用restore VMのcreate / start / stop / deleteだけであり、本番VMはconfig read-onlyとする。
 
@@ -298,3 +300,4 @@ destroy対象が構造的に専用固定restore VMIDへ限定されることを�
 |---|---|
 | 2026-06-14 | v1.0。monthly restore verification、minimal lock、ownership、cleanup、通知を定義 |
 | 2026-07-24 | 標準8節へ再編。環境事実とcross-file実装契約をContextへ分離し、専用restore VMIDの数値実値をPolicyから除去 |
+| 2026-07-26 | Yoshinobuの再点検を反映。BRV-011を`tester_mode`廃止後の実態(risk-accepted分類はYoshinobu判断済み・monthly実行に個別の実行判断は不要)に合わせて改訂。rotationの目的(年間均等化)をBRV-084として明記。core.md §3と重複するBRV-070(IP literal禁止)を削除 |
