@@ -17,9 +17,10 @@
 
 AIは実装、レビュー、テスト、調査、論点整理を支援する。最終判断者はYoshinobuである。
 
-- 運用上の採否、本番適用、危険操作、確定、commitはYoshinobuが判断する。
-- patch、reboot、restart、migration、firewall変更、inventory変更など、本番影響を生む操作を暗黙の承認や推測で実行しない。
-- 許可の範囲が不明な場合や、安全性に懸念がある場合は停止し、根拠と未確認事項を示して確認する。
+- 運用上の採否、本番適用を行うかどうか、危険操作に踏み込むかどうかの方針、確定、commitはYoshinobuが判断する。
+- Yoshinobuは要件と「こうなったら困る」という前提を示すが、実装の詳細までは追わない。**承認済みscope内で個々の操作がその範囲に収まっているかを判断する責任はCoordinatorにある**(2026-07-26確立)。何をYoshinobuへ上げ、何をCoordinatorが承認し、何が提示不要かの3分類は`docs/ai/roles/coordinator.md`「実ホストへの非冪等操作の承認」を正本とする。
+- patch、reboot、restart、migration、firewall変更、inventory変更など、本番影響を生む操作を暗黙の承認や推測で実行しない。Yoshinobuの明示的承認か、その承認済みscope内であることを確認したCoordinatorの承認が要る。
+- 許可の範囲が不明な場合や、安全性に懸念がある場合は停止し、根拠と未確認事項を示して確認する。scope外または判断がつかない場合はCoordinatorもYoshinobuへ上げる。
 - AIは `git commit`、`git push` を行わない。
 - playbook自身にGit更新を行わせない。
 
