@@ -42,18 +42,34 @@
 # =============================================================================
 
 # _expected_nodes: hosts targeted at play start (after --limit, before any
-# in-play failure). _reached_nodes: hosts still active at this point (in-play
-# failures already dropped out). Their difference is a node that was targeted
-# but failed to reach here -- either truly UNREACHABLE or a healthcheck task
+# in-play failure). _reached_nodes: hosts that actually produced node_dryrun
+# in Phase 1. Their difference is a node that was targeted but did not get
+# here with data -- either truly UNREACHABLE or a healthcheck/collect task
 # failure (requirement.md AC1; review 2026-07-26_004 Critical Issue #1: these
 # two causes are NOT distinguished, the wording below deliberately does not
 # assert which one happened); a node missing from _expected_nodes entirely
 # was never targeted, i.e. excluded by an explicit --limit (requirement.md
 # AC3). ADR-002 decision d-2.
+#
+# 2026-07-26: _reached_nodes was ansible_play_hosts (still-active hosts), a
+# proxy for "has data" that held only because a node that dropped out always
+# dropped out of the play too. Since the playbook gained ignore_unreachable
+# (see playbooks/proxmox_patch_dryrun.yml), a node can be a play member and
+# still have no node_dryrun, and everything below -- the merge input above
+# all -- needs the data, not the membership. Decoy runs of exactly that state
+# crash the merge input on the old definition ("object of type 'HostVarsVars'
+# has no attribute 'node_dryrun'") and pass on this one; see implement record
+# §9. Asking hostvars directly also keeps this correct no matter what future
+# handling of unreachable hosts the play chooses.
 - name: Determine expected and reached proxmox node sets
   ansible.builtin.set_fact:
     _expected_nodes: "{{ ansible_play_hosts_all }}"
-    _reached_nodes: "{{ ansible_play_hosts }}"
+    _reached_nodes: >-
+      {{ ansible_play_hosts_all
+         | map('extract', hostvars)
+         | selectattr('node_dryrun', 'defined')
+         | map(attribute='inventory_hostname')
+         | list }}
   run_once: true
   delegate_to: localhost
   become: false
@@ -64,21 +80,17 @@
 # instead of silently producing an empty or misleading report (requirement.md
 # AC4).
 #
-# KNOWN LIMITATION (documented after empirical testing, 2026-07-26 -- see
-# docs/ai/reviews/proxmox_patch_dryrun/2026-07-26_003_implement.md): this
-# `when` reliably fires and stops the run when ONE of pve1/pve2 fails while
-# the other stays up (the AC1/AC3 partial cases). It does NOT fire when BOTH
-# pve1 and pve2 fail/are unreachable in the same run: once every host in this
-# play has failed, Ansible's linear strategy stops scheduling any further
-# task for the play, including this one, regardless of delegate_to. In that
-# scenario the playbook still does not proceed to merge, does not produce an
-# empty or misleading report, and does not exit 0 -- Ansible's own per-host
-# UNREACHABLE/FAILED reporting and non-zero playbook exit code cover AC4's
-# safety intent -- but this guard's own message will not be the one shown.
-# Designs that make this guard itself fire in that scenario were evaluated
-# and rejected because they require changes outside this task's 4-file scope
-# (see the implement record for the two candidates and why each was
-# rejected).
+# WHERE AC4 IS ACTUALLY ENFORCED (2026-07-26 update): the both-nodes-gone
+# case is now caught earlier, by `Fail if no proxmox node could be reached`
+# in playbooks/proxmox_patch_dryrun.yml, which runs while every node is still
+# a play member and therefore does fire (verified with a decoy inventory --
+# implement record §9). This task cannot be the one to catch it: reaching
+# Phase 2 at all requires a surviving host to carry the run_once, and if both
+# nodes fail in-play (rather than being unreachable up front) Ansible's linear
+# strategy stops scheduling the play's remaining tasks entirely. It is kept as
+# a cheap last-resort assertion for any future path that reaches Phase 2 with
+# no node data; on that path Ansible's own UNREACHABLE/FAILED reporting plus
+# the non-zero exit code remain the backstop.
 - name: Fail if no proxmox node reached the merge phase
   ansible.builtin.fail:
     msg: >-

@@ -9,29 +9,75 @@
 #
 # 2026-07-26: any_errors_fatal を撤去(ADR-002 decision a-1)。単一node実行を
 # 許可するため、片方nodeがUNREACHABLEでも到達できた側のnodeでdry-runを継続
-# する。roles/proxmox_patch_dryrun/tasks/main.yml のPhase 2冒頭に到達node
-# 0件(=両node到達不能)の場合にfailするガードtaskがある。
+# する。
 #
-# 既知の制約(2026-07-26、decoy inventoryによる実地検証、詳細は
-# docs/ai/reviews/proxmox_patch_dryrun/2026-07-26_003_implement.md): pve1・
-# pve2の両方が失敗/到達不能になった場合、Ansibleのlinear strategyがこの
-# playの残りtaskを一切スケジュールしなくなるため、上記ガードtask
-# (run_once + delegate_to: localhost)自体が発火しない。この場合の停止・
-# 非サイレント成功はAnsible自身のUNREACHABLE/FAILED表示とplaybook全体の
-# 非ゼロ終了によって担保される(ガードtaskの独自メッセージは出ない)。
-# localhostをhosts:に加えて確実に発火させる案を検討・実地検証したが、
-# (a) roles/proxmox_healthcheck(対象外)の内部taskがansible_play_hostsを
-# 前提にしており、localhostが到達しても実行しない構造のため通常運行時から
-# 壊れる、(b) 別playへ分離すると本playbookをimport_playbookする
-# proxmox_patch_weekly_full.ymlが依存するhostvars[groups['proxmox'][0]]
-# ['_final_status']の格納先が変わり同ファイル(対象外)の修正が必要になる、
-# のいずれも4ファイル限定のscope外の変更を要するため見送った。
+# 2026-07-26(追補): any_errors_fatal 撤去だけでは、片方nodeが到達不能な回の
+# 終了コードが4(RUN_UNREACHABLE_HOSTS)のままだった。playは完走し failed=0、
+# 通知もreportも正しいのに、日次スケジューラ(Semaphore)は非ゼロ終了を
+# タスク失敗として表示するため、夏季pve1シャットダウン期間中は毎営業日
+# 「赤い成功」が並び本物の障害と区別できない — つまり「pve1停止中も日次
+# dry-runを継続する」という本機能の目的が実質的に達成できていなかった
+# (Tester実測: docs/ai/reviews/proxmox_patch_dryrun/2026-07-26_005_test_result.md
+# §13-4)。ignore_unreachable: true と、直後の3 task(到達判定、全node到達
+# 不能時の明示fail、到達不能nodeのplayからの除外)を1組で入れることで終了
+# コードを0にする。ignore_unreachableを1行だけ足すと壊れる理由、および両node
+# 到達不能時のガードtaskが今回から実際に発火するようになった経緯(旧「既知の
+# 制約」= ガードtaskがdead codeだった問題の解消)は
+# docs/ai/reviews/proxmox_patch_dryrun/2026-07-26_003_implement.md §9 に
+# decoy実測とともに記録した。
 - name: Proxmox patch dry-run
   hosts: proxmox
   gather_facts: true
   become: true
+  ignore_unreachable: true
 
   tasks:
+    # ignore_unreachable keeps an unreachable node in the play instead of
+    # aborting it, which is what stops UNREACHABLE from forcing a non-zero
+    # exit code. But a node that stays in the play also keeps being handed
+    # every later task, and roles/proxmox_healthcheck (out of scope, shared
+    # with other playbooks) has `when:` conditions on per-host registers /
+    # facts that do not exist for a node that never answered -- decoy testing
+    # shows those turn the honest UNREACHABLE into a confusing FAILED
+    # ("object of type 'dict' has no attribute 'stdout'") and exit code 2.
+    # So the three tasks below re-establish, without the exit code, exactly
+    # what Ansible would otherwise have done itself: decide who answered,
+    # refuse to continue when nobody did, and take the silent nodes out of
+    # the play before any role runs.
+    # Assumes fact caching is OFF (current ansible.cfg sets neither
+    # fact_caching nor gathering=smart). With a cache enabled this test reads
+    # the *cached* facts of a node that never answered and calls it reachable
+    # -- reproduced with ANSIBLE_CACHE_PLUGIN=jsonfile + ANSIBLE_GATHERING=smart
+    # in the 2026-07-26 review -- which is exactly the state these three tasks
+    # exist to prevent. If fact caching is ever turned on, replace this with an
+    # explicit per-run probe (e.g. a registered ansible.builtin.ping) instead
+    # of inspecting ansible_facts.
+    - name: Record whether this node answered fact gathering
+      ansible.builtin.set_fact:
+        _node_reachable: "{{ ansible_facts | length > 0 }}"
+
+    # AC4 (requirement.md): both nodes gone must stop loudly, never produce an
+    # empty report or a silent success. This is the point where that can still
+    # be said out loud: every targeted node is still in the play here (that is
+    # what ignore_unreachable bought), so run_once + delegate_to localhost is
+    # guaranteed a live host to run on. Once the end_host below has removed the
+    # silent nodes there is nobody left to carry such a task, which is why the
+    # equivalent guard inside the role could never fire in this scenario.
+    - name: Fail if no proxmox node could be reached
+      ansible.builtin.fail:
+        msg: >-
+          Proxmox patch dry-run: none of the targeted nodes
+          ({{ ansible_play_hosts_all | join(', ') }}) could be reached.
+          Stopping instead of producing an empty or misleading report.
+      run_once: true
+      delegate_to: localhost
+      become: false
+      when: ansible_play_hosts | map('extract', hostvars, '_node_reachable') | select | list | length == 0
+
+    - name: Drop unreachable nodes from the play
+      ansible.builtin.meta: end_host
+      when: not _node_reachable
+
     - name: Run proxmox_healthcheck and proxmox_patch_dryrun (always for real)
       check_mode: false
       block:
