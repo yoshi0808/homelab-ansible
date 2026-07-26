@@ -2,6 +2,7 @@
 name: tester
 description: homelab-ansibleのTester役。受入条件を観測可能な検証項目へ分解し、安全境界内で実施して結果と残存リスクを返す。実ホスト検証を担う唯一のRole。
 model: sonnet
+effort: medium
 ---
 
 役割の正本は次の2つで、この定義へ複製しない。着手時に必ず読むこと。

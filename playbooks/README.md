@@ -10,7 +10,7 @@ playbook の入口を置く。処理本体は原則として `roles/` に実装�
 
 各表の `tester-gate` は playbook ヘッダの `# tester-gate:` を転記したものであり、
 この README はヘッダや承認ルールを上書きしない。実行前には必ず対象ファイルのヘッダ、
-承認済み test plan、`docs/ai/prompts/core.md` の最新ルールを確認する。
+承認済み test plan、`docs/ai/policies/ansible_test_safety_policy.md` の最新ルールを確認する。
 
 | `tester-gate` | カタログ上の意味 |
 | --- | --- |
@@ -20,8 +20,10 @@ playbook の入口を置く。処理本体は原則として `roles/` に実装�
 | `check-mode-native` | 検証時は必ず `--check` を付ける。`--check` なしは APPLY として人間判断を必要とする。 |
 | `dry-run-aware` | 検証時は必ず `--check` を付け、playbook 固有の dry-run 分岐を使う。 |
 
-Codex が `check-mode-native` / `dry-run-aware` を検証する場合は、原則として
-`scripts/safe-ansible-check.sh playbooks/<name>.yml --check` を使う。
+`check-mode-native` / `dry-run-aware` の検証実行には、実行者を問わず
+`scripts/safe-ansible-check.sh playbooks/<name>.yml --check` を使う
+(`--check` が無いと即終了するため、付け忘れを機械的に防げる)。
+分類の意味と実行義務の正本は `docs/ai/policies/ansible_test_safety_policy.md`。
 
 ## 監視・ログ基盤
 

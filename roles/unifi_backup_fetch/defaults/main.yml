@@ -4,7 +4,7 @@
 # 詳細は docs/ai/reviews/unifi_backup_fetch/ を参照。
 
 # 接続先 CloudKey。必ずホスト名で接続する(私設 CA + Origin ヘッダ必須。
-# IP 直叩きは禁止。core.md §3 / cloudkey_cert_deploy と同方針)。
+# IP 直叩きは禁止。core.md / cloudkey_cert_deploy と同方針)。
 cloudkey_host: cloudkey.internal
 
 # UniFi OS 非公開 API パス

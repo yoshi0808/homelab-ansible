@@ -102,7 +102,7 @@
         fail_msg: >-
           This playbook does not support -e tester_mode=true. Use --check
           instead — see the header of this file for the check-mode-native
-          behavior. See docs/ai/prompts/core.md §18 "移行中の例外".
+          behavior. See docs/ai/policies/ansible_test_safety_policy.md.
         quiet: true
 
 - name: Ubuntu VM full-upgrade judgement / manual apply (ansy, monnie, authy, quory)

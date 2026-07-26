@@ -4,7 +4,7 @@
 # 登録・移行先検証)は --check の有無にかかわらず常に本実行し、Phase 3以降
 # (ha-manager relocate)は ansible_check_mode でゲートする(tags: destructive)。
 # 自律復旧ラダーの実処理のため、--check 時に実行してはならない
-# (Yoshinobu指示、2026-07-06)。詳細は docs/ai/prompts/core.md §18 "移行中の例外"。
+# (Yoshinobu指示、2026-07-06)。詳細は docs/ai/policies/ansible_test_safety_policy.md。
 # recovery_ha_failover.yml
 #
 # 目的: 自律復旧ラダー第3段（最終手段）。VM を Proxmox HA マネージャー経由で
@@ -60,7 +60,7 @@
           This playbook no longer supports -e tester_mode=true. Re-run with
           --check instead — tag/HA-registration/target-node verification
           runs for real under --check, and the actual HA relocate is gated
-          by ansible_check_mode. See docs/ai/prompts/core.md §18 "移行中の例外".
+          by ansible_check_mode. See docs/ai/policies/ansible_test_safety_policy.md.
         quiet: true
   roles:
     - recovery_ha_failover

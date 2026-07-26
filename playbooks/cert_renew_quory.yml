@@ -16,8 +16,7 @@
 # 理由: quory は本 playbook を含む自動化を動かしている本番 Semaphore(制御平面)
 # そのものであり、証明書配置ミスによる semaphore 再起動失敗はCloudKeyのような
 # 「Web UIのSSLが効かなくなるだけ」より復旧コストが高い(直接SSHでの復旧が必要
-# になり得る)とYoshinobuが判断(2026-07-06)。詳細は docs/ai/prompts/core.md §18
-# "移行中の例外"。
+# になり得る)とYoshinobuが判断(2026-07-06)。詳細は docs/ai/policies/ansible_test_safety_policy.md。
 
 - name: cert_renew_quory - verify execution host
   hosts: localhost
@@ -39,8 +38,7 @@
           This playbook no longer supports -e tester_mode=true. Re-run with
           --check instead — prepare_ca/issue/cleanup run for real under
           --check, and only the quory semaphore cert deploy/restart step is
-          gated by ansible_check_mode. See docs/ai/prompts/core.md §18
-          "移行中の例外".
+          gated by ansible_check_mode. See docs/ai/policies/ansible_test_safety_policy.md.
         quiet: true
 
 - name: cert_renew_quory - prepare CA key on quory

@@ -22,8 +22,7 @@
 # 解除 / HA relocate / 起動 / post-restore healthcheck(Phase 1-4)は
 # ansible_check_mode でゲートする(tags: destructive)。非HA VMはオンライン
 # マイグレーションも可能だが、全体の平仄を取るため --check 時は一切 VM を
-# 動かさない(Yoshinobu指示、2026-07-06)。詳細は docs/ai/prompts/core.md §18
-# "移行中の例外"。
+# 動かさない(Yoshinobu指示、2026-07-06)。詳細は docs/ai/policies/ansible_test_safety_policy.md。
 
 - name: Validate target_node
   hosts: localhost
@@ -43,8 +42,7 @@
           This playbook no longer supports -e tester_mode=true. Re-run with
           --check instead — VM identification runs for real under --check,
           and the actual migrate/maintenance-mode/HA-relocate sequence is
-          gated by ansible_check_mode. See docs/ai/prompts/core.md §18
-          "移行中の例外".
+          gated by ansible_check_mode. See docs/ai/policies/ansible_test_safety_policy.md.
         quiet: true
 
     - name: Set recovery mute for authy

@@ -16,7 +16,7 @@
 # 再実行で復旧できると判断)。ただし quory 自身の semaphore 証明書更新・再起動
 # (制御平面そのもの)は cert_renew_quory.yml 側で扱っており、そちらは
 # ansible_check_mode でゲートする(check-mode-native)。詳細は
-# docs/ai/prompts/core.md §18 "移行中の例外"。
+# docs/ai/policies/ansible_test_safety_policy.md。
 
 - name: cert_renew - verify execution host
   hosts: localhost
@@ -38,8 +38,7 @@
         fail_msg: >-
           This playbook no longer supports -e tester_mode=true and has no
           dry-run mode (--check included): issue/deploy for ansy, pve1, pve2,
-          monnie always run for real. See docs/ai/prompts/core.md §18
-          "移行中の例外".
+          monnie always run for real. See docs/ai/policies/ansible_test_safety_policy.md.
         quiet: true
 
 - name: cert_renew - prepare CA key on quory

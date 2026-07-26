@@ -1,7 +1,7 @@
 ---
 # time_sync_check: homelab 主要ホストの NTP 同期状態チェック。
 # read-only。各ホストでの状態取得は command/expect のみで行い、
-# 正常/異常判定・fail制御は本ファイル(Ansible tasks側)で行う(core.md §7)。
+# 正常/異常判定・fail制御は本ファイル(Ansible tasks側)で行う(docs/ai/context/operations/healthcheck.md)。
 #
 # 設計方針(quory基準の生時刻比較方式からの転換):
 # 当初は quory の時刻と各ホストの時刻をSSH/HTTPで一回取得して差分を計算する方式を

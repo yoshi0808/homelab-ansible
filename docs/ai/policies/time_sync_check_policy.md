@@ -58,7 +58,7 @@ Sophos DNSのNXDOMAIN応答をhard failureとして扱い`bad address`で失敗�
 判明した（CloudKey自身はglibcリゾルバのため同名を問題なく解決でき、この問題は
 再現しない）。Sophos側でのNXDOMAIN是正は不可能なため、`ntp_server_3`を
 `quory.internal`からquoryのIPアドレスへ、GUI経由でユーザー自身が変更済みである
-（IPリテラルは本ファイルへ書かない。core.md §3）。
+（IPリテラルは本ファイルへ書かない。core.md）。
 
 `time_sync_check.yml`側のcloudkey判定（`timedatectl timesync-status`の数値
 Offset取得）はCloudKey自身のsystemd-timesyncd（Ubiquiti/Debian pool参照、上記の
@@ -151,7 +151,7 @@ Phase 2〜4は対象ホストごとに独立して収集・判定する。1ホ�
 <!-- TIME-010 -->
 shell / Ansible の責務分離: 各ホストでの時刻・offset情報の取得は
 command/expectで行い、差分計算・閾値判定・fail制御はAnsible tasks側に置く
-（core.md §7）。
+（docs/ai/context/operations/healthcheck.md）。
 
 ## 6. 通知方針
 
@@ -194,10 +194,10 @@ severityはホストの状態区分ごとに独立して決め、ジョブのfai
 ```text
 - time_sync_check.yml は read-only。対象ホストの時刻・NTP設定の変更は行わない。
 - NTPクライアント設定へのquory参照追加は time_sync_ntp_reference.yml（変更系）
-  で別途実施する（core.md §9: 読み取り専用ロールと変更系ロールの分離）。
+  で別途実施する（core.md: 読み取り専用ロールと変更系ロールの分離）。
 - 秘密情報（cloudkeyのSSHパスワード、sophos-fwのSSH鍵）を扱うタスクには
   no_log: true を設定する。
-- IPリテラルをファイルに書かない（core.md §3）。quory.internal等の名前解決は
+- IPリテラルをファイルに書かない（core.md）。quory.internal等の名前解決は
   sophos-fw（社内DNS）に依存する前提を許容する。
 - NTP設定そのものの自動補正は行わない（異常検知のみ）。
 - 時刻ズレの履歴管理・トレンド分析は行わない。
@@ -229,7 +229,7 @@ role / playbook）
 
 参照:
 
-- docs/ai/prompts/core.md
+- docs/ai/core.md、docs/ai/policies/ansible_test_safety_policy.md
 - playbooks/cloudkey_cert_deploy.yml（vars_filesでのVault読み込みパターン）
 - roles/common_slack/tasks/notify.yml
 - docs/ai/reviews/time_sync_check/（要求仕様・実装・レビュー一式）

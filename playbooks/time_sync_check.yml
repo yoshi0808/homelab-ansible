@@ -59,7 +59,7 @@
 # 重要な前提・制約:
 #   - read-only。対象ホストの時刻・NTP設定の変更は行わない
 #     (NTPクライアント設定へのquory参照追加は playbooks/time_sync_ntp_reference.yml
-#     で別途実施する。core.md §9: 読み取り専用ロールと変更系ロールの分離)。
+#     で別途実施する。core.md: 読み取り専用ロールと変更系ロールの分離)。
 #   - sophos-fwの直接比較は、Advanced Shellのメニュー遷移全体を含む往復遅延が
 #     誤差として混入するため、他ホストより大きい閾値
 #     (time_sync_check_sophos_threshold_ms)を用いる。

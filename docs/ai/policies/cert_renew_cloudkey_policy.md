@@ -180,7 +180,7 @@ DELETE直前に assert で上記条件を固定する。
 <!-- CCK-013 -->
 総合判定 `cloudkey_verify_ok = リーフ指紋一致 and 3階層順序一致`。
 `openssl s_client` を使う shell は情報収集のみで、判定と fail 制御は
-Ansible tasks 側に置く（core.md §7 / §9 の責務分離）。
+Ansible tasks 側に置く（core.md の責務分離）。
 
 ## 5. ライフサイクル・処理フロー
 

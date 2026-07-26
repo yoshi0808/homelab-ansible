@@ -53,7 +53,7 @@ monthlyは`quory`から固定時刻のsingle scheduleで実行する。
 <!-- BRV-011 -->
 本Policyに対応するplaybookは`proxmox_backup_restore_verify.yml`の1本とする。
 
-この入口のtester-gateは`risk-accepted`である(core.md §18の判断基準: 対象は専用固定restore VMIDに限定され本番VMへの実害がないこと、かつ実restoreを省略すると検証自体の意味が失われることの2条件を満たす)。`--check`を指定してもrestore / start / stop / destroyを含む本実行になり、挙動は変わらない。`tester_mode`/`tester_gate`は廃止済みの概念であり本Playbookでも参照しない(`tester_mode=true`を指定した場合はassertでfailする)。
+この入口のtester-gateは`risk-accepted`である(判断基準は`docs/ai/policies/ansible_test_safety_policy.md` TS-009〜TS-011: 対象は専用固定restore VMIDに限定され本番VMへの実害がないこと、かつ実restoreを省略すると検証自体の意味が失われることの2条件を満たす)。`--check`を指定してもrestore / start / stop / destroyを含む本実行になり、挙動は変わらない。`tester_mode`/`tester_gate`は廃止済みの概念であり本Playbookでも参照しない(`tester_mode=true`を指定した場合はassertでfailする)。
 
 この分類自体はYoshinobuが判断済み(2026-07-06)であり、monthly実行のたびに個別の実行判断を必要としない。`quory`からのmonthly schedule実行(BRV-042)、`ansy`からのmanual実行(BRV-006)のいずれも同じ扱いとする。
 
@@ -300,4 +300,4 @@ destroy対象が構造的に専用固定restore VMIDへ限定されることを�
 |---|---|
 | 2026-06-14 | v1.0。monthly restore verification、minimal lock、ownership、cleanup、通知を定義 |
 | 2026-07-24 | 標準8節へ再編。環境事実とcross-file実装契約をContextへ分離し、専用restore VMIDの数値実値をPolicyから除去 |
-| 2026-07-26 | Yoshinobuの再点検を反映。BRV-011を`tester_mode`廃止後の実態(risk-accepted分類はYoshinobu判断済み・monthly実行に個別の実行判断は不要)に合わせて改訂。rotationの目的(年間均等化)をBRV-084として明記。core.md §3と重複するBRV-070(IP literal禁止)を削除 |
+| 2026-07-26 | Yoshinobuの再点検を反映。BRV-011を`tester_mode`廃止後の実態(risk-accepted分類はYoshinobu判断済み・monthly実行に個別の実行判断は不要)に合わせて改訂。rotationの目的(年間均等化)をBRV-084として明記。core.mdと重複するBRV-070(IP literal禁止)を削除 |

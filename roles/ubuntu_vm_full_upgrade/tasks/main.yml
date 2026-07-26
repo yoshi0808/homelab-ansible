@@ -304,7 +304,7 @@
     # include_tasks (dynamic include) cannot take check_mode: directly
     # ("'check_mode' is not a valid attribute for a TaskInclude") — wrapping
     # in a block and setting check_mode: false at the block level is the
-    # documented workaround (core.md §18.2) and cascades to the included
+    # documented workaround (docs/ai/policies/ansible_test_safety_policy.md TS-013) and cascades to the included
     # tasks.
     # Channel patches (2026-07-12_019 §実施2): this is the --check stand-in
     # for the apply summary, i.e. a normal patch-cycle report.

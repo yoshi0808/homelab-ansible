@@ -45,7 +45,7 @@
 # 実行される(ガードはtargetsへの配布直前にのみ効く)。この限定的なローカル
 # 変更こそが元々のrisk-accepted判断(2026-07-06)の対象であり、そこにサービス
 # 再起動を伴わないという前提は変わらない。両者を合わせてrisk-acceptedの分類は
-# 継続する。詳細は docs/ai/prompts/core.md §18 "移行中の例外"。
+# 継続する。詳細は docs/ai/policies/ansible_test_safety_policy.md。
 
 - name: Deploy recovery-exec (Codex runner + SSH key generation)
   hosts: dev_nodes:control_nodes
@@ -62,7 +62,7 @@
         fail_msg: >-
           This playbook no longer supports -e tester_mode=true and has no
           dry-run mode (--check included): recovery-exec setup always runs
-          for real. See docs/ai/prompts/core.md §18 "移行中の例外".
+          for real. See docs/ai/policies/ansible_test_safety_policy.md.
         quiet: true
 
   tasks:

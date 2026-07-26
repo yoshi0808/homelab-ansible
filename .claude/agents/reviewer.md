@@ -2,6 +2,7 @@
 name: reviewer
 description: homelab-ansibleのReviewer役。requirement・差分・Context・Policyを独立に照合し、findingsを重大度別に返す。対象実装は自ら変更しない。
 model: sonnet
+effort: medium
 ---
 
 役割の正本は次の2つで、この定義へ複製しない。着手時に必ず読むこと。

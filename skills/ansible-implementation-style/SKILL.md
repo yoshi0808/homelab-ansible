@@ -32,6 +32,20 @@ Ansible専用の公式Skillは存在しないため、内部で使う個別言�
 - `{{ foo }}` で始まる値は行全体をクォートしないとYAMLパースエラーになる。
 - Jinja2のループ・条件はplaybook内では使えず、template内でのみ使う。
 
+## check_mode の実装上の落とし穴
+
+出典: 旧`docs/ai/prompts/core.md` §18.3(項目1・4・5)および§18.2(項目2・3のinclude例外)から移設(2026-07-26、移行表C18-03/04/06/07/08/10)。実装時に繰り返し踏んだ／踏みかけた問題であり、新しいplaybookを書くときとレビューするときに毎回確認する。分類の意味・実行義務そのものは`docs/ai/policies/ansible_test_safety_policy.md`が正本(TS-028が本節を参照している)。
+
+1. **moduleごとにcheck_mode挙動が3パターンに分かれる。**
+   - 非対応・auto-skip: `command` / `shell` / `expect` / `uri`(`ansible-doc <module>`の`attributes.check_mode.support: none`で確認できる)
+   - 対応・simulate: `copy` / `template` / `file` / `systemd` / `apt`等(`--check`下では実際に書き込まず`changed`だけ返す)
+   - `command`/`shell` + `creates:`/`removes:`: ファイル存在チェックの結果に応じて「`changed: true`と報告しつつ実行しない」という第3パターンを取る
+   - 「初回でも必ず実データを作りたい」場合は、上記いずれのmoduleでも`check_mode: false`を明示しないと、実行されない・simulateされるだけで終わる。
+2. **`include_role` / `include_tasks`(動的include)には`check_mode:`を直接付けられない**(`'check_mode' is not a valid attribute for a IncludeRole/TaskInclude`)。`import_role` / `import_tasks`(静的)へ置き換えるか、blockで包んでblock側に置く。
+3. **`block:`に`loop:`は付けられない。** そのため`loop:`付きのincludeはblock化によるカスケードが使えず、include先のタスクファイル自身へ`check_mode: false`を個別に付ける(実例: `roles/recovery_push/tasks/drill_setup.yml`)。
+4. **handlerは通知元taskの`check_mode: false`を継承しない。** handler自身へ個別に付ける(実地検証済み)。
+5. **`meta: end_play` / `end_host`は、それが属するblockの`always:`を丸ごとスキップする**(通常のtask失敗によるrescue/alwaysフローとは異なる)。これに依存した旧ゲート実装は、停止時にレポート保存も通知も一切残らない「無音停止」になっていた。
+
 ## 適用条件
 
-セキュリティに関わる実装判断(shell/commandモジュールへの変数注入対策等)は`skills/ansible-security-review/SKILL.md`を参照する。本Skillは表現・スタイルレベルの基準であり、Reviewer/Testerの検査基準には拡張しない(2026-07-23確認済み)。
+セキュリティに関わる実装判断(shell/commandモジュールへの変数注入対策等)は`skills/ansible-security-review/SKILL.md`を参照する。本Skillは表現・スタイルレベルの基準であり、Reviewer/Testerの検査基準には拡張しない(2026-07-23確認済み)。ただし上記「check_modeの実装上の落とし穴」はReviewerも確認対象とする(出典の§18.3が実装時とレビュー時の双方を対象としていた)。

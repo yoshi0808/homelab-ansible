@@ -6,7 +6,7 @@
 # (see tasks/main.yml Phase 9-13 comment), so tasks here do not repeat
 # `when: not ansible_check_mode` individually. `tags: [destructive]` on the
 # reboot blocks is kept for discoverability/convention only
-# (core.md §18.2 style), not as the enforcement mechanism.
+# (docs/ai/policies/ansible_test_safety_policy.md TS-013 style), not as the enforcement mechanism.
 #
 # Muting recovery alerts before touching apt (not just before reboot):
 # full-upgrade's post-install maintainer scripts can restart services on

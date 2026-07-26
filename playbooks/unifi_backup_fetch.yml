@@ -24,7 +24,7 @@
 # (proxmox_backup_restore_verifyと同じ理由)ためYoshinobuが安全側と判断
 # (2026-07-06)。注意: 世代ローテーションは件数基準(既定8世代)のため、
 # 頻繁なテスト実行は本番バックアップの実質的な保持期間を縮める可能性がある。
-# 詳細は docs/ai/prompts/core.md §18 "移行中の例外"。
+# 詳細は docs/ai/policies/ansible_test_safety_policy.md。
 
 # ---------------------------------------------------------------------------
 # Play 1: pve1/pve2 の到達性を probe し、pve1 優先・pve2 フェイルオーバーで
@@ -88,7 +88,7 @@
         fail_msg: >-
           This playbook no longer supports -e tester_mode=true and has no
           dry-run mode (--check included): backup fetch always runs for
-          real. See docs/ai/prompts/core.md §18 "移行中の例外".
+          real. See docs/ai/policies/ansible_test_safety_policy.md.
         quiet: true
 
     - name: Fetch UniFi OS backup

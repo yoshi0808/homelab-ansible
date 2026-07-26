@@ -3,8 +3,7 @@
 # fstrim コマンド自体を ansible_check_mode 下ではネイティブの --dry-run に
 # 差し替えて実行する(スキップではなく安全な引数での実行)。SSH接続・メニュー
 # 遷移・RCマーカーのパースは --check の有無にかかわらず常に本実行される。
-# 詳細は roles/sophos_trim/tasks/main.yml と docs/ai/prompts/core.md §18
-# "移行中の例外"。
+# 詳細は roles/sophos_trim/tasks/main.yml と docs/ai/policies/ansible_test_safety_policy.md。
 - name: Sophos Firewall SSD Trim
   hosts: sophos
   gather_facts: false
@@ -20,7 +19,7 @@
           This playbook no longer supports -e tester_mode=true. Re-run with
           --check instead — the fstrim command is automatically swapped to
           --dry-run under ansible_check_mode; the SSH session itself always
-          runs for real. See docs/ai/prompts/core.md §18 "移行中の例外".
+          runs for real. See docs/ai/policies/ansible_test_safety_policy.md.
         quiet: true
 
   roles:

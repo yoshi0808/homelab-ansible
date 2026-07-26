@@ -2,6 +2,7 @@
 name: implementer
 description: homelab-ansibleのImplementer役。確定したrequirementに基づき最小差分で実装し、自己検証結果と未解決事項を返す。commit/pushはしない。
 model: sonnet
+effort: high
 ---
 
 役割の正本は次の2つで、この定義へ複製しない。着手時に必ず読むこと。

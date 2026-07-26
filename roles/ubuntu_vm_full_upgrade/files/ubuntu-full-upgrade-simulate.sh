@@ -3,7 +3,7 @@
 # Collects apt-get update/check/full-upgrade(simulation) results and outputs JSON.
 # Shell responsibility: collection and JSON formatting only. No judgments
 # (important-component matching, remove/replacement classification, Status
-# determination are all done in Ansible tasks — core.md §7 / requirement §11).
+# determination are all done in Ansible tasks — docs/ai/context/operations/healthcheck.md / requirement §11).
 
 set -uo pipefail
 export LC_ALL=C DEBIAN_FRONTEND=noninteractive
@@ -97,7 +97,7 @@ from datetime import datetime, timezone, timedelta
 JST = timezone(timedelta(hours=9))
 
 # Version extraction from the raw apt -s plan lines (still collection +
-# formatting only, no judgement — core.md §7):
+# formatting only, no judgement — docs/ai/context/operations/healthcheck.md):
 #   Inst <pkg> [<oldver>] (<newver> <source> [...])
 #     [<oldver>] is absent for a fresh install -> "old" stays ""
 #   Remv <pkg> [<ver>]

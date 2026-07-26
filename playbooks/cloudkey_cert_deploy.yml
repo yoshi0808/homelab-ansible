@@ -18,8 +18,7 @@
 # 終わるため、通知だけ挙動が変わらないよう明示的に無効化している)。
 # 理由: 最悪ケースは CloudKey Web UI の TLS 証明書が壊れて SSL 警告が出るだけで、
 # 本 playbook を再実行すれば復旧できる。Yoshinobu がこのリスクを許容し、常時
-# 本実行することに合意した(2026-07-06)。詳細は docs/ai/prompts/core.md §18
-# "移行中の例外"。
+# 本実行することに合意した(2026-07-06)。詳細は docs/ai/policies/ansible_test_safety_policy.md。
 
 - name: cloudkey_cert_deploy
   hosts: localhost
@@ -42,7 +41,7 @@
         fail_msg: >-
           This playbook no longer supports -e tester_mode=true and has no
           dry-run mode (--check included): it always issues and deploys a
-          real certificate. See docs/ai/prompts/core.md §18 "移行中の例外".
+          real certificate. See docs/ai/policies/ansible_test_safety_policy.md.
         quiet: true
 
     - name: Deploy CloudKey certificate

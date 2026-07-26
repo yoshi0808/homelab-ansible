@@ -59,8 +59,8 @@ CloudKey へは必ずホスト名で接続する（私設 CA + `Origin` ヘッ�
 `ubuntu_vm_patch_policy.md` の深夜リブートスケジュールと衝突しない時間帯に、quory の
 systemd timer で**週次**実行する（Semaphore UI 導入後は Schedule へ移行）。
 
-- Ansible playbook 内で git pull はしない（core.md §11）。
-- 未確認コードを timer で自動実行しない（core.md §12 / §17）。確定済みコードのみ。
+- Ansible playbook 内で git pull はしない（core.md）。
+- 未確認コードを timer で自動実行しない（docs/ai/core-migration-map.md C12-01/C12-02）。確定済みコードのみ。
 
 参考: 深夜帯は 01:00 UniFi Console / 02:00 UniFi Device / 03:00 quory / 03:30 authy・monnie が
 稼働するため、本取得はそれらと重ならない週次枠に置く。
@@ -185,7 +185,7 @@ always   一時ファイル掃除 → サマリ生成 → Slack 通知 → 失�
 ### 10. 制約・禁止事項
 
 ```text
-- IP リテラルをファイルに書かない（core.md §3）。cloudkey.internal で接続する。
+- IP リテラルをファイルに書かない（core.md）。cloudkey.internal で接続する。
 - 秘密情報（認証情報・TOKEN・CSRF）を扱うタスクには no_log: true を付ける。
 - 秘密情報・バックアップ実体をリポジトリにコミットしない。
 - CloudKey の設定は変更しない（生成・取得のみ）。
@@ -226,7 +226,7 @@ always   一時ファイル掃除 → サマリ生成 → Slack 通知 → 失�
 
 参照:
 
-- docs/ai/prompts/core.md
+- docs/ai/core.md、docs/ai/policies/ansible_test_safety_policy.md
 - docs/ai/policies/cert_renew_cloudkey_policy.md（CloudKey への非公開 API 認証方式を共有）
 - docs/ai/reviews/unifi_backup_fetch/（要求仕様・実装・レビュー一式）
 

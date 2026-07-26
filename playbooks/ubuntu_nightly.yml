@@ -3,7 +3,7 @@
 # 判定(stat/needrestart)は --check の有無にかかわらず常に本実行し、実際の
 # reboot + reboot後検証 + 結果通知(tags: destructive)だけを ansible_check_mode
 # でゲートする。reboot_required=true かつ --check のときは「reboot予定だが未実施」
-# の軽量レポート/通知を別途出す。詳細は docs/ai/prompts/core.md §18 "移行中の例外"。
+# の軽量レポート/通知を別途出す。詳細は docs/ai/policies/ansible_test_safety_policy.md。
 
 - name: Ubuntu nightly - conditional reboot and service check (radius_servers)
   hosts: radius_servers
@@ -21,8 +21,7 @@
           This playbook no longer supports -e tester_mode=true. Re-run with
           --check instead — reboot-required detection runs for real under
           --check, and only the actual reboot/post-reboot verification is
-          gated by ansible_check_mode. See docs/ai/prompts/core.md §18
-          "移行中の例外".
+          gated by ansible_check_mode. See docs/ai/policies/ansible_test_safety_policy.md.
         quiet: true
 
     - name: Check reboot-required flag
@@ -269,8 +268,7 @@
           This playbook no longer supports -e tester_mode=true. Re-run with
           --check instead — reboot-required detection runs for real under
           --check, and only the actual reboot/post-reboot verification is
-          gated by ansible_check_mode. See docs/ai/prompts/core.md §18
-          "移行中の例外".
+          gated by ansible_check_mode. See docs/ai/policies/ansible_test_safety_policy.md.
         quiet: true
 
     - name: Check reboot-required flag

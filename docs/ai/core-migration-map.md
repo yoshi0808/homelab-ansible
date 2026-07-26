@@ -1,8 +1,14 @@
 # `core.md` 移行追跡表
 
-対象: `docs/ai/prompts/core.md`（2026-07-21時点、1,253行、18セクション）
+対象: 旧 `docs/ai/prompts/core.md`（1,253行、18セクション）
 
-このファイルは、旧coreの情報を移行後に一項目ずつ消失確認するためのindexである。移行期間は、Role/routingを `docs/ai/role-routing-index.md` から解決し、本表の該当行が指す旧coreの節だけを読む。
+> **⚠️ 2026-07-26: 旧coreファイルは削除済み。** 稼働コードから参照されていた§18(tester-gate、49箇所)を `docs/ai/policies/ansible_test_safety_policy.md` と `skills/ansible-implementation-style/SKILL.md` へ、§7・§17のshell責務詳細を `docs/ai/context/operations/healthcheck.md` へ移設し、全live参照を張り替えたうえで削除した。
+>
+> **本表の各行の「旧core参照」(L番号・§番号)は、git履歴に対する参照として読む。** 原文が必要な場合は `git log --all -- docs/ai/prompts/core.md` から該当commitを辿る。削除直前の内容は2026-07-26のcommitの親に存在する。
+>
+> したがって本表は「移行中のfallback index」ではなく、**未移行項目の棚卸しリスト**として機能する。`[予定 Phase N]` / `[分類のみ Phase N]` の行は、その情報が現時点でどの正本にも無いことを意味する。必要になった時点で、この表の「内容」列の要約とgit履歴の原文から、指定先へ移す。
+
+このファイルは、旧coreの情報を移行後に一項目ずつ消失確認するためのindexである。Role/routingは `docs/ai/role-routing-index.md` から解決する。
 
 ## 判断基準と移動先マーカー
 
@@ -28,8 +34,8 @@
 | §4 inventory groupとplaybook対応 | 移す | Repository Context | **[予定 Phase 2]** `docs/ai/context/ansible/inventory-map.md`, `playbook-map.md` | リポジトリ地図である |
 | §5 管理user、SSH鍵、例外host | 一部残す | core / Context / Policy | **[既存]** coreの秘密保護; **[予定 Phase 2]** System ContextとSSH / Secrets Policy | 秘密境界以外は環境・認証詳細である |
 | §6 playbook / role / files / vars責務 | 移す | Repository Context | **[予定 Phase 2]** `docs/ai/context/ansible/repository-overview.md` | 構造説明である |
-| §7 check shellとAnsibleの責務 | 移す | Policy / Skill | **[分類のみ Phase 2]** Ansible Design Policy; **[分類のみ Phase 4–5]** Implementer / Reviewer Skill | 主に実装・レビュー時に必要 |
-| §8 files / templates / script | 移す | Policy / Skill | **[分類のみ Phase 2]** Ansible Design Policy; **[分類のみ Phase 4–5]** Implementer Skill | 実装手順と例外である |
+| §7 check shellとAnsibleの責務 | 移す | Operations Context | **[既存]** `docs/ai/context/operations/healthcheck.md` §1(2026-07-26移設) | 主に実装・レビュー時に必要 |
+| §8 files / templates / script | 移す | Policy / Skill | **[分類のみ Phase 2]** Ansible Design Policy; **[既存]** `skills/ansible-implementation-style/SKILL.md` | 実装手順と例外である |
 | §9 read-onlyと変更系の分離 | 一部残す | core / Policy | **[既存]** coreの共通境界; **[分類のみ Phase 2]** Change Safety Policy | 詳細条件は個別判断である |
 | §10 命名、playbook一覧、Policy一覧 | 移す | Repository Context / Policy index | **[既存]** `playbook-map.md`; Policyは **[既存]** `docs/ai/policies/*_policy.md`(2026-07-23移行完了) | 一覧は変化する |
 | §11 Git / quory反映 | 一部残す | core / Deployment Policy | **[既存]** coreの正本・自己更新禁止; **[分類のみ Phase 2]** Deployment Policy | 操作詳細だけを分離する |
@@ -37,9 +43,9 @@
 | §13 `.gitignore` | 一部残す | core / Repository Context / Skill | **[既存]** coreの秘密・生成物境界; **[分類のみ Phase 2/5]** Repository Context / Contribution Skill | pattern詳細はコードから確認可能 |
 | §14 AI運用、Role、2セッション | 一部残す | core / Role / Operations Context | **[既存]** coreとRole/routing index; **[予定 Phase 3]** `docs/ai/roles/`; **[分類のみ Phase 2]** Operations Context | 権限境界だけが全員共通 |
 | §15 要求・文書・agmsg・review | 一部残す | core / Role / Workflow / Skill | **[既存]** coreとRole/routing index; **[予定 Phase 3]** Role / Workflow; **[分類のみ Phase 4–5]** Requirements / Review / Documentation Skill | 工程・担当別手順である |
-| §16 review・test・final | 移す | Role / Workflow / Policy / Skill | **[予定 Phase 3]** Role / Workflow; **[分類のみ Phase 2]** Test Safety Policy; **[分類のみ Phase 4–5]** Test / Documentation Skill | Role固有の成果物と判断である |
+| §16 review・test・final | 移す | Role / Workflow / Policy / Skill | **[予定 Phase 3]** Role / Workflow; **[既存]** `docs/ai/policies/ansible_test_safety_policy.md`; **[分類のみ Phase 4–5]** Test / Documentation Skill | Role固有の成果物と判断である |
 | §17 禁止事項 | 一部残す | core / Policy / product差分 / Knowledge | **[既存]** coreと`CLAUDE.md`; **[分類のみ Phase 2]** Policy; **[予定 Phase 6]** Knowledge | 共通境界、製品差、教訓を分ける |
-| §18 tester-gate | 一部残す | core / Policy / Skill / Knowledge | **[既存]** coreの分類確認; **[分類のみ Phase 2]** Test Safety Policy; **[分類のみ Phase 4–5]** Skills; **[予定 Phase 6]** Lessons | 詳細は実装・テスト時だけ必要 |
+| §18 tester-gate | 一部残す | core / Policy / Skill / Knowledge | **[既存]** coreの分類確認; **[既存]** `docs/ai/policies/ansible_test_safety_policy.md`; **[分類のみ Phase 4–5]** Skills; **[予定 Phase 6]** Lessons | 詳細は実装・テスト時だけ必要 |
 
 ## 独立した許可・禁止・例外・停止条件
 
@@ -54,10 +60,10 @@
 | C05-03 | L204: `authorized_keys` を勝手に上書きしない | 禁止 | 移す | SSH Policy | **[分類のみ Phase 2]** SSH / Access Policy | 認証資産固有の変更禁止 |
 | C05-04 | L205: SSH port/userを推測して固定しない | 禁止 | 残す | core | **[既存]** `docs/ai/core.md` | 全Roleの推測禁止 |
 | C05-05 | L206: vault/secret/local平文を作らない | 禁止 | 統合 | core / Secrets Policy | **[既存]** core; **[分類のみ Phase 2]** Secrets Policy | 共通境界と形式詳細を分離 |
-| C07-01 | L261: boolean等の観測値をshellが返すことは許容 | 許可 | 移す | Ansible Design Policy | **[分類のみ Phase 2]** Ansible Design Policy | sensor出力境界の明示的許可 |
-| C07-02 | L262-263: `status: critical` / warnings生成は禁止 | 禁止 | 移す | Policy / Skill | **[分類のみ Phase 2]** Ansible Design Policy; **[分類のみ Phase 4–5]** Implementer / Reviewer Skill | 観測と判定の境界 |
-| C08-01 | L269-273 + L278-279: 静的shellはfiles、一時実行なら`script`を許容 | 原則・例外 | 移す | Policy / Skill | **[分類のみ Phase 2]** Ansible Design Policy; **[分類のみ Phase 4–5]** Implementer Skill | 一時実行だけの例外を保持する |
-| C08-02 | L281-285: templateは変数埋込が必要な場合だけ | 許可条件 | 移す | Policy / Skill | **[分類のみ Phase 2]** Ansible Design Policy; **[分類のみ Phase 4–5]** Implementer Skill | template採用の停止条件 |
+| C07-01 | L261: boolean等の観測値をshellが返すことは許容 | 許可 | 移す | Operations Context | **[既存]** `docs/ai/context/operations/healthcheck.md` §1 | sensor出力境界の明示的許可 |
+| C07-02 | L262-263: `status: critical` / warnings生成は禁止 | 禁止 | 移す | Operations Context | **[既存]** `docs/ai/context/operations/healthcheck.md` §1 | 観測と判定の境界 |
+| C08-01 | L269-273 + L278-279: 静的shellはfiles、一時実行なら`script`を許容 | 原則・例外 | 移す | Policy / Skill | **[分類のみ Phase 2]** Ansible Design Policy; **[既存]** `skills/ansible-implementation-style/SKILL.md` | 一時実行だけの例外を保持する |
+| C08-02 | L281-285: templateは変数埋込が必要な場合だけ | 許可条件 | 移す | Policy / Skill | **[分類のみ Phase 2]** Ansible Design Policy; **[既存]** `skills/ansible-implementation-style/SKILL.md` | template採用の停止条件 |
 | C09-01 | §9: checkへ変更操作を混ぜず変更系入口を分離 | 禁止 | 一部残す | core / Change Policy | **[既存]** core; **[分類のみ Phase 2]** Change Safety Policy | 共通境界と実装詳細を分ける |
 | C11-01 | §11: quoryのpullはclean確認後`--ff-only` | 前提条件 | 移す | Deployment Policy | **[分類のみ Phase 2]** Deployment Policy | 本番取得手順である |
 | C11-02 | §11: playbook内でgit pullしない | 禁止 | 残す | core | **[既存]** `docs/ai/core.md` | 自己更新問題は全Role共通 |
@@ -70,26 +76,26 @@
 | C15-01 | L587-588: 空の工程ファイルを事前作成しない | 禁止 | 移す | Documentation Skill | **[分類のみ Phase 4–5]** Documentation Skill | 不要成果物を防ぐ |
 | C15-02 | §15 agmsg: 本文はrepo、messageはpath中心 | 正本条件 | 一部残す | core / Workflow | **[既存]** core; **[予定 Phase 3]** Workflow | 監査証跡と配送を分ける |
 | C15-03 | §15 watcher: 通知を承認と扱わず秘密を転載しない | 禁止・停止条件 | 移す | Operations Context / agmsg Skill | **[分類のみ Phase 2/5]** Agent Operations Context / agmsg Skill | ASK検知は実行許可ではない |
-| C16-01 | L910-911: SSH自体でなく接続先コマンドの性質で安全分類 | 判断条件 | 移す | Test Safety Policy | **[分類のみ Phase 2]** Test Safety Policy | 実行方法でなく副作用を評価する |
+| C16-01 | L910-911: SSH自体でなく接続先コマンドの性質で安全分類 | 判断条件 | 移す | Test Safety Policy | **[既存]** `docs/ai/policies/ansible_test_safety_policy.md` | 実行方法でなく副作用を評価する |
 | C16-02 | L914: pve2先行、pve1/本番はdry-run後に人間判断 | 順序・停止条件 | 移す | System Context / Test Policy | **[予定 Phase 2]** Proxmox ContextとTest Safety Policy | 環境固有の先行検証境界 |
 | C16-03 | L917: quory SSHは指定鍵を先に試し、鍵なし失敗で不可と断定しない | 例外 | 移す | System Context / Test Skill | **[分類のみ Phase 2/5]** quory Context / Tester Skill | 誤った到達不能判定を防ぐ |
-| C17-01 | §17: Claude Codeはssh、commit/push、無確認playbook、実host ad-hocを行わない | 製品固有禁止 | 移す | product差分 / Policy | **[既存]** `CLAUDE.md`から本表経由で旧§17; **[分類のみ Phase 2]** Claude Execution Policy | Codex共通原則へ混ぜない |
-| C17-02 | L1016-1021: localhost + connection local + 無副作用ロジック検証は事前確認なし可、後で削除・記録 | 例外・記録義務 | 移す | Claude Execution Policy / Skill | **[分類のみ Phase 2/5]** Claude Execution Policy / Validation Skill | 製品固有禁止の限定例外 |
+| C17-01 | §17: Claude Codeはssh、commit/push、無確認playbook、実host ad-hocを行わない | 製品固有禁止 | 移す | product差分 / Policy | **[既存]** commit/push禁止は`docs/ai/core.md`、実host ad-hoc禁止は`docs/ai/roles/coordinator.md`と`skills/delegation-tier/SKILL.md`、無確認playbook禁止は`docs/ai/policies/ansible_test_safety_policy.md` TS-021。**ssh直接実行禁止は2026-07-26に廃止**(承認境界をCoordinatorへ移管、`~/.claude/settings.json`のssh askも削除) | Codex共通原則へ混ぜない |
+| C17-02 | L1016-1021: localhost + connection local + 無副作用ロジック検証は事前確認なし可、後で削除・記録 | 例外・記録義務 | 移す | Claude Execution Policy / Skill | **[既存]** `docs/ai/roles/coordinator.md`「実ホストへの非冪等操作の承認」の提示不要リスト(2026-07-26移設) | 製品固有禁止の限定例外 |
 | C17-03 | §17: 技術的hookを過信せず、人間確認を最後の安全網とする | Lesson / 原則 | 移す | Knowledge / Policy | **[予定 Phase 6]** Lesson; **[分類のみ Phase 2]** Execution Policy | 過去経緯と現在の停止条件を分離 |
-| C18-01 | §18.1: 全playbookに5分類のmarker必須 | 必須条件 | 一部残す | core / Test Policy | **[既存]** core; **[分類のみ Phase 2]** Test Safety Policy | 全員は存在を知り、詳細は必要時に読む |
-| C18-02 | L1074-1082: risk-acceptedは実害なし/復旧容易かつ本体省略無意味の2条件、costを理由にしない | 許可条件 | 移す | Test Safety Policy | **[分類のみ Phase 2]** Test Safety Policy | 本実行許可を過度に広げない |
-| C18-03 | L1099-1110: dynamic includeへ`check_mode`直付け不可、static化かblock | 実装例外 | 移す | Ansible Skill / Lesson | **[分類のみ Phase 4–5]** Ansible Implementer Skill; **[予定 Phase 6]** Lesson | include種別固有の落とし穴 |
-| C18-04 | L1112-1115: loop付きincludeはblock化不可、include先へ個別指定 | 実装例外 | 移す | Ansible Skill / Lesson | **[分類のみ Phase 4–5]** Implementer Skill; **[予定 Phase 6]** Lesson | C18-03とは別の停止条件 |
-| C18-05 | L1161-1166: orchestratorはimport先のcheck-modeを上位whenで潰さない | 実装禁止 | 移す | Ansible Skill / Test Policy | **[分類のみ Phase 4–5]** Implementer / Reviewer Skill; **[分類のみ Phase 2]** Test Policy | read-only検証消失を防ぐ |
-| C18-06 | L1173-1183: moduleごとのcheck_mode差と`check_mode:false`条件 | 実装条件 | 移す | Ansible Skill / Lesson | **[分類のみ Phase 4–5]** Skill; **[予定 Phase 6]** Lesson | module挙動の差を保持する |
-| C18-07 | L1184-1185: handlerは通知元の`check_mode:false`を継承しない | 実装例外 | 移す | Ansible Skill / Lesson | **[分類のみ Phase 4–5]** Skill; **[予定 Phase 6]** Lesson | handler固有の例外 |
-| C18-08 | L1186-1189: `end_play` / `end_host` はalwaysもskipする | 実装例外 | 移す | Ansible Skill / Lesson | **[分類のみ Phase 4–5]** Skill; **[予定 Phase 6]** Lesson | 無音停止を防ぐ |
-| C18-09 | L1190-1192: check-mode結果を通知/報告分岐へ含める | 実装義務 | 移す | Ansible Skill / Test Policy | **[分類のみ Phase 4–5]** Skill; **[分類のみ Phase 2]** Test Policy | dry-run誤通知を防ぐ |
-| C18-10 | L1193-1195: blockへloop不可 | 実装例外 | 統合 | Ansible Skill / Lesson | **[分類のみ Phase 4–5]** Skill; **[予定 Phase 6]** Lesson（C18-04と相互参照） | 同じ制約の重複説明を統合する |
-| C18-11 | §18.4: marker欠落はlintでcommitを止める | 機械的停止条件 | 移す | Repository Context / Test Policy | **[予定 Phase 2]** Repository Context / Test Safety Policy | 規約でなく実装済みgateである |
-| C18-12 | §18.5: testerはmarker確認、check-mode系を`--check`なしで実行しない | Role義務・禁止 | 移す | Tester Role / Test Skill | **[予定 Phase 3]** Tester Role; **[分類のみ Phase 4–5]** Test Skill | tester固有の実行境界 |
-| C18-13 | §18.6: Codexはsafe wrapperを使い、risk-acceptedは対象外 | 製品固有手順・例外 | 移す | Codex Test Skill | **[分類のみ Phase 4–5]** Codex Test Skill | Codex承認prefix依存の手順 |
-| C18-14 | L1157-1159: dry-run-awareで安全な引数を選んでも、`command` / `expect` 等のcheck_mode非対応moduleへ`check_mode:false`がなければtask自体がauto-skipされる | 実装条件・検証停止条件 | 移す | Implementer / Reviewer Skill + Test Safety Policy | **[分類のみ Phase 4–5]** Ansible Implementer / Reviewer Skill; **[分類のみ Phase 2]** Test Safety Policy | dry-run引数の選択だけでは実行保証にならず、auto-skipならdry-run検証が成立しないことを保持する |
+| C18-01 | §18.1: 全playbookに5分類のmarker必須 | 必須条件 | 一部残す | core / Test Policy | **[既存]** core; **[既存]** `docs/ai/policies/ansible_test_safety_policy.md` | 全員は存在を知り、詳細は必要時に読む |
+| C18-02 | L1074-1082: risk-acceptedは実害なし/復旧容易かつ本体省略無意味の2条件、costを理由にしない | 許可条件 | 移す | Test Safety Policy | **[既存]** `docs/ai/policies/ansible_test_safety_policy.md` | 本実行許可を過度に広げない |
+| C18-03 | L1099-1110: dynamic includeへ`check_mode`直付け不可、static化かblock | 実装例外 | 移す | Ansible Skill / Lesson | **[既存]** `skills/ansible-implementation-style/SKILL.md`; **[予定 Phase 6]** Lesson | include種別固有の落とし穴 |
+| C18-04 | L1112-1115: loop付きincludeはblock化不可、include先へ個別指定 | 実装例外 | 移す | Ansible Skill / Lesson | **[既存]** `skills/ansible-implementation-style/SKILL.md`; **[予定 Phase 6]** Lesson | C18-03とは別の停止条件 |
+| C18-05 | L1161-1166: orchestratorはimport先のcheck-modeを上位whenで潰さない | 実装禁止 | 移す | Ansible Skill / Test Policy | **[既存]** `skills/ansible-implementation-style/SKILL.md`; **[既存]** `docs/ai/policies/ansible_test_safety_policy.md` | read-only検証消失を防ぐ |
+| C18-06 | L1173-1183: moduleごとのcheck_mode差と`check_mode:false`条件 | 実装条件 | 移す | Ansible Skill / Lesson | **[既存]** `skills/ansible-implementation-style/SKILL.md`; **[予定 Phase 6]** Lesson | module挙動の差を保持する |
+| C18-07 | L1184-1185: handlerは通知元の`check_mode:false`を継承しない | 実装例外 | 移す | Ansible Skill / Lesson | **[既存]** `skills/ansible-implementation-style/SKILL.md`; **[予定 Phase 6]** Lesson | handler固有の例外 |
+| C18-08 | L1186-1189: `end_play` / `end_host` はalwaysもskipする | 実装例外 | 移す | Ansible Skill / Lesson | **[既存]** `skills/ansible-implementation-style/SKILL.md`; **[予定 Phase 6]** Lesson | 無音停止を防ぐ |
+| C18-09 | L1190-1192: check-mode結果を通知/報告分岐へ含める | 実装義務 | 移す | Ansible Skill / Test Policy | **[既存]** `skills/ansible-implementation-style/SKILL.md`; **[既存]** `docs/ai/policies/ansible_test_safety_policy.md` | dry-run誤通知を防ぐ |
+| C18-10 | L1193-1195: blockへloop不可 | 実装例外 | 統合 | Ansible Skill / Lesson | **[既存]** `skills/ansible-implementation-style/SKILL.md`; **[予定 Phase 6]** Lesson（C18-04と相互参照） | 同じ制約の重複説明を統合する |
+| C18-11 | §18.4: marker欠落はlintでcommitを止める | 機械的停止条件 | 移す | Repository Context / Test Policy | **[既存]** `docs/ai/policies/ansible_test_safety_policy.md`(TS-019/020) | 規約でなく実装済みgateである |
+| C18-12 | §18.5: testerはmarker確認、check-mode系を`--check`なしで実行しない | Role義務・禁止 | 移す | Tester Role / Test Skill | **[既存]** `docs/ai/policies/ansible_test_safety_policy.md`(TS-021/022/023) + `docs/ai/roles/tester.md` | tester固有の実行境界 |
+| C18-13 | §18.6: Codexはsafe wrapperを使い、risk-acceptedは対象外 | 製品固有手順・例外 | 移す | Codex Test Skill | **廃止(2026-07-26)** Codexが開発工程から外れたためprefix依存の手順は不要。`--check`付け忘れ防止という効能のみ`docs/ai/policies/ansible_test_safety_policy.md` TS-024/025へ保持 | Codex承認prefix依存の手順 |
+| C18-14 | L1157-1159: dry-run-awareで安全な引数を選んでも、`command` / `expect` 等のcheck_mode非対応moduleへ`check_mode:false`がなければtask自体がauto-skipされる | 実装条件・検証停止条件 | 移す | Implementer / Reviewer Skill + Test Safety Policy | **[既存]** `skills/ansible-implementation-style/SKILL.md`; **[既存]** `docs/ai/policies/ansible_test_safety_policy.md` | dry-run引数の選択だけでは実行保証にならず、auto-skipならdry-run検証が成立しないことを保持する |
 
 ## 移行完了の確認方法
 

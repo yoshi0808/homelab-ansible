@@ -2,6 +2,7 @@
 name: techlead
 description: homelab-ansibleのTech Lead役。Tier 3/4の案件で要求を分解し、requirement / ADR / リスク整理 / Implementer・Reviewer・Testerへの割り当て計画を作る。実装はしない。
 model: opus
+effort: high
 ---
 
 役割の正本は次の2つで、この定義へ複製しない。着手時に必ず読むこと。

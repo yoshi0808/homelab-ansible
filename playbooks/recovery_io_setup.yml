@@ -20,7 +20,7 @@
 # 制御平面そのものではなく、単一機能の周辺ブリッジ)、最悪ケースはSlack経由の
 # 復旧コマンド受付が再起動中の数秒だけ止まる程度で、他の自動化(Semaphore経由の
 # playbook実行、systemdタイマー)には影響しないためYoshinobuが安全側と判断
-# (2026-07-06)。詳細は docs/ai/prompts/core.md §18 "移行中の例外"。
+# (2026-07-06)。詳細は docs/ai/policies/ansible_test_safety_policy.md。
 
 - name: Deploy recovery-io (Slack I/O bridge)
   hosts: dev_nodes:control_nodes
@@ -36,7 +36,7 @@
           This playbook no longer supports -e tester_mode=true and has no
           dry-run mode (--check included): recovery-io setup (incl. any
           resulting service restart) always runs for real. See
-          docs/ai/prompts/core.md §18 "移行中の例外".
+          docs/ai/policies/ansible_test_safety_policy.md.
         quiet: true
 
   tasks:

@@ -42,5 +42,5 @@ time_sync_check_sophos_threshold_ms: 5000
 # Timeout for the expect-based SSH sessions (Sophos / CloudKey).
 time_sync_check_ssh_timeout: 60
 
-# CloudKey connection target (DNS name; see core.md §3 - no IP literals).
+# CloudKey connection target (DNS name; see core.md - no IP literals).
 cloudkey_host: cloudkey.internal

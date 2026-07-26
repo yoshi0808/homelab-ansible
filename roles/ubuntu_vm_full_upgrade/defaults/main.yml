@@ -51,7 +51,7 @@ ubuntu_vm_full_upgrade_important_common:
 # inventory_hostname. Final package-name confirmation against each host's
 # actual installed set is deferred to the tester (requirement §5.2: "実装時に
 # CCが対象ホストの実インストール状況を確認して行ってよい" — implementer does
-# not touch real hosts, core.md §17).
+# not touch real hosts, core.md).
 ubuntu_vm_full_upgrade_important_per_node:
   authy:
     - 'freeradius.*'
@@ -122,7 +122,7 @@ ubuntu_vm_full_upgrade_products:
 # How Ansible itself is installed on this host: "apt" (apt full-upgrade
 # candidate), "pip" (installed in a venv/pip — not an apt full-upgrade
 # candidate at all), or "unknown" (not yet confirmed). Defaults to
-# "unknown" because the implementer cannot inspect real hosts (core.md §17)
+# "unknown" because the implementer cannot inspect real hosts (core.md)
 # — override per host once the tester confirms, e.g. in
 # inventories/homelab/host_vars/ansy.yml:
 #   ubuntu_vm_full_upgrade_ansible_managed_by: apt
@@ -143,7 +143,7 @@ ubuntu_vm_full_upgrade_major_remove_threshold: 30
 # Expected distribution codename per host (e.g. "noble"), used to detect an
 # unexpected codename drift (requirement §5.4 "codename変化疑い"). Left empty
 # by default (check skipped) because the implementer cannot confirm the
-# actual installed codename on real hosts (core.md §17) — populate via
+# actual installed codename on real hosts (core.md) — populate via
 # host_vars/<node>.yml once the tester confirms current codenames.
 ubuntu_vm_full_upgrade_expected_codename: ""
 

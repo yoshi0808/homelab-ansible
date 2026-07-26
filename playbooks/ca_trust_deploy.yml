@@ -15,7 +15,7 @@
 # 変更が発生した場合もサービス再起動を伴わない update-ca-certificates(システム
 # 証明書バンドルの再構築のみ)だけなので、他の risk-accepted playbook
 # (cloudkey_cert_deploy 等)よりさらに安全側とYoshinobuが判断(2026-07-06)。詳細は
-# docs/ai/prompts/core.md §18 "移行中の例外"。
+# docs/ai/policies/ansible_test_safety_policy.md。
 
 - name: ca_trust_deploy - distribute CA cert to all nodes
   hosts: control_nodes:dev_nodes:monitoring_servers:radius_servers:proxmox
@@ -31,7 +31,7 @@
         fail_msg: >-
           This playbook no longer supports -e tester_mode=true and has no
           dry-run mode (--check included): CA trust deployment always runs
-          for real. See docs/ai/prompts/core.md §18 "移行中の例外".
+          for real. See docs/ai/policies/ansible_test_safety_policy.md.
         quiet: true
 
     - name: Deploy ROOT CA to system trust store and retire the intermediate

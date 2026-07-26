@@ -4,7 +4,7 @@
 # --check の有無にかかわらず常に本実行し、Phase 2 以降(shutdown/start)は
 # ansible_check_mode でゲートする(tags: destructive)。自律復旧ラダーの実処理
 # のため、--check 時に実行してはならない(Yoshinobu指示、2026-07-06)。詳細は
-# docs/ai/prompts/core.md §18 "移行中の例外"。
+# docs/ai/policies/ansible_test_safety_policy.md。
 # recovery_vm_reboot.yml
 #
 # 目的: 自律復旧ラダー第2段。VM をリブートして回復を試みる。
@@ -59,7 +59,7 @@
           This playbook no longer supports -e tester_mode=true. Re-run with
           --check instead — tag verification runs for real under --check,
           and the actual shutdown/start sequence is gated by
-          ansible_check_mode. See docs/ai/prompts/core.md §18 "移行中の例外".
+          ansible_check_mode. See docs/ai/policies/ansible_test_safety_policy.md.
         quiet: true
   roles:
     - recovery_vm_reboot

@@ -34,6 +34,7 @@ Yoshinobuは要件と「こうなったら困る」という前提を渡すが�
 - **Yoshinobuへ上げるもの**: `git commit` / `git push`(常にYoshinobu実施)。要件段階で許可されていない破壊的操作。復旧不能なデータ削除。安全境界そのものの変更。
 - **Coordinatorが承認するもの**: 上記以外。特にProxmox(pve1/pve2)、Sophos(sophos-fw)、UniFi機器への非冪等操作は、**subagentが着手前に計画をCoordinatorへ提示し、Coordinatorが「要件段階でYoshinobuが承認した範囲内か」を判断して承認する**。判断軸は製品名ではなく「Yoshinobuの承認済みscope内か」であり、scope内なら承認、scope外または不明なら停止してYoshinobuへ上げる。
 - **提示不要なもの**: 読み取り専用の確認(healthcheck、`--syntax-check`、`scripts/safe-ansible-check.sh`経由の`--check`、`ansible-lint`)、decoy inventory(`127.0.0.1`閉ポートまたは`ansible_connection: local`、実host名・実IPを書かない)での検証、ansy上のリポジトリ作業ツリーおよび`/tmp`に閉じた操作(自身が作成したscratchの削除を含む)。
+  - `hosts: localhost` + `connection: local`で副作用を持たない使い捨てplaybook(`set_fact` / `assert`によるJinja式・判定ロジックの検証)もこれに含む(2026-07-10 Yoshinobu承認)。**検証後に削除し、実行した事実と検証内容をimplementまたはtest_resultファイルへ記録する。** 実ホストに触れる可能性のあるもの、ファイル変更・通知等の副作用を持つものはこの例外に含まれない。
 
 subagentへ委任する際は、この境界を指示に明記する。Coordinatorが承認する場合、判断根拠(どの要件のどのscopeに含まれるか)を記録に残す。
 

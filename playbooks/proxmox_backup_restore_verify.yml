@@ -25,7 +25,7 @@
 # 起動で隔離、always:で確実に999を破棄(所有者トークンで二重チェック)されるため、
 # 本番サービスへの影響はゼロ。一時的な実ストレージI/O・実行時間を要するが、それは
 # このplaybook本来の動作でありYoshinobuが安全側と判断(2026-07-06)。詳細は
-# docs/ai/prompts/core.md §18 "移行中の例外"。
+# docs/ai/policies/ansible_test_safety_policy.md。
 
 # ---------------------------------------------------------------------------
 # Play 1: Decide the monthly target VM, its agent expectation, and the
@@ -44,7 +44,7 @@
         fail_msg: >-
           This playbook no longer supports -e tester_mode=true and has no
           dry-run mode (--check included): backup restore-verify always runs
-          for real. See docs/ai/prompts/core.md §18 "移行中の例外".
+          for real. See docs/ai/policies/ansible_test_safety_policy.md.
         quiet: true
 
     - name: Get cluster resources

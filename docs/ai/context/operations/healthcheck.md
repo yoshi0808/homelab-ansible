@@ -1,15 +1,38 @@
 # Operations Context: healthcheck系roleの共通パターン
 
-作成日: 2026-07-22
-作成契機: `docs/ai/reviews/agent_skills_reorganization_plan.md` Phase 7 pilot3(techlead配下、agmsg`claude`依頼、2026-07-22T07:13:28Z)。
+作成日: 2026-07-22(初版はPhase 7 pilot3向けの最小サブセット)
+更新: 2026-07-26。旧`docs/ai/prompts/core.md` §7・§17のshell責務規範を移設し、**§1はリポジトリ全体に適用される正本**となった。
 
-**位置づけ**: これはPhase 2で計画されている`context/operations/healthcheck.md`(推奨分類の`docs/ai/context/operations/`配下)の、Phase 7 pilot向け最小サブセットである。網羅的なOperations Contextではない。今回の対象案件(`proxmox_snapshot_check`への閾値2段化)に必要な範囲だけを記載する。Phase 2本格着手時に、他のhealthcheck roleを読んで拡充・再構成することを前提とする。
+**位置づけ**: §1「shell / Ansible責務分離」は、healthcheck系に限らず**shellを使う全roleに適用される規範**である(移設元の旧core §7が全体規範だったため)。§2以降はhealthcheck系roleの共通パターンをまとめたContextであり、網羅的ではない。他のhealthcheck roleを読んで拡充・再構成することを前提とする。
 
-対象role(read-only診断・`safe-readonly` tester-gate系): `monitoring_healthcheck`、`radius_healthcheck`、`proxmox_healthcheck`、`proxmox_hw_check`、`proxmox_snapshot_check`、`time_sync_check`。
+§2以降が主に対象とするrole(read-only診断・`safe-readonly` tester-gate系): `monitoring_healthcheck`、`radius_healthcheck`、`proxmox_healthcheck`、`proxmox_hw_check`、`proxmox_snapshot_check`、`time_sync_check`。なお§1を根拠にしているshellはこれ以外にも存在する(`codex_update_check`、`ubuntu_vm_full_upgrade`等)。
 
 ## 1. shell / Ansible責務分離
 
-shellスクリプト(`files/*.sh`)は収集とJSON整形のみを行い、warning/critical等の判定をしない。判定・分類・reportは常にAnsible側(`tasks/*.yml`)が行う。正本は`docs/ai/core.md`。詳細は`docs/ai/core-migration-map.md`のC07-01/C07-02(旧core §7)を辿る。
+shellスクリプト(`files/*.sh`)は収集とJSON整形のみを行い、warning/critical等の判定をしない。判定・分類・reportは常にAnsible側(`tasks/*.yml`)が行う。共通原則の宣言は`docs/ai/core.md`にあり、以下は旧`docs/ai/prompts/core.md` §7・§17から移設した詳細である(2026-07-26、移行表C07-01/C07-02)。
+
+check系shellは対象ホスト上でコマンドを実行し、結果をJSONに整形して標準出力へ返す。**収集とJSON整形のみ**を行い、次を行わない。
+
+- **変更操作**(check系shellへ変更を伴う操作を一切入れない)
+- 正常 / 異常の判定
+- warning / criticalの分類
+- host_varsとの期待値比較
+- 実行継続 / 中止の判断
+- 通知
+- レポート保存
+
+責務分離は次のとおり。
+
+```text
+Shell:   収集とJSON整形のみ
+Ansible: 配置、実行、JSON読込、期待値比較、warning/critical分類、保存、fail制御
+```
+
+補足:
+
+- shellが`port_1812_listen: true/false`のような観測値を返すことは許容する。
+- shellが`status: critical`や`warnings: [...]`を生成することは許容しない。
+- shellはhealth判定の主体ではなく、対象ホスト上の情報収集センサーとして扱う。
 
 `proxmox_snapshot_check`の収集script(`proxmox-snapshot-collect.sh`)はこの分離を明示コメントで守っている好例(「7日の閾値はAnsible tasks側で評価する」と明記)。新規判定を追加する際もshell側を変更する必要はなく、`tasks/main.yml`側だけで完結させられる。
 

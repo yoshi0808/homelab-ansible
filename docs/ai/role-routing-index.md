@@ -16,9 +16,18 @@
 | Reviewer | **Sonnet** | 同様にCoordinatorが別のAgent tool subagentを起動する。Implementerを行ったsubagentとは別セッションとして起動し、独立性を保つ(`docs/ai/roles/reviewer.md`「自分が実装した変更を独立レビュー済みとして扱わない」を、同一subagentの使い回しをしないことで担保する)。 |
 | Tester | **Sonnet** | 同様にCoordinatorが別のAgent tool subagentを起動する。実ホストへの`--check`/dry-run実行を含め、`docs/ai/roles/tester.md`の禁止事項(本番適用、`--check`なしのcheck-mode-native実行等)はそのまま適用される。 |
 
-### モデル配分(2026-07-26確定)
+### モデル・effort配分(2026-07-26確定)
 
-CoordinatorとTech LeadはOpus、Implementer / Reviewer / TesterはSonnet。**subagentは指定しなければ親のモデルを継承する**ため、Sonnet側は明示指定が必要である。各Roleのモデルは`.claude/agents/<role>.md`のfrontmatterに固定してあり、Coordinatorが`subagent_type`でそれを指定すれば配分は自動的に守られる。
+CoordinatorとTech LeadはOpus、Implementer / Reviewer / TesterはSonnet。**subagentは指定しなければ親のモデルを継承する**ため、Sonnet側は明示指定が必要である。各Roleのモデルとeffortは`.claude/agents/<role>.md`のfrontmatter(`model:` / `effort:`)に固定してあり、Coordinatorが`subagent_type`でそれを指定すれば配分は自動的に守られる。
+
+| Role | model | effort | 根拠 |
+|---|---|---|---|
+| Tech Lead | opus | high | 要求分解・ADR・リスク整理は意味判断が支配的。既定値を明示しているだけで、下げていない |
+| Implementer | sonnet | high | 実装は本番影響のある差分を作る唯一のRoleであり、ここは下げない |
+| Reviewer | sonnet | **medium** | Opus 5世代のガイドが「レビュー精度は低effortでも保たれる」と明示。2026-07-26に試行開始 |
+| Tester | sonnet | **medium** | 検証は実行と観測が主で、推論深度より実行経路を通すことが品質を決める。同日試行開始 |
+
+Reviewer / Testerのmediumは**試行中の設定**である。Tier 4の逐行照合でfindings品質の低下が観測された場合は`high`へ戻す。Implementer / Tech Leadを既定のままにしているのは、品質変化が出たときに原因をReviewer / Tester側へ切り分けられるようにするためである。
 
 根拠: 2026-07-26のTier 4フルサイクル(proxmox_patch_dryrun単一ノード対応)は、Implementer / Reviewer / Testerが実質すべてSonnetで走り、apply安全ゲートの保護漏れ、両ノード健全時のNoneクラッシュ、終了コード4の運用問題、その修正が1行では悪化する罠、の4件を本番影響前に検出した。一方でOpus級の判断が要ったのは「あるべきものが無い」ことの検出(`docs/ai/core.md`が旧モデルのまま残っていたドリフト、決定根拠がリポジトリに存在しなかった欠落)であり、いずれもCoordinatorの領分だった。
 

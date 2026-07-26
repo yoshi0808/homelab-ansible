@@ -4,7 +4,7 @@
 # 目的: time_sync_check（quory基準の時刻同期チェック）の精度向上のため、
 #       各ノードのNTPクライアント設定にquoryを参照先として追加する準備作業。
 #       time_sync_check.yml本体はread-onlyのまま、本playbookのみが
-#       変更系としてNTP設定に手を加える（core.md §9: 読み取り専用ロールと
+#       変更系としてNTP設定に手を加える（core.md: 読み取り専用ロールと
 #       変更系ロールの分離）。
 #
 # 対象ホスト・実行元: pve1, pve2, ansy, monnie, authy（chrony）。
@@ -39,7 +39,7 @@
 # 意味での冪等(ca_trust_deployと同型)。chrony再起動は設定ファイルが実際に
 # 変わった時(主に初回配置時)のみ発生し、以降は真のno-op。再起動してもchrony
 # デーモンが一瞬再起動するだけで他サービス・接続には影響しないためYoshinobuが
-# 安全側と判断(2026-07-06)。詳細は docs/ai/prompts/core.md §18 "移行中の例外"。
+# 安全側と判断(2026-07-06)。詳細は docs/ai/policies/ansible_test_safety_policy.md。
 
 - name: Add quory as an additional NTP reference on homelab nodes
   hosts: pve1:pve2:ansy:monnie:authy
@@ -52,7 +52,7 @@
         fail_msg: >-
           This playbook no longer supports -e tester_mode=true and has no
           dry-run mode (--check included): NTP reference config always runs
-          for real. See docs/ai/prompts/core.md §18 "移行中の例外".
+          for real. See docs/ai/policies/ansible_test_safety_policy.md.
         quiet: true
 
     - name: Run time_sync_ntp_reference role (always for real)

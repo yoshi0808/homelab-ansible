@@ -31,7 +31,7 @@
 # によりゲート済み)は --check 時には行わない。このオーケストレータ自身は
 # import_playbook 先のゲートを信頼し、二重にスキップしない
 # (read-only部分のテスト網羅性を落とさないため)。詳細は
-# docs/ai/prompts/core.md §18 "移行中の例外"。
+# docs/ai/policies/ansible_test_safety_policy.md。
 # =============================================================================
 
 # ---------------------------------------------------------------------------
@@ -103,7 +103,7 @@
           --check instead — preflight/healthcheck/dry-run run for real under
           --check, and the actual evacuate/patch-apply/restore sequence is
           gated by ansible_check_mode inside each imported playbook. See
-          docs/ai/prompts/core.md §18 "移行中の例外".
+          docs/ai/policies/ansible_test_safety_policy.md.
         quiet: true
 
 # ---------------------------------------------------------------------------
