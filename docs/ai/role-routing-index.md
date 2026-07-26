@@ -8,13 +8,23 @@
 
 常駐する識別子は`claude`(Coordinator、この対話セッション自身)のみである。Tech Lead / Implementer / Reviewer / Testerは常駐identityを持たず、CoordinatorがTierに応じてその場で実行する。
 
-| Role | 実現方式 |
-|---|---|
-| Coordinator | `claude`。Yoshinobuとの対話窓口、Tier判定、以下Roleの呼び出しと結果評価を行う本セッション自身。 |
-| Tech Lead | Tier 3/4の案件でCoordinatorがAgent tool(Task)でsubagentを起動し、`docs/ai/roles/techlead.md`の責任・権限・禁止事項の範囲で要求分解・ADR・リスク整理・Implementer/Reviewer/Tester分解案の作成までを行わせる。Tech Lead subagent自身は実装しない(役割定義は不変)。 |
-| Implementer | Tech Lead(subagentまたはCoordinator自身)がまとめたrequirement/分解案に基づき、Coordinatorが別途Agent toolでsubagentを起動する。`docs/ai/roles/implementer.md`の範囲(最小差分実装、commit/push禁止、本番適用禁止)は不変。 |
-| Reviewer | 同様にCoordinatorが別のAgent tool subagentを起動する。Implementerを行ったsubagentとは別セッションとして起動し、独立性を保つ(`docs/ai/roles/reviewer.md`「自分が実装した変更を独立レビュー済みとして扱わない」を、同一subagentの使い回しをしないことで担保する)。 |
-| Tester | 同様にCoordinatorが別のAgent tool subagentを起動する。実ホストへの`--check`/dry-run実行を含め、`docs/ai/roles/tester.md`の禁止事項(本番適用、`--check`なしのcheck-mode-native実行等)はそのまま適用される。 |
+| Role | モデル | 実現方式 |
+|---|---|---|
+| Coordinator | Opus | `claude`。Yoshinobuとの対話窓口、Tier判定、以下Roleの呼び出しと結果評価を行う本セッション自身。 |
+| Tech Lead | **Opus** | Tier 3/4の案件でCoordinatorがAgent tool(Task)でsubagentを起動し、`docs/ai/roles/techlead.md`の責任・権限・禁止事項の範囲で要求分解・ADR・リスク整理・Implementer/Reviewer/Tester分解案の作成までを行わせる。Tech Lead subagent自身は実装しない(役割定義は不変)。 |
+| Implementer | **Sonnet** | Tech Lead(subagentまたはCoordinator自身)がまとめたrequirement/分解案に基づき、Coordinatorが別途Agent toolでsubagentを起動する。`docs/ai/roles/implementer.md`の範囲(最小差分実装、commit/push禁止、本番適用禁止)は不変。 |
+| Reviewer | **Sonnet** | 同様にCoordinatorが別のAgent tool subagentを起動する。Implementerを行ったsubagentとは別セッションとして起動し、独立性を保つ(`docs/ai/roles/reviewer.md`「自分が実装した変更を独立レビュー済みとして扱わない」を、同一subagentの使い回しをしないことで担保する)。 |
+| Tester | **Sonnet** | 同様にCoordinatorが別のAgent tool subagentを起動する。実ホストへの`--check`/dry-run実行を含め、`docs/ai/roles/tester.md`の禁止事項(本番適用、`--check`なしのcheck-mode-native実行等)はそのまま適用される。 |
+
+### モデル配分(2026-07-26確定)
+
+CoordinatorとTech LeadはOpus、Implementer / Reviewer / TesterはSonnet。**subagentは指定しなければ親のモデルを継承する**ため、Sonnet側は明示指定が必要である。各Roleのモデルは`.claude/agents/<role>.md`のfrontmatterに固定してあり、Coordinatorが`subagent_type`でそれを指定すれば配分は自動的に守られる。
+
+根拠: 2026-07-26のTier 4フルサイクル(proxmox_patch_dryrun単一ノード対応)は、Implementer / Reviewer / Testerが実質すべてSonnetで走り、apply安全ゲートの保護漏れ、両ノード健全時のNoneクラッシュ、終了コード4の運用問題、その修正が1行では悪化する罠、の4件を本番影響前に検出した。一方でOpus級の判断が要ったのは「あるべきものが無い」ことの検出(`docs/ai/core.md`が旧モデルのまま残っていたドリフト、決定根拠がリポジトリに存在しなかった欠落)であり、いずれもCoordinatorの領分だった。
+
+### Agent定義との関係
+
+`.claude/agents/<role>.md`はClaude Code harness向けの**実行機構**(モデル指定と、subagent固有の運用事情)だけを持つ。役割の規範 — 責任・権限・成果物・禁止事項 — は`docs/ai/roles/<role>.md`が正本であり、agent定義へ複製しない。`CLAUDE.md`が共通原則を複製しないのと同じ理由で、正本が二重化するとドリフトする。
 
 Tier 1/2はこれまで通りCoordinator自身が実装し、Tier 2のみTester相当のsubagentへ実ホスト検証を依頼する(`skills/delegation-tier/SKILL.md`)。
 

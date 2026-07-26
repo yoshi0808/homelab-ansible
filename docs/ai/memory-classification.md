@@ -55,6 +55,26 @@ Policy または Skill (該当業務のPolicyファイル新設・改訂、ま�
 - **Decisionの見直し**: 定期レビューはしない。前提条件(依存する環境事実・技術選定)が変わったとYoshinobu・Tech Lead・Coordinatorのいずれかが気づいた時点で見直す。
 - **Incidentの月次振り返り**: Coordinatorが月次で`docs/ai/memory/incidents/`を振り返り、上記のPolicy/Skill直接昇格の要否を判断する。
 
+### 月次振り返りの対象と手順(2026-07-26拡張)
+
+当初この振り返りは`incidents/`だけを対象としていたが、**本番影響が出ずIncidentにならなかった学びが網から漏れる**ことが判明したため対象を広げる。2026-07-26のTier 4案件では、工程内で実バグ4件を検出・修正して本番影響ゼロだったためIncidentを1件も作っておらず、そこで得た教訓はCoordinatorの個人memory(Claude Memory、subagentからは読めない)にしか存在しなかった。「苦労した」という体験が学習として定着しないまま流れる状態である。
+
+**対象**: `docs/ai/memory/incidents/`に加え、**前回の振り返り以降にCoordinatorのClaude Memoryへ蓄積された項目**、および工程を何周も往復した案件の`docs/ai/reviews/<target>/`記録。
+
+**捕捉と昇格を分ける**: 教訓の捕捉は即時に行う(詳細は時間が経つと失われる)。月次で行うのは**昇格判断**であり、初回記録の場ではない。
+
+**振り返りで各項目を3つに仕分ける**(Yoshinobu提案、2026-07-26)。
+
+| 仕分け | 判定基準 | 行き先 |
+|---|---|---|
+| 再利用可能な**手順** | 注意喚起でなく、次回そのまま使えるチェックリスト・テンプレートになっているか | `skills/` |
+| この**環境独自の事実** | このホームラボ固有の落とし穴・構成事実で、知らないと判断を誤るか | `docs/ai/memory/lessons/` または`docs/ai/context/` |
+| **Yoshinobuの考え方** | 承認境界・優先順位・役割分担など、人の判断基準そのものか | `docs/ai/memory/decisions/` または Policy |
+
+**判定ルールは1節と同じ**: 「この知識を知らないことで、Coordinatorが起動するsubagentの判断や実装が変わるか」。Yesならリポジトリへ書き出す。Noならauto-memoryのままでよい。
+
+**次回期日はCoordinatorのMEMORY.md先頭に1行で置く**。MEMORY.mdは毎セッション文脈へ読み込まれるため、これが実質的な発火装置になる。文書に手順だけ書いて誰も見ない状態を避けるための措置である(`docs/ai/memory/lessons/sweep-all-documents-stating-a-changed-boundary.md`と同じ失敗類型)。
+
 ## 4. Role別のKnowledge参照範囲(TODO6-3)
 
 | Role | 参照するKnowledge |

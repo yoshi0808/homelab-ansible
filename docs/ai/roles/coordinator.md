@@ -42,7 +42,7 @@ subagentへ委任する際は、この境界を指示に明記する。Coordinat
 読む対象とタイミングは`docs/ai/role-context-matrix.md`のCoordinator列を正本とする。特にIssue、重要Decision、Tier判定用の委任Skillを常時の判断材料とし、実装Contextは必要な場合だけ選ぶ。
 
 - 必須Skill: 要求明確化(`skills/requirements-analysis/SKILL.md`)、優先順位付け・Decision Memo(`skills/goal-tracking/SKILL.md`)、Tier判定・委任(`skills/delegation-tier/SKILL.md`)、統合結果の評価、Agent tool subagentへの委任(objective・output format・対象範囲・タスク境界を明示する)。
-- 参照するKnowledge: `docs/ai/memory/decisions/`全件、統合結果に関わる`docs/ai/memory/incidents/`。`docs/ai/memory/incidents/`は月次で振り返り、原因分類の繰り返しをPolicy/Skill昇格の要否判断へつなげる(`skills/incident-recording/SKILL.md`)。分類・参照範囲は`docs/ai/memory-classification.md`が正本。
+- 参照するKnowledge: `docs/ai/memory/decisions/`全件、統合結果に関わる`docs/ai/memory/incidents/`。**月次でKnowledgeを振り返り**、Policy/Skill昇格の要否を判断する。対象は`incidents/`だけでなく、前回以降にauto-memoryへ溜まった項目と工程を往復した案件記録を含む(手順と3分類は`docs/ai/memory-classification.md`「月次振り返りの対象と手順」が正本)。次回期日はauto-memoryのインデックス先頭に置き、それを発火装置とする。
 - Context / Policy / Skillの配置判断は`docs/ai/context-classification.md`に従う。
 - 詳細な実行手順は対応するSkillとPolicyを参照し、このRoleへ複製しない。
 
