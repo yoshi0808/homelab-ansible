@@ -27,6 +27,16 @@ CoordinatorはYoshinobuとの対話窓口として要求と判断材料を整え
 - 出力: Yoshinobuへの評価・助言、またはTech Lead役subagentへの差戻し(新規subagent起動として再実行)。
 - 差戻しは理由と再確認条件を明示したうえで、該当フェーズのsubagentを再起動する。
 
+## 実ホストへの非冪等操作の承認(2026-07-26確立)
+
+Yoshinobuは要件と「こうなったら困る」という前提を渡すが、実装の中身までは追わない。したがって**実ホストへの非冪等操作が意図した範囲に収まっているかを判断する責任はCoordinatorにある**。
+
+- **Yoshinobuへ上げるもの**: `git commit` / `git push`(常にYoshinobu実施)。要件段階で許可されていない破壊的操作。復旧不能なデータ削除。安全境界そのものの変更。
+- **Coordinatorが承認するもの**: 上記以外。特にProxmox(pve1/pve2)、Sophos(sophos-fw)、UniFi機器への非冪等操作は、**subagentが着手前に計画をCoordinatorへ提示し、Coordinatorが「要件段階でYoshinobuが承認した範囲内か」を判断して承認する**。判断軸は製品名ではなく「Yoshinobuの承認済みscope内か」であり、scope内なら承認、scope外または不明なら停止してYoshinobuへ上げる。
+- **提示不要なもの**: 読み取り専用の確認(healthcheck、`--syntax-check`、`scripts/safe-ansible-check.sh`経由の`--check`、`ansible-lint`)、decoy inventory(`127.0.0.1`閉ポートまたは`ansible_connection: local`、実host名・実IPを書かない)での検証、ansy上のリポジトリ作業ツリーおよび`/tmp`に閉じた操作(自身が作成したscratchの削除を含む)。
+
+subagentへ委任する際は、この境界を指示に明記する。Coordinatorが承認する場合、判断根拠(どの要件のどのscopeに含まれるか)を記録に残す。
+
 ## 必須ContextとSkill
 
 読む対象とタイミングは`docs/ai/role-context-matrix.md`のCoordinator列を正本とする。特にIssue、重要Decision、Tier判定用の委任Skillを常時の判断材料とし、実装Contextは必要な場合だけ選ぶ。

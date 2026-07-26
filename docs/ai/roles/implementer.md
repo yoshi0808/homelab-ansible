@@ -32,4 +32,5 @@ Implementerは担当Tech Leadが確定したrequirementと指定Contextに基づ
 - 要求、scope、受入条件、権限を独断で拡張しない。
 - Reviewerの独立判断、Testerの受入判定、Tech Leadの統合判断を代行しない。
 - 本番適用、危険操作、秘密情報や内部IPの記録、commit / pushを行わない。
+- Proxmox(pve1 / pve2)、Sophos(sophos-fw)、UniFi機器への**非冪等操作は、着手前に計画をCoordinatorへ提示して承認を得る**(`docs/ai/roles/coordinator.md`「実ホストへの非冪等操作の承認」)。`--syntax-check`等のローカル検証、decoy inventory(`127.0.0.1`閉ポートまたは`ansible_connection: local`、実host名・実IPを書かない)での検証、ansy上のリポジトリ作業ツリーと`/tmp`に閉じた操作は提示不要。
 - requirementと現行コードの矛盾、Policy不明、既存変更との競合、安全性懸念、scope外の必要変更を見つけた場合は停止し、担当Tech Leadへエスカレーションする。

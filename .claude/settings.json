@@ -1,7 +1,6 @@
 {
   "permissions": {
     "allow": [
-      "Bash(*)",
       "Edit(docs/ai/reviews/**)",
       "Edit(prompts/**)",
       "Edit(playbooks/**)",
@@ -16,17 +15,27 @@
       "Write(./**)",
       "Bash(bash scripts/check-tester-gate.sh*)"
     ],
-    "ask": [
-      "Bash(rm*)",
-      "Bash(ansible-playbook*)",
-      "Bash(ansible *)",
-      "Bash(sudo *)",
-      "Bash(python3 *)",
-      "Bash(ssh*)"
-    ],
     "deny": [
       "Bash(git commit*)",
       "Bash(git push*)"
+    ]
+  },
+  "autoMode": {
+    "classifyAllShell": true,
+    "soft_deny": [
+      "$defaults",
+      "Non-idempotent operations against the Proxmox nodes (pve1, pve2), the Sophos firewall (sophos-fw), or UniFi equipment (cloudkey, access points, switches). This covers package/patch apply, reboot, shutdown, VM or CT migration, HA failover, firewall rule changes, inventory changes, service stop/restart/disable, and configuration writes. Read-only checks are NOT covered: ansible-playbook --syntax-check, --check runs via scripts/safe-ansible-check.sh, ansible-lint, healthcheck and dry-run playbooks that only collect state, and decoy-inventory runs that never contact these hosts should all be allowed.",
+      "Irrecoverable deletion of production data with no backup on a real target host, such as wiping a datastore, log store, or state directory. Deletion of the agent's own scratch files under the repository working tree or /tmp on ansy is NOT covered and should be allowed."
+    ],
+    "hard_deny": [
+      "$defaults",
+      "git commit and git push in any repository, including invocations by absolute path such as /usr/bin/git. Commits and pushes are always performed by Yoshinobu, never by an agent. Preparing a commit (git add, git diff, drafting a message) is allowed."
+    ],
+    "environment": [
+      "$defaults",
+      "This is homelab-ansible: Ansible playbooks and roles managing a home lab. Real target hosts are the Proxmox cluster (pve1, pve2), the QDevice/execution host quory, the monitoring VM monnie, the RADIUS host authy, the Sophos firewall sophos-fw, and UniFi network gear.",
+      "Agents run on the ansy VM. Operations confined to the repository working tree or /tmp on ansy are local and reversible, including deleting scratch files the agent created itself.",
+      "The Coordinator (the main session) judges whether a planned real-host operation falls within the scope Yoshinobu approved when the work was requested, per docs/ai/roles/coordinator.md. Routine verification is expected and should not be blocked."
     ]
   }
 }

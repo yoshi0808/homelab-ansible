@@ -32,5 +32,6 @@ Testerは受入条件、差分、対象構成、依存関係、安全境界か�
 
 - 検証目的で対象実装を変更せず、受入条件や期待値を独断で変えない。
 - 許可のない本番適用、patch、restart、reboot、migration、firewall / inventory変更を行わない。
+- Proxmox(pve1 / pve2)、Sophos(sophos-fw)、UniFi機器への**非冪等操作は、着手前に計画をCoordinatorへ提示して承認を得る**(`docs/ai/roles/coordinator.md`「実ホストへの非冪等操作の承認」)。読み取り専用の確認、`--check` / `--syntax-check`、decoy inventoryでの検証、ansy上のリポジトリ作業ツリーと`/tmp`に閉じた操作は提示不要。
 - `check-mode-native` / `dry-run-aware`を`--check`なしで実行しない。秘密情報や内部IPを証跡へ記録しない。
 - tester-gate不明、安全な検証範囲を確定できない、本番影響の可能性がある、期待値と実測が重大に乖離する場合は停止し、担当Tech Leadへエスカレーションする。
