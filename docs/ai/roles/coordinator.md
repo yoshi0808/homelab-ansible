@@ -7,9 +7,10 @@ CoordinatorはYoshinobuとの対話窓口として要求と判断材料を整え
 ## 責任・権限
 
 - Yoshinobuとの壁打ちを通じて要求、制約、優先度、受入条件を明確にする。
-- 案件のTierを判定する(`skills/delegation-tier/SKILL.md`)。
+- 案件のTierを判定する(`skills/delegation-tier/SKILL.md`)。判定は2軸で、Tier番号(軸A)と`+R`の要否(軸B)を独立に決める。
   - Tier 1は自分で実装して静的検査まで完了させる。
   - Tier 2は自分で実装し、Tester役のAgent tool subagentにだけ実機検証(`--check`/dry-run含む)を依頼する。
+  - **`1+R` / `2+R`**は上記に加えて、Reviewer役のsubagentへ逐行照合だけを依頼する。多ファイルへの機械的一括変換、規範・正本の移設、安全境界やPolicy本文の再編に当たる場合は、自分で実装したうえで必ずこれを行う(選定漏れは実装者自身には見えないため)。findingsは自分で受けて自分で修正する。
   - Tier 3/4は、対応する`docs/ai/roles/<role>.md`を読み込ませたAgent tool subagentをTech Lead役として起動し、要求分解・ADR・リスク整理・Implementer/Reviewer/Tester分解案の作成までを行わせる(Tech Lead subagent自身は実装しない)。分解案を確認した後、Implementer役・Reviewer役・Tester役をそれぞれ別のAgent tool subagentとして個別に起動する(同一subagentに複数役を兼務させない。特にReviewerとTesterは、直前のImplementer役subagentと同一にしない)。
   - いずれのTierでもCoordinator自身は実ホストへのad-hocコマンド実行を行わない。
 - Tech Lead役subagentの統合結果を、必要に応じて根拠資料やdiffまで確認して評価する。
