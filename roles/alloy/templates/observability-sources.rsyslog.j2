@@ -8,8 +8,6 @@ template(name="AlloyRemoteWarning" type="string"
          string="warning %hostname% %timereported:::date-rfc3339% %syslogtag%%msg:::sp-if-no-1st-sp%%msg%\n")
 template(name="AlloyRemoteInfo" type="string"
          string="info %hostname% %timereported:::date-rfc3339% %syslogtag%%msg:::sp-if-no-1st-sp%%msg%\n")
-template(name="AlloyRemoteDebug" type="string"
-         string="debug %hostname% %timereported:::date-rfc3339% %syslogtag%%msg:::sp-if-no-1st-sp%%msg%\n")
 
 {% for destination_name, destination_path in alloy_remote_syslog_destinations | dictsort %}
 {% set route_sources = alloy_remote_syslog_sources | selectattr('destination', 'equalto', destination_name) | list %}
@@ -35,10 +33,9 @@ if (
         action(type="omfile" file="{{ destination_path }}" template="AlloyRemoteInfo"
                fileOwner="syslog" fileGroup="syslog" fileCreateMode="0644")
     }
-    if ($syslogseverity == 7) then {
-        action(type="omfile" file="{{ destination_path }}" template="AlloyRemoteDebug"
-               fileOwner="syslog" fileGroup="syslog" fileCreateMode="0644")
-    }
+    # LOG-071: debug (severity 7) is not collected. No action matches it here,
+    # so it falls through to `stop` below and is discarded without being
+    # written to any destination file.
     stop
 }
 

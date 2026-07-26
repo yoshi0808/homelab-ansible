@@ -1,7 +1,10 @@
 // Managed by Ansible (roles/alloy). Do not edit on the host.
 // Phase 2 preserves the existing UniFi contract, adds remote syslog files,
-// and normalizes severity to error|warning|info|debug. Optional new files are
-// discovered without constructing a reader until they exist.
+// and normalizes severity to error|warning|info (LOG-070). debug is still
+// recognized where a source needs it for labeling or prefix-stripping, but
+// is always dropped before reaching Loki rather than collected (LOG-071).
+// Optional new files are discovered without constructing a reader until they
+// exist.
 
 loki.write "local" {
   endpoint {
@@ -24,6 +27,14 @@ loki.process {{ (source.name ~ '_pipeline') | to_json }} {
     values = {
       "level" = "level",
     }
+  }
+
+  // LOG-071: debug is not collected. The regex above still recognizes it so
+  // the line is labeled (not left unlabeled) before being dropped here.
+  stage.match {
+    selector            = "{level=\"debug\"}"
+    action              = "drop"
+    drop_counter_reason = "observability_debug_excluded"
   }
 
 {% endif %}
@@ -80,12 +91,14 @@ loki.process {{ (source.name ~ '_pipeline') | to_json }} {
     }
   }
 
+  // LOG-071: debug is not collected. Drop immediately instead of labeling it,
+  // for every source that reaches this shared best-effort block (unifi and
+  // network_devices both set extract_level_best_effort).
   stage.match {
     selector = {{ (selector_prefix ~ '"' ~ selector_token_prefix ~ 'debug(?:\\\\s|:)"') | to_json }}
 
-    stage.static_labels {
-      values = { "level" = "debug" }
-    }
+    action              = "drop"
+    drop_counter_reason = "observability_debug_excluded"
   }
 {% endif %}
 {% if source.labels.job == 'unifi' %}
@@ -184,9 +197,18 @@ loki.relabel {{ (source.name ~ '_metadata') | to_json }} {
 }
 
 {% set drop_info_debug_units = source.drop_info_debug_units | default([]) %}
-{% if drop_info_debug_units | length > 0 %}
 loki.process {{ (source.name ~ '_pipeline') | to_json }} {
   forward_to = [loki.write.local.receiver]
+
+  // LOG-071: debug is not collected, for every unit. Kept separate from the
+  // observability-stack self-noise drop below (LOG-027), which is scoped to
+  // specific units and also covers info for those units only.
+{% set global_debug_drop_selector = '{job=' ~ (source.labels.job | to_json) ~ ', host=' ~ (source.labels.host | to_json) ~ ', level="debug"}' %}
+  stage.match {
+    selector            = {{ global_debug_drop_selector | to_json }}
+    action              = "drop"
+    drop_counter_reason = "observability_debug_excluded"
+  }
 
 {% for unit in drop_info_debug_units %}
 {% set drop_selector = '{job=' ~ (source.labels.job | to_json) ~ ', host=' ~ (source.labels.host | to_json) ~ ', unit=' ~ (unit | to_json) ~ ', level=~"info|debug"}' %}
@@ -199,7 +221,6 @@ loki.process {{ (source.name ~ '_pipeline') | to_json }} {
 {% endfor %}
 }
 
-{% endif %}
 loki.source.journal {{ source.name | to_json }} {
   max_age       = {{ source.max_age | to_json }}
   relabel_rules = loki.relabel.{{ source.name }}_metadata.rules
@@ -208,11 +229,7 @@ loki.source.journal {{ source.name | to_json }} {
     {{ label.0 | to_json }} = {{ label.1 | to_json }},
 {% endfor %}
   }
-{% if drop_info_debug_units | length > 0 %}
   forward_to = [loki.process.{{ source.name }}_pipeline.receiver]
-{% else %}
-  forward_to = [loki.write.local.receiver]
-{% endif %}
 }
 
 {% endfor %}

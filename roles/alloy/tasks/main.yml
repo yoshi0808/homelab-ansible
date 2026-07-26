@@ -88,13 +88,21 @@
       - alloy_journal_sources[0].labels.job == "ubuntu-nodes"
       - alloy_journal_sources[0].labels.host == "monnie"
       - alloy_journal_sources[0].drop_info_debug_units == alloy_observability_journal_drop_units
-      - "alloy_candidate_config.count('action              = \"drop\"') == (alloy_observability_journal_drop_units | length)"
       - "alloy_candidate_config.count('drop_counter_reason = \"observability_info_debug\"') == (alloy_observability_journal_drop_units | length)"
       - "alloy_observability_journal_drop_units | reject('in', alloy_candidate_config) | list | length == 0"
       - "'replacement  = \"error\"' in alloy_candidate_config"
       - "'replacement  = \"warning\"' in alloy_candidate_config"
       - "'replacement  = \"info\"' in alloy_candidate_config"
       - "'replacement  = \"debug\"' in alloy_candidate_config"
+      - >-
+        alloy_candidate_config.count('drop_counter_reason = "observability_debug_excluded"') ==
+        (alloy_file_sources | selectattr('extract_normalized_level_at_start', 'equalto', true) | list | length)
+        + (alloy_file_sources | selectattr('extract_level_best_effort', 'equalto', true) | list | length)
+        + (alloy_journal_sources | length)
+      - >-
+        alloy_candidate_config.count('action              = "drop"') ==
+        alloy_candidate_config.count('drop_counter_reason = "observability_info_debug"')
+        + alloy_candidate_config.count('drop_counter_reason = "observability_debug_excluded"')
       - "'loki.write \"local\"' in alloy_candidate_config"
       - alloy_loki_push_url in alloy_candidate_config
       - "'tail_from_end = true' in alloy_candidate_config"

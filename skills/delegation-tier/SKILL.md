@@ -22,12 +22,20 @@ description: homelab-ansibleのCoordinatorが案件をどこまで分解する�
 
 Tier 4であっても、意味判断(何をどう変えるか)はCoordinatorが確定してから渡す。下流に発明させない。
 
+## Tier 2でTech Leadへ一報を入れる理由(2026-07-26の実例)
+
+Tier 2はTech Leadを飛ばしてCoordinatorが直接Testerへ依頼する経路である。しかし**Testerは想定外の事態に遭遇したとき、自分の担当Tech Leadへエスカレーションする**(`docs/ai/roles/tester.md`の経路)。このときTech Leadに案件の文脈が無いと、誰が何を承認したか分からないまま判断を迫られる。
+
+2026-07-26、CoordinatorがLoki全データ削除をTesterへ直接依頼した際、削除後にLokiが起動せず、Testerが指示範囲を超える復旧手順の可否をTech Leadへ確認した。Tech Leadは案件自体を知らず、Yoshinobuが直接依頼した可能性を疑ってCoordinatorへ照会することになった。Tech Leadの判断(サービス停止中のため復旧を優先して許可)自体は適切だったが、文脈の欠落は避けられた。
+
+したがってTier 2では、**指示は出さなくてよいが、着手前に「誰が何をTesterへ依頼したか」をTech Leadへ共有する**。あわせて承認所有権がCoordinatorにあることを明示し、Tech Leadが同じTesterへ二重に指示しない状態をつくる。二重承認は誤操作の原因になる(`feedback_confirm_prompt_proxy_scope`の所有権ルール)。
+
 ## Tierごとの工程
 
 | Tier | 工程 | 成果物 |
 |---|---|---|
 | 1 | Coordinatorが実装し静的検査まで自分で完了する。Roleへ渡さない | 変更本体。記録は必要な場合だけ |
-| 2 | Coordinatorが実装し、Testerにだけ実機検証を依頼する | 変更本体 + test_result |
+| 2 | Coordinatorが実装し、Testerにだけ実機検証を依頼する。**着手前にTech Leadへ一報を入れる**(下記) | 変更本体 + test_result |
 | 3 | Tech Lead → Implementer → Reviewer → Tester。着手前に分解方針をCoordinatorへ報告する(`docs/ai/context/operations/agmsg-message-format.md`) | requirement / implement / review / test_result |
 | 4 | Tier 3に加えて調査→Coordinator受入→実装の2段階とし、Reviewerは逐行照合する | Tier 3の成果物 + investigation |
 

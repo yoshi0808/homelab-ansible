@@ -39,7 +39,7 @@
         "spec": {
           "id": 1,
           "title": "Event Timeline",
-          "description": "Event count per host across Ubuntu, PVE, and Sophos syslog. Bar height = log volume in the selected interval; the level filter and per-host aggregation are the basis for the Phase 3 error-threshold alert.",
+          "description": "Event count per host. Series A covers Ubuntu / PVE / Sophos / CloudKey and honours the Severity filter. Series B covers UniFi network devices, which carry no level label (LOG-075) and are therefore not filtered by Severity.",
           "links": [],
           "data": {
             "kind": "QueryGroup",
@@ -56,12 +56,32 @@
                         "name": "ffn86ietu7jeoc"
                       },
                       "spec": {
-                        "expr": "sum by(host) (count_over_time({job=~\"pve-nodes|sophos-fw|ubuntu-nodes|unifi|network-devices\", host=~\"$host\", level=~\"$level\"} |= \"$search\" [$__interval]))",
+                        "expr": "sum by(host) (count_over_time({job=~\"pve-nodes|sophos-fw|ubuntu-nodes|unifi\", host=~\"$host\", level=~\"$level\"} |= \"$search\" [$__interval]))",
                         "legendFormat": "{{host}}",
                         "queryType": "range"
                       }
                     },
                     "refId": "A",
+                    "hidden": false
+                  }
+                },
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "query": {
+                      "kind": "DataQuery",
+                      "group": "loki",
+                      "version": "v0",
+                      "datasource": {
+                        "name": "ffn86ietu7jeoc"
+                      },
+                      "spec": {
+                        "expr": "sum by(host) (count_over_time({job=\"network-devices\", host=~\"$host\"} |= \"$search\" [$__interval]))",
+                        "legendFormat": "{{host}}",
+                        "queryType": "range"
+                      }
+                    },
+                    "refId": "B",
                     "hidden": false
                   }
                 }
@@ -107,8 +127,8 @@
         "kind": "Panel",
         "spec": {
           "id": 2,
-          "title": "Infra Events (Ubuntu / PVE / Sophos)",
-          "description": "Unified log stream for monnie, ansy, quory, authy, pve1, pve2, and sophos-fw. Filter by host, severity, or keyword instead of splitting panels by source or device.",
+          "title": "Infra Events (Ubuntu / PVE / Sophos/uckg2)",
+          "description": "Unified log stream for monnie, ansy, quory, authy, pve1, pve2, sophos-fw and the CloudKey (uckg2). All of these carry a level label, so the Severity filter applies. UniFi network devices are in the separate panel below.",
           "links": [],
           "data": {
             "kind": "QueryGroup",
@@ -125,7 +145,63 @@
                         "name": "ffn86ietu7jeoc"
                       },
                       "spec": {
-                        "expr": "{job=~\"pve-nodes|sophos-fw|ubuntu-nodes|unifi|network-devices\", host=~\"$host\", level=~\"$level\"} |= \"$search\" | line_format \"{{ .host }} | {{ __line__ }}\"",
+                        "expr": "{job=~\"pve-nodes|sophos-fw|ubuntu-nodes|unifi\", host=~\"$host\", level=~\"$level\"} |= \"$search\" | line_format \"{{ .host }} | {{ __line__ }}\"",
+                        "maxLines": 1500,
+                        "queryType": "range"
+                      }
+                    },
+                    "refId": "A",
+                    "hidden": false
+                  }
+                }
+              ],
+              "transformations": [],
+              "queryOptions": {}
+            }
+          },
+          "vizConfig": {
+            "kind": "VizConfig",
+            "group": "logs",
+            "version": "",
+            "spec": {
+              "options": {
+                "dedupStrategy": "none",
+                "enableLogDetails": true,
+                "showTime": true,
+                "sortOrder": "Descending",
+                "wrapLogMessage": false
+              },
+              "fieldConfig": {
+                "defaults": {},
+                "overrides": []
+              }
+            }
+          }
+        }
+      },
+      "panel-3": {
+        "kind": "Panel",
+        "spec": {
+          "id": 3,
+          "title": "Network Device Events (UniFi switches / APs)",
+          "description": "Log stream for UniFi network devices. These lines carry no level label (LOG-075), so the Severity filter does not apply here by design. Use Host and Keyword to narrow, for example TRAPMGR for Link Up and Link Down.",
+          "links": [],
+          "data": {
+            "kind": "QueryGroup",
+            "spec": {
+              "queries": [
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "query": {
+                      "kind": "DataQuery",
+                      "group": "loki",
+                      "version": "v0",
+                      "datasource": {
+                        "name": "ffn86ietu7jeoc"
+                      },
+                      "spec": {
+                        "expr": "{job=\"network-devices\", host=~\"$host\"} |= \"$search\" | line_format \"{{ .host }} | {{ __line__ }}\"",
                         "maxLines": 1500,
                         "queryType": "range"
                       }
@@ -187,6 +263,19 @@
               "element": {
                 "kind": "ElementReference",
                 "name": "panel-2"
+              }
+            }
+          },
+          {
+            "kind": "GridLayoutItem",
+            "spec": {
+              "x": 0,
+              "y": 26,
+              "width": 24,
+              "height": 14,
+              "element": {
+                "kind": "ElementReference",
+                "name": "panel-3"
               }
             }
           }
