@@ -35,6 +35,10 @@ Yoshinobuは要件と「こうなったら困る」という前提を渡すが�
 
 - **Yoshinobuへ上げるもの**: `git commit` / `git push`(常にYoshinobu実施)。要件段階で許可されていない破壊的操作。復旧不能なデータ削除。安全境界そのものの変更。
 - **Coordinatorが承認するもの**: 上記以外。特にProxmox(pve1/pve2)、Sophos(sophos-fw)、UniFi機器への非冪等操作は、**subagentが着手前に計画をCoordinatorへ提示し、Coordinatorが「要件段階でYoshinobuが承認した範囲内か」を判断して承認する**。判断軸は製品名ではなく「Yoshinobuの承認済みscope内か」であり、scope内なら承認、scope外または不明なら停止してYoshinobuへ上げる。
+- **事前承認は不要だが報告が必要なもの**(2026-07-27 Yoshinobu決定): **冪等なコマンド・クエリの追加**。`recovery_exec` の investigate allowlist や `homelab-semaphore-query` のように、AIが名前で呼べる操作カタログへ**冪等な(状態を変えない)操作を1つ足す**行為は、Coordinatorの判断で進めてよい。ただし**追加した事実と内容は必ずYoshinobuへ報告する**。
+  - 判断軸は**追加される操作自体が冪等か**であり、追加という行為ではない。非冪等な操作をカタログへ足す場合は上記「Yoshinobuへ上げるもの」に当たる。
+  - この分類が成立するのは、カタログ拡張が構造的に緩衝されているためである。反映には repo編集 → commit(Yoshinobu) → quory pull(Yoshinobu) → 配備playbook実行 が要り、人手が2回入る。また名前で呼ぶだけの設計上、呼び出し側が引数で影響範囲を変えられない。
+  - 同じカタログは`recovery_exec`経由でCodexからも叩けるため、**追加はCodexの能力拡張でもある**。報告時にその旨を明示する。
 - **提示不要なもの**: 読み取り専用の確認(healthcheck、`--syntax-check`、`scripts/safe-ansible-check.sh`経由の`--check`、`ansible-lint`)、decoy inventory(`127.0.0.1`閉ポートまたは`ansible_connection: local`、実host名・実IPを書かない)での検証、ansy上のリポジトリ作業ツリーおよび`/tmp`に閉じた操作(自身が作成したscratchの削除を含む)。
   - `hosts: localhost` + `connection: local`で副作用を持たない使い捨てplaybook(`set_fact` / `assert`によるJinja式・判定ロジックの検証)もこれに含む(2026-07-10 Yoshinobu承認)。**検証後に削除し、実行した事実と検証内容をimplementまたはtest_resultファイルへ記録する。** 実ホストに触れる可能性のあるもの、ファイル変更・通知等の副作用を持つものはこの例外に含まれない。
 

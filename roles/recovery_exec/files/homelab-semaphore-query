@@ -22,7 +22,7 @@ DB=/var/lib/semaphore/semaphore.db
 SQLITE=/usr/bin/sqlite3
 
 usage() {
-  echo "usage: homelab-semaphore-query <recent-failed <n>|task-errors <id>|task-hosts <id>|task-output <id>>" >&2
+  echo "usage: homelab-semaphore-query <recent-failed <n>|task-errors <id>|task-hosts <id>|task-output <id>|task-time <id>>" >&2
   exit 1
 }
 
@@ -54,6 +54,15 @@ case "$query" in
   task-output)
     is_uint "$param" || usage
     sql="SELECT time, output FROM task__output WHERE task_id = ${param} ORDER BY time;"
+    ;;
+  task-time)
+    is_uint "$param" || usage
+    # Unlike recent-failed, start/end are NOT substr()-truncated here: the
+    # point of this query is to see whatever suffix (Z / +09:00 / none)
+    # Semaphore actually persisted, which substr(...,1,19) would strip.
+    # `end` is quoted as [end] because it is a SQL keyword (CASE/TRIGGER);
+    # unquoted it fails to parse as a column reference in SQLite.
+    sql="SELECT t.id, tpl.name AS template, tpl.playbook, t.status, t.start, t.[end] FROM task t LEFT JOIN project__template tpl ON t.template_id = tpl.id WHERE t.id = ${param};"
     ;;
   *)
     usage

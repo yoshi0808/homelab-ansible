@@ -173,12 +173,14 @@ homelab-semaphore-query recent-failed <n>
 homelab-semaphore-query task-errors <id>
 homelab-semaphore-query task-hosts <id>
 homelab-semaphore-query task-output <id>
+homelab-semaphore-query task-time <id>
 ```
 
-- `recent-failed <n>` — last `n` (1-200) tasks with status error/stopped: id, template name, playbook, status, start time.
+- `recent-failed <n>` — last `n` (1-200) tasks with status error/stopped: id, template name, playbook, status, start time. `start` is truncated to `YYYY-MM-DDTHH:MM:SS` (the timezone suffix, if any, is stripped).
 - `task-errors <id>` — ansible error messages for that task id.
 - `task-hosts <id>` — per-host result rows for that task id.
 - `task-output <id>` — full task output log, chronological.
+- `task-time <id>` — id, template name, playbook, status, and **untruncated** `start`/`end` for that task id (whatever Semaphore actually stored, including any `Z`/`+09:00` suffix or lack of one). Use this instead of `recent-failed` when the exact stored timestamp format matters.
 - `<n>` / `<id>` must be plain integers; there is no free-form SQL access.
 
 ### Monitoring control (homelab-monitoring-*)
