@@ -43,7 +43,7 @@ ansible-playbook p.yml -e title="検証 test" -e message="本文 body"
 ansible-playbook p.yml --extra-vars '{"title":"検証 test","message":"本文 body"}'
 ```
 
-**空白を含みうる値はJSON形式の `--extra-vars` で渡す。** 2026-07-27に別々のTesterが同日中に2回踏み、うち1回は実際のSlack通知が途中で切れた状態で本番チャンネルへ送信された。実装・検証のどちらでも起こる。
+**空白を含みうる値はJSON形式の `--extra-vars` で渡す。** 2026-07-27に別々のTesterが同日中に2回踏み、うち1回は実際のSlack通知がタイトル・本文とも**値の中の最初の半角スペースで切断された状態**で本番チャンネルへ送信された(現物をYoshinobuが確認)。文字化けではなく切断であり、**送信自体は成功するため送り手側では気づきにくい**。実装・検証のどちらでも起こる。
 
 ## task-level `vars:` の lookup は複数回評価されうる
 

@@ -30,7 +30,6 @@
 
 | 項目 | 発火条件 | 検証手段 | 一次記録 | 最終確認 |
 |---|---|---|---|---|
-| **footerの空表示の目視確認**(Yoshinobu) | 済ませるまで | 2026-07-27に `alerts` チャンネルへ検証通知を2件送信済み。**footerが空文字のときSlackが不自然な空欄・余白を出さないか**は、コードからもTesterからも判断できず人の目が要る。不自然なら `roles/common_slack/tasks/notify.yml` の `footer:` 行を条件付きにする | `docs/ai/reviews/incident_auto_capture/2026-07-27_015_w6_test_result.md` | 2026-07-27 |
 | quoryの作業ツリーを**Testerが直接確認できない** | 次にquoryの作業ツリー状態を検証したいとき | Tester接続identity(`ann`)とリポジトリ所有者(`yoshi`)が異なり、gitの `dubious ownership` ガードが `rc=128` で拒否する。回避には `safe.directory` 設定が要り、今回は承認範囲外として構造的推論で代替した。**AC6(作業ツリーを汚さない)のquory側継続確認が原理的に盲目**である | 同上「未実施とその理由」 | 2026-07-27 |
 | T1(証拠捕捉)の**quoryでの初回実行** | 次にSemaphoreジョブが通知を出したとき | quoryで `reports/incidents/_spool/*.json` が生成されるか。**2026-07-27時点で `reports/incidents/` はW5の配備で作られたばかりで、T1は本番で一度も実行されていない**。AC1のパリティはansy実測とコード構造(ホスト分岐なし)が根拠で、**本番identityでの実行は未確認**(Testerの実行identityが本番と異なるため原理的に確認できなかった) | `docs/ai/reviews/incident_auto_capture/2026-07-27_009_test_result.md` §AC1 | 2026-07-27 |
 | `_spool/` の**グループ所有がroot**である点の是正 | 次に `incident_capture` roleを触るとき | `roles/incident_capture/tasks/main.yml` が `owner: yoshi` を指定し `group:` を指定していないため、兄弟の `reports/incidents/`(`homelab-ansible`)と食い違う。ACLで機能はするのでセキュリティ問題ではない。整合性の修正 | 同上 §未実施・想定外まとめ | 2026-07-27 |
