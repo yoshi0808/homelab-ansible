@@ -32,6 +32,19 @@ Ansible専用の公式Skillは存在しないため、内部で使う個別言�
 - `{{ foo }}` で始まる値は行全体をクォートしないとYAMLパースエラーになる。
 - Jinja2のループ・条件はplaybook内では使えず、template内でのみ使う。
 
+## `-e` で空白を含む値を渡さない(playbook実行時)
+
+`ansible-playbook -e` は**単一の `-e` 内に空白区切りで複数の `key=value` を書ける**仕様を持つ。この副作用で、**値に空白が含まれると次のkeyの開始と解釈され、値がそこで切れる**。日本語の文中にASCII語が混ざる文字列で特に踏みやすい。
+
+```
+# 壊れる
+ansible-playbook p.yml -e title="検証 test" -e message="本文 body"
+# 安全
+ansible-playbook p.yml --extra-vars '{"title":"検証 test","message":"本文 body"}'
+```
+
+**空白を含みうる値はJSON形式の `--extra-vars` で渡す。** 2026-07-27に別々のTesterが同日中に2回踏み、うち1回は実際のSlack通知が途中で切れた状態で本番チャンネルへ送信された。実装・検証のどちらでも起こる。
+
 ## task-level `vars:` の lookup は複数回評価されうる
 
 task の `vars:` に `lookup('pipe', ...)` のような**副作用や時刻を伴う式**を置き、同一task内の複数箇所から参照すると、**lookupが参照回数ぶん実行される**(2026-07-27、カウンタファイルへの副作用ログで実測)。

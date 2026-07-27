@@ -22,7 +22,7 @@
 
 | 項目 | 現在地 | 次にやること |
 |---|---|---|
-| **障害の自動捕捉(Step 1)** — Operator役の第一歩 | Tier 4。**W0〜W5まで完走**。T1(`roles/common_slack/tasks/capture.yml`)・収集器(`roles/incident_capture/`)・commit前YAML検査を実装し、独立レビュー2巡でCritical 2件を検出・修正。**W5で全ACがPASS**(`2026-07-27_009_test_result.md`)。収集器はquoryへ配備済みだが **timerは意図的に無効のまま**。実装フェーズは終了 | ①timer有効化の判断 ②T1のquory初回実行の観測(Watch参照) ③T1のコスト最適化(7→3〜4タスク見込み) ④**R6(Slack本文へspool IDを載せる)が未実装** ⑤R8(Semaphore外ジョブの保険)が未実装 |
+| **障害の自動捕捉(Step 1)** — Operator役の第一歩 | Tier 4 + W6(Tier 3)。**実装フェーズ完了**。T1(`roles/common_slack/tasks/capture.yml`)・収集器(`roles/incident_capture/`、quoryでtimer稼働中)・commit前YAML検査・vault検査のindex読み取り化・R6(Slack footerへ相関ID)まで実装し、独立レビュー5本でCritical 3件を検出・修正。W5/W6の全ACがPASS。**副産物としてcommit前ゲートの既存欠陥を4件修正**(いずれも今日の案件とは独立の既存の穴) | ①**R8(Semaphore外ジョブの保険)が未実装** ②シェル(`git-pre-commit-check.sh`)とPython(`check-staged-yaml.py`)で staged mode 取得を二重実装している負債の解消 ③Step 2(ansy側で `claude -p` が第一報を起票)は未着手 |
 
 ## Watch(観測待ち)
 
@@ -30,6 +30,8 @@
 
 | 項目 | 発火条件 | 検証手段 | 一次記録 | 最終確認 |
 |---|---|---|---|---|
+| **footerの空表示の目視確認**(Yoshinobu) | 済ませるまで | 2026-07-27に `alerts` チャンネルへ検証通知を2件送信済み。**footerが空文字のときSlackが不自然な空欄・余白を出さないか**は、コードからもTesterからも判断できず人の目が要る。不自然なら `roles/common_slack/tasks/notify.yml` の `footer:` 行を条件付きにする | `docs/ai/reviews/incident_auto_capture/2026-07-27_015_w6_test_result.md` | 2026-07-27 |
+| quoryの作業ツリーを**Testerが直接確認できない** | 次にquoryの作業ツリー状態を検証したいとき | Tester接続identity(`ann`)とリポジトリ所有者(`yoshi`)が異なり、gitの `dubious ownership` ガードが `rc=128` で拒否する。回避には `safe.directory` 設定が要り、今回は承認範囲外として構造的推論で代替した。**AC6(作業ツリーを汚さない)のquory側継続確認が原理的に盲目**である | 同上「未実施とその理由」 | 2026-07-27 |
 | T1(証拠捕捉)の**quoryでの初回実行** | 次にSemaphoreジョブが通知を出したとき | quoryで `reports/incidents/_spool/*.json` が生成されるか。**2026-07-27時点で `reports/incidents/` はW5の配備で作られたばかりで、T1は本番で一度も実行されていない**。AC1のパリティはansy実測とコード構造(ホスト分岐なし)が根拠で、**本番identityでの実行は未確認**(Testerの実行identityが本番と異なるため原理的に確認できなかった) | `docs/ai/reviews/incident_auto_capture/2026-07-27_009_test_result.md` §AC1 | 2026-07-27 |
 | `_spool/` の**グループ所有がroot**である点の是正 | 次に `incident_capture` roleを触るとき | `roles/incident_capture/tasks/main.yml` が `owner: yoshi` を指定し `group:` を指定していないため、兄弟の `reports/incidents/`(`homelab-ansible`)と食い違う。ACLで機能はするのでセキュリティ問題ではない。整合性の修正 | 同上 §未実施・想定外まとめ | 2026-07-27 |
 | SessionStart hookの**実発火**(`scripts/session-context.sh`) | 次に`/clear`・再起動・compactが起きたとき | セッション冒頭の文脈に「セッション開始時の現在地」ブロックが載るか。載らなければ設定変更がwatcherに拾われていないので`/hooks`を一度開くか再起動する。スクリプト単体実行は検証済みで、未検証なのはイベント経由の発火のみ | `.claude/settings.json` の `hooks.SessionStart`、`docs/ai/reviews/session_continuity/2026-07-27_001_review.md` の未確認事項 | 2026-07-27 |
