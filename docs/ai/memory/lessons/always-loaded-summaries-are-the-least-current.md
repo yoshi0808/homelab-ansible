@@ -1,0 +1,36 @@
+# 常に読み込まれる要約ほど古い
+
+## 教訓
+
+記録は多くの場合3層を持つ。**本文**、ファイル先頭の**要約**(`description`、リード文)、そして**索引**(`MEMORY.md`、README、一覧表)。
+
+更新されるのは本文だけになりやすい。一方、文脈へ自動で載る・最初に目に入るのは索引と要約である。つまり:
+
+> **いちばん古い層が、いちばん確実に読まれる。**
+
+ここから2つの作法が出る。
+
+**読むとき**: 索引や`description`で結論を出さない。「将来タスク」「未実装」「残: 〜」といった**状態を述べる記述**は特に危険で、実装が進んでも索引は自動では変わらない。判断に使う前に本文へ降りる。本文すら要約であることがあるので、件数・完了可否・仕様の詳細を問うなら**一次記録**(`docs/ai/reviews/`、実装ファイル、コミット)まで降りる。
+
+**書くとき**: 本文を更新したら、その記録を要約している層を全部掃く([[sweep-all-documents-stating-a-changed-boundary]]と同じ操作を、文書間でなく**同一記録の層間**に適用する)。特に「完了した」「方針を変えた」の2つは、索引に古い状態が残ると後続の判断を直接誤らせる。
+
+## 根拠(2026-07-27、同一セッション内で2回)
+
+**1件目**: `proxmox_patch_dryrun`単一ノード対応で検出した実バグの件数を、auto-memoryの索引が「2件」と記録していた。Incidentを起票するため一次記録(`docs/ai/reviews/proxmox_patch_dryrun/2026-07-26_002〜005`)を読んだところ**4件**だった(None化クラッシュ / apply gate非対称 / 到達不能とhealthcheck失敗の混同 / 終了コード4)。要約が件数を落としていた。
+
+**2件目**: 「prometheusの更新チェックは将来タスク」と述べて次の案件候補に挙げたところ、Yoshinobuから「専用playbookで check / upgrade / rollback の仕組みを既に持っている」と指摘された。確認すると`playbooks/prometheus_update_check.yml` + `roles/prometheus_update_check`(`upgrade.yml` / `manual_rollback.yml` / `discover_backups.yml`)が実在し、金曜のSemaphoreスケジュールにも載っていた。
+
+2件目の構造が示唆的である。該当memoryの**本文には「prometheus更新チェック=完成(2026-07-19、commit 3593e4c)」と、reviewer approve・tester PASS・監査記録まで正確に書かれていた**。古かったのは`description`フィールドと`MEMORY.md`の索引行、そして別ファイルに残っていた実装前の方向決定(2026-07-16「別playbookでなく統合する」)だけである。**下の層は正しく、上の層だけが古かった。** そして参照したのは上の層だった。
+
+同じ日に、要約の不正確さを扱ったIncidentを自分で起票した直後に2件目を起こしている。「要約は一次記録の代わりにならない」と書くことと、実際に一次記録まで降りることは別の行動である。
+
+## 適用
+
+- 状態(完了/未完了/方針)を根拠に判断するときは、索引→本文→一次記録の順に降りる。**索引で止まらない**
+- 記録を更新したら、`description`・索引・他ファイルからの言及を検索で掃く。目視で数えない([[sweep-all-documents-stating-a-changed-boundary]])
+- 方針決定を記録した後にその方針が採用されなかった場合、**決定の記録を消さず「採用されず、実際は〜」と上書きする**。決定だけが残ると、実装と食い違う指示として後から読まれる
+
+## 関連
+
+- `docs/ai/memory/lessons/sweep-all-documents-stating-a-changed-boundary.md`(層間でなく文書間に同じ操作を適用したもの)
+- `docs/ai/memory/lessons/verify-the-outside-of-a-claimed-boundary.md`(「確認済み」の主張が何を確認していないか)
