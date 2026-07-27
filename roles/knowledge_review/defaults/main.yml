@@ -1,0 +1,32 @@
+---
+# 月次Knowledge振り返り(仕分け・昇格判断)
+# 手順の正本: docs/ai/memory-classification.md「月次振り返りの対象と手順」
+
+# Coordinatorのauto-memory置き場。repoツリー外にあるため --add-dir で明示的に渡す。
+# この置き場がansyにしか無いため、本roleはansy(dev_nodes)専用である。
+knowledge_review_automemory_dir: /home/yoshi/.claude/projects/-home-yoshi-homelab-ansible/memory
+
+# repo作業ツリー
+knowledge_review_repo_dir: /home/yoshi/homelab-ansible
+
+# claude CLI
+knowledge_review_claude_bin: /home/yoshi/.local/bin/claude
+knowledge_review_model: claude-opus-5
+
+# 実行記録(repo外。commit不要な運用ログ)
+knowledge_review_state_dir: /home/yoshi/.local/state/knowledge-review
+
+# claude -p のタイムアウト(秒)
+knowledge_review_timeout: 1800
+
+# 作業ツリーが汚れていても実行するか。既定は false(中止する)。
+# 進行中の変更へ書き込みを混ぜないための安全弁。
+knowledge_review_allow_dirty: false
+
+# --- timer配置用(tasks/install_timer.yml) ---
+
+# 毎月26日。MEMORY.md先頭行の「次回のKnowledge月次振り返り」と同じ周期に合わせる
+# (前回=2026-07-26)。期日の正本はMEMORY.mdの当該行で、振り返り自身が更新する。
+knowledge_review_schedule: "*-*-26 07:15:00"
+knowledge_review_run_user: yoshi
+knowledge_review_playbook_bin: /usr/bin/ansible-playbook

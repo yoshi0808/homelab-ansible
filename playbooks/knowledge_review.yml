@@ -1,0 +1,59 @@
+---
+# knowledge_review.yml - 月次Knowledge振り返り(仕分け・昇格判断)の無人実行
+#
+# 対象: localhost (ansy)。実ホストへは一切接続しない。
+# 実行元: ansy の systemd timer (ansible-knowledge-review.timer)。
+#         Semaphore からは実行しない(Coordinator の auto-memory が ansy にしか無いため)。
+#
+# 何をするか: claude -p を起動し、docs/ai/memory-classification.md の
+# 「月次振り返りの対象と手順」に従って Incident / auto-memory / reviews を
+# 3分類(手順→skills、環境固有の事実→lessons・context、考え方→decisions)に仕分ける。
+# 昇格結果は作業ツリーへ書き出すだけで commit はしない(commit は常に Yoshinobu)。
+# Policy 本文は書き換えず、必要なら docs/ai/memory/temporary/ へ提案を残す。
+#
+# 通知: 結果を Slack へ通知する(変更あり/変更なし/失敗)。
+#
+# tester-gate: check-mode-native — 状態収集(git status)は --check でも常に本実行し、
+# 実際の書き込みを伴う claude -p の起動と report 保存のみ ansible_check_mode でゲートする。
+# --check では「作業ツリーが汚れていないか」までを確認して終わる。
+# 副作用は ansy のリポジトリ作業ツリーと ~/.local/state 配下に限定され、実ホストには及ばない。
+
+- name: Monthly knowledge review
+  hosts: localhost
+  connection: local
+  gather_facts: true
+  become: false
+
+  roles:
+    - role: knowledge_review
+
+  post_tasks:
+    - name: Notify result to Slack
+      ansible.builtin.include_tasks: "{{ playbook_dir }}/../roles/common_slack/tasks/notify.yml"
+      vars:
+        slack_channel: "{{ 'info' if knowledge_review_summary in ['CHANGES', 'NO_CHANGES'] else 'alerts' }}"
+        slack_status: >-
+          {{ 'error' if knowledge_review_summary == 'FAILED'
+             else ('warning' if knowledge_review_summary == 'ABORTED_DIRTY' else 'info') }}
+        slack_title: "[knowledge_review] 月次Knowledge振り返り {{ knowledge_review_summary }}"
+        slack_message: |
+          月次Knowledge振り返りの結果です。
+
+          結果: {{ knowledge_review_summary }}
+          作業ツリーの変更: {{ knowledge_review_changed_files }} ファイル
+
+          {% if knowledge_review_summary == 'CHANGES' %}
+          昇格結果が未commitで残っています。報告を確認のうえ commit してください。
+          報告: {{ knowledge_review_state_dir }}/report-*.md
+          {% elif knowledge_review_summary == 'FAILED' %}
+          実行が失敗しました。タイムアウト({{ knowledge_review_timeout }}秒)の可能性もあります。
+          報告: {{ knowledge_review_state_dir }}/report-*.md
+          journal: journalctl -u ansible-knowledge-review.service
+          {% elif knowledge_review_summary == 'ABORTED_DIRTY' %}
+          作業ツリーに未commitの変更があるため、振り返りを実行せず中止しました。
+          先月分の昇格結果が未commitのままだとここで止まります。commit 後に再実行してください。
+          再実行: systemctl start ansible-knowledge-review.service
+          {% else %}
+          今回昇格した項目はありません。
+          {% endif %}
+      when: not ansible_check_mode

@@ -1,0 +1,32 @@
+---
+# knowledge_review_timer.yml - 月次Knowledge振り返りの systemd timer を配置する
+#
+# 対象: ansy (dev_nodes) のみ。
+#   Coordinator の auto-memory (~/.claude/projects/.../memory) が ansy にしか存在せず、
+#   振り返りの主要な入力の一つがそれであるため、quory へは配布しない。
+#   共有の systemd_timers role の systemd_ansible_timers へ足すと既定の
+#   control_nodes(quory) へ配布されてしまうので、意図的に別 role として分けている。
+#
+# 実行: ansible-playbook playbooks/knowledge_review_timer.yml
+# 配置物: /etc/systemd/system/ansible-knowledge-review.{service,timer}
+# 実際の振り返り本体は playbooks/knowledge_review.yml。
+#
+# 手動実行するときは ansible-playbook を直接叩くより
+# `systemctl start ansible-knowledge-review.service` を使うこと。
+# ExecStart の flock を経由するため、timer 発火との二重実行を避けられる。
+#
+# tester-gate: check-mode-native — unit ファイルの配置と systemd 操作は
+# ansible.builtin.template / systemd モジュールが check_mode に対応しており、
+# --check では差分表示のみで書き込まない。状態確認(systemctl list-timers)は
+# check_mode: false で常に本実行する。副作用は ansy のローカル systemd 設定に限定される。
+
+- name: Install monthly knowledge review timer
+  hosts: dev_nodes
+  gather_facts: true
+  become: false
+
+  tasks:
+    - name: Install timer and service units
+      ansible.builtin.include_role:
+        name: knowledge_review
+        tasks_from: install_timer

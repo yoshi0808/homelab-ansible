@@ -1,0 +1,54 @@
+---
+# systemd timer/service の配置。ansy(dev_nodes)専用。
+# Coordinator の auto-memory が ansy にしか存在しないため、quory へは配布しない。
+# playbooks/knowledge_review_timer.yml から include_role tasks_from で呼ぶ。
+#
+# systemctl list-timers は状態照会であり systemd モジュールでは代替できないため
+# command を使う(roles/ubuntu_vm_full_upgrade 等と同じ扱い)。
+
+- name: Deploy knowledge review service unit
+  ansible.builtin.template:
+    src: knowledge-review.service.j2
+    dest: /etc/systemd/system/ansible-knowledge-review.service
+    owner: root
+    group: root
+    mode: "0644"
+  become: true
+  notify: Reload systemd for knowledge review
+  tags: [destructive]
+
+- name: Deploy knowledge review timer unit
+  ansible.builtin.template:
+    src: knowledge-review.timer.j2
+    dest: /etc/systemd/system/ansible-knowledge-review.timer
+    owner: root
+    group: root
+    mode: "0644"
+  become: true
+  notify: Reload systemd for knowledge review
+  tags: [destructive]
+
+- name: Flush handlers so units are reloaded before enabling
+  ansible.builtin.meta: flush_handlers
+
+- name: Enable and start knowledge review timer
+  ansible.builtin.systemd:
+    name: ansible-knowledge-review.timer
+    enabled: true
+    state: started
+  become: true
+  # --check では unit ファイルが実書き込みされないため、systemd から見て
+  # 対象 unit が存在せず失敗する。差分確認は上の template タスクで足りる。
+  when: not ansible_check_mode
+  tags: [destructive]
+
+- name: Query next scheduled run
+  ansible.builtin.command:
+    cmd: systemctl list-timers ansible-knowledge-review.timer --all --no-pager
+  register: knowledge_review_timer_status
+  changed_when: false
+  check_mode: false
+
+- name: Report next scheduled run
+  ansible.builtin.debug:
+    msg: "{{ knowledge_review_timer_status.stdout_lines }}"

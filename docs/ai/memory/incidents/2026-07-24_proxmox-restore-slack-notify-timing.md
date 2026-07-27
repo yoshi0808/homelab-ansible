@@ -1,6 +1,7 @@
 # Incident: proxmox_restore_vm_placement実行後のSlack通知失敗(Sophos再起動によるネットワーク断)
 
 日付: 2026-07-24
+状態: 解決済み
 対象: `playbooks/proxmox_restore_vm_placement.yml` → `roles/proxmox_restore_vm_placement`最終ステップの`roles/proxmox_healthcheck`(post-restore healthcheck) → `roles/common_slack`(`tasks/notify.yml`)
 種別: 動作不具合
 原因分類: #運用考慮ミス

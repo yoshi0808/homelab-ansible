@@ -31,7 +31,20 @@ grep -rn "<変更した境界のキーワード>" docs/ai/ CLAUDE.md AGENTS.md s
 
 あわせて、決定の**根拠と見直し条件**を`docs/ai/memory/decisions/`へ書く。運用上の境界そのものは正本(通常はRole文書かPolicy)に置き、decisions側へ複製しない。
 
+## 根拠2(2026-07-27、月次Knowledge振り返りの無人実行) — 目視の掃引は3回失敗した
+
+同じセッション内で、掃引漏れを3回起こした。いずれも「直したつもり」で目視確認していた。
+
+1. **廃止した安全根拠の残存**: 書込境界を`--disallowedTools`(denylist)からallowlistへ変えた際、`tasks/main.yml`と`docs/ai/role-routing-index.md`は直したが、`review-prompt.md.j2`だけ「`--disallowedTools`で技術的にも塞いである」が残った。**これは無人LLMが毎月読む当のファイル**であり、廃止した機構を現在形で信じ続けることになる。独立レビューが検出。
+2. **別の誤った根拠**: `--setting-sources ''`を導入して`.claude/settings.json`を読み込まなくしたのに、ヘッダコメントに「commit/pushはsettings.jsonのdenyが効く」が残っていた(実際に効いていたのはBash全面禁止)。自分で発見。
+3. **撤回した規範の残存**: Incidentの記録タイミングを「修正完了後に1回」から「気づいた時点で捕捉」へ変えた際、`skills/incident-recording/SKILL.md`・`incidents/README.md`・promptは直したが、`docs/ai/memory-classification.md`の別セクションに旧ルールがそのまま残っていた。自分で発見。
+
+**教訓の更新**: 掃引は目視でなく`grep`等で機械的に行い、**撤回した文言そのものを検索語にして残存ゼロを確認する**。「直した箇所を数える」のではなく「古い記述が1つも無いことを示す」。上記3件はいずれも、変更した箇所の周辺だけを見ていたために漏れた。
+
+対象には**実装コメント・promptテンプレート・正本文書のすべて**を含める。特にAIが読むファイル(prompt、SKILL.md、CLAUDE.md)に古い規範が残ると、人間が気づかないまま judgment が汚染され続ける。
+
 ## 関連
 
+- `docs/ai/memory/lessons/verify-the-outside-of-a-claimed-boundary.md`(境界の検証そのものの落とし穴)
 - `docs/ai/memory/decisions/approval-authority-for-real-host-operations.md`(この掃引の対象となった決定)
 - `docs/ai/memory/lessons/multilayer-escaping-and-novel-stack-verification.md`(同クラス全面掃引という同じ発想を、実装の欠陥クラスに適用したもの)

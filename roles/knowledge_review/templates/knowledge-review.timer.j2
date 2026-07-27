@@ -1,0 +1,10 @@
+[Unit]
+Description=Monthly knowledge review (timer)
+
+[Timer]
+OnCalendar={{ knowledge_review_schedule }}
+# ansy が停止していて発火を逃した場合、起動後に取り戻す。
+Persistent=true
+
+[Install]
+WantedBy=timers.target

@@ -29,7 +29,7 @@ Claude Memoryの`user`/`feedback`/`project`/`reference`とは別の分類体系�
 | `decisions/` | 承認済み設計判断 | 恒久。前提が変わったら見直す(3節) | Shellは収集、判定はAnsible側 |
 | `temporary/` | 作業中だけ必要な情報 | 案件クローズ時に削除 | request-42のテストが未完了 |
 
-`incidents/`のファイル形式(ファイル名規則・記載項目・原因分類タグ)は`skills/incident-recording/SKILL.md`が正本。修正して正常動作の確認が取れた時点で1回記録する。
+`incidents/`のファイル形式(ファイル名規則・記載項目・原因分類タグ・`状態`)は`skills/incident-recording/SKILL.md`が正本。**記録は気づいた時点で開始し、原因判明後に同じファイルを完成させる2段階**(2026-07-27改訂。旧ルール「修正して正常動作の確認が取れた時点で1回記録する」は、修正されなかった事象と工程内で解決した事象が丸ごと網から漏れるため撤回した)。
 
 ## 3. 昇格・廃止ルール(TODO6-2)
 
@@ -63,6 +63,8 @@ Policy または Skill (該当業務のPolicyファイル新設・改訂、ま�
 
 **捕捉と昇格を分ける**: 教訓の捕捉は即時に行う(詳細は時間が経つと失われる)。月次で行うのは**昇格判断**であり、初回記録の場ではない。
 
+**Incidentの`状態`は3値**(`調査中` / `解決済み` / `未解決`)。形式は`skills/incident-recording/SKILL.md`が正本。月次振り返りでの扱いは状態ごとに異なる。`解決済み`のみ`原因分類`タグを集計する(`調査中`のタグは未確定で集計を歪めるため)。`調査中`は滞留件数と経過日数を報告する(滞留自体が検出対象)。`未解決`(調査打ち切り)は集計にも滞留にも入れず別枠で一覧し、打ち切り判断が今も妥当かを問い直す。
+
 **振り返りで各項目を3つに仕分ける**(Yoshinobu提案、2026-07-26)。
 
 | 仕分け | 判定基準 | 行き先 |
@@ -73,7 +75,11 @@ Policy または Skill (該当業務のPolicyファイル新設・改訂、ま�
 
 **判定ルールは1節と同じ**: 「この知識を知らないことで、Coordinatorが起動するsubagentの判断や実装が変わるか」。Yesならリポジトリへ書き出す。Noならauto-memoryのままでよい。
 
-**次回期日はCoordinatorのMEMORY.md先頭に1行で置く**。MEMORY.mdは毎セッション文脈へ読み込まれるため、これが実質的な発火装置になる。文書に手順だけ書いて誰も見ない状態を避けるための措置である(`docs/ai/memory/lessons/sweep-all-documents-stating-a-changed-boundary.md`と同じ失敗類型)。
+**起動はtimerが行う(2026-07-27)**。`roles/knowledge_review`が配置する`ansible-knowledge-review.timer`が毎月26日にansyで発火し、`playbooks/knowledge_review.yml`が`claude -p`でこの手順を無人実行する。当初はMEMORY.md先頭行を「実質的な発火装置」としていたが、セッションが開かれなければ発火しないため、時刻起動へ移した。
+
+**期日の正本はCoordinatorのMEMORY.md先頭の1行**であり続ける。timerは起動機構、MEMORY.mdは実施記録という分担で、振り返り自身が最後にこの行を更新する。二重管理を避けるため、期日を他所へ書かない(2026-07-27時点で、cloud routine `homelab-ansible-incident-monthly-review`が別日程を持っていたため無効化した)。
+
+**自律の境界**: 振り返りは`docs/ai/memory/`・`docs/ai/context/`・`skills/`へ自分で書き出す。ただし`docs/ai/policies/`本文は書き換えず、必要な改訂は`docs/ai/memory/temporary/policy-proposal-<date>-<slug>.md`へ提案として残す(Policyは人間の判断領域)。commit/pushも行わない。作業ツリーが汚れているときは何も書かずに中止する。
 
 ## 4. Role別のKnowledge参照範囲(TODO6-3)
 

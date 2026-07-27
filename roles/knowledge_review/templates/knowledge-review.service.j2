@@ -1,0 +1,13 @@
+[Unit]
+Description=Monthly knowledge review (classification and promotion)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User={{ knowledge_review_run_user }}
+WorkingDirectory={{ knowledge_review_repo_dir }}
+# claude -p は最大 {{ knowledge_review_timeout }} 秒走る。Type=oneshot の
+# TimeoutStartSec は既定 90 秒のため、明示的に伸ばさないと途中で kill される。
+TimeoutStartSec={{ knowledge_review_timeout + 600 }}
+ExecStart=/usr/bin/flock -n /run/lock/ansible-knowledge-review.lock {{ knowledge_review_playbook_bin }} playbooks/knowledge_review.yml
