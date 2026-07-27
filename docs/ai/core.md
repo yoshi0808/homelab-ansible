@@ -8,6 +8,7 @@
 
 - Git管理されたリポジトリ内容をコードと文書の正本とする。
 - `docs/ai/core.md` は全Role共通原則の正本とする。
+- `docs/ai/status.md` は**現在地**(進行中の作業、観測待ち、着手候補)の正本とする。規範は書かない。対話セッションは`/clear`のたびに文脈を失うため、状態はセッションの記憶でなくリポジトリ側に置く。
 - 案件固有の要求と工程記録は、Coordinatorからの依頼文と `docs/ai/reviews/<target>/` の requirement、implement、review、test_plan、test_result、finalを正本とする。
 - 現在の変更内容は作業ツリーとdiffを正本とし、説明文だけで変更済みと判断しない。
 - 対象システム固有の判断は、該当Policyを正本とする。Policyは `docs/ai/policies/*_policy.md` にある。
@@ -52,12 +53,13 @@ quory = Gitから取得した確定済みコードの本番実行基盤
 情報は必要な範囲だけを、次の順序で選ぶ。
 
 1. 本ファイルで共通原則を確認する。
-2. `docs/ai/role-routing-index.md` で自分のRoleとその実現方式を確認する。
-3. requirement、review、test_planなど、依頼で指定された案件記録を読む。
-4. `docs/ai/core-migration-map.md` の該当行から、対象のSystem / Repository / Operations ContextとPolicyだけを辿る。
-5. 作業内容に一致するSkillを使う。
-6. 過去の経緯が判断に必要な場合だけKnowledgeを読む。
-7. 実装・レビュー・テストでは、コード、git status、diffで現状を再確認する。
+2. 対話セッションのCoordinatorは `docs/ai/status.md` で現在地を確認する(SessionStart hookが自動で載せる。載っていなければ読む)。subagentは案件依頼文で足りるため、指示がない限り読まない。
+3. `docs/ai/role-routing-index.md` で自分のRoleとその実現方式を確認する。
+4. requirement、review、test_planなど、依頼で指定された案件記録を読む。
+5. `docs/ai/core-migration-map.md` の該当行から、対象のSystem / Repository / Operations ContextとPolicyだけを辿る。
+6. 作業内容に一致するSkillを使う。
+7. 過去の経緯が判断に必要な場合だけKnowledgeを読む。
+8. 実装・レビュー・テストでは、コード、git status、diffで現状を再確認する。
 
 Role、Context、Policy、Skill、Knowledgeの新配置は段階的に作成する。まだ存在しない情報は、Roleとroutingについては `docs/ai/role-routing-index.md`、個別ルールについては `docs/ai/core-migration-map.md` の該当行を入口とし、その行が指す既存Policyまたは旧coreの正確な節だけを参照する。関連しそうな旧coreやreviewsを無差別に探索しない。
 
@@ -103,3 +105,4 @@ Role間の連携はCoordinatorを起点とするsubagentの起動と、その最
 |---|---|
 | 2026-07-22 | 旧共通promptから全AI Role共通原則を分離し、現行coreを正本化 |
 | 2026-07-25 | 共通原則本文を変更せず、正本保守のため変更履歴を追加 |
+| 2026-07-27 | 現在地(状態)の正本として `docs/ai/status.md` を新設し、読む順へ追加。規範はリポジトリにあるが状態はセッションの記憶にしかない、という非対称を解消するため |

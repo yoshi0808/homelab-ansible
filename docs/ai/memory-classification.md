@@ -7,11 +7,22 @@
 | 層 | 位置づけ |
 |---|---|
 | Core(`docs/ai/core.md`) | 全Role共通の不変原則 |
+| **状態**(`docs/ai/status.md`、および影響先のコード・Policy・Contextの当該箇所) | 知識ではなく**現在地**。進行中の作業、観測待ち、着手候補。可変であり、repoの現物で真偽を確かめられる |
 | **Knowledge**(`docs/ai/memory/`、本ファイルの対象) | プロジェクト全体で共有すべき知識。特定AI製品に紐づかない、リポジトリ内の共有資産 |
 | Skill(`skills/`) | 再利用可能な能力・手順 |
 | Claude Memory(`~/.claude/projects/.../memory/`) | Coordinator(このClaude Codeセッション)固有の経験・運用。Coordinatorが起動するAgent tool subagentは前提としてこの内容を見ない(subagentは都度コールドスタートし、渡されたprompt以外の文脈を持たない) |
 
-**判定ルールは1つだけ**: 「この知識を知らないことで、Coordinatorが起動するsubagent(Tech Lead/Implementer/Reviewer/Tester役)の判断や実装が変わるか」。(2026-07-26改訂: 旧「Codex系Role」の判定基準を、Codex撤退後のsubagent体制に合わせて言い換えた。判定の実質は変わらない)
+**判定は2段階で行う**(2026-07-27に第0段を追加)。
+
+**第0段 — 知識か、状態か。** 「repoの現物(コード・commit・reviews)を見れば真偽を確かめられるか」を先に問う。確かめられるものは**状態**であり、Knowledgeでもauto-memoryでもなく`docs/ai/status.md`か「使う場所」(該当するコード・Policy・Contextの当該箇所)へ置く。判断の順序は次のとおり。
+
+- 影響先のコード・Policy・Contextに書ける → **そこへ書く**(第一選択。変更する人の目に必ず入る)
+- 書ける場所が無い(将来の日付やイベントを待つ、複数箇所にまたがる) → **`docs/ai/status.md`**
+- repoでは確かめようがない(Yoshinobuの判断傾向、Coordinator自身の作法) → **知識**として第1段へ進む
+
+**auto-memoryに「残タスク」「将来課題」「完了済み」を書かない。** 検証されないまま索引に残り、repoの現物と食い違う。2026-07-27時点のauto-memory索引には、隣接する2行が同じ案件を「将来課題」と「完走・commit済み」と述べる矛盾が実在し、既に解決済みの項目(`AGENTS.md`要否判断)も残タスクとして残っていた。これは`lessons/always-loaded-summaries-are-the-least-current.md`の構造そのものである。
+
+**第1段 — 誰が読む知識か**: 「この知識を知らないことで、Coordinatorが起動するsubagent(Tech Lead/Implementer/Reviewer/Tester役)の判断や実装が変わるか」。(2026-07-26改訂: 旧「Codex系Role」の判定基準を、Codex撤退後のsubagent体制に合わせて言い換えた。判定の実質は変わらない)
 
 - Yes → Knowledge(`docs/ai/memory/`)へ書く。
 - No(Yoshinobuとのコミュニケーションスタイル、Coordinator自身の作業習慣など、Coordinatorの運用に閉じるもの)→ Claude Memoryのままでよい。
@@ -76,13 +87,20 @@ Policy または Skill (該当業務のPolicyファイル新設・改訂、ま�
 | この**環境独自の事実** | このホームラボ固有の落とし穴・構成事実で、知らないと判断を誤るか | `docs/ai/memory/lessons/` または`docs/ai/context/` |
 | **Yoshinobuの考え方** | 承認境界・優先順位・役割分担など、人の判断基準そのものか | `docs/ai/memory/decisions/` または Policy |
 
-**判定ルールは1節と同じ**: 「この知識を知らないことで、Coordinatorが起動するsubagentの判断や実装が変わるか」。Yesならリポジトリへ書き出す。Noならauto-memoryのままでよい。
+**判定ルールは1節と同じ**: まず第0段(知識か状態か)、次に「この知識を知らないことで、Coordinatorが起動するsubagentの判断や実装が変わるか」。Yesならリポジトリへ書き出す。Noならauto-memoryのままでよい。
+
+**状態の突合も月次で行う(2026-07-27追加)**。対象は2つある。
+
+1. **auto-memory側**: 残っている状態記述(「残:」「将来課題」「完了済み」)をrepoの現物と突き合わせ、①既に解決しているもの、②`docs/ai/status.md`へ移すべきもの、③影響先のコードやContextへ書くべきもの、に仕分ける。**auto-memoryは状態を持たない**のが到達点であり、月次はその漏れを回収する場である。
+2. **`docs/ai/status.md`自身**: 各行の検証手段を実際にたどり、記述が現物と合っているかを確かめる。このファイルの更新トリガはCoordinatorセッション内の3イベントだけなので、**セッションを経由せずに現実が変わった場合**(Yoshinobuが手動で片付けた、外部システムの状態が変わった)は誰も気づかない。月次がその唯一の周期的な検知点である。
 
 **起動はtimerが行う(2026-07-27)**。`roles/knowledge_review`が配置する`ansible-knowledge-review.timer`が毎月26日にansyで発火し、`playbooks/knowledge_review.yml`が`claude -p`でこの手順を無人実行する。当初はMEMORY.md先頭行を「実質的な発火装置」としていたが、セッションが開かれなければ発火しないため、時刻起動へ移した。
 
 **期日の正本はCoordinatorのMEMORY.md先頭の1行**であり続ける。timerは起動機構、MEMORY.mdは実施記録という分担で、振り返り自身が最後にこの行を更新する。二重管理を避けるため、期日を他所へ書かない(2026-07-27時点で、cloud routine `homelab-ansible-incident-monthly-review`が別日程を持っていたため無効化した)。
 
 **自律の境界**: 振り返りは`docs/ai/memory/`・`docs/ai/context/`・`skills/`へ自分で書き出す。ただし`docs/ai/policies/`本文は書き換えず、必要な改訂は`docs/ai/memory/temporary/policy-proposal-<date>-<slug>.md`へ提案として残す(Policyは人間の判断領域)。commit/pushも行わない。作業ツリーが汚れているときは何も書かずに中止する。
+
+**無人実行は`docs/ai/status.md`を書き換えない**(2026-07-27)。書込allowlistは上記3パスのみで、`status.md`はそこに含まれない(`role-routing-index.md`「無人実行されるCoordinator」の表)。読取は`docs/`配下なので可能である。したがって上記「状態の突合」で見つかった差分は、**書き換えずに報告へ列挙する**。auto-memoryを読み取りのみとしている扱いと同じで、反映は後で対話セッションかYoshinobuが行う。allowlistを広げて`status.md`を書けるようにするのは、封じ込めが成立している3条件(同節)を崩さないか確認したうえで別途判断する。
 
 ## 4. Role別のKnowledge参照範囲(TODO6-3)
 

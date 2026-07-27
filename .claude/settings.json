@@ -20,6 +20,20 @@
       "Bash(git push*)"
     ]
   },
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PROJECT_DIR:-.}/scripts/session-context.sh\"",
+            "timeout": 10,
+            "statusMessage": "現在地(docs/ai/status.md)を読み込み中"
+          }
+        ]
+      }
+    ]
+  },
   "autoMode": {
     "classifyAllShell": true,
     "soft_deny": [

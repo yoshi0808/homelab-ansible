@@ -81,6 +81,7 @@ Tier 1/2はこれまで通りCoordinator自身が実装し、Tier 2のみTester�
 | 情報 | 優先する正本 | fallback |
 |---|---|---|
 | 全Role共通原則・安全境界 | `docs/ai/core.md` | なし |
+| **現在地**(進行中・観測待ち・着手候補) | `docs/ai/status.md` | なし。Coordinatorのauto-memoryは正本ではない |
 | identity → Role対応、Role実現方式 | 本index | なし |
 | Role本文(責任・権限・成果物・禁止事項) | `docs/ai/roles/<role>.md` | 本indexの要約 |
 | Tierと呼び出し方針 | `skills/delegation-tier/SKILL.md` | 本index |
@@ -89,7 +90,7 @@ Tier 1/2はこれまで通りCoordinator自身が実装し、Tier 2のみTester�
 
 ## 作業開始時の解決手順
 
-1. `docs/ai/core.md`を読む。
+1. `docs/ai/core.md`を読む。対話セッションのCoordinatorは`docs/ai/status.md`で現在地も確認する(SessionStart hook `scripts/session-context.sh`が自動で載せる)。
 2. Tierを判定する(`skills/delegation-tier/SKILL.md`)。
 3. Tier 3/4なら、該当Roleの`docs/ai/roles/<role>.md`を読み込ませたAgent tool subagentを起動する。Tier 1/2はCoordinator自身が実装する。
 4. 案件固有の成果物は指定された`docs/ai/reviews/<target>/`だけを読む。

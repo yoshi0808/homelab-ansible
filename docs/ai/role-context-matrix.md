@@ -17,6 +17,7 @@
 |---|---|---|---|---|---|
 | `docs/ai/core.md` | 起動時 | 起動時 | 起動時 | 起動時 | 起動時 |
 | `docs/ai/role-routing-index.md` | 起動時 | 起動時 | 起動時 | 起動時 | 起動時 |
+| `docs/ai/status.md`(現在地) | **起動時**(SessionStart hookが自動で載せる。更新責任もCoordinatorにある) | 必要時 | 不要 | 不要 | 不要 |
 | `docs/ai/context/system/overview.md` | 着手時 | 着手時 | 必要時 | 必要時 | 必要時 |
 | 対象領域System Context(`proxmox.md`/`radius.md`/`monitoring.md`/`semaphore.md`、該当するもののみ) | 必要時 | 着手時(詳細) | 着手時(詳細) | 着手時(詳細) | 着手時(詳細) |
 | `docs/ai/context/ansible/repository-overview.md` | 必要時 | 着手時 | 必要時 | 必要時 | 必要時 |
@@ -41,6 +42,8 @@
 ## Coordinatorの扱い(2026-07-22、pilot2/3レビューの指摘を反映)
 
 pilot3のTODO2-2レビューで「Role別Contextマトリクスにタイミング軸とCoordinatorの明示的な扱いが欠けている」との指摘があり、この節で解消する。Coordinatorは実装Contextの大半を「必要時」に留め、Tech Leadへの委任時に対象System/Ansible Contextの選定を委ねる。ただしIssue受理・Knowledge(重要Decision)・委任Skill(Tier判定)の3つは常時参照する。これはCoordinatorがコンテキスト量を抑えつつ、委任判断とTier判定の質を保つための線引きである。
+
+2026-07-27に`docs/ai/status.md`(現在地)を追加した。subagentは都度コールドスタートし、案件の依頼文で必要な文脈を受け取るため、進行中作業の一覧を読む必要がない(Knowledgeを全件読ませないのと同じ理由)。Tech Leadだけ「必要時」としてあるのは、分解時に他の進行中案件との競合を確かめる場合があるため。**subagentへ渡すべき状態は、Coordinatorが依頼文へ書く。**
 
 ## 完了条件の確認
 
