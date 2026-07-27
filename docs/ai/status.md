@@ -22,6 +22,11 @@
 
 | 項目 | 現在地 | 次にやること |
 |---|---|---|
+| **工程の作り直し**(PMO新設ほか) | 2026-07-27の振り返り(`docs/ai/reviews/process_retrospective/`)を受けて、PMO役の新設・見積もり責務・計画レビュー工程・依頼文の書き方を規範へ反映。独立レビュー2巡でCritical 3件を検出・修正しApprove | ①**`.claude/agents/pmo.md` の作成**(未作成のためPMOは起動できず、Coordinatorが代行中。代行中は工程遵守の点検が自己点検になり機能しない)②`skills/subagent-briefing` の新設 ③次の案件でPMOと見積もりを実地に回す |
+
+
+| 項目 | 現在地 | 次にやること |
+|---|---|---|
 | **障害の自動捕捉(Step 1)** — Operator役の第一歩 | Tier 4 + W6(Tier 3)。**実装フェーズ完了**。T1(`roles/common_slack/tasks/capture.yml`)・収集器(`roles/incident_capture/`、quoryでtimer稼働中)・commit前YAML検査・vault検査のindex読み取り化・R6(Slack footerへ相関ID)まで実装し、独立レビュー5本でCritical 3件を検出・修正。W5/W6の全ACがPASS。**副産物としてcommit前ゲートの既存欠陥を4件修正**(いずれも今日の案件とは独立の既存の穴) | ①**R8(Semaphore外ジョブの保険)が未実装** ②シェル(`git-pre-commit-check.sh`)とPython(`check-staged-yaml.py`)で staged mode 取得を二重実装している負債の解消 ③Step 2(ansy側で `claude -p` が第一報を起票)は未着手 |
 
 ## Watch(観測待ち)
@@ -46,7 +51,7 @@
 
 | 項目 | 内容 | 根拠 |
 |---|---|---|
-| Operator役の新設 | 現行5役(Coordinator / Tech Lead / Implementer / Reviewer / Tester)は**開発工程しか持たず、運用工程が空白**である。Incident記録・運用レポートをAIへ委ねる方向。着手時期は未定 | `docs/ai/roles/` に運用工程のRoleが存在しないこと。Yoshinobu表明(2026-07-26) |
+| Operator役の新設 | 現行6役(Coordinator / Tech Lead / **PMO** / Implementer / Reviewer / Tester)は**開発工程しか持たず、運用工程が空白**である。Incident記録・運用レポートをAIへ委ねる方向。着手時期は未定 | `docs/ai/roles/` に運用工程のRoleが存在しないこと。Yoshinobu表明(2026-07-26) |
 | 時刻表記JST規約をrepoへ明文化 | 「リポジトリの時刻表記はJST(+09:00)、`date -u`やローカル時刻+リテラル`Z`は詐称バグ」という規約が、repo内には `autonomous_recovery_policy.md` L174(通知文言の1行)しか無く、規約本体はCoordinatorのauto-memoryにある。Implementerが従うべき規約なのでrepo側が正本であるべき。障害バンドルがSemaphoreのUTCとreportsのJSTを混在させるため、実害が出る前に片付ける | `grep -rn "JST" docs/` の結果が通知文言1件のみであること。`docs/ai/memory-classification.md` 第0段(subagentの判断が変わる知識はrepoへ) |
 | リポジトリ直下 `AGENTS.md` の要否判断 | Codexが開発工程から外れた結果、このファイルを読む主体が現状存在しない。残すか消すかが未判断。ファイル自身が末尾でそう述べている | `AGENTS.md` L7。規律1により状態は使う場所(当該ファイル)に書かれているが、**そこを開く動機を持つ人がいない**ため、判断の起票だけをここに置く |
 

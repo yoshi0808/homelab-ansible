@@ -15,6 +15,7 @@
 | Implementer | **Sonnet** | Tech Lead(subagentまたはCoordinator自身)がまとめたrequirement/分解案に基づき、Coordinatorが別途Agent toolでsubagentを起動する。`docs/ai/roles/implementer.md`の範囲(最小差分実装、commit/push禁止、本番適用禁止)は不変。 |
 | Reviewer | **Sonnet** | 同様にCoordinatorが別のAgent tool subagentを起動する。Implementerを行ったsubagentとは別セッションとして起動し、独立性を保つ(`docs/ai/roles/reviewer.md`「自分が実装した変更を独立レビュー済みとして扱わない」を、同一subagentの使い回しをしないことで担保する)。 |
 | Tester | **Sonnet** | 同様にCoordinatorが別のAgent tool subagentを起動する。実ホストへの`--check`/dry-run実行を含め、`docs/ai/roles/tester.md`の禁止事項(本番適用、`--check`なしのcheck-mode-native実行等)はそのまま適用される。 |
+| **PMO** | **Sonnet** | 2026-07-27新設。Tier 3以上でCoordinatorが計画を決め切った後に起動し、`docs/ai/roles/pmo.md`の範囲で工程の組み立て・計画レビュー(60分/30分の単位基準と未決定数)・進捗と逸脱の検出・課題管理、および**Coordinator自身の工程遵守の点検**を行う。**技術的な判断・解決は一切しない。** 入力はリポジトリ(計画、`status.md`、案件フォルダ、`effort-baseline.md`)のみでコールドスタートに耐える設計。**ただし2026-07-27時点で `.claude/agents/pmo.md` が未作成のため、`subagent_type: pmo` での起動はまだできない**(`docs/ai/roles/pmo.md`「実行機構」)。それまではCoordinatorが代行する。 |
 
 ### モデル・effort配分(2026-07-26確定)
 

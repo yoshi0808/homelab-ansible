@@ -4,7 +4,7 @@
 
 このリポジトリが扱うhomelabは、Git管理されたAnsibleコードを開発する`ansy`、確定済みコードを取得して本番実行する`quory`、仮想化基盤の`proxmox`、認証の`radius_servers`、観測の`monitoring_servers`を中心に構成される。Semaphoreは`quory`を本番実行基盤とするGUI・定期実行の入口であり、`ansy`にも開発側のSemaphoreがある。
 
-AI作業は`role-routing-index.md`に従い、Coordinator、Tech Lead、Implementer、Reviewer、Testerが分担する。System Contextは、Tech Leadが対象領域と依存を選び、各Roleが実環境への影響と安全境界を判断するための地図である。現在のコード、inventory、対象Policyが常に優先される。
+AI作業は`role-routing-index.md`に従い、Coordinator、Tech Lead、PMO、Implementer、Reviewer、Testerが分担する(PMOは工程管理のみを担い、本System Contextを読まない。`role-context-matrix.md`「PMOの参照範囲」)。System Contextは、Tech Leadが対象領域と依存を選び、各Roleが実環境への影響と安全境界を判断するための地図である。現在のコード、inventory、対象Policyが常に優先される。
 
 ## ノードの役割
 

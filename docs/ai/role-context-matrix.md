@@ -31,6 +31,19 @@
 | 委任Skill(Tier判定、`skills/delegation-tier/SKILL.md`) | 案件ごとに毎回参照(Tier判定はCoordinatorが確定する) | 着手時(受領した案件がTier 3以上であることの確認) | 不要 | 不要 | 不要 |
 | 規範文書レビュー(`skills/document-norm-review/SKILL.md`) | 必要時(自ら規範を書き換えるとき) | 必要時(規範の再配置を伴う分解のとき) | 不要 | **着手時(レビュー対象が規範文書を含む場合は必須)** | 不要 |
 
+## PMOの参照範囲(2026-07-27新設)
+
+上表はPMO列を持たない。PMOは技術Contextを一切読まないため、列を足すと大半が「不要」になり表が薄まるからである。PMOが読むのは次の4つに限る。
+
+| 情報 | タイミング |
+|---|---|
+| Coordinatorが決め切った計画、Tech Leadの見積もり | 着手時 |
+| `docs/ai/effort-baseline.md`(実績と測り方) | 着手時・チェックポイント |
+| `docs/ai/status.md`(現在地) | 着手時・チェックポイント |
+| 案件フォルダ `docs/ai/reviews/<target>/` | 必要時(工程の再構成、課題の追跡) |
+
+**System Context / Ansible Context / Policy / 実装Skillは読まない。** PMOは技術的な判断をしないため、読んでも判断に使えず、読むこと自体が役割の越境になる。技術的な精査が要ると判断した場合は、2人目のTech Leadの起用をCoordinatorへ進言する(`docs/ai/roles/pmo.md`)。
+
 ## 判断の原則(計画書からの引き継ぎ、変更なし)
 
 - Tech Leadは全体像を理解し、必要Contextを選ぶ。Tech LeadのContext指定に不足があれば、各Roleは追加調査する。

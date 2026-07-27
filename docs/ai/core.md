@@ -1,6 +1,6 @@
 # homelab-ansible AI共通原則
 
-このファイルは、Claude CodeによるCoordinatorと、Coordinatorが必要に応じて呼び出すsubagent(Tech Lead / Implementer / Reviewer / Tester相当)が作業開始時に読む共通原則の正本である。製品別入口はリポジトリ直下の `AGENTS.md` と `CLAUDE.md` とし、共通原則をそれらへ複製しない。
+このファイルは、Claude CodeによるCoordinatorと、Coordinatorが必要に応じて呼び出すsubagent(Tech Lead / PMO / Implementer / Reviewer / Tester相当)が作業開始時に読む共通原則の正本である。製品別入口はリポジトリ直下の `AGENTS.md` と `CLAUDE.md` とし、共通原則をそれらへ複製しない。
 
 ## 目的と正本
 

@@ -72,14 +72,32 @@ Tier 2はTech Leadを飛ばしてCoordinatorが直接Testerへ依頼する経路
 
 したがってTier 2では、**指示は出さなくてよいが、着手前に「誰が何をTesterへ依頼したか」をTech Leadへ共有する**。あわせて承認所有権がCoordinatorにあることを明示し、Tech Leadが同じTesterへ二重に指示しない状態をつくる。二重承認は誤操作の原因になる(`feedback_confirm_prompt_proxy_scope`の所有権ルール)。
 
+## 計画レビュー(Tier 3以上、2026-07-27追加)
+
+Tier 3以上では、**実行へ移す前にPMOが計画をレビューする**。Coordinatorは承認するだけで、自分でレビューしない。
+
+差し戻しの基準は3つで、**いずれも技術的な妥当性を問わない**(`docs/ai/roles/pmo.md`)。
+
+1. **1単位が60分を超えるなら差し戻す。理想は30分程度。**
+2. **1単位に未決定の設計判断が2つ以上あれば差し戻す。**
+3. 60分を割れない大型案件は「このままでは無理」とCoordinatorへ報告し、**フェーズ分割はCoordinatorが判断する**。
+
+技術的な精査が要る場合は、2人目のTech Leadによる査読をPMOがCoordinatorへ進言する。
+
+**なぜ必要か**: 2026-07-27の案件では、**実装が5回レビューされ、計画は0回だった**。参照モデル(200名規模の実務)で要件定義・基本設計が日程35%を占めるのは、そこに査読サイクルが入っているためであり、それに当たる工程が存在しなかった。結果、日程配分は計画8.8% / 製造45.6%(モデルは50% / 20%)となり、上流の不足がそのまま製造の手戻りとして現れた。
+
+**基準2は現時点では仮説である。** 2026-07-27の3単位で、所要時間(21.2分 / 11.6分 / 16.3分)と独立レビューの検出(Critical 1+Suggestion 7 / Critical 1 / blocking 0)が**単調に対応しなかった**ことは一次記録で確認できる。一方「未決定の数」(約5 / 約1 / 約0)は**Coordinatorが事後に数えた分類であり計測値ではない**。詳細と検証計画は `docs/ai/roles/pmo.md` の基準2節を正本とする。
+
+検証可能にするため、**Tech Leadは見積もりに「単位ごとの未決定の設計判断の一覧」を書く**。PMOは申告された一覧を数えるだけでよく、技術的判断を要しない。
+
 ## Tierごとの工程
 
 | Tier | 工程 | 成果物 |
 |---|---|---|
 | 1 | Coordinatorが実装し静的検査まで自分で完了する。Roleへ渡さない | 変更本体。記録は必要な場合だけ |
 | 2 | Coordinatorが実装し、Testerにだけ実機検証を依頼する。**着手前にTech Leadへ一報を入れる**(下記) | 変更本体 + test_result |
-| 3 | Tech Lead → Implementer → Reviewer → Tester。着手前に分解方針をCoordinatorへ報告する(報告の形式は`docs/ai/context/operations/agmsg-message-format.md`。配送手段はsubagentの最終報告へ変わったが、記載すべき項目の規約は有効) | requirement / implement / review / test_result |
-| 4 | Tier 3に加えて調査→Coordinator受入→実装の2段階とし、Reviewerは逐行照合する | Tier 3の成果物 + investigation |
+| 3 | Tech Lead(分解+見積もり)→ **PMO(計画レビュー)** → Coordinator承認 → Implementer → Reviewer → Tester。着手前に分解方針をCoordinatorへ報告する(報告の形式は`docs/ai/context/operations/agmsg-message-format.md`。配送手段はsubagentの最終報告へ変わったが、記載すべき項目の規約は有効) | requirement / implement / review / test_result |
+| 4 | Tier 3(**PMOの計画レビューを含む**)に加えて調査→Coordinator受入→実装の2段階とし、Reviewerは逐行照合する | Tier 3の成果物 + investigation |
 
 **+R(Reviewer付加)**: Tier 1または2に、軸Bを理由としてReviewerの逐行照合だけを足す形。Tech Lead / Implementer / Testerは入れない。Policy / Context / docのみの変更が軸Bに当たる場合の標準形であり、`1+R`・`2+R`と表記する。成果物は当該Tierの成果物 + review。
 
