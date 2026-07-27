@@ -20,7 +20,9 @@
 
 ## Now(進行中)
 
-なし。
+| 項目 | 現在地 | 次にやること |
+|---|---|---|
+| **障害の自動捕捉・第一報起票**(Operator役の第一歩) | 設計合意まで完了。決定7件(D1〜D7)と実装前に潰す細部4件を `docs/ai/reviews/incident_auto_capture/2026-07-27_001_design_agreement.md` に記録済み。**実装はまだ無い** | Step 1(quory側の証拠バンドル + 現況スナップショット生成)のrequirement作成。Tier 4想定 |
 
 ## Watch(観測待ち)
 
@@ -42,6 +44,7 @@
 | 項目 | 内容 | 根拠 |
 |---|---|---|
 | Operator役の新設 | 現行5役(Coordinator / Tech Lead / Implementer / Reviewer / Tester)は**開発工程しか持たず、運用工程が空白**である。Incident記録・運用レポートをAIへ委ねる方向。着手時期は未定 | `docs/ai/roles/` に運用工程のRoleが存在しないこと。Yoshinobu表明(2026-07-26) |
+| 時刻表記JST規約をrepoへ明文化 | 「リポジトリの時刻表記はJST(+09:00)、`date -u`やローカル時刻+リテラル`Z`は詐称バグ」という規約が、repo内には `autonomous_recovery_policy.md` L174(通知文言の1行)しか無く、規約本体はCoordinatorのauto-memoryにある。Implementerが従うべき規約なのでrepo側が正本であるべき。障害バンドルがSemaphoreのUTCとreportsのJSTを混在させるため、実害が出る前に片付ける | `grep -rn "JST" docs/` の結果が通知文言1件のみであること。`docs/ai/memory-classification.md` 第0段(subagentの判断が変わる知識はrepoへ) |
 | リポジトリ直下 `AGENTS.md` の要否判断 | Codexが開発工程から外れた結果、このファイルを読む主体が現状存在しない。残すか消すかが未判断。ファイル自身が末尾でそう述べている | `AGENTS.md` L7。規律1により状態は使う場所(当該ファイル)に書かれているが、**そこを開く動機を持つ人がいない**ため、判断の起票だけをここに置く |
 
 ## 載せていないもの(判断の記録)
