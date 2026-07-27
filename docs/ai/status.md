@@ -22,7 +22,7 @@
 
 | 項目 | 現在地 | 次にやること |
 |---|---|---|
-| **障害の自動捕捉・第一報起票**(Operator役の第一歩) | 設計合意まで完了。決定7件(D1〜D7)と実装前に潰す細部4件を `docs/ai/reviews/incident_auto_capture/2026-07-27_001_design_agreement.md` に記録済み。**実装はまだ無い** | Step 1(quory側の証拠バンドル + 現況スナップショット生成)のrequirement作成。Tier 4想定 |
+| **障害の自動捕捉・第一報起票**(Operator役の第一歩) | Tier 4。設計合意(D1〜D7)→ requirement(AC1〜AC7)→ Tech Lead調査+ADR-003/004 → **W0先行観測まで完了**。OQ1〜OQ6すべて解決済み。`homelab-semaphore-query task-time` をカタログへ追加しquoryへ配備済み。**本体の実装はまだ無い** | W1(Implementer A: `notify.yml` へのT1挿入)。工程は `2026-07-27_003_investigation.md` §8 の W0→W5 が正本。**AC1のベースラインは取得済み**(`recovery_probe_notify.yml`、rc=0 / ok=3 changed=0 failed=0 ignored=0) |
 
 ## Watch(観測待ち)
 
