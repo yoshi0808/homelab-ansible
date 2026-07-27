@@ -31,18 +31,20 @@
 | 委任Skill(Tier判定、`skills/delegation-tier/SKILL.md`) | 案件ごとに毎回参照(Tier判定はCoordinatorが確定する) | 着手時(受領した案件がTier 3以上であることの確認) | 不要 | 不要 | 不要 |
 | 規範文書レビュー(`skills/document-norm-review/SKILL.md`) | 必要時(自ら規範を書き換えるとき) | 必要時(規範の再配置を伴う分解のとき) | 不要 | **着手時(レビュー対象が規範文書を含む場合は必須)** | 不要 |
 
-## PMOの参照範囲(2026-07-27新設)
+## Auditorの参照範囲(2026-07-28新設。退役したPMOの節を置き換え)
 
-上表はPMO列を持たない。PMOは技術Contextを一切読まないため、列を足すと大半が「不要」になり表が薄まるからである。PMOが読むのは次の4つに限る。
+上表はAuditor列を持たない。Auditorは技術Contextを一切読まないため、列を足すと大半が「不要」になり表が薄まるからである。Auditorは**案件クローズ時に1回だけ**起動し、読むのは次の4つに限る。
 
 | 情報 | タイミング |
 |---|---|
-| Coordinatorが決め切った計画、Tech Leadの見積もり | 着手時 |
-| `docs/ai/effort-baseline.md`(実績と測り方) | 着手時・チェックポイント |
-| `docs/ai/status.md`(現在地) | 着手時・チェックポイント |
-| 案件フォルダ `docs/ai/reviews/<target>/` | 必要時(工程の再構成、課題の追跡) |
+| **案件フォルダ `docs/ai/reviews/<target>/` の全成果物** | 起動時(必須)。これが検査対象そのもの。`progress.md`(進捗・課題の集約)と**番号付き成果物**(各単位の `_implement.md` / `_review.md` / `_test_result.md`)を**必ず突き合わせる** — 前者の実行フェーズの書き手はCoordinator、後者は実行した本人であり、**食い違いはそれ自体が指摘になる** |
+| `docs/ai/status.md`(現在地) | 起動時。案件の現況と一致しているか、完了行が残っていないかを見る |
+| `docs/ai/effort-baseline.md`(実績と測り方) | 起動時。当該案件が記帳されているかを見る |
+| 成果物から**参照されている先** | 必要時。file:line・commitが実在し内容が一致するかの確認。**参照が無効になっていることを見つけるのが仕事の一部** |
 
-**System Context / Ansible Context / Policy / 実装Skillは読まない。** PMOは技術的な判断をしないため、読んでも判断に使えず、読むこと自体が役割の越境になる。技術的な精査が要ると判断した場合は、2人目のTech Leadの起用をCoordinatorへ進言する(`docs/ai/roles/pmo.md`)。
+**Coordinatorの説明は入力にしない。** 依頼文に書いてよいのは「どの案件か」「どこから読み始めるか」だけである。**「Coordinatorが説明しなければ分からないこと」は、記録の欠落として指摘されるべきもの**であり、説明で補ってはならない。前身のPMO役はCoordinatorの自己申告を点検対象にした結果、最も重要な逸脱を検出できずに退役した(`docs/ai/reviews/process_retrospective/2026-07-28_003_pmo_retirement.md`)。
+
+**System Context / Ansible Context / Policy / 実装Skillは読まない。** Auditorは技術的な正否を判定しないため、読んでも判断に使えず、読むこと自体が役割の越境になる。ただし**記録どうしの矛盾**は技術的な内容であっても指摘してよい(読解だけで判別できるため)。技術的な精査が要ると判断した場合は、2人目のTech Leadの起用をCoordinatorへ進言する(`docs/ai/roles/auditor.md`)。
 
 ## 判断の原則(計画書からの引き継ぎ、変更なし)
 

@@ -158,3 +158,7 @@ Coordinator自身の工程逸脱3件は、**いずれもCoordinatorには検出�
 - `docs/ai/memory/incidents/2026-07-27_*`(同日のIncident 2件)
 - `docs/ai/memory/lessons/distinguish-nothing-found-from-not-run.md`
 - `docs/ai/memory/lessons/dynamic-include-escapes-static-and-rescue.md`
+
+---
+
+> **後日談(2026-07-28追記)**: 本振り返りを根拠に新設したPMO役は、**唯一の実走を経て翌日に退役した**。本ファイルの分析(Coordinatorの失敗は手続きの側に集中しており、技術判断は独立レビューを通って1件も覆らなかった)は、2026-07-28の案件では成立せず、技術判断が2回覆っている。退役の判断と代替の設計は `2026-07-28_003_pmo_retirement.md` を参照。**本ファイルは当時の分析としてそのまま残す** — 結論が覆ったことも含めて記録である。

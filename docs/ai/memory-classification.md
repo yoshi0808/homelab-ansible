@@ -108,7 +108,7 @@ Policy または Skill (該当業務のPolicyファイル新設・改訂、ま�
 |---|---|
 | Coordinator | 全`decisions/`(重要度問わず)、Tech Lead統合結果に関わる`incidents/` |
 | Tech Lead | 重要`decisions/`、担当領域(自trio)に関連する`lessons/`全般、委任判断に関わる`incidents/` |
-| PMO | **読まない。** 技術的な判断をしないため、Knowledgeを読んでも判断に使えない。参照範囲は`docs/ai/role-context-matrix.md`「PMOの参照範囲」が正本 |
+| Auditor | **読まない。** 技術的な正否を判定しないため、Knowledgeを読んでも判断に使えない。参照範囲は`docs/ai/role-context-matrix.md`「Auditorの参照範囲」が正本 |
 | Implementer | 対象role/playbookに関連する`lessons/`(実装例外・落とし穴) |
 | Reviewer | 過去レビューで見つかった`lessons/`(見落としパターン) |
 | Tester | 障害・テスト関連の`lessons/`(検証手段の穴、rc規約等) |

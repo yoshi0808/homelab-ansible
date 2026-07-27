@@ -15,7 +15,7 @@
 | Implementer | **Sonnet** | Tech Lead(subagentまたはCoordinator自身)がまとめたrequirement/分解案に基づき、Coordinatorが別途Agent toolでsubagentを起動する。`docs/ai/roles/implementer.md`の範囲(最小差分実装、commit/push禁止、本番適用禁止)は不変。 |
 | Reviewer | **Sonnet** | 同様にCoordinatorが別のAgent tool subagentを起動する。Implementerを行ったsubagentとは別セッションとして起動し、独立性を保つ(`docs/ai/roles/reviewer.md`「自分が実装した変更を独立レビュー済みとして扱わない」を、同一subagentの使い回しをしないことで担保する)。 |
 | Tester | **Sonnet** | 同様にCoordinatorが別のAgent tool subagentを起動する。実ホストへの`--check`/dry-run実行を含め、`docs/ai/roles/tester.md`の禁止事項(本番適用、`--check`なしのcheck-mode-native実行等)はそのまま適用される。 |
-| **PMO** | **Sonnet** | 2026-07-27新設。Tier 3以上でCoordinatorが計画を決め切った後に起動し、`docs/ai/roles/pmo.md`の範囲で工程の組み立て・計画レビュー(60分/30分の単位基準と未決定数)・進捗と逸脱の検出・課題管理、および**Coordinator自身の工程遵守の点検**を行う。**技術的な判断・解決は一切しない。** 入力はリポジトリ(計画、`status.md`、案件フォルダ、`effort-baseline.md`)のみでコールドスタートに耐える設計。**ただし2026-07-27時点で `.claude/agents/pmo.md` が未作成のため、`subagent_type: pmo` での起動はまだできない**(`docs/ai/roles/pmo.md`「実行機構」)。それまではCoordinatorが代行する。 |
+| **Auditor** | **Sonnet** | 2026-07-28新設。**Coordinatorが案件クローズ時に1回だけ**起動し(起動条件と手順は`docs/ai/roles/coordinator.md`。全単位が完了し`progress.md`と番号付き成果物が出揃った時点、`docs/ai/status.md`の該当行を消す前)、`docs/ai/roles/auditor.md`の範囲で「この記録から経緯を再構成できるか、辻褄は合っているか」を検査する。**入力はrepoの成果物のみで、Coordinatorの説明を受け取らない**(受け取ると自己申告の清書になる)。技術的な正否は判定しないが、**記録どうしの矛盾**は指摘する。走行中の工程管理は行わない。 |
 
 ### モデル・effort配分(2026-07-26確定)
 
@@ -24,6 +24,7 @@ CoordinatorとTech LeadはOpus、Implementer / Reviewer / TesterはSonnet。**su
 | Role | model | effort | 根拠 |
 |---|---|---|---|
 | Tech Lead | opus | high | 要求分解・ADR・リスク整理は意味判断が支配的。既定値を明示しているだけで、下げていない |
+| Auditor | sonnet | medium | 2026-07-28追加。読むのはrepoの成果物のみで技術的な正否を判定しないため、推論深度を要さない。検査項目は`docs/ai/roles/auditor.md`§1に列挙済み。**「あるべきものが無い」ことの検出**が中核だが、コールドスタートで再構成を試みれば欠落は詰まりとして現れるため、列挙とこの手順でSonnetに足りる |
 | Implementer | sonnet | high | 実装は本番影響のある差分を作る唯一のRoleであり、ここは下げない |
 | Reviewer | sonnet | **medium** | Opus 5世代のガイドが「レビュー精度は低effortでも保たれる」と明示。2026-07-26に試行開始 |
 | Tester | sonnet | **medium** | 検証は実行と観測が主で、推論深度より実行経路を通すことが品質を決める。同日試行開始 |
@@ -37,6 +38,8 @@ Reviewer / Testerのmediumは**試行中の設定**である。Tier 4の逐行�
 `.claude/agents/<role>.md`はClaude Code harness向けの**実行機構**(モデル指定と、subagent固有の運用事情)だけを持つ。役割の規範 — 責任・権限・成果物・禁止事項 — は`docs/ai/roles/<role>.md`が正本であり、agent定義へ複製しない。`CLAUDE.md`が共通原則を複製しないのと同じ理由で、正本が二重化するとドリフトする。
 
 Tier 1/2はこれまで通りCoordinator自身が実装し、Tier 2のみTester相当のsubagentへ実ホスト検証を依頼する(`skills/delegation-tier/SKILL.md`)。
+
+**セッション途中に作成した定義が登録されるかは、harnessの版に依存する。** 2026-07-26には登録されず`subagent_type`指定が失敗したが、2026-07-28の`pmo`追加では**同一セッション中に登録された**(harnessが新Role追加を通知してきた。**なおこの`pmo`役自体は同日中に退役しており、現存しない** — ここで示しているのは登録挙動の実例である)。したがって「次のセッションまで使えない」とも「すぐ使える」とも決め打ちしないこと。新規Roleを追加したら、**実地の案件に組み込む前に一度起動して確かめる**。`effort:`等の既存値の変更が即時反映されるかは未確認である。
 
 ### 無人実行されるCoordinator(2026-07-27〜)
 

@@ -20,14 +20,13 @@
 
 ## Now(進行中)
 
-| 項目 | 現在地 | 次にやること |
-|---|---|---|
-| **工程の作り直し**(PMO新設ほか) | 2026-07-27の振り返り(`docs/ai/reviews/process_retrospective/`)を受けて、PMO役の新設・見積もり責務・計画レビュー工程・依頼文の書き方を規範へ反映。独立レビュー2巡でCritical 3件を検出・修正しApprove | ①**`.claude/agents/pmo.md` の作成**(未作成のためPMOは起動できず、Coordinatorが代行中。代行中は工程遵守の点検が自己点検になり機能しない)②`skills/subagent-briefing` の新設 ③次の案件でPMOと見積もりを実地に回す |
+**次に着手する順**に並べる。
 
-
-| 項目 | 現在地 | 次にやること |
-|---|---|---|
-| **障害の自動捕捉(Step 1)** — Operator役の第一歩 | Tier 4 + W6(Tier 3)。**実装フェーズ完了**。T1(`roles/common_slack/tasks/capture.yml`)・収集器(`roles/incident_capture/`、quoryでtimer稼働中)・commit前YAML検査・vault検査のindex読み取り化・R6(Slack footerへ相関ID)まで実装し、独立レビュー5本でCritical 3件を検出・修正。W5/W6の全ACがPASS。**副産物としてcommit前ゲートの既存欠陥を4件修正**(いずれも今日の案件とは独立の既存の穴) | ①**R8(Semaphore外ジョブの保険)が未実装** ②シェル(`git-pre-commit-check.sh`)とPython(`check-staged-yaml.py`)で staged mode 取得を二重実装している負債の解消 ③Step 2(ansy側で `claude -p` が第一報を起票)は未着手 |
+| # | 項目 | 現在地 | 次にやること |
+|---|---|---|---|
+| 1 | **収集器がspoolを削除できず、同一レコードを再処理し続けている**(本番で進行中) | 2026-07-28朝にTesterが実機観測で検出(`docs/ai/reviews/incident_auto_capture/2026-07-28_016_t1_production_observation_test_result.md`)。`_spool/` のACLは `user:recovery-exec:rwx` だが **`mask::r-x` が実効権限を `r-x` に切り詰めており**、収集器の `os.remove()` が `Permission denied` で失敗し続ける。結果、**同一の1レコードが05:55〜06:45に11回重複バンドル化**され、`homelab-incident-capture.service` が5分ごとに `failed` を報告している。情報欠落はないが、バンドルが約288件/日で増え続ける | **Tier 3で進行中。** requirement=`2026-07-28_017`、分解・見積もり=`2026-07-28_018`、PMO計画レビュー=`2026-07-28_019`。**真因は特定済み**(Tech Leadが実測、Coordinatorの当初仮説は反証された): `_spool/` のパーミッションビットに書き手が2人いる。`roles/common_slack/tasks/capture.yml` の spool ディレクトリ作成タスクが `mode: "0755"` を持ち**通知1回ごとに無条件で走る**。mask が正常(rwx)だと `stat` は 0775 を返すため要求 0755 と必ず不一致になり、chmod が発火して mask を `r-x` へ落とす。`changed_when: false` は報告を抑えるだけでchmodは走る。正解パターンは `roles/recovery_exec/tasks/main.yml` L263-284 の create-only 方式として**リポジトリ内に既にあった**(2026-07-14 review 008 F1)。W6起因説は否定(`mode: "0755"` は初出commit `68dd409` から存在) |
+| 2 | **工程の作り直し**(2026-07-28に体制を再決定) | 2026-07-27に新設したPMO役を、**唯一の実走(`incident_auto_capture`)の結果を受けて2026-07-28に退役**させた。理由と代替の設計は `docs/ai/reviews/process_retrospective/2026-07-28_003_pmo_retirement.md` が正本。**代替は3点**: ①Coordinatorが計画受領時に1回だけ適用するゲート(第一に並行幅を決める)②2人目のTech Leadによる計画査読(技術的前提の反証まで行う)③Auditor役の新設(クローズ時に記録だけを読んで再構成可能性を検査)。規範9ファイルへ反映済み | **①新体制を次の案件で実地に回す** — 計画査読とAuditorは**まだ一度も起動していない**。②`skills/subagent-briefing` の新設。**適用は次の案件から**で、進行中の `incident_auto_capture` は旧体制のまま完走させる(走行中に入れ替えると実績が新旧どちらとも比較できなくなるため) |
+| 3 | **障害の自動捕捉(Step 1)** — Operator役の第一歩 | Tier 4 + W6(Tier 3)。**実装完了・本番稼働中**。T1の本番初回実行を2026-07-28に実機確認済み(`controller: quory` / `tester_mode: false` のspoolレコード実物)。T1(`roles/common_slack/tasks/capture.yml`)と収集器(`roles/incident_capture/`、quoryでtimer 5分間隔)が動作。W5/W6の全ACがPASS | ①**R8(Semaphore外ジョブの保険)が未実装**。②シェルとPythonで staged mode 取得を二重実装している負債の解消。③**Step 2**(ansy側で `claude -p` が第一報を起票)は未着手。**要件に「既知条件の除外」を含めること** — pve1の夏季平日シャットダウン運用により、Proxmox HW check / healthcheck が平日ごとに通知を出す(2026-07-27 Yoshinobu、既知として対象外と判断)。**捕捉は止めず起票側で弾く**(証拠は安く、いつか普段と違う症状が出たときの比較対象になる)。素通しにすると平日毎日Incidentが自動起票され、`原因分類` タグの母数が埋まって月次の昇格判断が狂う |
 
 ## Watch(観測待ち)
 
@@ -36,9 +35,6 @@
 | 項目 | 発火条件 | 検証手段 | 一次記録 | 最終確認 |
 |---|---|---|---|---|
 | quoryの作業ツリーを**Testerが直接確認できない** | 次にquoryの作業ツリー状態を検証したいとき | Tester接続identity(`ann`)とリポジトリ所有者(`yoshi`)が異なり、gitの `dubious ownership` ガードが `rc=128` で拒否する。回避には `safe.directory` 設定が要り、今回は承認範囲外として構造的推論で代替した。**AC6(作業ツリーを汚さない)のquory側継続確認が原理的に盲目**である | 同上「未実施とその理由」 | 2026-07-27 |
-| T1(証拠捕捉)の**quoryでの初回実行** | 次にSemaphoreジョブが通知を出したとき | quoryで `reports/incidents/_spool/*.json` が生成されるか。**2026-07-27時点で `reports/incidents/` はW5の配備で作られたばかりで、T1は本番で一度も実行されていない**。AC1のパリティはansy実測とコード構造(ホスト分岐なし)が根拠で、**本番identityでの実行は未確認**(Testerの実行identityが本番と異なるため原理的に確認できなかった) | `docs/ai/reviews/incident_auto_capture/2026-07-27_009_test_result.md` §AC1 | 2026-07-27 |
-| `_spool/` の**グループ所有がroot**である点の是正 | 次に `incident_capture` roleを触るとき | `roles/incident_capture/tasks/main.yml` が `owner: yoshi` を指定し `group:` を指定していないため、兄弟の `reports/incidents/`(`homelab-ansible`)と食い違う。ACLで機能はするのでセキュリティ問題ではない。整合性の修正 | 同上 §未実施・想定外まとめ | 2026-07-27 |
-| SessionStart hookの**実発火**(`scripts/session-context.sh`) | 次に`/clear`・再起動・compactが起きたとき | セッション冒頭の文脈に「セッション開始時の現在地」ブロックが載るか。載らなければ設定変更がwatcherに拾われていないので`/hooks`を一度開くか再起動する。スクリプト単体実行は検証済みで、未検証なのはイベント経由の発火のみ | `.claude/settings.json` の `hooks.SessionStart`、`docs/ai/reviews/session_continuity/2026-07-27_001_review.md` の未確認事項 | 2026-07-27 |
 | 月次Knowledge振り返りの**初回無人実行** | 毎月26日 07:15 JST(期日の正本はauto-memory `MEMORY.md` 先頭行。ここへ日付を写さない) | ansyで `systemctl list-timers ansible-knowledge-review.timer` と `journalctl -u ansible-knowledge-review`。実行後は作業ツリーに未commit差分が出る | `roles/knowledge_review/`、`playbooks/knowledge_review.yml`、`docs/ai/memory-classification.md`「月次振り返りの対象と手順」 | 2026-07-27 |
 | weekly full patchの**apply gateを実データで通す**(AC5) | Proxmox dry-runが `PATCH_READY` を返す週 | `playbooks/proxmox_patch_weekly_full.yml` L159-188。`_dryrun_missing_nodes` が実データで空になり、両ノード揃ってgateを通ることを確認する。現状の根拠はdecoy検証のみ | `docs/ai/reviews/proxmox_patch_dryrun/2026-07-26_005_test_result.md` L426(§14-5の項目c) | 2026-07-27 |
 | Reviewer / Testerの **effort=medium 試行** | 次にTier 4を回すとき | そのTier 4案件でfindings品質(逐行照合の取りこぼし)が落ちていないか。落ちていれば `.claude/agents/reviewer.md` / `tester.md` の `effort:` を `high` へ戻す | `docs/ai/role-routing-index.md`「モデル・effort配分(2026-07-26確定)」 | 2026-07-27 |
@@ -51,8 +47,10 @@
 
 | 項目 | 内容 | 根拠 |
 |---|---|---|
-| Operator役の新設 | 現行6役(Coordinator / Tech Lead / **PMO** / Implementer / Reviewer / Tester)は**開発工程しか持たず、運用工程が空白**である。Incident記録・運用レポートをAIへ委ねる方向。着手時期は未定 | `docs/ai/roles/` に運用工程のRoleが存在しないこと。Yoshinobu表明(2026-07-26) |
+| Operator役の新設 | 現行6役(Coordinator / Tech Lead / Implementer / Reviewer / Tester / **Auditor**)は**開発工程しか持たず、運用工程が空白**である。Incident記録・運用レポートをAIへ委ねる方向。着手時期は未定 | `docs/ai/roles/` に運用工程のRoleが存在しないこと。Yoshinobu表明(2026-07-26) |
 | 時刻表記JST規約をrepoへ明文化 | 「リポジトリの時刻表記はJST(+09:00)、`date -u`やローカル時刻+リテラル`Z`は詐称バグ」という規約が、repo内には `autonomous_recovery_policy.md` L174(通知文言の1行)しか無く、規約本体はCoordinatorのauto-memoryにある。Implementerが従うべき規約なのでrepo側が正本であるべき。障害バンドルがSemaphoreのUTCとreportsのJSTを混在させるため、実害が出る前に片付ける | `grep -rn "JST" docs/` の結果が通知文言1件のみであること。`docs/ai/memory-classification.md` 第0段(subagentの判断が変わる知識はrepoへ) |
+| 収集器へ「消費済みidの記憶」防御を入れるか | 現在「消費済み」の正本は「spoolファイルが存在しないこと」の1つ。state.jsonにも記録する二重化は、両者が食い違う新しい欠陥クラスを生むため2026-07-28の案件では**意図的に見送った**。検出自体は `collection_errors` + exit 2 + systemd `failed` で既に効いている(今回の欠陥もそれで見つかった) | `docs/ai/reviews/incident_auto_capture/2026-07-28_018_acl_mask_plan.md` D7 |
+| ACL付きパスへのchmodをpre-commitで自動検査するか | 「named-user ACLを持つパスへ `mode:` を指定していないか」を機械検査したいが、**検査対象がパス変数の解決を要する**(書き手が `incident_capture_spool_dir` 等の変数を経由するため、パス文字列のgrepでは現に壊れている箇所を1件も拾えないことが実証済み)。静的検査では偽陰性が確実に出る。**効かない検査は「掃引済み」という誤った安心を生む**ため見送った | 同上 D9、および §5の実証 |
 | リポジトリ直下 `AGENTS.md` の要否判断 | Codexが開発工程から外れた結果、このファイルを読む主体が現状存在しない。残すか消すかが未判断。ファイル自身が末尾でそう述べている | `AGENTS.md` L7。規律1により状態は使う場所(当該ファイル)に書かれているが、**そこを開く動機を持つ人がいない**ため、判断の起票だけをここに置く |
 
 ## 載せていないもの(判断の記録)

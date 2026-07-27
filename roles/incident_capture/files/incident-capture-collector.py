@@ -65,6 +65,23 @@ _spool/ 自体に rwx を持てば、sticky bit の無い通常ディレクト�
 「ディレクトリへの書込権があれば中のファイルは所有者に関係なく rename/unlink
 できる」というPOSIXの規則により、各spoolファイルの所有者(yoshi)を変えずに
 収集器が消費できる。
+
+補足(2026-07-28、ACL mask障害の教訓。docs/ai/adr/003-incident-capture-collector-runtime.md
+補正2、docs/ai/reviews/incident_auto_capture/2026-07-28_018_acl_mask_plan.md):
+上記の「ディレクトリへの書込権があれば…」自体はPOSIXの規則として正しいが、
+この権限モデルには前提条件がある。named-user ACLエントリの**実効**権限は、
+エントリ自体の値ではなく `min(エントリの権限, ACL maskエントリ)` で決まる
+(`getfacl` が `#effective:` として警告する値)。上記のrwxは `mask::` がrwxを
+維持している間だけ実効し、そのmaskは対象ディレクトリへの `chmod`(および
+`chmod` を内部で呼ぶ `ansible.builtin.file` の `mode:` 指定)ひとつで
+書き換わってしまう。named entryを含む拡張ACLを持つディレクトリでは、
+chmodが要求するグループビットの行き先はgroup entryではなくmaskだからである。
+したがって、reports/incidents/ と _spool/ のどちらに対しても、**このroleより
+後にこのディレクトリを再chmodする書き手を作ってはならない**
+(roles/incident_capture/tasks/main.yml 冒頭の不変条件、C1を参照)。
+2026-07-28、roles/common_slack/tasks/capture.yml のディレクトリ作成タスクが
+`mode: "0755"` を持っていたためにこのmaskが本番quoryで書き換わり、収集器が
+_spool/ 配下の消費済みレコードを削除できなくなる障害が実際に発生した。
     - 正常に取り込めたレコード: 即座に削除する(重複取り込み防止。内容は
       バンドルの summary.json 側に複製済みなので消える情報は無い)。
     - スキーマ不正なレコード(JSON parse失敗・record_version不一致・

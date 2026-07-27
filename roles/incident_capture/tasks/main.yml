@@ -6,9 +6,36 @@
 # 出力先ディレクトリ(RSK-06: ACLはreports/incidents/配下にのみ付与し、
 # reports/直下には絶対に付与しない — reports/直下は
 # proxmox_patch_apply_node が fileglob で読むパッチ適用ゲートの入力を含む)。
+#
+# 不変条件(2026-07-28、review 2026-07-28_018_acl_mask_plan.md §2 C1・D3・D4。
+# 先例: roles/recovery_exec/tasks/main.yml のmute dir作成、
+# roles/recovery_mute/tasks/{deploy_cli,set}.yml、review 2026-07-14_008 F1):
+# reports/incidents/ と _spool/ のパーミッションビット(mode/ACL)の
+# 単独所有者はこのroleとする。両ディレクトリともACLを持つため、
+# `mode:` を持つ file タスクで作成し続けると「毎回0755へchmodする」タスクに
+# なり、ACLを持つディレクトリに対するchmodはACL maskエントリを書き換えて
+# しまう(named entryの実効権限を `min(entry, mask)` へ切り詰める。
+# incident-capture-collector.py のdocstring「spool消費方式」を参照)。
+# roleが自分のACLタスクで直後にmaskを復旧するため単独実行では無害に見えるが、
+# role外の書き手(roles/common_slack/tasks/capture.yml、通知のたびに実行)が
+# 同じディレクトリをchmodすると復旧されないままmaskが壊れる。2026-07-28、
+# 実際にこれで本番quoryの収集器がspool削除に失敗する障害が起きた
+# (`2026-07-28_016_t1_production_observation_test_result.md`)。
+# 対処として、mode指定は「初回作成時のみ」`mkdir -m 0755 -p` + `creates:`の
+# create-onlyタスクで行い、既存ディレクトリに対する file タスクは
+# owner/group だけを強制して mode には一切触れない。他の書き手
+# (T1含む)は「ディレクトリが無ければ作ってよい」が「既存ディレクトリの
+# パーミッションを変更してはならない」(T1側もこの原則に合わせて
+# `mode:` 行を削除済み)。
 # ---------------------------------------------------------------------------
 
-- name: Ensure reports/incidents/ exists
+- name: Ensure reports/incidents/ exists at 0755 (create-only, never re-chmod)
+  ansible.builtin.command:
+    cmd: mkdir -m 0755 -p "{{ incident_capture_bundle_dir }}"
+    creates: "{{ incident_capture_bundle_dir }}"
+  become: true
+
+- name: "Enforce reports/incidents/ owner (no mode: here — see create-only task above)"
   ansible.builtin.file:
     path: "{{ incident_capture_bundle_dir }}"
     state: directory
@@ -16,8 +43,10 @@
     # 同じ実オーナー yoshi に明示的に固定する(2026-07-27 W0実測:
     # reports/ は owner=yoshi group=homelab-ansible、サブディレクトリも概ね
     # yoshi:yoshi。ann所有にすると兄弟ディレクトリと所有者が食い違う)。
+    # mode: を持たないため、file モジュールは既存ディレクトリのパーミッション
+    # ビットに一切触れない(ansible-core module_utils/basic.py の
+    # set_mode_if_different() は mode is None のとき即returnする)。
     owner: yoshi
-    mode: "0755"
   become: true
 
 # T1(roles/common_slack/tasks/capture.yml)がこのroleより先に一度でも実行
@@ -33,23 +62,31 @@
 # (2026-07-27_004_observation.md T-OQ4)で reports/incidents/ が当時未作成
 # だったと確認済みであり、incident_capture_setup.yml がT1より先に走る配備
 # 順序は仮説ではなく実際に起こりうる)。
-# 補足(訂正): `mode:` を明示している以上、file モジュールは既存ディレクトリに
-# 対しても現在値との差分があれば owner/group/mode を上書きする。「既存
-# ディレクトリのowner/modeを変えない」という以前の記述は不正確だったため
-# 削除した。
 # 補足2(2026-07-27 W6): 兄タスク(reports/incidents/ 本体、group=homelab-ansible)
 # と同じ group を明示する。ここに group: が無いと、become: true実行時の
 # プロセスの実効グループ(root)がそのまま採用され、_spool/ だけ group=root に
 # なる食い違いが生じることが観測済み(2026-07-27_009_test_result.md 「副次観測」)。
 # ACLで機能自体は成立するため実害はないが、兄弟ディレクトリと所有グループが
 # 食い違ったまま放置しない。
-- name: Ensure reports/incidents/_spool/ exists
+# 補足3(2026-07-28、review 2026-07-28_018_acl_mask_plan.md §2 C1・D3・D4):
+# create-only化。mode指定は上のブロックコメント(不変条件)のとおり
+# create-onlyの mkdir タスクだけで行い、この file タスクは owner/group を
+# 強制するだけで mode には触れない。かつて「補足(訂正)」としてここにあった
+# 「mode: を明示している以上 file は既存ディレクトリにも owner/group/mode を
+# 上書きする」という記述は、mode: を持たなくなった今は当てはまらないため
+# 削除した(このタスクは既存ディレクトリのパーミッションビットに一切触れない)。
+- name: Ensure reports/incidents/_spool/ exists at 0755 (create-only, never re-chmod)
+  ansible.builtin.command:
+    cmd: mkdir -m 0755 -p "{{ incident_capture_spool_dir }}"
+    creates: "{{ incident_capture_spool_dir }}"
+  become: true
+
+- name: "Enforce reports/incidents/_spool/ owner/group (no mode: here — see create-only task above)"
   ansible.builtin.file:
     path: "{{ incident_capture_spool_dir }}"
     state: directory
     owner: yoshi
     group: homelab-ansible
-    mode: "0755"
   become: true
 
 # 収集器(recovery-exec)がバンドルディレクトリを作成できるようにする。
@@ -102,6 +139,17 @@
     default: true
     state: present
   become: true
+
+# 期待値(2026-07-28、review 2026-07-28_018_acl_mask_plan.md §1.6・§4 U5 T3):
+# create-only化により、上のディレクトリ作成2箇所はもはや毎回chmodしない
+# (`creates:` が2回目以降no-opにする)。そのため4つのACLタスクは定常状態
+# (mask::rwxが既に成立している)では `setfacl --test` が真のno-opを検出し、
+# **このroleは2回目以降の実行で changed=0 になる。** 修正前は、file タスクの
+# chmodがACL maskを毎回r-xへ落とし、access aclタスクがそれを毎回rwxへ
+# 戻すという往復があったため、reports/incidents/ と _spool/ 双方のACL
+# タスク(計2箇所)が永久に changed を報告し続けていた(それ自体が本欠陥の
+# 観測可能な信号だった)。「2回目の実行でchanged=0」は、この往復が
+# 止まったことの直接証拠として使える。
 
 # ---------------------------------------------------------------------------
 # 収集器のローカル実行状態(reports/とは別。recovery-execが単独所有するため

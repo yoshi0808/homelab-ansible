@@ -74,21 +74,29 @@ Tier 2はTech Leadを飛ばしてCoordinatorが直接Testerへ依頼する経路
 
 ## 計画レビュー(Tier 3以上、2026-07-27追加)
 
-Tier 3以上では、**実行へ移す前にPMOが計画をレビューする**。Coordinatorは承認するだけで、自分でレビューしない。
+Tier 3以上では、**実行へ移す前に2人目のTech Leadが計画を査読する**(2026-07-28。当初は専任のPMO役が担ったが、同日退役させた。経緯は `docs/ai/reviews/process_retrospective/2026-07-28_003_pmo_retirement.md`)。Coordinatorは承認するだけで、自分でレビューしない。
 
-差し戻しの基準は3つで、**いずれも技術的な妥当性を問わない**(`docs/ai/roles/pmo.md`)。
+**Tier 1・2では計画査読を行わない。** 上の工程表がTier 3・4にだけ置いているのはそのためである。`+R`(Reviewerだけを足す任意付加)と同じ要領で**査読を任意に足す形は無い** — Tier 1/2は分解自体を行わないため、査読すべき計画が存在しない。足したくなったら、それはTier判定が誤っている信号として扱い、Tierの側を見直す。
 
-1. **1単位が60分を超えるなら差し戻す。理想は30分程度。**
+**走行中の定期チェックポイントは置かない**(2026-07-28)。常設の工程管理役を廃したため、走行中は事象駆動になる — 逸脱が**超過方向に**10%を超えた、未決定が単位の着手をブロックした、計画外事象が他工程へ波及した、のいずれかでCoordinatorが立ち止まる。着手前の判断は「計画受領時のゲート」(`docs/ai/roles/coordinator.md`)へ集約し、事後の受入はAuditorが行う。
+
+査読は2層あり、**両方を返す**。詳細は `docs/ai/roles/techlead.md`「計画査読」が正本。
+
+**層1(数えるだけで判定でき、技術的妥当性を問わない)**
+
+1. **実行単位が80 `tool_uses` を超えるなら差し戻す。理想は30〜40。** 計画・査読単位(Tech Lead自身、査読者)は対象外。**2026-07-28に単位を「分」から変更した** — 「分」の見積もりが単位の大小を予測できていないことが実測されたため(`docs/ai/effort-baseline.md`)。基準値は暫定。
 2. **1単位に未決定の設計判断が2つ以上あれば差し戻す。**
-3. 60分を割れない大型案件は「このままでは無理」とCoordinatorへ報告し、**フェーズ分割はCoordinatorが判断する**。
+3. 基準1を割れない大型案件は「このままでは無理」とCoordinatorへ報告し、**フェーズ分割はCoordinatorが判断する**。
 
-技術的な精査が要る場合は、2人目のTech Leadによる査読をPMOがCoordinatorへ進言する。
+**層2(技術的前提の反証。こちらが本体)**
+
+計画が根拠として挙げているfile:line・モジュールの挙動・因果モデルを**現物で確かめる**。2026-07-28のTier 3案件では計画の技術的引用3件のうち2件が誤っており、いずれも**実装後に下流が発見した**。当時の査読役は技術判断を禁じられていたため構造的に検出できなかった。**本来は実装前に潰れているべきものである。**
 
 **なぜ必要か**: 2026-07-27の案件では、**実装が5回レビューされ、計画は0回だった**。参照モデル(200名規模の実務)で要件定義・基本設計が日程35%を占めるのは、そこに査読サイクルが入っているためであり、それに当たる工程が存在しなかった。結果、日程配分は計画8.8% / 製造45.6%(モデルは50% / 20%)となり、上流の不足がそのまま製造の手戻りとして現れた。
 
-**基準2は現時点では仮説である。** 2026-07-27の3単位で、所要時間(21.2分 / 11.6分 / 16.3分)と独立レビューの検出(Critical 1+Suggestion 7 / Critical 1 / blocking 0)が**単調に対応しなかった**ことは一次記録で確認できる。一方「未決定の数」(約5 / 約1 / 約0)は**Coordinatorが事後に数えた分類であり計測値ではない**。詳細と検証計画は `docs/ai/roles/pmo.md` の基準2節を正本とする。
+**基準2は現時点では仮説である。** 2026-07-27の3単位で、所要時間(21.2分 / 11.6分 / 16.3分)と独立レビューの検出(Critical 1+Suggestion 7 / Critical 1 / blocking 0)が**単調に対応しなかった**ことは一次記録で確認できる。一方「未決定の数」(約5 / 約1 / 約0)は**Coordinatorが事後に数えた分類であり計測値ではない**。詳細と検証計画は `docs/ai/roles/techlead.md`「計画査読」および `docs/ai/effort-baseline.md` を正本とする。
 
-検証可能にするため、**Tech Leadは見積もりに「単位ごとの未決定の設計判断の一覧」を書く**。PMOは申告された一覧を数えるだけでよく、技術的判断を要しない。
+検証可能にするため、**Tech Leadは見積もりに「単位ごとの未決定の設計判断の一覧」を書く**。査読者は申告された一覧を数えるだけで層1を通せる。
 
 ## Tierごとの工程
 
@@ -96,8 +104,8 @@ Tier 3以上では、**実行へ移す前にPMOが計画をレビューする**�
 |---|---|---|
 | 1 | Coordinatorが実装し静的検査まで自分で完了する。Roleへ渡さない | 変更本体。記録は必要な場合だけ |
 | 2 | Coordinatorが実装し、Testerにだけ実機検証を依頼する。**着手前にTech Leadへ一報を入れる**(下記) | 変更本体 + test_result |
-| 3 | Tech Lead(分解+見積もり)→ **PMO(計画レビュー)** → Coordinator承認 → Implementer → Reviewer → Tester。着手前に分解方針をCoordinatorへ報告する(報告の形式は`docs/ai/context/operations/agmsg-message-format.md`。配送手段はsubagentの最終報告へ変わったが、記載すべき項目の規約は有効) | requirement / implement / review / test_result |
-| 4 | Tier 3(**PMOの計画レビューを含む**)に加えて調査→Coordinator受入→実装の2段階とし、Reviewerは逐行照合する | Tier 3の成果物 + investigation |
+| 3 | Tech Lead(分解+見積もり)→ **2人目のTech Lead(計画査読)** → **Coordinator承認(計画受領時のゲート)** → Implementer → Reviewer → Tester → **Auditor(クローズ時の受入)**。着手前に分解方針をCoordinatorへ報告する(報告の形式は`docs/ai/context/operations/agmsg-message-format.md`。配送手段はsubagentの最終報告へ変わったが、記載すべき項目の規約は有効) | requirement / plan / plan_review / implement / review / test_result / audit |
+| 4 | Tier 3(**計画査読とAuditorを含む**)に加えて調査→Coordinator受入→実装の2段階とし、Reviewerは逐行照合する | Tier 3の成果物 + investigation |
 
 **+R(Reviewer付加)**: Tier 1または2に、軸Bを理由としてReviewerの逐行照合だけを足す形。Tech Lead / Implementer / Testerは入れない。Policy / Context / docのみの変更が軸Bに当たる場合の標準形であり、`1+R`・`2+R`と表記する。成果物は当該Tierの成果物 + review。
 

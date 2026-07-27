@@ -151,6 +151,12 @@
 #                               write anything under --check (ADR-004 補1)
 #
 # Invariants (do not violate when editing this file):
+#   - This file CREATES the spool directory if missing, but never CHANGES an
+#     existing directory's permissions. Ownership of `_spool/`'s permission
+#     bits (mode/ACL) belongs solely to the incident_capture role (2026-07-28,
+#     ACL mask incident — see docs/ai/reviews/incident_auto_capture/
+#     2026-07-28_018_acl_mask_plan.md §2 C1). Do not add `mode:` (or any other
+#     chmod-equivalent) to the "Ensure capture spool directory exists" task.
 #   - No SSH, no HTTP, no external network I/O. Local filesystem + local subprocess
 #     (date/hostname) only, same pattern already used for JST timestamps elsewhere in
 #     this repo (e.g. roles/recovery_ha_failover/tasks/main.yml).
@@ -221,11 +227,27 @@
       become: false
       changed_when: false
 
+    # No `mode:` here (2026-07-28, ACL mask incident — see
+    # docs/ai/reviews/incident_auto_capture/2026-07-28_016_t1_production_observation_test_result.md
+    # and .../2026-07-28_018_acl_mask_plan.md §1). (a) On a directory that
+    # carries POSIX ACLs, `file`'s chmod does not just set the requested bits
+    # — it rewrites the ACL mask entry, which caps every named-user/
+    # named-group entry's *effective* permission regardless of what that
+    # entry itself grants. (b) Ownership of this directory's permission bits
+    # belongs solely to the `incident_capture` role (plan §2 C1); this task's
+    # only job is to create the directory when it is missing (e.g. on ansy,
+    # which never runs that role) — never to modify an existing directory's
+    # mode/ACL. (c) In production this caused `recovery-exec`'s named-user
+    # ACL entry on `_spool/` to be silently truncated from rwx to r-x every
+    # time this task ran against an already-ACL'd directory, which broke the
+    # collector's ability to unlink consumed spool records. (d) Do NOT add
+    # `mode:` back here "to be explicit/safe" — on an ACL'd directory that is
+    # exactly the operation that reintroduces the incident; permissions for
+    # an existing directory are the role's responsibility, not this file's.
     - name: Ensure capture spool directory exists
       ansible.builtin.file:
         path: "{{ _capture_ctx.spool_dir }}"
         state: directory
-        mode: "0755"
       delegate_to: localhost
       become: false
       changed_when: false
