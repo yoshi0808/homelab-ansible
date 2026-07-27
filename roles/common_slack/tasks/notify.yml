@@ -5,6 +5,15 @@
 #   slack_title:   Notification title
 #   slack_message: Notification body
 
+- name: Capture notification evidence (best-effort, never fails the play)
+  block:
+    - name: Include notification evidence capture
+      ansible.builtin.include_tasks: "{{ playbook_dir }}/../roles/common_slack/tasks/capture.yml"
+  rescue:
+    - name: Notification evidence capture include failed (ignored)
+      ansible.builtin.debug:
+        msg: "Notification evidence capture include failed and was ignored. This does not affect the notification itself."
+
 - name: "[tester_mode] Show notification instead of sending"
   ansible.builtin.debug:
     msg:

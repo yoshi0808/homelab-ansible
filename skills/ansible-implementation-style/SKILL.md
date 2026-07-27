@@ -32,6 +32,21 @@ Ansible専用の公式Skillは存在しないため、内部で使う個別言�
 - `{{ foo }}` で始まる値は行全体をクォートしないとYAMLパースエラーになる。
 - Jinja2のループ・条件はplaybook内では使えず、template内でのみ使う。
 
+## task-level `vars:` の lookup は複数回評価されうる
+
+task の `vars:` に `lookup('pipe', ...)` のような**副作用や時刻を伴う式**を置き、同一task内の複数箇所から参照すると、**lookupが参照回数ぶん実行される**(2026-07-27、カウンタファイルへの副作用ログで実測)。
+
+実害の例: `date '+%s %Y-%m-%dT%H:%M:%S+09:00'` を1回呼んで epoch とRFC3339を両方得る意図で書いたが、実際は2回呼ばれており、**秒境界をまたぐとファイル名のepochと記録した時刻が1秒ずれる**状態だった。
+
+値を1度だけ確定させたい場合は、**専用の `set_fact` task で先に確定させてから**参照する。`vars:` は「参照ごとに再評価されうる式」だと考える。
+
+## `include_tasks` / `block` に付けられない属性
+
+- `include_tasks` に `become` / `delegate_to` を付けると `'become' is not a valid attribute for a TaskInclude` でハードエラーになる
+- `block` に `changed_when` を付けると `'changed_when' is not a valid attribute for a Block` になる
+
+いずれも**include先またはblock配下の各taskへ個別に付ける**。動的includeのその他の制約(静的検査が届かない、構文エラーが`rescue`で捕捉できない)は `docs/ai/memory/lessons/dynamic-include-escapes-static-and-rescue.md` を参照。
+
 ## check_mode の実装上の落とし穴
 
 出典: 旧`docs/ai/prompts/core.md` §18.3(項目1・4・5)および§18.2(項目2・3のinclude例外)から移設(2026-07-26、移行表C18-03/04/06/07/08/10)。実装時に繰り返し踏んだ／踏みかけた問題であり、新しいplaybookを書くときとレビューするときに毎回確認する。分類の意味・実行義務そのものは`docs/ai/policies/ansible_test_safety_policy.md`が正本(TS-028が本節を参照している)。

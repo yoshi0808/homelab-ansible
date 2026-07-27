@@ -1,0 +1,14 @@
+{
+  "bundle_dir": "{{ incident_capture_bundle_dir }}",
+  "spool_dir": "{{ incident_capture_spool_dir }}",
+  "state_dir": "{{ incident_capture_state_dir }}",
+  "semaphore_query_bin": "{{ incident_capture_semaphore_query_bin }}",
+  "semaphore_query_timeout_s": {{ incident_capture_semaphore_query_timeout_s }},
+  "investigate_bin_template": "{{ incident_capture_investigate_bin_template }}",
+  "ssh_snapshot_timeout_s": {{ incident_capture_ssh_snapshot_timeout_s }},
+  "recent_failed_batch": {{ incident_capture_recent_failed_batch }},
+  "spool_correlation_tolerance_s": {{ incident_capture_spool_correlation_tolerance_s }},
+  "retention_days": {{ incident_capture_retention_days }},
+  "base_snapshot_targets": {{ incident_capture_base_snapshot_targets | to_nice_json }},
+  "failure_snapshot_ops": {{ incident_capture_failure_snapshot_ops | to_nice_json }}
+}

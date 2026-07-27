@@ -3,11 +3,25 @@ set -euo pipefail
 
 echo "[pre-commit] checking staged changes..."
 
-staged_files="$(git diff --cached --name-only --diff-filter=ACMR || true)"
+staged_files="$(git -c core.quotepath=false diff --cached --name-only --diff-filter=ACMR || true)"
 
 if [[ -z "$staged_files" ]]; then
   echo "[pre-commit] no staged files"
   exit 0
+fi
+
+# core.quotepath=false stops git from octal-escaping+quoting non-ASCII paths
+# (which made them invisible to every grep/case match below: dangerous_files,
+# vault-header, and the YAML syntax check all silently skipped such files).
+# A path can still come back quoted if it contains a literal newline, quote,
+# or backslash; for this check group, a name we cannot read is not "safe",
+# it is "unjudged" — fail closed instead of silently skipping it.
+quoted_paths="$(echo "$staged_files" | grep -E '^"' || true)"
+if [[ -n "$quoted_paths" ]]; then
+  echo "ERROR: staged path(s) cannot be safely checked (still quoted after core.quotepath=false):"
+  echo "$quoted_paths"
+  echo "These names likely contain a newline, quote, or backslash. Rename before committing."
+  exit 1
 fi
 
 if command -v gitleaks >/dev/null 2>&1; then
@@ -52,6 +66,23 @@ while IFS= read -r file; do
       ;;
   esac
 done <<< "$staged_files"
+
+yaml_files=()
+while IFS= read -r f; do
+  [[ -n "$f" ]] || continue
+  yaml_files+=("$f")
+done < <(echo "$staged_files" | grep -Ei '\.ya?ml$' || true)
+
+if [[ ${#yaml_files[@]} -gt 0 ]]; then
+  if ! command -v python3 >/dev/null 2>&1; then
+    echo "ERROR: python3 not found; cannot run staged YAML syntax check"
+    exit 1
+  fi
+  if ! python3 "$(dirname "${BASH_SOURCE[0]}")/check-staged-yaml.py" "${yaml_files[@]}"; then
+    echo "ERROR: staged YAML syntax check failed (see above)"
+    exit 1
+  fi
+fi
 
 "$(dirname "${BASH_SOURCE[0]}")/check-tester-gate.sh"
 

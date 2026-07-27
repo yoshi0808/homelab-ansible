@@ -1,0 +1,49 @@
+---
+# Deploy the incident evidence bundle collector (Step 1 / R2, W3) to quory.
+#
+# Design authority: docs/ai/adr/003-incident-capture-collector-runtime.md
+# Input contract (spool record shape): roles/common_slack/tasks/capture.yml
+#
+# Prerequisite: playbooks/recovery_exec_setup.yml must already have been run
+# (this playbook does not create the recovery-exec user, generate SSH keys,
+# or deploy homelab-semaphore-query / homelab-investigate-* — it only grants
+# an additional POSIX ACL scoped to reports/incidents/ and deploys the
+# collector itself).
+#
+# Run:
+#   ansible-playbook playbooks/incident_capture_setup.yml -l quory
+#
+# Production enable (starts the timer):
+#   ansible-playbook playbooks/incident_capture_setup.yml -l quory \
+#     -e incident_capture_service_enabled=true
+#
+# tester-gate: risk-accepted — no destructive operation on any host other
+# than quory itself, and no restart of any already-running production
+# service. The changes are: directory creation (idempotent), a POSIX ACL
+# grant scoped strictly to reports/incidents/ (never reports/ itself —
+# RSK-06), script/config/unit file deployment, and (only when
+# incident_capture_service_enabled=true) enabling + starting a NEW oneshot
+# timer that did not exist before. There is no existing service to disrupt.
+# Repeated runs are idempotent (ansible.posix.acl / template / copy / file
+# all report changed only on an actual diff). See
+# docs/ai/policies/ansible_test_safety_policy.md for the risk-accepted
+# criteria this satisfies.
+
+- name: Deploy incident evidence bundle collector (Step 1 / R2)
+  hosts: quory
+  gather_facts: true
+  become: false
+  pre_tasks:
+    - name: "[migration] tester_mode is deprecated for this playbook — it always runs for real"
+      ansible.builtin.assert:
+        that: not (tester_mode | default(false) | bool)
+        fail_msg: >-
+          This playbook does not support -e tester_mode=true and has no
+          dry-run mode (--check included): collector deployment always runs
+          for real. See docs/ai/policies/ansible_test_safety_policy.md.
+        quiet: true
+  tasks:
+    - name: Run incident_capture role
+      ansible.builtin.import_role:
+        name: incident_capture
+      check_mode: false

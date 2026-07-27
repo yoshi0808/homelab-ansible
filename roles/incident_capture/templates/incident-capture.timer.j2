@@ -1,0 +1,12 @@
+[Unit]
+Description=Homelab incident evidence bundle collector (timer)
+
+[Timer]
+OnCalendar={{ incident_capture_schedule }}
+# ここでの取りこぼしはR5b/収集器自身のspool再読込みでカバーされるため、
+# knowledge-review(月次・取りこぼすと1ヶ月ずれる)と異なり Persistent は不要。
+Persistent=false
+AccuracySec=30s
+
+[Install]
+WantedBy=timers.target

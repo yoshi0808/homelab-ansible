@@ -1,0 +1,181 @@
+---
+# T1: notification evidence capture (Step 1 of the incident auto-capture pipeline).
+#
+# Design authority (insertion form, failure isolation, condition, correlation-id
+# ownership): docs/ai/adr/004-notify-capture-insertion.md — Decision (a-2) / (b-1) /
+# (c-2) / (d-2) and 補1〜補5. Do not change this file's shape without re-reading that ADR.
+#
+# WHAT "best-effort, never fails the play" ACTUALLY COVERS (Coordinator decision,
+# 2026-07-27, based on Implementer measurement against ansible-core 2.20.1):
+#
+#   Protected (play continues, rc unaffected):
+#     - Any failure INSIDE this file's own block (write errors, unwritable/missing
+#       spool dir, etc. — AC4's scenario) is caught by this file's own block/rescue.
+#     - `capture.yml` itself being MISSING is caught by the block/rescue that wraps
+#       the `include_tasks` call in notify.yml (not in this file). Measured: rc stays
+#       equal to the pre-capture baseline (0), the play's later tasks (including the
+#       actual Slack send) still run. The PLAY RECAP `failed` counter still goes 0→1
+#       for that run even though the play does not abort — see AC1's requirement.md
+#       note ("AC1のパリティは正常時に限る"): the 0→1 degrade is accepted, only the
+#       *normal-path* run is required to match the W0 baseline exactly.
+#
+#   NOT protected (play dies):
+#     - A YAML SYNTAX ERROR inside this file. Measured directly (temporarily broke
+#       this file and ran playbooks/recovery_probe_notify.yml): `ansible.builtin.
+#       include_tasks` fails at YAML-parse time, before the task-execution loop ever
+#       starts, so this happens *outside* any block/rescue that wraps the include —
+#       neither this file's rescue nor notify.yml's wrapping rescue ever runs. Result:
+#       fatal error, rc=4, no further tasks in the play execute at all. This is a
+#       known, accepted gap, not an oversight — do NOT "fix" it by adding a runtime
+#       pre-parse check before the include (e.g. shelling out to validate the YAML
+#       first). That was considered and rejected: (a) it would need a `when:` on the
+#       include, which conflicts with ADR-004 (c) — capture is unconditional; (b) it
+#       adds a subprocess call to every one of the 38 call sites; (c) `notify.yml`
+#       itself already has this exact same exposure (a syntax error in notify.yml is
+#       just as fatal, and always has been) — this file does not introduce a new class
+#       of risk, only one more file in an already-existing one. The layer that is
+#       supposed to catch this is commit-time YAML validation of dynamically-included
+#       task files (tracked separately, not part of this Step), not a runtime guard
+#       here. R5b (collector-side detection of "Semaphore has job rows but zero spool
+#       records") is the safety net if this class of failure ever reaches production
+#       despite that gate.
+#
+# This file is included unconditionally from the top of notify.yml, before the
+# tester_mode/skip_notifications suppression gate. It writes ONE spool record per
+# reached notification. A collector (Step 2, not implemented yet) later reads these
+# records from `_spool/` and folds them into `reports/incidents/<id>/`.
+#
+# record_version 1 is the input contract for that future collector. Field set below
+# (based on docs/ai/reviews/incident_auto_capture/2026-07-27_003_investigation.md §5):
+#   record_version      int    schema version of this record
+#   written_at          str    RFC3339, offset-explicit JST ("+09:00", never bare Z/UTC)
+#   controller          str    short hostname of the machine running ansible-playbook
+#                               (quory in production, ansy under Tester) — distinguishes
+#                               dev-side captures from production ones (RSK-16)
+#   play_name           str    ansible_play_name (the play's `name:`, or its `hosts:`
+#                               pattern if unset). Auxiliary only — T1 does not attempt
+#                               to identify "the playbook" (playbook_dir is useless for
+#                               that here: every playbook in this repo lives directly
+#                               under playbooks/, so playbook_dir|basename is always
+#                               literally "playbooks" and was rejected as a field for
+#                               that reason, 2026-07-27 Coordinator decision). The
+#                               authoritative playbook/template identification is the
+#                               collector's job, taken from the Semaphore job row
+#                               (template name, playbook path) — that data does not
+#                               exist yet when T1 runs.
+#   play_host           str    inventory_hostname of the play this notification is for
+#   slack_channel       str    as passed to notify.yml (may be '')
+#   slack_status        str    as passed to notify.yml (may be '') — recorded
+#                               unconditionally, including "ok" (ADR-004 (c) / D7)
+#   slack_title         str    as passed to notify.yml (may be '')
+#   slack_message       str    as passed to notify.yml (may be '')
+#   tester_mode         bool   flag only, not a filter (R1)
+#   skip_notifications  bool   flag only, not a filter (R1)
+#   check_mode          bool   ansible_check_mode; always false in practice because
+#                               this file never sets check_mode: false, so it does not
+#                               write anything under --check (ADR-004 補1)
+#
+# Invariants (do not violate when editing this file):
+#   - No SSH, no HTTP, no external network I/O. Local filesystem + local subprocess
+#     (date/hostname) only, same pattern already used for JST timestamps elsewhere in
+#     this repo (e.g. roles/recovery_ha_failover/tasks/main.yml).
+#   - No `when:` anywhere in this file. Every notification that reaches this include
+#     is captured (ADR-004 (c) / D7); filtering is the collector's/Step 2's job.
+#   - No `assert` / `fail` / `ignore_errors`. Failures are isolated by block/rescue only.
+#   - `rescue:` contains exactly one `ansible.builtin.debug` task.
+#   - Every task: `delegate_to: localhost`, `become: false`, `changed_when: false`.
+#     Capture always happens on the controller, never on the remote target host.
+#   - `check_mode: false` is intentionally NOT set anywhere in this file. Under
+#     `--check`, `file`/`copy` auto-simulate (no real write) and `command` auto-skips
+#     (module has no check_mode support), so the whole file no-ops under --check.
+#   - All referenced notify.yml vars go through `| default('')` / `| default(false)`
+#     so an undefined slack_channel/slack_status/slack_title/slack_message/
+#     tester_mode/skip_notifications never breaks the caller (ADR-004 補2).
+#   - Spool location is a variable (`capture_spool_dir`), not hardcoded, so it can be
+#     redirected in tests (e.g. to a nonexistent/unwritable path for AC4 verification).
+#   - Output extensions are `.json` (final) and `.json.tmp` (in-flight, renamed into
+#     place). Both match existing `.gitignore` patterns (`reports/**/*.json`, `*.tmp`).
+
+- name: Capture notification evidence (best-effort, never fails the play)
+  delegate_to: localhost
+  become: false
+  block:
+    - name: Resolve capture spool directory
+      ansible.builtin.set_fact:
+        _capture_spool_dir: "{{ capture_spool_dir | default(reports_base_dir ~ '/incidents/_spool') }}"
+      delegate_to: localhost
+      become: false
+      changed_when: false
+
+    - name: Ensure capture spool directory exists
+      ansible.builtin.file:
+        path: "{{ _capture_spool_dir }}"
+        state: directory
+        mode: "0755"
+      delegate_to: localhost
+      become: false
+      changed_when: false
+
+    - name: Resolve capture timestamp once (epoch and RFC3339 JST from a single call)
+      ansible.builtin.set_fact:
+        # A task-level `vars:` template is re-evaluated on every reference within the
+        # same task, not once — confirmed by measurement (2026-07-27): a lookup('pipe',
+        # ...) referenced twice from `vars:` ran twice and returned two *different*
+        # subprocess invocations, so splitting one string into "epoch" and "RFC3339"
+        # parts by referencing the same `vars:` name twice does NOT guarantee they came
+        # from the same call (a second-boundary race). Resolving it here, once, via
+        # set_fact fixes the value into a plain fact; every later reference to
+        # `_capture_now` in this file reads that already-resolved string and triggers
+        # no further subprocess calls.
+        _capture_now: "{{ lookup('pipe', \"TZ='Asia/Tokyo' date '+%s %Y-%m-%dT%H:%M:%S+09:00'\") }}"
+      delegate_to: localhost
+      become: false
+      changed_when: false
+
+    - name: Build capture record and spool filename
+      ansible.builtin.set_fact:
+        _capture_record:
+          record_version: 1
+          written_at: "{{ _capture_now.split(' ')[1] }}"
+          controller: "{{ lookup('pipe', 'hostname -s') }}"
+          play_name: "{{ ansible_play_name | default('') }}"
+          play_host: "{{ inventory_hostname }}"
+          slack_channel: "{{ slack_channel | default('') }}"
+          slack_status: "{{ slack_status | default('') }}"
+          slack_title: "{{ slack_title | default('') }}"
+          slack_message: "{{ slack_message | default('') }}"
+          tester_mode: "{{ tester_mode | default(false) | bool }}"
+          skip_notifications: "{{ skip_notifications | default(false) | bool }}"
+          check_mode: "{{ ansible_check_mode | default(false) | bool }}"
+        _capture_spool_stem: "{{ _capture_now.split(' ')[0] }}-{{ '%08x' | format(4294967296 | random) }}"
+      delegate_to: localhost
+      become: false
+      changed_when: false
+
+    - name: Write capture record to temp file
+      ansible.builtin.copy:
+        content: "{{ _capture_record | to_nice_json }}\n"
+        dest: "{{ _capture_spool_dir }}/{{ _capture_spool_stem }}.json.tmp"
+      delegate_to: localhost
+      become: false
+      changed_when: false
+
+    - name: Rename capture record into place (atomic)
+      ansible.builtin.command:
+        cmd: >-
+          mv -f
+          {{ (_capture_spool_dir ~ '/' ~ _capture_spool_stem ~ '.json.tmp') | quote }}
+          {{ (_capture_spool_dir ~ '/' ~ _capture_spool_stem ~ '.json') | quote }}
+      delegate_to: localhost
+      become: false
+      changed_when: false
+
+  rescue:
+    - name: Notification evidence capture failed (ignored)
+      ansible.builtin.debug:
+        msg: >-
+          Notification evidence capture failed and was ignored
+          (play={{ ansible_play_name | default('') }}, host={{ inventory_hostname }}).
+          This does not affect the notification itself.
+      delegate_to: localhost
+      become: false

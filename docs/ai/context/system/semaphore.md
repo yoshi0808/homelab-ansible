@@ -20,6 +20,17 @@ SemaphoreはAnsible playbookをGUIから手動またはschedule実行し、job�
 - `cert_renew.yml`は`quory`から実行するSemaphore向けの変更系playbookで、`ansy`のSemaphore、Proxmox UI、`monnie`のGrafanaへ証明書を配布し、必要なserviceをrestartする。CAの秘密情報は一時領域にだけ展開し、cleanupを行う設計である。
 - `quory`自身のSemaphore証明書更新は、SemaphoreをrestartするためSemaphore jobから実行せず、`cert_renew_quory.yml`をsystemd timerから実行する。制御平面自身を自分で停止させないための分離である。
 
+## ジョブ結果の読み取り(2026-07-27 実測)
+
+Semaphoreのジョブ結果はSQLite(`semaphore.db`)にあり、read-onlyのSELECTで読める。AIが読む経路は名前付き操作 `homelab-semaphore-query`(`recovery_exec` が配備)に限る。
+
+- **時刻の保存形式は `YYYY-MM-DD HH:MM:SS.nnnnnnnnn +0000 UTC`**(Goの `time.Time.String()`)。**RFC3339ではなく、`Z` 表記でもない。** ナノ秒9桁・空白区切りのオフセット・末尾のゾーン名という3点が標準パーサを素通りしないため、扱うときは専用のパースが要る。
+- **オフセットは常に `+0000` で、保存は実質UTC。** `/etc/semaphore/config.json` の `Asia/Tokyo`(ansy / quory とも)は**保存形式を支配していない**。リポジトリの時刻表記はJSTが正のため、読み出した値は変換して使う。設定ファイルの記述からタイムゾーンを推定しない。
+- `task` テーブルには `start` と `end` の両方が存在する(`end` はSQLの予約語のため、列参照は引用が要る)。`status` の語彙は `success` / `error` / `stopped`。
+- 既存の `recent-failed` は `substr(t.start,1,19)` を返すため、**タイムゾーンを決める末尾を切り落とす**。生の保存形式を見るには `task-time <id>` を使う。
+- `semaphore.db` は `recovery-exec` の権限でのみ読める(ACL)。ansyの接続ユーザーのままでは `unable to open database` になる。
+- ansy / quory ともSemaphoreのバージョンとサービス実行ユーザーは一致している(2026-07-27時点)。スキーマ調査は開発側(ansy)で先に行い、本番の読み取りを最小化する。
+
 ## 可用性
 
 - 本番Semaphoreの停止は、新しいGUI・schedule jobの起動と結果閲覧に影響する。すでに稼働中の管理対象serviceの可用性と、制御平面の可用性は分けて判断する。

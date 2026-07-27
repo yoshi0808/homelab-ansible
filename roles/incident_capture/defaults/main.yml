@@ -1,0 +1,91 @@
+---
+# incident_capture: quory 常駐の証拠バンドル収集器(W3, Step 1 R2)
+# 設計の正本: docs/ai/adr/003-incident-capture-collector-runtime.md
+# 入力契約(T1側のspoolレコード形): roles/common_slack/tasks/capture.yml
+
+# 実行identity。ADR-003 (b) b-1 の決定どおり recovery-exec 固定(新規特権ゼロ)。
+# recovery_exec role が作るユーザーと同じ名前を直接参照する(role依存にはしない
+# — meta/main.yml で recovery_exec を dependency にすると、このroleを実行する
+# たびに recovery-exec ユーザー作成/SSH鍵生成が意図せず再実行経路に乗るため、
+# 前提条件(recovery_exec_setup.ymlを先に実行済みであること)は
+# playbooks/incident_capture_setup.yml のコメントで明示するに留める)。
+incident_capture_user: recovery-exec
+
+# ansible-playbook を実行するリポジトリ(recovery_probe_repo_dir 等と同じ値)。
+# Documentation= URLの組み立てにのみ使う。
+incident_capture_repo_dir: /home/yoshi/homelab-ansible
+
+# 出力先。reports_base_dir は inventories/homelab/group_vars/all.yml の全体共通値。
+# RSK-06: ACLは reports/incidents/ 配下にのみ付与し、reports/ 直下には付与しない
+# (reports/直下は proxmox_patch_apply_node が fileglob で読むパッチ適用ゲートの
+# 入力を含むため)。
+incident_capture_bundle_dir: "{{ reports_base_dir }}/incidents"
+# T1 (roles/common_slack/tasks/capture.yml) の capture_spool_dir 既定値と
+# 一致させること。ずれると収集器が読む場所とT1が書く場所が食い違う。
+incident_capture_spool_dir: "{{ incident_capture_bundle_dir }}/_spool"
+
+# 収集器のローカル実行状態(最後に処理したSemaphore task id等)。
+# reports/ 配下ではない(gitのバンドル成果物ではなく純粋なローカル実行状態のため、
+# AC6のバンドル汚れ判定の対象外に置く)。recovery-exec が単独で所有し、
+# 追加のACLは不要(自分のUIDで作るディレクトリのため)。
+incident_capture_state_dir: /var/lib/homelab-recovery/incident-capture
+
+# 収集器の設定JSON配置先(recovery-probe.json.j2 と同じ /etc/homelab-recovery/ 配下)。
+incident_capture_config_dir: /etc/homelab-recovery
+incident_capture_config_path: "{{ incident_capture_config_dir }}/incident-capture.json"
+
+# 既存の読み取り口(ADR-003 (c) c-1)。新規SQLを増やさず、この1ファイルを
+# 引数付きで呼ぶだけ。W0で task-time が配備済みであることを確認済み。
+incident_capture_semaphore_query_bin: /usr/local/bin/homelab-semaphore-query
+incident_capture_semaphore_query_timeout_s: 15
+
+# 既存の名前付き操作(ADR-003 (d) d-2)。ホスト名を鍵にして "名前を呼ぶだけ"。
+# {host} はコード側で置換する(文字列連結でコマンドを組み立てない。D1)。
+incident_capture_investigate_bin_template: /usr/local/bin/homelab-investigate-{host}
+incident_capture_ssh_snapshot_timeout_s: 20
+
+# recent-failed の1回の取得件数上限。この件数を超える新規失敗ジョブが1周期の
+# 間に発生すると、古い方が取りこぼされる可能性がある(recent-failed はID起点の
+# ページングを持たない固定n件のみ)。取りこぼしの可能性自体は収集器が
+# collection_errors へ記録する(新規クエリを増やさない制約とのトレードオフ)。
+incident_capture_recent_failed_batch: 50
+
+# spoolレコード(written_at)とSemaphoreジョブ(start/end)を同一事象とみなす
+# 許容ずれ秒数。notify.yml の呼び出しはジョブの post_tasks 付近で起きるため、
+# ジョブのend前後で発生するのが通常。
+incident_capture_spool_correlation_tolerance_s: 180
+
+# バンドル保持日数(R7、P1)。reports/incidents/<bundle>/ ディレクトリのmtime基準。
+incident_capture_retention_days: 30
+
+# 現況スナップショット対象(ADR-003 (d) d-2)。
+# 基礎セット: 新規イベントがある周期は常に pve1/pve2 のクラスタ/HA状態を取る
+# (隣のホストの正常性が判断材料になるため、D7/#461)。
+incident_capture_base_snapshot_targets:
+  - host: pve1
+    ops: [cluster-quorum, ha-status]
+  - host: pve2
+    ops: [cluster-quorum, ha-status]
+
+# 失敗ホストに対応する操作がある場合に追加で取る操作。
+# キーに無いホスト(quory自身・ansy等)は「叩ける操作が無い」事実を
+# collection_errors へ記録する(ADR-003 制約4、D3 §5のカタログ拡張根拠)。
+incident_capture_failure_snapshot_ops:
+  authy: [status, failed, disk, journal-system]
+  monnie: [status, failed, disk, journal-system]
+  pve1: [cluster-quorum, ha-status]
+  pve2: [cluster-quorum, ha-status]
+
+# systemd timer間隔(OQ2提案値: 5分)。OnCalendar形式。
+incident_capture_schedule: "*:0/5"
+
+# 配備先のスクリプト/unitパス
+incident_capture_script_path: /usr/local/sbin/incident-capture-collector.py
+incident_capture_lock_path: /run/lock/homelab-incident-capture.lock
+
+# true にすると systemd timer を enable + start する(本番quory)。
+# ansyでは配置のみで起動しない(recovery_probe_service_enabled と同じ流儀。
+# ADR-003 Consequences: 収集器はquoryにのみ配備し、ansyへは配備しない —
+# ただしTesterがansy上で単体実行して異常系を検証できるよう、配置自体は
+# ansyでも行えるようにしておく)。
+incident_capture_service_enabled: false

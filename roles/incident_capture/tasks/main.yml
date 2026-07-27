@@ -1,0 +1,175 @@
+---
+# incident_capture: 証拠バンドル収集器の配備。quory専用(ADR-003 Consequences)。
+# 設計の正本: docs/ai/adr/003-incident-capture-collector-runtime.md
+
+# ---------------------------------------------------------------------------
+# 出力先ディレクトリ(RSK-06: ACLはreports/incidents/配下にのみ付与し、
+# reports/直下には絶対に付与しない — reports/直下は
+# proxmox_patch_apply_node が fileglob で読むパッチ適用ゲートの入力を含む)。
+# ---------------------------------------------------------------------------
+
+- name: Ensure reports/incidents/ exists
+  ansible.builtin.file:
+    path: "{{ incident_capture_bundle_dir }}"
+    state: directory
+    # owner はansible_user_id(quoryの接続ユーザーはann)ではなく、reports/直下と
+    # 同じ実オーナー yoshi に明示的に固定する(2026-07-27 W0実測:
+    # reports/ は owner=yoshi group=homelab-ansible、サブディレクトリも概ね
+    # yoshi:yoshi。ann所有にすると兄弟ディレクトリと所有者が食い違う)。
+    owner: yoshi
+    mode: "0755"
+  become: true
+
+# T1(roles/common_slack/tasks/capture.yml)がこのroleより先に一度でも実行
+# されていれば、_spool/ は既にコントローラ実行ユーザ(yoshi)所有・0755で
+# 存在する。ここで作るのは「まだ一度もT1が呼ばれていない場合」に備えた
+# 冪等な保証。owner は兄タスク(reports/incidents/ 本体)と同じ理由で明示的に
+# yoshi を指定する(2026-07-27 独立レビューCritical #1: owner未指定のまま
+# become: true で作ると root:root 0755 になり、delegate_to: localhost /
+# become: false で動くT1(実行ユーザyoshi、W0実測 T-OQ2)が永久に書き込め
+# なくなる。直後に付与するACLはrecovery-exec宛のみでyoshiには何も与えない。
+# T1自身のrescueがこの書込み失敗を吸収し、R5bも「新規失敗ジョブがある周期」
+# でしか気づけないため、この欠陥は外から極めて見えにくい。W0実測
+# (2026-07-27_004_observation.md T-OQ4)で reports/incidents/ が当時未作成
+# だったと確認済みであり、incident_capture_setup.yml がT1より先に走る配備
+# 順序は仮説ではなく実際に起こりうる)。
+# 補足(訂正): `mode:` を明示している以上、file モジュールは既存ディレクトリに
+# 対しても現在値との差分があれば owner/group/mode を上書きする。「既存
+# ディレクトリのowner/modeを変えない」という以前の記述は不正確だったため
+# 削除した。
+- name: Ensure reports/incidents/_spool/ exists
+  ansible.builtin.file:
+    path: "{{ incident_capture_spool_dir }}"
+    state: directory
+    owner: yoshi
+    mode: "0755"
+  become: true
+
+# 収集器(recovery-exec)がバンドルディレクトリを作成できるようにする。
+# 新規に与える権限は reports/incidents/ 配下(このタスク一式)だけ
+# (ADR-003 (b) b-1)。access ACL(即時)と default ACL(将来このディレクトリ内に
+# 作られるサブディレクトリへの継承)の両方を付与する。
+- name: Grant recovery-exec ACL rwx on reports/incidents/ (access, immediate)
+  ansible.posix.acl:
+    path: "{{ incident_capture_bundle_dir }}"
+    entity: "{{ incident_capture_user }}"
+    etype: user
+    permissions: rwx
+    state: present
+  become: true
+
+- name: Grant recovery-exec ACL rwx on reports/incidents/ (default, for future subdirs)
+  ansible.posix.acl:
+    path: "{{ incident_capture_bundle_dir }}"
+    entity: "{{ incident_capture_user }}"
+    etype: user
+    permissions: rwx
+    default: true
+    state: present
+  become: true
+
+# _spool/ は reports/incidents/ の「サブディレクトリ」であり、上のdefault ACL
+# は今後新規作成されるエントリにしか継承されない。T1がこのroleより先に
+# _spool/ を作っていた場合(本番で先にcapture.ymlが動いていたケース)、
+# default ACLだけでは既存の _spool/ には遡って効かないため、_spool/ 自体にも
+# 同じ named-user ACL を明示的に付与する。詳細な理由は
+# roles/incident_capture/files/incident-capture-collector.py の
+# モジュールdocstring「spool消費方式」を参照(収集器はこのrwxを使って、
+# sticky bitの無い通常ディレクトリのPOSIX規則によりyoshi所有のspoolファイルを
+# rename/unlinkする — 各ファイル自体の所有者は変えない)。
+- name: Grant recovery-exec ACL rwx on reports/incidents/_spool/ (access, covers pre-existing dir)
+  ansible.posix.acl:
+    path: "{{ incident_capture_spool_dir }}"
+    entity: "{{ incident_capture_user }}"
+    etype: user
+    permissions: rwx
+    state: present
+  become: true
+
+- name: Grant recovery-exec ACL rwx on reports/incidents/_spool/ (default, for new spool files)
+  ansible.posix.acl:
+    path: "{{ incident_capture_spool_dir }}"
+    entity: "{{ incident_capture_user }}"
+    etype: user
+    permissions: rwx
+    default: true
+    state: present
+  become: true
+
+# ---------------------------------------------------------------------------
+# 収集器のローカル実行状態(reports/とは別。recovery-execが単独所有するため
+# 追加のACLは不要)。
+# ---------------------------------------------------------------------------
+
+- name: Ensure incident-capture state directory exists (recovery-exec owned)
+  ansible.builtin.file:
+    path: "{{ incident_capture_state_dir }}"
+    state: directory
+    owner: "{{ incident_capture_user }}"
+    group: "{{ incident_capture_user }}"
+    mode: "0750"
+  become: true
+
+- name: Ensure config directory exists
+  ansible.builtin.file:
+    path: "{{ incident_capture_config_dir }}"
+    state: directory
+    mode: "0755"
+  become: true
+
+# ---------------------------------------------------------------------------
+# スクリプト・設定・systemd unit
+# ---------------------------------------------------------------------------
+
+- name: Deploy incident-capture-collector.py
+  ansible.builtin.copy:
+    src: incident-capture-collector.py
+    dest: "{{ incident_capture_script_path }}"
+    owner: root
+    group: root
+    mode: "0755"
+  become: true
+  notify: Reload systemd for incident capture
+
+- name: Deploy incident-capture config
+  ansible.builtin.template:
+    src: incident-capture.json.j2
+    dest: "{{ incident_capture_config_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+  become: true
+
+- name: Deploy incident-capture service unit
+  ansible.builtin.template:
+    src: incident-capture.service.j2
+    dest: /etc/systemd/system/homelab-incident-capture.service
+    owner: root
+    group: root
+    mode: "0644"
+  become: true
+  notify: Reload systemd for incident capture
+
+- name: Deploy incident-capture timer unit
+  ansible.builtin.template:
+    src: incident-capture.timer.j2
+    dest: /etc/systemd/system/homelab-incident-capture.timer
+    owner: root
+    group: root
+    mode: "0644"
+  become: true
+  notify: Reload systemd for incident capture
+
+- name: Flush handlers so units are reloaded before enabling
+  ansible.builtin.meta: flush_handlers
+
+- name: Enable and start incident-capture timer (production only)
+  ansible.builtin.systemd:
+    name: homelab-incident-capture.timer
+    daemon_reload: true
+    enabled: true
+    state: started
+  become: true
+  when:
+    - not ansible_check_mode
+    - incident_capture_service_enabled | bool

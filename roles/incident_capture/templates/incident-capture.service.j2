@@ -1,0 +1,16 @@
+[Unit]
+Description=Homelab incident evidence bundle collector (Step 1 / R2)
+Documentation=file://{{ incident_capture_repo_dir }}/docs/ai/adr/003-incident-capture-collector-runtime.md
+After=network.target
+
+[Service]
+Type=oneshot
+User={{ incident_capture_user }}
+Environment=INCIDENT_CAPTURE_CONFIG={{ incident_capture_config_path }}
+# 多重起動抑止(AC7)。knowledge-review.service の `flock -n` 前例に倣うが、
+# AC7が「多重起動を意味する定義済みの終了コード」を要求するため、通常の
+# 失敗(exit 1)と区別できる -E 75 を明示する(ADR-003 (a))。
+ExecStart=/usr/bin/flock -n -E 75 {{ incident_capture_lock_path }} /usr/bin/python3 {{ incident_capture_script_path }}
+# recovery-exec からSSHで4ホスト分の名前付き操作を叩く周期もあるため、
+# 既定の90秒より余裕を持たせる(ssh_snapshot_timeout_sの合計より十分大きい値)。
+TimeoutStartSec=180
