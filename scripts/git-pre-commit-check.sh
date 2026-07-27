@@ -51,14 +51,42 @@ if [[ -n "$ipv4_hits" ]]; then
   exit 1
 fi
 
+# Checks the content staged in the git index (`git show :<path>`), not the
+# working tree. What gets committed is the index, not the working tree, so
+# checking the working tree lets plaintext-staged-then-encrypted-in-place
+# slip through, and flags encrypted-staged-then-decrypted-in-place as a
+# false positive. See check-staged-yaml.py's header comment for the same
+# reasoning applied to the YAML syntax check.
 while IFS= read -r file; do
-  [[ -f "$file" ]] || continue
+  [[ -n "$file" ]] || continue
 
   case "$file" in
     *vault*.yml|*vault*.yaml|*secret*.yml|*secret*.yaml|*.vault.yml|*.vault.yaml|*.secret.yml|*.secret.yaml)
-      first_line="$(head -n 1 "$file" || true)"
+      # Symlinks (e.g. shared vault files linked from elsewhere) have index
+      # content that is a target path string, not vault ciphertext; skip
+      # them, matching check-staged-yaml.py's treatment of mode 120000.
+      # ":(literal)" disables pathspec glob magic so a name containing
+      # [seq]/*/? etc. is matched literally, not as a glob (otherwise a
+      # symlink named e.g. "vault[s].yml" could match other staged paths
+      # too, turning this into a multi-line result that never equals
+      # "120000" and wrongly blocks a legitimate symlink commit).
+      file_mode="$(git ls-files -s -- ":(literal)$file" | awk '{print $1}')"
+      if [[ "$file_mode" == "120000" ]]; then
+        continue
+      fi
+
+      # A name we cannot read the staged content for is not "safe", it is
+      # "unjudged" — fail closed instead of silently skipping it (same
+      # policy as the quoted-path guard above).
+      if ! staged_content="$(git show ":$file" 2>/dev/null)"; then
+        echo "ERROR: could not read staged content for vault/secret-like file (fail-closed):"
+        echo "$file"
+        exit 1
+      fi
+
+      first_line="$(head -n 1 <<< "$staged_content")"
       if [[ "$first_line" != "\$ANSIBLE_VAULT;"* ]]; then
-        echo "ERROR: vault/secret-like YAML is not Ansible Vault encrypted:"
+        echo "ERROR: vault/secret-like YAML is not Ansible Vault encrypted (staged content checked):"
         echo "$file"
         echo "First line must start with: \$ANSIBLE_VAULT;"
         exit 1

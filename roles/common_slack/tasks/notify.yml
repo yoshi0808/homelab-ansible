@@ -71,6 +71,7 @@
             text: "{{ slack_message }}"
             color: "{{ _slack_color }}"
             fallback: "{{ slack_title }}"
+            footer: "{{ 'capture: ' ~ _capture_written_id if _capture_written_id is defined else '' }}"
       delegate_to: localhost
       become: false
       no_log: true

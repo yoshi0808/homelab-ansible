@@ -42,12 +42,87 @@
 #
 # This file is included unconditionally from the top of notify.yml, before the
 # tester_mode/skip_notifications suppression gate. It writes ONE spool record per
-# reached notification. A collector (Step 2, not implemented yet) later reads these
-# records from `_spool/` and folds them into `reports/incidents/<id>/`.
+# reached notification. A collector (Step 2) later reads these records from `_spool/`
+# and folds them into `reports/incidents/<id>/`.
 #
-# record_version 1 is the input contract for that future collector. Field set below
-# (based on docs/ai/reviews/incident_auto_capture/2026-07-27_003_investigation.md §5):
+# TASK-COUNT REDUCTION (2026-07-27, W6, requirement.md AC8 "最適化を今行わない理由"
+# candidates, executed once the multi-site cost (AC8) had been measured):
+#
+#   1. `.json.tmp` + `mv` collapsed into a single `ansible.builtin.copy` writing
+#      straight to the final `.json` path. `copy` calls AnsibleModule.atomic_move(),
+#      whose primary path is a plain `os.rename()` (atomic, no intermediate file) —
+#      confirmed by reading module_utils/basic.py (atomic_move, ~line 1721). The
+#      mkstemp+rename fallback only runs on EPERM/EXDEV/EACCES/ETXTBSY/EBUSY (cross-
+#      filesystem or permission edge cases), and even then the temp file's suffix is
+#      the destination's basename, so it still ends in `.json` and matches
+#      `reports/**/*.json` in .gitignore. Measured directly (2026-07-27, W6): wrote a
+#      500000-byte record with plain `copy` into this repo's real
+#      `reports/incidents/_spool/` (same filesystem as production would use), listed
+#      the directory before/after — no stray `.tmp`/hidden file ever appeared, the
+#      final file's size matched exactly (no partial-write window observed), and
+#      `git status --short` stayed unchanged (the file was gitignored, as expected).
+#   2. The three `set_fact` tasks (spool dir resolution / timestamp / record+filename
+#      construction) are collapsed into ONE `set_fact` task, `_capture_ctx`, using a
+#      SINGLE Jinja expression with `{%- set … -%}` locals feeding one final
+#      `{{ {...} }}` dict literal. This is not the same thing as splitting the same
+#      value across multiple `set_fact` keys (or a task-level `vars:` referenced
+#      twice) — both of those re-evaluate `lookup('pipe', ...)` once per reference
+#      (see skills/ansible-implementation-style/SKILL.md, "task-level `vars:` の
+#      lookup は複数回評価されうる"; the same non-caching applies to sibling keys of
+#      a single `set_fact:` — measured separately: sibling keys in one `set_fact` task
+#      do NOT see each other's values, each is templated against the pre-task
+#      variable snapshot, confirmed empirically 2026-07-27). A `{% set %}` inside a
+#      SINGLE field's Jinja render is different: it is a local variable scoped to
+#      that one template evaluation, resolved once, and every reference to it within
+#      that same render reuses the already-computed value — measured (2026-07-27):
+#      wrapped a `lookup('pipe', ...)` in `{% set now = ... %}` inside one `set_fact`
+#      field referencing `now` three times (date split into epoch/RFC3339 + used to
+#      build the id), instrumented the piped command to append to a counter file, ran
+#      the task, and the counter showed exactly ONE invocation. The resulting fact was
+#      also confirmed to be a native mapping (`_capture_ctx is mapping` == True, not a
+#      stringified dict), so `_capture_ctx.spool_dir` / `.id` / `.record` attribute
+#      access works in the later tasks exactly like it would with separate facts.
+#      Net effect: 6 block tasks → 3 (dir-exists / build-context / write-record), and
+#      the play total (including the 1 `include_tasks` task in notify.yml) goes from
+#      7 → 4 on the normal-completion path. Re-verified against the W0 baseline
+#      (docs/ai/reviews/incident_auto_capture/2026-07-27_004_observation.md): rc/ok/
+#      changed/failed/skipped/rescued/ignored unaffected by this refactor (only the
+#      *count* within the T1-added `ok` bucket changed, from +7 to +4).
+#      REVISED (2026-07-27, post-review): a 4th block task ("Mark capture id as
+#      actually written") was added back after independent review reproduced a
+#      footer/record mismatch (see `_capture_written_id` below and its task comment).
+#      This raises the block to 4 tasks and the play total to 5 (T1-added `ok` bucket
+#      +5, not +4). The task count above is kept as a record of what the pure
+#      task-reduction pass achieved; it is not the current total.
+#   NOT done: the spool-directory *creation* task was deliberately kept (not moved to
+#   deploy-time-only), per Coordinator decision — moving it to the incident_capture
+#   role's deploy-time setup would break capture on ansy (Tester's dev box), which
+#   never runs that role.
+#
+# record_version 1 is the input contract for the collector (roles/incident_capture/
+# files/incident-capture-collector.py). Field set below (based on
+# docs/ai/reviews/incident_auto_capture/2026-07-27_003_investigation.md §5, extended
+# 2026-07-27 W6 R6 with `id`):
 #   record_version      int    schema version of this record
+#   id                  str    the same `<epoch>-<rand8>` value used for this record's
+#                               spool filename (added 2026-07-27, R6). This is an
+#                               ADDITIVE field only — the collector's
+#                               REQUIRED_SPOOL_FIELDS set was deliberately NOT updated
+#                               to require it, so spool records already in flight at
+#                               deploy time (written by the pre-R6 version of this
+#                               file, which have no `id` key) keep parsing correctly.
+#                               The collector does not currently use this value as the
+#                               bundle_id (bundle numbering is collector-owned per
+#                               ADR-004 (d) d-2 and is out of this file's scope); it
+#                               flows through verbatim into
+#                               summary.json["spool_records"][].id, which is what lets
+#                               a human correlate the footer ID on Slack back to the
+#                               bundle contents. `notify.yml`'s Slack footer surfaces
+#                               this same value, but only via the `_capture_written_id`
+#                               fact (see below and the "Mark capture id as actually
+#                               written" task) — never `_capture_ctx.id` directly, so a
+#                               footer ID is never shown unless the record with that id
+#                               is confirmed on disk (2026-07-27, post-review fix).
 #   written_at          str    RFC3339, offset-explicit JST ("+09:00", never bare Z/UTC)
 #   controller          str    short hostname of the machine running ansible-playbook
 #                               (quory in production, ansy under Tester) — distinguishes
@@ -67,11 +142,11 @@
 #   slack_channel       str    as passed to notify.yml (may be '')
 #   slack_status        str    as passed to notify.yml (may be '') — recorded
 #                               unconditionally, including "ok" (ADR-004 (c) / D7)
-#   slack_title         str    as passed to notify.yml (may be '')
-#   slack_message       str    as passed to notify.yml (may be '')
-#   tester_mode         bool   flag only, not a filter (R1)
-#   skip_notifications  bool   flag only, not a filter (R1)
-#   check_mode          bool   ansible_check_mode; always false in practice because
+#   slack_title          str    as passed to notify.yml (may be '')
+#   slack_message        str    as passed to notify.yml (may be '')
+#   tester_mode          bool   flag only, not a filter (R1)
+#   skip_notifications   bool   flag only, not a filter (R1)
+#   check_mode           bool   ansible_check_mode; always false in practice because
 #                               this file never sets check_mode: false, so it does not
 #                               write anything under --check (ADR-004 補1)
 #
@@ -93,79 +168,93 @@
 #     tester_mode/skip_notifications never breaks the caller (ADR-004 補2).
 #   - Spool location is a variable (`capture_spool_dir`), not hardcoded, so it can be
 #     redirected in tests (e.g. to a nonexistent/unwritable path for AC4 verification).
-#   - Output extensions are `.json` (final) and `.json.tmp` (in-flight, renamed into
-#     place). Both match existing `.gitignore` patterns (`reports/**/*.json`, `*.tmp`).
+#   - Output extension is `.json` only — written directly by `copy` (atomic, see
+#     TASK-COUNT REDUCTION above). No manual `.tmp` file is created by this file.
+#   - `_capture_ctx` (spool_dir / id / record) is set via ONE `set_fact` task and
+#     persists as a host fact after this include finishes successfully. It is used
+#     internally by this file (directory path, filename) but is NOT what `notify.yml`
+#     reads for the footer (R6) — `_capture_ctx.id` is assigned before the write can
+#     fail, so on its own it cannot prove the record actually exists on disk.
+#   - `_capture_written_id` is a SEPARATE fact, set by the last task in this block,
+#     strictly AFTER the write succeeds. `notify.yml`'s footer reads this one, not
+#     `_capture_ctx.id` (2026-07-27, post-review fix — an independent review
+#     reproduced a case where `_capture_ctx.id` was defined but the write had failed,
+#     i.e. the footer could show an id with no corresponding file). If ANY of the
+#     tasks in this block raises — including the write itself — `rescue:` fires before
+#     `_capture_written_id` is ever set, so it stays undefined and the footer degrades
+#     to '' in that case too. This costs one extra task (accepted, 2026-07-27
+#     Coordinator decision) specifically so that a non-empty footer is always backed
+#     by a real file.
 
 - name: Capture notification evidence (best-effort, never fails the play)
   delegate_to: localhost
   become: false
   block:
-    - name: Resolve capture spool directory
+    - name: Resolve capture context (spool dir, id, record — single evaluation)
       ansible.builtin.set_fact:
-        _capture_spool_dir: "{{ capture_spool_dir | default(reports_base_dir ~ '/incidents/_spool') }}"
+        _capture_ctx: >-
+          {%- set _spool_dir = capture_spool_dir | default(reports_base_dir ~ '/incidents/_spool') -%}
+          {%- set _now = lookup('pipe', "TZ='Asia/Tokyo' date '+%s %Y-%m-%dT%H:%M:%S+09:00'") -%}
+          {%- set _epoch = _now.split(' ')[0] -%}
+          {%- set _written_at = _now.split(' ')[1] -%}
+          {%- set _id = _epoch ~ '-' ~ ('%08x' | format(4294967296 | random)) -%}
+          {{ {
+            'spool_dir': _spool_dir,
+            'id': _id,
+            'record': {
+              'record_version': 1,
+              'id': _id,
+              'written_at': _written_at,
+              'controller': lookup('pipe', 'hostname -s'),
+              'play_name': ansible_play_name | default(''),
+              'play_host': inventory_hostname,
+              'slack_channel': slack_channel | default(''),
+              'slack_status': slack_status | default(''),
+              'slack_title': slack_title | default(''),
+              'slack_message': slack_message | default(''),
+              'tester_mode': tester_mode | default(false) | bool,
+              'skip_notifications': skip_notifications | default(false) | bool,
+              'check_mode': ansible_check_mode | default(false) | bool,
+            }
+          } }}
       delegate_to: localhost
       become: false
       changed_when: false
 
     - name: Ensure capture spool directory exists
       ansible.builtin.file:
-        path: "{{ _capture_spool_dir }}"
+        path: "{{ _capture_ctx.spool_dir }}"
         state: directory
         mode: "0755"
       delegate_to: localhost
       become: false
       changed_when: false
 
-    - name: Resolve capture timestamp once (epoch and RFC3339 JST from a single call)
-      ansible.builtin.set_fact:
-        # A task-level `vars:` template is re-evaluated on every reference within the
-        # same task, not once — confirmed by measurement (2026-07-27): a lookup('pipe',
-        # ...) referenced twice from `vars:` ran twice and returned two *different*
-        # subprocess invocations, so splitting one string into "epoch" and "RFC3339"
-        # parts by referencing the same `vars:` name twice does NOT guarantee they came
-        # from the same call (a second-boundary race). Resolving it here, once, via
-        # set_fact fixes the value into a plain fact; every later reference to
-        # `_capture_now` in this file reads that already-resolved string and triggers
-        # no further subprocess calls.
-        _capture_now: "{{ lookup('pipe', \"TZ='Asia/Tokyo' date '+%s %Y-%m-%dT%H:%M:%S+09:00'\") }}"
-      delegate_to: localhost
-      become: false
-      changed_when: false
-
-    - name: Build capture record and spool filename
-      ansible.builtin.set_fact:
-        _capture_record:
-          record_version: 1
-          written_at: "{{ _capture_now.split(' ')[1] }}"
-          controller: "{{ lookup('pipe', 'hostname -s') }}"
-          play_name: "{{ ansible_play_name | default('') }}"
-          play_host: "{{ inventory_hostname }}"
-          slack_channel: "{{ slack_channel | default('') }}"
-          slack_status: "{{ slack_status | default('') }}"
-          slack_title: "{{ slack_title | default('') }}"
-          slack_message: "{{ slack_message | default('') }}"
-          tester_mode: "{{ tester_mode | default(false) | bool }}"
-          skip_notifications: "{{ skip_notifications | default(false) | bool }}"
-          check_mode: "{{ ansible_check_mode | default(false) | bool }}"
-        _capture_spool_stem: "{{ _capture_now.split(' ')[0] }}-{{ '%08x' | format(4294967296 | random) }}"
-      delegate_to: localhost
-      become: false
-      changed_when: false
-
-    - name: Write capture record to temp file
+    - name: Write capture record directly to spool (atomic via copy's os.rename)
       ansible.builtin.copy:
-        content: "{{ _capture_record | to_nice_json }}\n"
-        dest: "{{ _capture_spool_dir }}/{{ _capture_spool_stem }}.json.tmp"
+        content: "{{ _capture_ctx.record | to_nice_json }}\n"
+        dest: "{{ _capture_ctx.spool_dir }}/{{ _capture_ctx.id }}.json"
       delegate_to: localhost
       become: false
       changed_when: false
 
-    - name: Rename capture record into place (atomic)
-      ansible.builtin.command:
-        cmd: >-
-          mv -f
-          {{ (_capture_spool_dir ~ '/' ~ _capture_spool_stem ~ '.json.tmp') | quote }}
-          {{ (_capture_spool_dir ~ '/' ~ _capture_spool_stem ~ '.json') | quote }}
+    - name: Mark capture id as actually written (2026-07-27, Coordinator decision post-review)
+      # Deliberately a 4th, separate task instead of folding this into the
+      # write task above. `notify.yml`'s footer must only ever show an id
+      # that corresponds to a record that is actually on disk — if any of
+      # the three tasks above this one raises, `rescue:` fires and this task
+      # never runs, so `_capture_written_id` stays undefined and the footer
+      # degrades to '' (see notify.yml). `_capture_ctx.id` alone could not be
+      # used for that purpose: it is set by the very first task in this
+      # block, before the directory-create/write tasks that can actually
+      # fail, so a failure between "id computed" and "record written" left
+      # `_capture_ctx.id` defined while no file existed — an independent
+      # review (docs/ai/reviews/incident_auto_capture/2026-07-27_013_review_w6_notify.md)
+      # reproduced this and the Coordinator decided the +1 task (ok 7->8) is
+      # worth paying to close it. Cost accepted; do not re-collapse this into
+      # the write task to save a task.
+      ansible.builtin.set_fact:
+        _capture_written_id: "{{ _capture_ctx.id }}"
       delegate_to: localhost
       become: false
       changed_when: false

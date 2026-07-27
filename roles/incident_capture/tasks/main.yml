@@ -37,11 +37,18 @@
 # 対しても現在値との差分があれば owner/group/mode を上書きする。「既存
 # ディレクトリのowner/modeを変えない」という以前の記述は不正確だったため
 # 削除した。
+# 補足2(2026-07-27 W6): 兄タスク(reports/incidents/ 本体、group=homelab-ansible)
+# と同じ group を明示する。ここに group: が無いと、become: true実行時の
+# プロセスの実効グループ(root)がそのまま採用され、_spool/ だけ group=root に
+# なる食い違いが生じることが観測済み(2026-07-27_009_test_result.md 「副次観測」)。
+# ACLで機能自体は成立するため実害はないが、兄弟ディレクトリと所有グループが
+# 食い違ったまま放置しない。
 - name: Ensure reports/incidents/_spool/ exists
   ansible.builtin.file:
     path: "{{ incident_capture_spool_dir }}"
     state: directory
     owner: yoshi
+    group: homelab-ansible
     mode: "0755"
   become: true
 

@@ -2,10 +2,9 @@
 """Validate that staged YAML files parse as YAML.
 
 Checks the content staged in the git index (`git show :<path>`), not the
-working tree. Note this differs from the existing vault-header check in
-`scripts/git-pre-commit-check.sh`, which reads the working tree
-(`head -n 1 "$file"`); staged content is the correct thing to check here
-since that is what the commit will actually contain. This exists because
+working tree, since that is what the commit will actually contain. The
+vault-header check in `scripts/git-pre-commit-check.sh` uses the same
+`git show :<path>` approach for the same reason. This exists because
 `ansible-playbook --syntax-check` does not validate the contents of
 dynamically included task files (`include_tasks`/`include_role`), so a
 broken YAML file reachable only via a dynamic include can pass syntax-check
