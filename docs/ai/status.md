@@ -22,7 +22,7 @@
 
 | 項目 | 現在地 | 次にやること |
 |---|---|---|
-| **障害の自動捕捉・第一報起票**(Operator役の第一歩) | Tier 4。設計合意(D1〜D7)→ requirement(AC1〜AC7)→ Tech Lead調査+ADR-003/004 → **W0先行観測まで完了**。OQ1〜OQ6すべて解決済み。`homelab-semaphore-query task-time` をカタログへ追加しquoryへ配備済み。**本体の実装はまだ無い** | W1(Implementer A: `notify.yml` へのT1挿入)。工程は `2026-07-27_003_investigation.md` §8 の W0→W5 が正本。**AC1のベースラインは取得済み**(`recovery_probe_notify.yml`、rc=0 / ok=3 changed=0 failed=0 ignored=0) |
+| **障害の自動捕捉(Step 1)** — Operator役の第一歩 | Tier 4。**W0〜W5まで完走**。T1(`roles/common_slack/tasks/capture.yml`)・収集器(`roles/incident_capture/`)・commit前YAML検査を実装し、独立レビュー2巡でCritical 2件を検出・修正。**W5で全ACがPASS**(`2026-07-27_009_test_result.md`)。収集器はquoryへ配備済みだが **timerは意図的に無効のまま**。実装フェーズは終了 | ①timer有効化の判断 ②T1のquory初回実行の観測(Watch参照) ③T1のコスト最適化(7→3〜4タスク見込み) ④**R6(Slack本文へspool IDを載せる)が未実装** ⑤R8(Semaphore外ジョブの保険)が未実装 |
 
 ## Watch(観測待ち)
 
@@ -30,6 +30,8 @@
 
 | 項目 | 発火条件 | 検証手段 | 一次記録 | 最終確認 |
 |---|---|---|---|---|
+| T1(証拠捕捉)の**quoryでの初回実行** | 次にSemaphoreジョブが通知を出したとき | quoryで `reports/incidents/_spool/*.json` が生成されるか。**2026-07-27時点で `reports/incidents/` はW5の配備で作られたばかりで、T1は本番で一度も実行されていない**。AC1のパリティはansy実測とコード構造(ホスト分岐なし)が根拠で、**本番identityでの実行は未確認**(Testerの実行identityが本番と異なるため原理的に確認できなかった) | `docs/ai/reviews/incident_auto_capture/2026-07-27_009_test_result.md` §AC1 | 2026-07-27 |
+| `_spool/` の**グループ所有がroot**である点の是正 | 次に `incident_capture` roleを触るとき | `roles/incident_capture/tasks/main.yml` が `owner: yoshi` を指定し `group:` を指定していないため、兄弟の `reports/incidents/`(`homelab-ansible`)と食い違う。ACLで機能はするのでセキュリティ問題ではない。整合性の修正 | 同上 §未実施・想定外まとめ | 2026-07-27 |
 | SessionStart hookの**実発火**(`scripts/session-context.sh`) | 次に`/clear`・再起動・compactが起きたとき | セッション冒頭の文脈に「セッション開始時の現在地」ブロックが載るか。載らなければ設定変更がwatcherに拾われていないので`/hooks`を一度開くか再起動する。スクリプト単体実行は検証済みで、未検証なのはイベント経由の発火のみ | `.claude/settings.json` の `hooks.SessionStart`、`docs/ai/reviews/session_continuity/2026-07-27_001_review.md` の未確認事項 | 2026-07-27 |
 | 月次Knowledge振り返りの**初回無人実行** | 毎月26日 07:15 JST(期日の正本はauto-memory `MEMORY.md` 先頭行。ここへ日付を写さない) | ansyで `systemctl list-timers ansible-knowledge-review.timer` と `journalctl -u ansible-knowledge-review`。実行後は作業ツリーに未commit差分が出る | `roles/knowledge_review/`、`playbooks/knowledge_review.yml`、`docs/ai/memory-classification.md`「月次振り返りの対象と手順」 | 2026-07-27 |
 | weekly full patchの**apply gateを実データで通す**(AC5) | Proxmox dry-runが `PATCH_READY` を返す週 | `playbooks/proxmox_patch_weekly_full.yml` L159-188。`_dryrun_missing_nodes` が実データで空になり、両ノード揃ってgateを通ることを確認する。現状の根拠はdecoy検証のみ | `docs/ai/reviews/proxmox_patch_dryrun/2026-07-26_005_test_result.md` L426(§14-5の項目c) | 2026-07-27 |
