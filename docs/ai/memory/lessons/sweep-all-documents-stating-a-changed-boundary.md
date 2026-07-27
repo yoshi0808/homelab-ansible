@@ -45,6 +45,7 @@ grep -rn "<変更した境界のキーワード>" docs/ai/ CLAUDE.md AGENTS.md s
 
 ## 関連
 
+- `skills/document-norm-review/SKILL.md` — **規範文書レビューの手順の正本**(2026-07-27新設)。本Lessonの掃引作法は同Skillの「前提」節と欠陥クラス3へ取り込み済み。手順を本Lesson側へ複製せず、事例(根拠)としてここを残す。
 - `docs/ai/memory/lessons/verify-the-outside-of-a-claimed-boundary.md`(境界の検証そのものの落とし穴)
 - `docs/ai/memory/decisions/approval-authority-for-real-host-operations.md`(この掃引の対象となった決定)
 - `docs/ai/memory/lessons/multilayer-escaping-and-novel-stack-verification.md`(同クラス全面掃引という同じ発想を、実装の欠陥クラスに適用したもの)

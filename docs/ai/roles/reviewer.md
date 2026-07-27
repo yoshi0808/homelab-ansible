@@ -25,6 +25,7 @@ Reviewerはrequirement、差分、Context、Policyを独立に照合し、正確
 読む対象とタイミングは`docs/ai/role-context-matrix.md`のReviewer列を正本とする。Issue、diff、対象領域System Context、対象playbook/role、該当Policyを着手時に確認する。
 
 - 必須Skill: code review(`skills/code-review/SKILL.md`、出力フォーマットのみ)、duplication / reuse check(`skills/duplication-reuse-check/SKILL.md`)、security review(`skills/ansible-security-review/SKILL.md`)、requirements traceability、risk / impact analysis、Policy適合確認、テスト不足の抽出。
+- **規範文書の変更をレビューするときは`skills/document-norm-review/SKILL.md`を併用する。** Policy / Context / Role文書 / SKILL.md / prompt / CLAUDE.mdの移設・削除・正本の差し替え・判定基準の改訂が対象で、コード差分とは欠陥クラスが異なる(宙ぶらりん参照、規範の消失、撤回した根拠の残存、判定ラダーの全域性)。`skills/delegation-tier/SKILL.md`の軸Bで`+R`が付く作業とほぼ一致する。
 - 参照するKnowledge: 過去レビューで見つかった`docs/ai/memory/lessons/`(見落としパターン)。分類・参照範囲は`docs/ai/memory-classification.md`が正本。
 - Context / Policy / Skillの配置判断は`docs/ai/context-classification.md`に従う。
 - 詳細なレビュー観点は対象SkillとPolicyを参照し、このRoleへ複製しない。

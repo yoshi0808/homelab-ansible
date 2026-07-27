@@ -46,6 +46,18 @@ Ansible専用の公式Skillは存在しないため、内部で使う個別言�
 4. **handlerは通知元taskの`check_mode: false`を継承しない。** handler自身へ個別に付ける(実地検証済み)。
 5. **`meta: end_play` / `end_host`は、それが属するblockの`always:`を丸ごとスキップする**(通常のtask失敗によるrescue/alwaysフローとは異なる)。これに依存した旧ゲート実装は、停止時にレポート保存も通知も一切残らない「無音停止」になっていた。
 
+## ガードtaskが発火しない条件
+
+**`run_once` + `delegate_to: localhost`のガードtaskは、同一play内の全ホストが先に失敗していると発火しない。** `run_once`は「生存しているホストのうち1台で実行する」という意味であり、生存ホストが0になればtask自体が実行対象を失う。
+
+これは「対象が0件なら明示的に停止・通知する」という**0件ガードほど、最も発動してほしい状況(全ホスト到達不能)でこそ死ぬ**ことを意味する。素朴に書くと、ガードのつもりのコードが死んだコードになる。
+
+- ガードを書いたら、**全ホストが失敗した状態をdecoy inventoryで再現して、実際に発火するかを確認する**。「書いてあること」を発火の根拠にしない。
+- 前段のホスト失敗を跨いでガードを効かせる必要がある場合、`meta: clear_host_errors`や、ガードを別playへ切り出す(`hosts: localhost`)といった設計が要る。いずれも採用前に上記のdecoy再現で発火を実測すること。
+- 関連する検証観点は`docs/ai/memory/lessons/verify-through-the-consuming-filter.md`(値の目視で終えず消費側まで通す)と同型で、対象がJinjaの値ではなくtaskの発火条件になったもの。
+
+根拠: 2026-07-26、`proxmox_patch_dryrun`単一ノード対応の実装中に、Implementer役がdecoy inventory(閉ポート/`ansible_connection: local`)で`ping`/`fail`/`debug`/`meta: clear_host_errors`のみを使った4パターンの検証を行って発見した。ADR-002で決めた0件ガードの実装が該当し、出荷前に潰している。
+
 ## 適用条件
 
 セキュリティに関わる実装判断(shell/commandモジュールへの変数注入対策等)は`skills/ansible-security-review/SKILL.md`を参照する。本Skillは表現・スタイルレベルの基準であり、Reviewer/Testerの検査基準には拡張しない(2026-07-23確認済み)。ただし上記「check_modeの実装上の落とし穴」はReviewerも確認対象とする(出典の§18.3が実装時とレビュー時の双方を対象としていた)。

@@ -17,29 +17,19 @@
     "作業ディレクトリ外は拒否されることを実測で確認済み。auto-memory は --add-dir で",
     "渡した範囲だけ読める。",
     "",
-    "実効ルールは Read() と Edit() だけである。現行 harness では Write()・Glob()・Grep() の",
-    "エントリは権限チェックに一致せず no-op で、起動のたび stderr へ警告を出す(report に残る)。",
-    "Glob/Grep の権限は Read() が兼ねるため封じ込め自体は成立している。将来 harness が",
-    "変わる可能性を考えて残しているだけなので、'絞ったのに読める' と誤認して調査しないこと。",
+    "許可は Read() と Edit() だけで書く。harness は Write()/Glob()/Grep() のエントリを",
+    "権限チェックに使わず、書くと起動のたび stderr へ警告が出る(2026-07-27の初回実行で実測)。",
+    "Read() が全ファイル読取ツールを、Edit() が全ファイル編集ツールをそれぞれ兼ねる。",
     "",
     "--setting-sources '' には副次的な保護もある: .claude/agents/ の定義もロードされないため、",
-    "カスタム subagent 経由の特権昇格ができない(実測で subagent も同じプロファイルに拘束される)。",
-    "",
-    "重複に見えても Read() と Edit() のエントリを消してはいけない(消すと許可が全部落ちる)。"
+    "カスタム subagent 経由の特権昇格ができない(実測で subagent も同じプロファイルに拘束される)。"
   ],
   "permissions": {
     "allow": [
       "Read(docs/**)",
       "Read(skills/**)",
-      "Glob(docs/**)",
-      "Glob(skills/**)",
-      "Grep(docs/**)",
-      "Grep(skills/**)",
-      "Write(docs/ai/memory/**)",
       "Edit(docs/ai/memory/**)",
-      "Write(docs/ai/context/**)",
       "Edit(docs/ai/context/**)",
-      "Write(skills/**)",
       "Edit(skills/**)"
     ],
     "deny": [

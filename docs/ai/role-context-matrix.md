@@ -28,6 +28,7 @@
 | PR / diff | 必要時(Tech Leadの統合報告で足りることが多い) | 必要時 | 自分の実装(常時) | 着手時(必須、レビュー対象そのもの) | 着手時(必須、検証対象そのもの) |
 | Knowledge(`docs/ai/memory/`、Claude Memoryを含む) | 起動時(重要Decisionは常に前提とする) | 必要時(重要Decision) | 必要時(対象関連) | 必要時(対象関連) | 必要時(対象関連) |
 | 委任Skill(Tier判定、`skills/delegation-tier/SKILL.md`) | 案件ごとに毎回参照(Tier判定はCoordinatorが確定する) | 着手時(受領した案件がTier 3以上であることの確認) | 不要 | 不要 | 不要 |
+| 規範文書レビュー(`skills/document-norm-review/SKILL.md`) | 必要時(自ら規範を書き換えるとき) | 必要時(規範の再配置を伴う分解のとき) | 不要 | **着手時(レビュー対象が規範文書を含む場合は必須)** | 不要 |
 
 ## 判断の原則(計画書からの引き継ぎ、変更なし)
 
