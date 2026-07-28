@@ -40,7 +40,7 @@
     "soft_deny": [
       "$defaults",
       "Non-idempotent operations against the Proxmox nodes (pve1, pve2), the Sophos firewall (sophos-fw), or UniFi equipment (cloudkey, access points, switches). This covers package/patch apply, reboot, shutdown, VM or CT migration, HA failover, firewall rule changes, inventory changes, service stop/restart/disable, and configuration writes. Read-only checks are NOT covered: ansible-playbook --syntax-check, --check runs via scripts/safe-ansible-check.sh, ansible-lint, healthcheck and dry-run playbooks that only collect state, and decoy-inventory runs that never contact these hosts should all be allowed.",
-      "Irrecoverable deletion of production data with no backup on a real target host, such as wiping a datastore, log store, or state directory. Deletion of the agent's own scratch files under the repository working tree or /tmp on ansy is NOT covered and should be allowed."
+      "Irrecoverable deletion of production data with no backup on a real target host, such as wiping a datastore, log store, or state directory. This applies regardless of the form the deletion takes: issuing it as one bulk command, as a loop, or as repeated individual per-item operations are all the same act. Reformulating a deletion that was already blocked into a shape the classifier accepts does not clear it, and the agent that was blocked is not the one who decides whether the block was about form or about substance. Two exemptions, both NOT covered and to be allowed: (a) deletion of the agent's own scratch files under the repository working tree or /tmp on ansy; (b) removal of redundant duplicates where a byte-identical copy is retained, so that no information is lost."
     ],
     "hard_deny": [
       "$defaults",

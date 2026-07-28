@@ -124,6 +124,7 @@ Yoshinobuは要件と「こうなったら困る」という前提を渡すが�
   - この分類が成立するのは、カタログ拡張が構造的に緩衝されているためである。反映には repo編集 → commit(Yoshinobu) → quory pull(Yoshinobu) → 配備playbook実行 が要り、人手が2回入る。また名前で呼ぶだけの設計上、呼び出し側が引数で影響範囲を変えられない。
   - 同じカタログは`recovery_exec`経由でCodexからも叩けるため、**追加はCodexの能力拡張でもある**。報告時にその旨を明示する。
   - **運用上の切り替え**も同じ扱いとする(2026-07-27 Yoshinobu明示)。systemd timer / serviceの有効化・無効化、スケジュールの停止・再開など、**Policyに関わらず、逆操作で元に戻せるもの**は、Coordinatorが判断して実施し**事後報告**する。事前確認は求めない。実例: 検証を終えた`incident_capture` timerの本番quoryでの有効化(2026-07-27)。
+- **`soft_deny` / `hard_deny` に該当するものは、Coordinatorの承認では通らない**(2026-07-28、実測により訂正)。上の3分類は「Coordinatorが承認すれば実行できる」ことを前提に書かれているが、**harnessの安全機構が発火した操作については成立しない。** `soft_deny` の定義は「user intentで解除できる破壊的操作」であり、harnessは**そのintentをYoshinobuのものだけと見なす**。セッション内のCoordinatorの承認はintentとして数えられない。したがってブロックが発火したら、Coordinatorは自分で承認せずYoshinobuへ上げる。機構側の対応は `docs/ai/core.md`「安全機構がブロックしたとき」。
 - **迷ったら上げてよい。** 上記の分類は「確認を減らすため」のものであり、判断がつかない場合にYoshinobuへ確認することは歓迎される(2026-07-27 Yoshinobu明示)。ただし**確認するときは必ず推奨を添える**。推奨のない問いは、判断材料を持つ側が持たない側へ判断を戻す形になる。既に推奨を述べた事項について、同意の再確認を求めない。
 - **提示不要なもの**: 読み取り専用の確認(healthcheck、`--syntax-check`、`scripts/safe-ansible-check.sh`経由の`--check`、`ansible-lint`)、decoy inventory(`127.0.0.1`閉ポートまたは`ansible_connection: local`、実host名・実IPを書かない)での検証、ansy上のリポジトリ作業ツリーおよび`/tmp`に閉じた操作(自身が作成したscratchの削除を含む)。
   - `hosts: localhost` + `connection: local`で副作用を持たない使い捨てplaybook(`set_fact` / `assert`によるJinja式・判定ロジックの検証)もこれに含む(2026-07-10 Yoshinobu承認)。**検証後に削除し、実行した事実と検証内容をimplementまたはtest_resultファイルへ記録する。** 実ホストに触れる可能性のあるもの、ファイル変更・通知等の副作用を持つものはこの例外に含まれない。

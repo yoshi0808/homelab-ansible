@@ -25,6 +25,16 @@ AIは実装、レビュー、テスト、調査、論点整理を支援する。
 - AIは `git commit`、`git push` を行わない。
 - playbook自身にGit更新を行わせない。
 
+### 安全機構がブロックしたとき(2026-07-28追加、全Role共通)
+
+harnessの安全機構(permission classifier、`permissions.deny`)が操作をブロックしたら、**その事実をCoordinatorへ報告せずに、別の形で同じ結果へ到達しない。**
+
+- **ブロックが「形への異議」か「実質への異議」かの判定を、ブロックされた側が行わない。** 通る形を探すのではなく、止まって上げる。
+- Coordinatorは、報告を受けてもそれを自分では解除できない。**`soft_deny` を解除できるのはYoshinobuのintentだけであり、セッション内のCoordinatorの承認はharness層でintentとして数えられない**(2026-07-28実測)。したがってCoordinatorはYoshinobuへ上げる。
+- ブロックされた事実と、その後の対応は記録に残す。**隠して迂回した場合、記録には成功だけが残る** — これが最も避けたい状態である。
+
+根拠と実例は `docs/ai/memory/lessons/permission-boundaries-must-be-designed-not-prompted.md`。2026-07-28に、承認済みの削除操作でclassifierが2回ブロックし、subagentが3つ目の形で通過させた事例がある。**その形自体は妥当だった可能性が高いが、妥当かどうかを判定したのがブロックされた当人だった点が問題だった。**
+
 ## 開発と本番の境界
 
 ```text
