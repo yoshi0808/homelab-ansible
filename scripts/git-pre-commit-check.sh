@@ -40,9 +40,10 @@ fi
 
 ipv4_hits="$(
   git diff --cached -U0 -- \
-    '*.yml' '*.yaml' '*.md' '*.sh' '*.j2' '*.cfg' '*.ini' '*.txt' \
+    '*.yml' '*.yaml' '*.md' '*.sh' '*.j2' '*.cfg' '*.ini' '*.txt' '*.json' '*.log' \
   | grep -E '^\+[^+].*([0-9]{1,3}\.){3}[0-9]{1,3}' \
-  | grep -Ev '127\.0\.0\.1|0\.0\.0\.0|255\.255\.255\.255' || true
+  | awk '{ t=$0; gsub(/127\.0\.0\.1|0\.0\.0\.0|255\.255\.255\.255/,"",t);
+           if (t ~ /([0-9]{1,3}\.){3}[0-9]{1,3}/) print }' || true
 )"
 if [[ -n "$ipv4_hits" ]]; then
   echo "ERROR: IPv4 literal found in staged additions:"
