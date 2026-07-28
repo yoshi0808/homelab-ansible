@@ -55,10 +55,10 @@
 |---|---|---|---|---|---|---|
 | C03-01 | §3: IP literalをrepo全体へ書かない | 禁止 | 残す | core | **[既存]** `docs/ai/core.md` | 全Role共通の公開安全境界 |
 | C03-02 | §3: IPが必要なら実行時に名前解決する | 代替条件 | 移す | Network Policy | **[分類のみ Phase 2]** Network / Naming Policy | 実装方法はPolicy向き |
-| C05-01 | L201-202: 秘密鍵を生成・表示しない | 禁止 | 残す | core | **[既存]** `docs/ai/core.md` | 全Role共通 |
+| C05-01 | L201-202: 秘密鍵を生成・表示しない | 禁止 | 残す | core | **[既存]** `docs/ai/core.md` | 全Role共通。2026-07-29に判断基準形式へ書換(種別は移行時点の記録) |
 | C05-02 | L203: `~/.ssh/id_ann` をrepoへコピーしない | 禁止 | 統合 | core | **[既存]** coreの秘密情報を複製しない規則 | C05-01の具体例として消失確認する |
 | C05-03 | L204: `authorized_keys` を勝手に上書きしない | 禁止 | 移す | SSH Policy | **[分類のみ Phase 2]** SSH / Access Policy | 認証資産固有の変更禁止 |
-| C05-04 | L205: SSH port/userを推測して固定しない | 禁止 | 残す | core | **[既存]** `docs/ai/core.md` | 全Roleの推測禁止 |
+| C05-04 | L205: SSH port/userを推測して固定しない | 禁止 | 残す | core | **[既存]** `docs/ai/core.md` | 全Roleの推測禁止。2026-07-29に判断基準形式へ書換(種別は移行時点の記録) |
 | C05-05 | L206: vault/secret/local平文を作らない | 禁止 | 統合 | core / Secrets Policy | **[既存]** core; **[分類のみ Phase 2]** Secrets Policy | 共通境界と形式詳細を分離 |
 | C07-01 | L261: boolean等の観測値をshellが返すことは許容 | 許可 | 移す | Operations Context | **[既存]** `docs/ai/context/operations/healthcheck.md` §1 | sensor出力境界の明示的許可 |
 | C07-02 | L262-263: `status: critical` / warnings生成は禁止 | 禁止 | 移す | Operations Context | **[既存]** `docs/ai/context/operations/healthcheck.md` §1 | 観測と判定の境界 |

@@ -45,32 +45,20 @@ Tier 1/2はこれまで通りCoordinator自身が実装し、Tier 2のみTester�
 
 上表のCoordinatorは対話セッションだが、**対話相手を持たないCoordinatorが1つだけ存在する**。ansyのsystemd timer `ansible-knowledge-review.timer`が毎月26日に`playbooks/knowledge_review.yml`を起動し、`claude -p`が月次Knowledge振り返り(仕分け・昇格判断)を無人で実行する。手順の正本は`docs/ai/memory-classification.md`「月次振り返りの対象と手順」。
 
-対話セッションのCoordinatorと異なり、この実行形態には次の制約が技術的に課してある。Role文書の整合性を点検するときは、この形態も対象に含めること。
+対話セッションのCoordinatorと異なり、この実行形態には読み書き範囲を絞る技術的な制約が課してある。**制約の仕組み・根拠・実測結果の正本は`docs/ai/memory/lessons/claude-code-unattended-session-confinement.md`**であり、本節は現在の許可範囲(実現方式)だけを要約する。この節を読む必要があるのは、`roles/knowledge_review`の権限プロファイルを変更するとき、または無人実行の挙動を調べるときに限る。Role文書の整合性を点検するときは、この形態も対象に含めること。
 
 | 項目 | 無人Coordinator |
 |---|---|
 | 起動 | systemd timer(ansy専用。auto-memoryがansyにしか無いため) |
 | 判断の委譲先 | 無し。subagentを起動せず単独で完結する |
-| 書込可 | `docs/ai/memory/`、`docs/ai/context/`、`skills/` の3つ**のみ** |
-| 書込不可 | **上記以外すべて**。専用の権限プロファイル(`roles/knowledge_review/templates/job-settings.json.j2`)によるallowlist方式で、許可した3パス以外への書込はharnessが拒否する |
-| 読取可 | `docs/`、`skills/`、および`--add-dir`で渡したauto-memoryのみ。**それ以外は拒否**(作業ディレクトリ外を含む) |
-| auto-memory | **読み取りのみ**。repo外への書込はこの構成では許可できないため、無人実行が触れない。縮約が必要な項目は報告に列挙し、後で対話セッションかYoshinobuが行う |
-| Bash | 禁止。Write のpath制限をshell経由で迂回させないため |
+| 書込可(allowlist方式) | `docs/ai/memory/`、`docs/ai/context/`、`skills/` の3つ**のみ**(実装: `roles/knowledge_review/templates/job-settings.json.j2`) |
+| 読取可 | `docs/`、`skills/`、`--add-dir`で渡したauto-memoryのみ。それ以外は拒否 |
+| Bash | 禁止 |
+| auto-memory | **読み取りのみ**。repo外への書込はこの構成では許可できない。縮約が必要な項目は報告に列挙し、後で対話セッションかYoshinobuが行う |
 | commit/push | しない。差分は作業ツリーに残しYoshinobuがcommitする |
 | 中止条件 | 作業ツリーが汚れているとき(起動側のAnsibleが判定) |
-| 期日更新 | `MEMORY.md`の期日行は起動側のAnsibleが更新する(LLMは書けない) |
 
-**denylist方式は採用していない。** 当初`--disallowedTools`で禁止パスを列挙したが、2026-07-27の独立レビューが実機で検証し、**列挙から漏れた`CLAUDE.md`・`AGENTS.md`・`docs/ai/`直下の正本群・`docs/ai/reviews/`の計9ファイルへ実際に書き込めた**。列挙漏れは列挙した本人には見えないため、「許可した場所以外は全部拒否」の向きに反転させてある。
-
-この封じ込めは次の3条件が**同時に**成立して初めて機能する(いずれか欠けると崩れることを実測で確認済み)。変更する際は3つまとめて確認すること。
-
-なお**読取も同じ理由で絞ってある**。bareな`Read`を許すとansyユーザーが読める全ファイル(vaultのパスワードファイル、SSHキー等)へ到達でき、書込先が公開repoのgit管理下であることと組み合わさると機密混入の経路になる。書込側だけを塞いでも封じ込めは片側にしかならない。
-
-1. 権限ルールのpathは**相対表記**。絶対表記だとルールが照合されず全拒否になる
-2. `--permission-mode acceptEdits` を**付けない**。付けると作業ディレクトリ内の編集が無条件承認され、path指定が無効化される
-3. `--setting-sources` を**空**にする。repoの`.claude/settings.json`(`Write(./**)`)が載ると素通りする
-
-## 旧体制(2026-05〜2026-07-26、廃止)
+## 旧体制(2026-05〜2026-07-26、廃止。経緯確認のときだけ読めばよく、現行運用には不要)
 
 以前は`techlead`/`implementer`/`reviewer`/`tester`(無印trio、Claude Codeベース、tmux常駐)と`techlead2`/`implementer2`/`reviewer2`/`tester2`(2付きtrio、Codexベース、techlead2はネイティブアプリ常駐)が、agmsgでCoordinatorおよび相互に非同期メッセージを送り合う常駐マルチプロセス体制だった。2026-07-26、処理速度(cross-process遅延、tmux ASK承認の手動待ち)を理由にCodexは本プロジェクトから外れ、あわせて常駐trio体制自体(Claude Codeベースの無印trioを含む)も廃止した。理由と経緯は`project_agmsg_to_subagent_transition`(Claude Memory、2026-07-26)を参照。
 

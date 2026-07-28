@@ -100,7 +100,7 @@ Policy または Skill (該当業務のPolicyファイル新設・改訂、ま�
 
 **自律の境界**: 振り返りは`docs/ai/memory/`・`docs/ai/context/`・`skills/`へ自分で書き出す。ただし`docs/ai/policies/`本文は書き換えず、必要な改訂は`docs/ai/memory/temporary/policy-proposal-<date>-<slug>.md`へ提案として残す(Policyは人間の判断領域)。commit/pushも行わない。作業ツリーが汚れているときは何も書かずに中止する。
 
-**無人実行は`docs/ai/status.md`を書き換えない**(2026-07-27)。書込allowlistは上記3パスのみで、`status.md`はそこに含まれない(`role-routing-index.md`「無人実行されるCoordinator」の表)。読取は`docs/`配下なので可能である。したがって上記「状態の突合」で見つかった差分は、**書き換えずに報告へ列挙する**。auto-memoryを読み取りのみとしている扱いと同じで、反映は後で対話セッションかYoshinobuが行う。allowlistを広げて`status.md`を書けるようにするのは、封じ込めが成立している3条件(同節)を崩さないか確認したうえで別途判断する。
+**無人実行は`docs/ai/status.md`を書き換えない**(2026-07-27)。書込allowlistは上記3パスのみで、`status.md`はそこに含まれない(`role-routing-index.md`「無人実行されるCoordinator」の表)。読取は`docs/`配下なので可能である。したがって上記「状態の突合」で見つかった差分は、**書き換えずに報告へ列挙する**。auto-memoryを読み取りのみとしている扱いと同じで、反映は後で対話セッションかYoshinobuが行う。allowlistを広げて`status.md`を書けるようにするのは、封じ込めが成立している3条件(`docs/ai/memory/lessons/claude-code-unattended-session-confinement.md`)を崩さないか確認したうえで別途判断する。
 
 ## 4. Role別のKnowledge参照範囲(TODO6-3)
 

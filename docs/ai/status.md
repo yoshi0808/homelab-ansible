@@ -48,7 +48,6 @@
 | 項目 | 内容 | 根拠 |
 |---|---|---|
 | **`1+R` に計画査読だけを足す形を認めるか** | `skills/delegation-tier/SKILL.md` は「Tier 1/2に査読を足す形は無い。足したくなったらTier判定が誤っている信号」と定める。しかし上流55 `tool_uses` で**実装前に5件**が潰れ、うち1件は**Coordinator自身が書いたrequirementの内部矛盾**だった。`1+R` には計画を見る者が居ない。**現行規定は維持しており、この起票は見直しの検討** | `.../subagent_briefing/2026-07-28_003_plan_review.md`、同 `progress.md`「クローズ判断」 |
-| **Auditorの起動条件と `status.md` 検査の矛盾** | `docs/ai/roles/coordinator.md` はAuditorを「該当行を消す**前**」に起動すると定め、`docs/ai/role-context-matrix.md` は「該当行が現況と一致しているか」を検査項目に置く。**両方を守るとこの指摘は毎回発火し、空振りと本物を区別できない** | `.../subagent_briefing/2026-07-28_007_audit.md` 指摘1 |
 | **計画査読の正本に足りない2点** | ①申告の妥当性に疑義が出たときの扱いが層1/層2のどちらか不明(初回で実際に発生し、査読者が裁量で分けた)②査読者の出力の型が無い。いずれも `docs/ai/roles/techlead.md` の改訂 | `.../subagent_briefing/2026-07-28_003_plan_review.md` §4-1・§4-4 |
 | **Auditorの単位分類が `effort-baseline.md` に無い** | 「実行単位」の定義がImplementer / Reviewer / Testerのみで、Auditorがどちらにも属さない。**層1基準(80 `tool_uses`)を実際に適用できなかった** | `docs/ai/effort-baseline.md`「採用する単位」、`.../subagent_briefing/2026-07-28_003_plan_review.md` §4-3 |
 | **Context索引と現物の突合を機械的検査にする** | `role-map.md` / `playbook-map.md` / `playbooks/README.md` に未記載のrole・playbookがあれば落ちる形(`scripts/check-tester-gate.sh` の兄弟)。**索引は2026-07-25以降更新されず、7/27・7/28の追加が丸ごと抜けていた**(role 3件・playbook 6件)。Yoshinobuの指摘で発覚し補修済み。**同種の欠陥は「触れてよいパスの切り方」で4回起き、うち1回は教訓を記録した後だった** — 文章では止まらないことが実証されている | `docs/ai/reviews/incident_auto_capture_step2/progress.md`「後続への申し送り」A-10・A-7 |
