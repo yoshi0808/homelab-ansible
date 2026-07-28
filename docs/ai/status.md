@@ -20,11 +20,10 @@
 
 | # | 項目 | 現在地 | 次にやること |
 |---|---|---|---|
-| 1 | **障害の自動捕捉・評価** — Operator役の第一歩 | **3段(捕捉→転送→評価)すべてが本番で成立した**(2026-07-28)。全12単位完了、Auditor検査済み(指摘6件は是正済み)。転送は `ansible-incident-sync.timer`(毎時)、評価は既存の月次 `ansible-knowledge-review.timer` の中で2本目の `claude -p` として動く。**月次フル経路を実データで1回通し済み**(`claude -p` 2本で591.70秒 / 予算3600秒)。進捗・実績・課題・申し送りの正本は `docs/ai/reviews/incident_auto_capture_step2/progress.md`(**ここへ写さない**) | **残るのは `git push` のみ。** そのあと**この行を消す**。申し送り9件(見積単位の見直し、decoy技法のLesson昇格ほか)は `progress.md`「後続への申し送り」が正本で、**別案件として起票する**。**2026-08-26 07:15 JSTの月次発火が最初の無人での通し**になる — それはWatch行が持つ |
 
-**Yoshinobuの決定3件**(所在だけを示す。本文はここへ写さない)。①評価結果は**repo内のgitignore済みパス**へ出し `docs/ai/memory/incidents/` への昇格は人が行う ②月次 `claude -p` へ **`Read(reports/incidents/**)` の追加を承認**(IC-019。拡大はこの1エントリのみ)③**中止した月次評価の再実行はYoshinobuが行う**(Policy **IC-033**。「汚れている」の定義と、この運用が成立する前提条件2つも同条文にある)。①②の正本は requirement §4 D-2〜D-4、③は Policy §7。
+**進行中の案件は無い**(2026-07-28)。「障害の自動捕捉・評価」は**3段すべてが本番で成立してクローズした** — 捕捉=quory(5分毎)、転送=ansy `ansible-incident-sync.timer`(毎時)、評価=既存の月次 `ansible-knowledge-review.timer` の中の2本目の `claude -p`。**次の観測点は2026-08-26の月次発火**で、Watch行が持つ。
 
-**未決の一覧は Policy §8 と requirement §9 が正本。** OQ5(自動起票が作業ツリーを汚し月次評価を止める)は決着済みで、結論は ADR-005 第2版。
+**規範の正本は `docs/ai/policies/incident_capture_policy.md`**(IC-001〜IC-033)。設計判断は `docs/ai/adr/003` / `004` / `005`(いずれも Accepted)。案件記録は `docs/ai/reviews/incident_auto_capture/`(Step 1)と `.../incident_auto_capture_step2/`(Step 2)。**未決の一覧は Policy §8 が正本。**
 
 **Step 1の残件2つは、使う場所へ書かず現状ここにしか無い**(規律1の例外として明示する)。①**R8(Semaphore外ジョブの保険)が未実装** ②シェルとPythonで staged mode 取得を**二重実装**している負債。一次記録は `docs/ai/reviews/incident_auto_capture/`。
 
@@ -52,6 +51,9 @@
 | **Auditorの起動条件と `status.md` 検査の矛盾** | `docs/ai/roles/coordinator.md` はAuditorを「該当行を消す**前**」に起動すると定め、`docs/ai/role-context-matrix.md` は「該当行が現況と一致しているか」を検査項目に置く。**両方を守るとこの指摘は毎回発火し、空振りと本物を区別できない** | `.../subagent_briefing/2026-07-28_007_audit.md` 指摘1 |
 | **計画査読の正本に足りない2点** | ①申告の妥当性に疑義が出たときの扱いが層1/層2のどちらか不明(初回で実際に発生し、査読者が裁量で分けた)②査読者の出力の型が無い。いずれも `docs/ai/roles/techlead.md` の改訂 | `.../subagent_briefing/2026-07-28_003_plan_review.md` §4-1・§4-4 |
 | **Auditorの単位分類が `effort-baseline.md` に無い** | 「実行単位」の定義がImplementer / Reviewer / Testerのみで、Auditorがどちらにも属さない。**層1基準(80 `tool_uses`)を実際に適用できなかった** | `docs/ai/effort-baseline.md`「採用する単位」、`.../subagent_briefing/2026-07-28_003_plan_review.md` §4-3 |
+| **Context索引と現物の突合を機械的検査にする** | `role-map.md` / `playbook-map.md` / `playbooks/README.md` に未記載のrole・playbookがあれば落ちる形(`scripts/check-tester-gate.sh` の兄弟)。**索引は2026-07-25以降更新されず、7/27・7/28の追加が丸ごと抜けていた**(role 3件・playbook 6件)。Yoshinobuの指摘で発覚し補修済み。**同種の欠陥は「触れてよいパスの切り方」で4回起き、うち1回は教訓を記録した後だった** — 文章では止まらないことが実証されている | `docs/ai/reviews/incident_auto_capture_step2/progress.md`「後続への申し送り」A-10・A-7 |
+| **`tool_uses` 見積の単位を見直す** | 直近案件でレンジが **0.43〜4.44(10.3倍)** へ拡大し、`effort-baseline.md` 自身が定める見直しトリガ(1.8倍)を超えた。**ずれたのは製造だけで、レビューと検証はほぼ見積どおり**。仮説は「実行時にしか証明できない性質の個数」を見積が数えていないこと | `docs/ai/effort-baseline.md`(3件目の記帳)、同 progress.md A-1 |
+| 案件の申し送り(上記2件以外) | decoy定型がモジュールによっては成立しない件のLesson昇格、`requirements-analysis` への索引更新の追加、subagentのscratch漏れ対策ほか**計12件**。**個別にここへ写さない** | `docs/ai/reviews/incident_auto_capture_step2/progress.md`「後続への申し送り」 |
 | Operator役の新設 | 現行6役は**開発工程しか持たず運用工程が空白**。Incident記録・運用レポートをAIへ委ねる方向。着手時期は未定 | `docs/ai/roles/` に運用工程のRoleが無いこと。Yoshinobu表明(2026-07-26) |
 | リポジトリ直下 `AGENTS.md` の要否判断 | Codexが開発工程から外れ、このファイルを読む主体が存在しない。**そこを開く動機を持つ人がいない**ため起票だけをここに置く | `AGENTS.md` L7 |
 
