@@ -71,6 +71,17 @@ playbook の入口を置く。処理本体は原則として `roles/` に実装�
 | [`recovery_service_restart.yml`](recovery_service_restart.yml) | `pve1` | 承認された対象サービスの復旧restart | `check-mode-native` | `recovery_service_restart` |
 | [`recovery_vm_reboot.yml`](recovery_vm_reboot.yml) | `pve1` | 承認された対象VMの復旧reboot | `check-mode-native` | `recovery_vm_reboot` |
 
+## 障害記録・振り返り
+
+| Playbook | 対象 | 用途 | `tester-gate` | 主な role / 実装 |
+| --- | --- | --- | --- | --- |
+| [`incident_capture_setup.yml`](incident_capture_setup.yml) | `quory` | 障害証拠バンドル収集器(collector)を配備。有効化オプション時のみtimerをenable+start | `risk-accepted` | `incident_capture` |
+| [`incident_sync.yml`](incident_sync.yml) | `control_nodes`, `localhost` | quory→ansy証拠バンドルの定期ミラー同期(pull-only) | `check-mode-native` | `incident_sync` |
+| [`incident_sync_timer.yml`](incident_sync_timer.yml) | `dev_nodes` | `incident_sync`同期用systemd timerを配置 | `risk-accepted` | `incident_sync` timer tasks |
+| [`incident_evaluation.yml`](incident_evaluation.yml) | `localhost` | 障害の自動評価工程だけを`knowledge_review.yml`本体を経由せず手動で個別に実行(検証・対話セッション用。timerには載せない) | `check-mode-native` | `knowledge_review` incident evaluation tasks |
+| [`knowledge_review.yml`](knowledge_review.yml) | `localhost`（ansy専用） | 月次Knowledge振り返りを`claude -p`で無人実行し、続けて障害の自動評価を行う | `check-mode-native` | `knowledge_review` |
+| [`knowledge_review_timer.yml`](knowledge_review_timer.yml) | `dev_nodes` | 月次Knowledge振り返り用systemd timerを配置 | `check-mode-native` | `knowledge_review` timer tasks |
+
 ## ホスト保守・定期運用
 
 | Playbook | 対象 | 用途 | `tester-gate` | 主な role / 実装 |
