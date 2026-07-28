@@ -2,6 +2,7 @@
 reports/**/*.json
 reports/**/*.log
 reports/**/*.md
+reports/incidents/
 
 # Ansible retry files
 *.retry

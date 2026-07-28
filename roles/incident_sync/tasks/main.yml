@@ -1,0 +1,14 @@
+---
+# Entry point when this role is invoked without tasks_from.
+#
+# playbooks/incident_sync.yml(U2)は2 play構成である(I-7)。
+#   play1: hosts: control_nodes(=quory)。この play が既定の main.yml(このファイル)
+#          を使う想定 — transfer.yml をそのまま import するだけなので、
+#          `roles: - incident_sync` のように tasks_from なしで呼んでよい。
+#   play2: hosts: localhost。こちらは main.yml を経由せず、明示的に
+#          `tasks_from: finalize` で finalize.yml を呼ぶこと。main.yml 経由で
+#          finalize を動かす経路は無い(play1/play2 で挙動を変える必要があり、
+#          単一ファイルの条件分岐より2ファイルに分けた方が事故が少ないため
+#          — homelab_cert_renew と同型の割り切り)。
+- name: Import transfer tasks (default entry point)
+  ansible.builtin.import_tasks: transfer.yml

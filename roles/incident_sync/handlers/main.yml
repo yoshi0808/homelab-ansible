@@ -1,0 +1,26 @@
+---
+# incident_sync: systemd daemon-reload handler(2026-07-28差し戻しにより新設)。
+#
+# tasks/install_timer.yml のtemplate配備taskから notify される。handler化した
+# 理由 — 通常taskとして `daemon_reload: true` を毎回実行すると、この呼び出し
+# (unit名を指定しない daemon_reload 単体呼び出し)は常に changed を報告する
+# ため、「2回目以降の再配備はchangedゼロ」という冪等性の観測ができなくなる。
+# handler化すれば、通知元のtemplate taskが実際に差分を出したとき(初回配備、
+# または将来unitの内容を変えたとき)だけ発火する — roles/knowledge_review/
+# handlers/main.yml と同じ形。
+#
+# `check_mode: false` を明示するのは knowledge_review のhandlerとは異なる点
+# である。knowledge_review側のplaybook(check-mode-native)は「--checkでは
+# 破壊的操作を行わない」ことが設計意図であり、handlerに何も指定しなくても
+# 既定どおり--check下では発火・実行されない(それでよい)。一方このroleの
+# 配備playbook(playbooks/incident_sync_timer.yml)は risk-accepted であり、
+# 「--checkの有無に関わらず常に本実行する」ことが設計意図(呼び出し元の
+# `check_mode: false` によるcascade、TS-013)。handlerはtaskの通常のtask木
+# ではなく別系統のqueueであり、呼び出し元のcascadeが自動的に及ぶかどうかは
+# 保証されないため、本ファイル側でも明示的に check_mode: false を置き、
+# risk-acceptedの意図(常に本実行)をhandler側でも独立に担保する。
+- name: Reload systemd for incident sync
+  ansible.builtin.systemd:
+    daemon_reload: true
+  become: true
+  check_mode: false

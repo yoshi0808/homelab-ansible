@@ -20,11 +20,11 @@
 
 | # | 項目 | 現在地 | 次にやること |
 |---|---|---|---|
-| 1 | **障害の自動捕捉・評価** — Operator役の第一歩 | **Policyを策定済み**(`docs/ai/policies/incident_capture_policy.md`、2026-07-28 Yoshinobu承認)。パイプラインは3段(捕捉=quory → 転送 → 評価=ansy)で、**捕捉は本番稼働中**。残り2段のrequirementを確定済み(`.../incident_auto_capture_step2/2026-07-28_006_step2_requirement.md`、Tier 4)。案件記録は `docs/ai/reviews/incident_auto_capture/`(Step 1、クローズ済み)と `docs/ai/reviews/incident_auto_capture_step2/`(現行) | **Tech Leadへ渡して分解・見積もり・ADR-005改訂**(requirement §12)。**未決の一覧はPolicy §8とrequirement §9が正本**(ここへ写さない)。**期限は2026-08-26の月次timer発火**(requirement §11) |
+| 1 | **障害の自動捕捉・評価** — Operator役の第一歩 | **実装フェーズの製造4単位が完了し、独立レビュー2件が走行中**(2026-07-28)。Policy・requirement・実装計画・ADR-005第2版はすべて確定済みで、計画受領ゲートも通過。**捕捉は本番稼働中、転送と評価は未commit・未配備。** 進捗・実績・課題の正本は `docs/ai/reviews/incident_auto_capture_step2/progress.md`(**ここへ写さない**)。Step 1の記録は `docs/ai/reviews/incident_auto_capture/`(クローズ済み) | **レビュー2件のfindingsを1回の修正ラウンドで処理 → `W1`(Yoshinobuのcommit / push)→ 実ホストへの配備と検証(U7・U10・U8・U9・U11の直列)。** `W1` は工程上の待ちであり、**AIはcommitしないためここで必ず止まる**。**期限は2026-08-26の月次timer発火**(requirement §11) |
 
-**2026-07-28にYoshinobuが決めた2点**(requirement §4 D-2・D-3・D-4が正本。ここは所在を示すだけ)。①評価結果は**repo内のgitignore済みパス**へ出し、`docs/ai/memory/incidents/` への昇格は人が行う → **ADR-005 Decision (1)・(4)「作業ツリーの外」は改訂される** ②月次 `claude -p` へ **`Read(reports/incidents/**)` の追加を承認**(IC-019)。拡大はこの1エントリのみ。
+**Yoshinobuの決定3件**(所在だけを示す。本文はここへ写さない)。①評価結果は**repo内のgitignore済みパス**へ出し `docs/ai/memory/incidents/` への昇格は人が行う ②月次 `claude -p` へ **`Read(reports/incidents/**)` の追加を承認**(IC-019。拡大はこの1エントリのみ)③**中止した月次評価の再実行はYoshinobuが行う**(Policy **IC-033**。「汚れている」の定義と、この運用が成立する前提条件2つも同条文にある)。①②の正本は requirement §4 D-2〜D-4、③は Policy §7。
 
-**OQ5(自動起票が作業ツリーを汚し月次評価を止める)は、IC-007で書き手が月次評価自身だけになったため実質解消した。** 書込が清潔チェックの後に起きるため、`roles/knowledge_review/tasks/main.yml:44-51` が既に許容する「先月分が未commitなら止まる」以上の新しい衝突は生じない。**この判断は未検証であり、ADR-005改訂時にTech Leadが現物で反証すること。**
+**未決の一覧は Policy §8 と requirement §9 が正本。** OQ5(自動起票が作業ツリーを汚し月次評価を止める)は決着済みで、結論は ADR-005 第2版。
 
 **Step 1の残件2つは、使う場所へ書かず現状ここにしか無い**(規律1の例外として明示する)。①**R8(Semaphore外ジョブの保険)が未実装** ②シェルとPythonで staged mode 取得を**二重実装**している負債。一次記録は `docs/ai/reviews/incident_auto_capture/`。
 

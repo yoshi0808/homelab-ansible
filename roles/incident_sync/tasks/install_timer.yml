@@ -1,0 +1,70 @@
+---
+# incident_sync: systemd timer/service の配置。ansy(dev_nodes)専用。
+# quoryへは配布しない(D-1: 転送はansy起点のpullであり、quory側には何も置かない
+# — IC-013)。playbooks/incident_sync_timer.yml から include_role tasks_from で呼ぶ。
+#
+# 呼び出し元は本role(incident_sync)を risk-accepted として起動する
+# (playbooks/incident_sync_timer.ymlのtester-gateマーカーとコメントを参照)。
+# `check_mode: false` を呼び出し元のimport箇所に置くことで、配下の本ファイルの
+# 全task(ネストされたcommand/debugを含む)は --check の有無に関わらず常に本実行
+# される(TS-013)。そのため本ファイル内では ansible_check_mode による when 分岐
+# を一切使わない — 使うと呼び出し元のcascadeと矛盾し、--check時にだけ一部が
+# 意図せずskipされる(その場合 when: not ansible_check_mode は常にFalseになる
+# ため、cascadeで実行されるはずのtaskが動かなくなる)。
+#
+# timer専用の変数(schedule・run_user・playbook_bin・lock path・timeout)は
+# roles/incident_sync/defaults/main.yml の「timer配置用」節にある(2026-07-28
+# 差し戻しにより、U1が置いた既存の変数群には触れずそこへ追記した)。
+# 値は計画 §3 I-5 が正本(lock pathの2つと run_user/repo_dir/playbook_bin の
+# 形は既存の knowledge_review と同じにする、とI-5に明記されている)。
+#
+# systemctl list-timers は状態照会であり systemd モジュールでは代替できないため
+# command を使う(roles/knowledge_review/tasks/install_timer.yml、
+# roles/ubuntu_vm_full_upgrade 等と同じ扱い)。
+#
+# daemon-reloadは handlers/main.yml の notify 経由(2026-07-28差し戻し)。
+# unit名を指定しない `daemon_reload: true` 単体呼び出しは、通常taskとして
+# 毎回実行すると常に changed を報告してしまい、「2回目以降の再配備はchanged
+# ゼロ」という冪等性の観測ができなくなる。handler化すれば、template taskが
+# 実際に差分を出したとき(初回配備、または将来unitの内容を変えたとき)だけ
+# 発火する(roles/knowledge_review/tasks/install_timer.yml と同じ形)。
+
+- name: Deploy incident sync service unit
+  ansible.builtin.template:
+    src: incident-sync.service.j2
+    dest: /etc/systemd/system/ansible-incident-sync.service
+    owner: root
+    group: root
+    mode: "0644"
+  become: true
+  notify: Reload systemd for incident sync
+
+- name: Deploy incident sync timer unit
+  ansible.builtin.template:
+    src: incident-sync.timer.j2
+    dest: /etc/systemd/system/ansible-incident-sync.timer
+    owner: root
+    group: root
+    mode: "0644"
+  become: true
+  notify: Reload systemd for incident sync
+
+- name: Flush handlers so units are reloaded before enabling
+  ansible.builtin.meta: flush_handlers
+
+- name: Enable and start incident sync timer
+  ansible.builtin.systemd:
+    name: ansible-incident-sync.timer
+    enabled: true
+    state: started
+  become: true
+
+- name: Query next scheduled run
+  ansible.builtin.command:
+    cmd: systemctl list-timers ansible-incident-sync.timer --all --no-pager
+  register: incident_sync_timer_status
+  changed_when: false
+
+- name: Report next scheduled run
+  ansible.builtin.debug:
+    msg: "{{ incident_sync_timer_status.stdout_lines }}"

@@ -30,3 +30,45 @@ knowledge_review_allow_dirty: false
 knowledge_review_schedule: "*-*-26 07:15:00"
 knowledge_review_run_user: yoshi
 knowledge_review_playbook_bin: /usr/bin/ansible-playbook
+
+# --- 障害の自動評価(incident_metrics → incident_evaluation → incident_index_write) ---
+# 設計の正本: docs/ai/reviews/incident_auto_capture_step2/2026-07-28_007_step2_plan.md
+#             §2.4・§2.5・§2.6。変数名と既定値の正本は同 §3 I-5。
+# Policy: docs/ai/policies/incident_capture_policy.md(IC-005, IC-007, IC-017〜IC-020,
+#         IC-025, IC-031, IC-032, IC-033)
+#
+# roles/incident_sync が書くミラー(reports/incidents/quory/)を読むだけであり、
+# incident_sync の defaults(incident_sync_mirror_dir 等)は参照しない。値は一致
+# させてあるが、書き手が交差しない設計(IC-031)にするため各roleが自分の変数を持つ。
+
+# quoryからのミラー着地点(読むだけ)。roles/incident_sync が書く。
+knowledge_review_incident_mirror_dir: "{{ reports_base_dir }}/incidents/quory"
+
+# 評価成果物の置き場所。ここだけはAnsibleが書く(IC-032)。incident_sync の書込
+# 対象外であり、毎時の同期がミラーを上書きしても消えない(IC-031)。
+knowledge_review_incident_eval_dir: "{{ reports_base_dir }}/incidents/_evaluations"
+
+# 評価工程(incident_metrics/incident_evaluation/incident_index_writeの3ファイル)
+# を有効にするか。既定 true。false にすると3ファイルとも include されない
+# (main.yml側のwhen)。既存の振り返り本体には一切影響しない(AC9)。
+knowledge_review_incident_eval_enabled: true
+
+# 評価用 claude -p のタイムアウト(秒)。評価は summary.json の generated_at を
+# 起点に窓を区切って読む(§2.5・R-6)ぶん、全repoを仕分ける振り返り本体
+# (knowledge_review_timeout=1800)より軽いため半分を割り当てる。
+# unit の TimeoutStartSec 再計算(3600 = 1800 + 900 + 900)はこの値を前提にする
+# (templates/knowledge-review.service.j2)。
+knowledge_review_incident_timeout: 900
+
+# 評価用 claude -p のモデル。既存の振り返り本体と揃える。
+knowledge_review_incident_model: "{{ knowledge_review_model }}"
+
+# ミラーの _heartbeat.json の generated_at がこの秒数より古ければ stale とみなす
+# (incident_metrics.yml が評価時点で再計算する。§2.6層3)。収集器の周期
+# (5分)の36倍 = 3時間。roles/incident_sync/defaults/main.yml の
+# incident_sync_heartbeat_max_age_s と**同じ値**であることを意図しているが、
+# 変数としては独立している(書き手が交差しない設計。IC-031)。**この2つを
+# 統合はしない**(別roleの変数を跨いで参照すると依存が増えるため)——
+# 片方だけ変えるとstale判定の基準がroleごとにずれる。変えるときは両方を
+# 確認すること。
+knowledge_review_incident_heartbeat_max_age_s: 10800

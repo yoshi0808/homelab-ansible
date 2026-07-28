@@ -1,0 +1,250 @@
+---
+# 障害の自動評価: 決定論的メトリクスの算出(評価の前段)。
+# 設計の正本: docs/ai/reviews/incident_auto_capture_step2/2026-07-28_007_step2_plan.md
+#             §2.6・§3 I-3(indexのschema。実装判断ではなく契約)。
+# Policy: docs/ai/policies/incident_capture_policy.md(IC-021・IC-022・IC-031〜IC-033)
+#
+# ここで計算するのは「人の記帳を必要としない指標」だけである(相関IDによる
+# 照合は実装しない — 計画の決定)。尺度は summary.json の generated_at であり、
+# ミラーのディレクトリmtimeは使わない(fetch経路がmtimeを保存しないため。
+# 査読F-3・Coordinator決定6)。
+#
+# 呼び出し元は2経路ある。どちらも knowledge_review_started_at /
+# knowledge_review_incident_mirror_dir / knowledge_review_incident_eval_dir が
+# 本ファイルの前に定義済みであることを前提にする。
+#   1. roles/knowledge_review/tasks/main.yml(月次本体。Save reportの直後、
+#      本ファイルが Run incident evaluation より先に呼ばれる)
+#   2. playbooks/incident_evaluation.yml(手動専用。include_role: tasks_from
+#      で直接呼ばれる)
+#
+# 生成するfact incident_eval_index は I-5 が定める契約上の名前(実装判断で
+# 変更しない)。evaluation_rc / evaluation_artifact の2キーはここでは埋めない
+# — incident_evaluation.yml(評価本体)の実行後に incident_index_write.yml が
+# 合わせて書き出す(I-3「このファイルは2段階で作られる」)。
+#
+# 本ファイル内部だけで使う中間factは knowledge_review_incident_metrics_ を
+# 接頭辞にし、契約上の名前(incident_eval_index)と衝突しないようにする。
+
+- name: Ensure incident evaluation output directory exists
+  ansible.builtin.file:
+    path: "{{ knowledge_review_incident_eval_dir }}"
+    state: directory
+    owner: "{{ ansible_user_id }}"
+    mode: "0750"
+  # incident_evaluation.yml(U3)も同じディレクトリを同じ設定で確保するが、
+  # 本タスクは「前回indexを探す」ために本ファイル自身が先に必要とする
+  # (実行順は metrics → evaluation → index_write)。file モジュールは冪等
+  # であり二重に置いても害は無い。--check でも実ディレクトリを作る
+  # (既存 main.yml の「Ensure state directory exists」と同じ扱い)。
+  check_mode: false
+
+# --- 1. previous_evaluation_date(_evaluations/ 内の既存indexのうち最新の日付) ---
+#
+# ファイル名の日付だけを見る。中身(schema_version等)は問わない — 中身が
+# 壊れていても「その日付のindexが存在した」という事実だけで前回評価日を
+# 決められる決定論的な設計にするため。
+
+- name: Find existing incident evaluation index files
+  ansible.builtin.find:
+    paths: "{{ knowledge_review_incident_eval_dir }}"
+    patterns: "*-index.json"
+    file_type: file
+  register: knowledge_review_incident_metrics_existing_indexes
+  # find はpathが存在しない/空でも failed にならず files: [] を返す
+  # (自己検証で確認済み。_evaluations/ が無い初回でもここで落ちない)。
+
+- name: Extract candidate dates from existing index filenames
+  ansible.builtin.set_fact:
+    knowledge_review_incident_metrics_previous_dates: >-
+      {{ knowledge_review_incident_metrics_existing_indexes.files
+         | map(attribute='path')
+         | map('basename')
+         | map('regex_replace', '^(\d{4}-\d{2}-\d{2})-index\.json$', '\1')
+         | select('match', '^\d{4}-\d{2}-\d{2}$')
+         | list }}
+  # 命名規約に一致しないファイル名(regex_replaceが素通りした場合)は直後の
+  # select('match', ...) で除外される。壊れたファイル名が紛れ込んでも
+  # previous_evaluation_date の誤判定にはつながらない(自己検証済み)。
+
+- name: Determine previous_evaluation_date (null on first run)
+  ansible.builtin.set_fact:
+    knowledge_review_incident_metrics_previous_date: >-
+      {{ (knowledge_review_incident_metrics_previous_dates | sort | last)
+         if (knowledge_review_incident_metrics_previous_dates | length > 0)
+         else None }}
+  # 初回(既存indexが無い)は None(JSON化で null)。自己検証で
+  # type_debug=NoneType であることを確認済み(空文字列との混同を避ける)。
+
+# --- 2. mirror_bundle_total / bundles_new_since_last_eval / oldest_unreviewed_bundle ---
+#
+# incident_sync が書くミラー配下のバンドルディレクトリ(semaphore-*/spool-*)
+# を数え、各 summary.json の generated_at を読む。ディレクトリのmtimeは
+# 一切参照しない(§2.6・査読F-3)。
+
+- name: Find bundle directories in incident mirror
+  ansible.builtin.find:
+    paths: "{{ knowledge_review_incident_mirror_dir }}"
+    file_type: directory
+    patterns: ["semaphore-*", "spool-*"]
+  register: knowledge_review_incident_metrics_bundle_dirs
+  # ミラーがまだ一度も同期されていない(ディレクトリ自体が存在しない)場合も
+  # find は warning を出すだけで files: [] を返す(自己検証済み)。
+
+- name: Read each bundle's summary.json
+  ansible.builtin.slurp:
+    src: "{{ item.path }}/summary.json"
+  loop: "{{ knowledge_review_incident_metrics_bundle_dirs.files | default([]) }}"
+  loop_control:
+    label: "{{ item.path | basename }}"
+  register: knowledge_review_incident_metrics_bundle_summaries_raw
+  ignore_errors: true
+  # 転送直後でsummary.jsonがまだ揃っていないバンドル等、個々のslurp失敗を
+  # 握りつぶさず後段のselectattrで除外する(全体を失敗させない)。
+
+- name: Parse bundle summaries that were read successfully
+  ansible.builtin.set_fact:
+    knowledge_review_incident_metrics_bundles_parsed: >-
+      {{ knowledge_review_incident_metrics_bundle_summaries_raw.results | default([])
+         | selectattr('failed', 'equalto', False)
+         | map(attribute='content')
+         | map('b64decode')
+         | map('from_json')
+         | list }}
+
+- name: Compute mirror_bundle_total
+  ansible.builtin.set_fact:
+    knowledge_review_incident_metrics_bundle_total: "{{ knowledge_review_incident_metrics_bundles_parsed | length | int }}"
+
+- name: Compute bundles new since last evaluation (date-slice comparison, inclusive)
+  ansible.builtin.set_fact:
+    knowledge_review_incident_metrics_bundles_new: >-
+      {{ (knowledge_review_incident_metrics_bundles_parsed
+          | selectattr('generated_at', 'defined')
+          | selectattr('generated_at', 'ge', knowledge_review_incident_metrics_previous_date ~ 'T00:00:00+09:00')
+          | list)
+         if knowledge_review_incident_metrics_previous_date is not none
+         else (knowledge_review_incident_metrics_bundles_parsed
+               | selectattr('generated_at', 'defined')
+               | list) }}
+  # 「前回評価日以降(当日を含む)」の判定。generated_at を欠くバンドル
+  # (壊れた/未完了のsummary.json)は selectattr('generated_at', 'defined') で
+  # 静かに除外する(mirror_bundle_total には含まれるが新着数には数えない)。
+  # previous_evaluation_date が null(初回)ならミラー全件を新着として扱う
+  # (I-3「初回はbundles_new_since_last_evalはミラー全件」)。
+
+- name: Compute bundles_new_since_last_eval count
+  ansible.builtin.set_fact:
+    knowledge_review_incident_metrics_bundles_new_count: "{{ knowledge_review_incident_metrics_bundles_new | length | int }}"
+
+- name: Find the oldest new bundle (raw dict, or None if no new bundles)
+  ansible.builtin.set_fact:
+    knowledge_review_incident_metrics_oldest_bundle: >-
+      {{ (knowledge_review_incident_metrics_bundles_new | sort(attribute='generated_at') | first)
+         if (knowledge_review_incident_metrics_bundles_new | length > 0) else None }}
+
+- name: Compute oldest new bundle age in days (only when a bundle exists)
+  ansible.builtin.set_fact:
+    knowledge_review_incident_metrics_oldest_age_days: >-
+      {{ (((knowledge_review_started_at | to_datetime('%Y-%m-%dT%H:%M:%S%z'))
+           - (knowledge_review_incident_metrics_oldest_bundle.generated_at | to_datetime('%Y-%m-%dT%H:%M:%S%z'))).days) }}
+  when: knowledge_review_incident_metrics_oldest_bundle is not none
+  # bundle_idはsummary.json自身が持つ値をそのまま使う(収集器が書き込み時に
+  # 必ず入れる。roles/incident_capture/files/incident-capture-collector.py
+  # :592・:740-742)。ディレクトリ名の再構成はしない。
+
+- name: Build final oldest_unreviewed_bundle (dict, or null if no new bundles)
+  ansible.builtin.set_fact:
+    knowledge_review_incident_metrics_oldest_unreviewed_bundle: >-
+      {{ {'id': knowledge_review_incident_metrics_oldest_bundle.bundle_id,
+          'generated_at': knowledge_review_incident_metrics_oldest_bundle.generated_at,
+          'age_days': knowledge_review_incident_metrics_oldest_age_days | int}
+         if knowledge_review_incident_metrics_oldest_bundle is not none else None }}
+
+# --- 3. incidents_added_since_last_eval ---
+#
+# docs/ai/memory/incidents/ のIncidentは「ファイル名の日付」で数える。mtimeは
+# checkoutで壊れるため使わない(要求仕様。skills/incident-recording/SKILL.md
+# が定める <YYYY-MM-DD>_<slug>.md 形式)。README.md 等、命名規約に合わない
+# ファイルは find の patterns で最初から除外する。
+
+- name: Find Incident record files by filename convention
+  ansible.builtin.find:
+    paths: "{{ knowledge_review_repo_dir }}/docs/ai/memory/incidents"
+    patterns: "????-??-??_*.md"
+    file_type: file
+  register: knowledge_review_incident_metrics_incident_files
+
+- name: Compute incidents_added_since_last_eval
+  ansible.builtin.set_fact:
+    knowledge_review_incident_metrics_incidents_added: >-
+      {{ knowledge_review_incident_metrics_incident_files.files | default([])
+         | map(attribute='path') | map('basename')
+         | map('regex_replace', '^(\d{4}-\d{2}-\d{2})_.*$', '\1')
+         | select('ge', knowledge_review_incident_metrics_previous_date if knowledge_review_incident_metrics_previous_date is not none else '0000-00-00')
+         | list | length | int }}
+  # previous_evaluation_dateがnull(初回)の場合はどの日付も '0000-00-00' 以降
+  # になるため既存Incident全件を数える。bundlesの初回扱いと同じ考え方。
+
+# --- 4. mirror_heartbeat_age_seconds / mirror_stale(検知②③・§2.6層3) ---
+
+- name: Read mirror heartbeat file
+  ansible.builtin.slurp:
+    src: "{{ knowledge_review_incident_mirror_dir }}/_heartbeat.json"
+  register: knowledge_review_incident_metrics_heartbeat_raw
+  ignore_errors: true
+  # 心拍ファイルが無い(同期が一度も成功していない/ミラーが空)場合は
+  # 「stale」として扱う(下記 mirror_stale の判定)。取得失敗を隠さない
+  # (IC-011と同じ考え方をここにも適用する)。
+
+- name: Extract heartbeat generated_at (null if heartbeat missing)
+  ansible.builtin.set_fact:
+    knowledge_review_incident_metrics_heartbeat_generated_at: >-
+      {{ (knowledge_review_incident_metrics_heartbeat_raw.content | b64decode | from_json).generated_at
+         if not (knowledge_review_incident_metrics_heartbeat_raw.failed | default(false)) else None }}
+
+- name: Compute mirror_heartbeat_age_seconds (null if heartbeat missing)
+  ansible.builtin.set_fact:
+    knowledge_review_incident_metrics_heartbeat_age_seconds: >-
+      {{ (((knowledge_review_started_at | to_datetime('%Y-%m-%dT%H:%M:%S%z'))
+           - (knowledge_review_incident_metrics_heartbeat_generated_at | to_datetime('%Y-%m-%dT%H:%M:%S%z'))).total_seconds() | int)
+         if knowledge_review_incident_metrics_heartbeat_generated_at is not none else None }}
+
+- name: Compute mirror_stale
+  ansible.builtin.set_fact:
+    knowledge_review_incident_metrics_mirror_stale: >-
+      {{ true if knowledge_review_incident_metrics_heartbeat_generated_at is none
+         else ((knowledge_review_incident_metrics_heartbeat_age_seconds | int)
+               > (knowledge_review_incident_heartbeat_max_age_s | int)) }}
+  # 心拍が読めない(ファイル無し・破損)場合は「無条件でstale」に倒す
+  # (未知をstaleでない側へ倒さない。IC-021の「拾われなかったことを検知
+  # できる」を守る安全側の判断)。
+  #
+  # しきい値 knowledge_review_incident_heartbeat_max_age_s は
+  # roles/knowledge_review/defaults/main.yml が正本(2026-07-28
+  # Coordinator指示によりU4が追加)。即値やインラインdefaultをここに
+  # 置かない — 運用で調整したい人が defaults/main.yml を見て気づける形に
+  # するため。roles/incident_sync/defaults/main.yml の
+  # incident_sync_heartbeat_max_age_s と値を揃える意図があるが、変数は
+  # 独立している(defaults側のコメントに注記済み)。
+
+# --- 5. I-3の素材を確定させる(evaluation_rc/evaluation_artifact以外の全て) ---
+#
+# ここで確定させる incident_eval_index は契約上のfact名(I-5)。
+# evaluation_rc/evaluation_artifact は評価後にincident_index_write.ymlが
+# 合わせて書き出す(I-3)。
+
+- name: Build incident_eval_index (partial — without evaluation_rc/evaluation_artifact)
+  ansible.builtin.set_fact:
+    incident_eval_index: >-
+      {{ {
+           'schema_version': 1,
+           'generated_at': knowledge_review_started_at,
+           'previous_evaluation_date': knowledge_review_incident_metrics_previous_date,
+           'time_source': 'summary.json:generated_at',
+           'mirror_bundle_total': knowledge_review_incident_metrics_bundle_total | int,
+           'bundles_new_since_last_eval': knowledge_review_incident_metrics_bundles_new_count | int,
+           'oldest_unreviewed_bundle': knowledge_review_incident_metrics_oldest_unreviewed_bundle,
+           'incidents_added_since_last_eval': knowledge_review_incident_metrics_incidents_added | int,
+           'mirror_heartbeat_age_seconds': knowledge_review_incident_metrics_heartbeat_age_seconds,
+           'mirror_stale': knowledge_review_incident_metrics_mirror_stale
+         } }}

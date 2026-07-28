@@ -191,6 +191,34 @@
     - not (knowledge_review_aborted | bool)
   tags: [destructive]
 
+# 障害の自動評価(incident_metrics → incident_evaluation → incident_index_write)。
+# 振り返り本体・期日更新・report保存がすべて完了したあとに続ける(計画
+# docs/ai/reviews/incident_auto_capture_step2/2026-07-28_007_step2_plan.md
+# §2.4・査読F-14が確定させた位置。新しい工程が失敗しても既存動作は1つも
+# 欠けない)。3ファイルは所有者が分かれる — incident_metrics.yml と
+# incident_index_write.yml は別の実装単位が書き、incident_evaluation.yml は
+# 本ファイルと同じ単位が書く。include_tasks(動的include)であるため、
+# incident_metrics.yml / incident_index_write.yml がまだ存在しない段階でも
+# --syntax-check は通る(実装順序が単位間で異なるため、意図的にこの形にした)。
+- name: Compute incident evaluation metrics
+  ansible.builtin.include_tasks: incident_metrics.yml
+  when:
+    - not (knowledge_review_aborted | bool)
+    - knowledge_review_incident_eval_enabled | bool
+
+- name: Run incident evaluation
+  ansible.builtin.include_tasks: incident_evaluation.yml
+  when:
+    - not (knowledge_review_aborted | bool)
+    - knowledge_review_incident_eval_enabled | bool
+
+- name: Write incident evaluation index
+  ansible.builtin.include_tasks: incident_index_write.yml
+  when:
+    - not ansible_check_mode
+    - not (knowledge_review_aborted | bool)
+    - knowledge_review_incident_eval_enabled | bool
+
 - name: Collect resulting diff
   ansible.builtin.command:
     cmd: git status --porcelain

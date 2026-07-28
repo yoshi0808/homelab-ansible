@@ -1,0 +1,43 @@
+---
+# incident_sync_timer.yml - quory→ansy 証拠バンドル同期の systemd timer を配置する
+#
+# 対象: ansy (dev_nodes) のみ。転送はansy起点のpullであり(D-1・IC-013)、
+#   quoryには何も配備しない。roles/knowledge_review_timer.yml と同じ理由 —
+#   このrole自体がansy専用ジョブであり、共有の systemd_timers role
+#   (既定でcontrol_nodes=quoryへ配布される)へ足すと本番外の依存を作ってしまう
+#   ため使わない(計画F15)。
+#
+# 実行: ansible-playbook playbooks/incident_sync_timer.yml
+# 配置物: /etc/systemd/system/ansible-incident-sync.{service,timer}
+# 実際の同期本体は playbooks/incident_sync.yml。
+#
+# timer専用の変数(schedule・run_user・playbook_bin・lock path・timeout)は
+# roles/incident_sync/defaults/main.yml の「timer配置用」節にある(2026-07-28
+# 差し戻し — 初版はここにplay varsとして置いていたが、defaults/main.ymlを
+# 読んだだけではschedule/timeout/lock pathが分からなくなるため移した)。
+# 値の根拠は同ファイルのコメントと計画§3 I-5を参照。このplaybook自身は
+# 上書きしたい値を持たないため、vars: は置かない。
+#
+# tester-gate: risk-accepted — timer/serviceユニット配置とenable/startのみで、
+# .timerをstartしてもsystemdの仕様上スケジュールがarmedになるだけであり、
+# 紐づく .service(Type=oneshot)は次回のOnCalendar時刻まで実行されない
+# (即座の実行なし)。playbooks/systemd_timers.yml(2026-07-06 Yoshinobu承認)
+# と同じ判断根拠 — TS-009の2条件をともに満たす: (1)本番影響は無く、ansyの
+# ローカルsystemd設定に自己完結する実害の小さい操作である (2)ユニット配置・
+# enable/startという操作自体を省いた検証には乏しい価値しかない(配置される
+# unitファイルの中身が正しいかどうかは実際に配置してsystemctl show等で見る
+# ことでしか確認できない)。詳細は docs/ai/policies/ansible_test_safety_policy.md。
+# `check_mode: false` を import 箇所に置き、配下タスク一式(command/debugを
+# 含む)を --check の有無に関わらず常に本実行する(TS-013)。
+
+- name: Install incident sync timer
+  hosts: dev_nodes
+  gather_facts: true
+  become: false
+
+  tasks:
+    - name: Install timer and service units (always for real)
+      ansible.builtin.import_role:
+        name: incident_sync
+        tasks_from: install_timer
+      check_mode: false
