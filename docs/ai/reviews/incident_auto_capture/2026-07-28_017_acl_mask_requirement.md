@@ -31,6 +31,10 @@ Testerが2026-07-28朝に本番quoryで読み取り専用観測して確認し�
 
 ## Coordinatorの仮説(未検証 — 裏付けまたは反証はTech Leadの仕事)
 
+> **訂正(2026-07-28クローズ時、Auditor指摘3により追記)**: **本節の仮説は Tech Lead が実測で反証した。** 真因は「W6の `group:` 追加が引き金」でも「`acl` タスクがno-opでmaskを戻さない」でもなく、**`_spool/` のパーミッションビットに書き手が2人いたこと**である(`roles/common_slack/tasks/capture.yml` の spool ディレクトリ作成タスクが `mode: "0755"` を持ち、通知1回ごとに無条件で走ってchmodを発火させ、ACL maskを `r-x` へ落としていた)。W6起因説は否定された(`mode: "0755"` は初出commit `68dd409` から存在)。詳細は `2026-07-28_018_acl_mask_plan.md` §1、経緯は `progress.md` E-1。
+>
+> **この節を書いたこと自体がPMOの初回指摘の対象になった** — 未検証・反証可の断り書きはあったが、因果メカニズムを完成形まで組み立てて渡しており、方法論の指定に近い。規範へ反映済み(`docs/ai/roles/coordinator.md`「依頼文には『何を満たすか』を書き、『どう作るか』を書かない」の仮説に関する項)。
+
 **この節は参考情報であり、実装方針の指定ではない。** 誤っている可能性があるので、現物で確かめて反証してよい。
 
 `roles/incident_capture/tasks/main.yml` の `_spool/` に対する `file` タスクは `mode: "0755"` を指定している。ACLを持つディレクトリではchmodのgroupビットがACL maskそのものになるため、`file` モジュールが実際にディレクトリを変更した回で mask が `r-x` へ落ちた可能性がある。後続の `acl` タスクは `user:recovery-exec:rwx` エントリが既に存在して一致するため changed=False となり、maskを戻さない。
