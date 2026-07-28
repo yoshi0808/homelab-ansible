@@ -6,7 +6,7 @@
 - 計画の正本: `docs/ai/reviews/subagent_briefing/2026-07-28_002_plan.md`
 - 実績の比較対象: `docs/ai/effort-baseline.md`
 
-**状態: Auditor受入済み(クローズ可)。残るはYoshinobuのcommit(W1)のみ。**
+**状態: クローズ済み(2026-07-28)。** 全受入条件PASS、Auditor受入済み、W1(Yoshinobuのcommit)解消 = `4419250` "Add sub-agent briefing skills"(push済み)。
 
 - 計画査読: `docs/ai/reviews/subagent_briefing/2026-07-28_003_plan_review.md`(**このリポジトリで計画査読を起動した初回**)
 
@@ -95,7 +95,7 @@
 
 | ID | 待ち | 誰が解く | 位置 | 状態 |
 |---|---|---|---|---|
-| **W1** | **Yoshinobuのcommit** | Yoshinobu | U3のApprove後、クローズ前 | **未着手。** requirement §6 が計画へ入れるよう明示。**本案件は実ホスト適用が無いため、`docs/ai/roles/coordinator.md` ゲート#5 の文言上の条件(「実ホストへの適用を含む案件のみ」)には当たらない。** それでも置く理由は「commitされるまで新Skillは正本になっていない」(`docs/ai/core.md`)。詳細は計画 §6 |
+| **W1** | **Yoshinobuのcommit** | Yoshinobu | U3のApprove後、クローズ前 | **解消(2026-07-28)。** commit `4419250`、`origin/main` へpush済み。**quoryへの反映は不要** — 変更は `skills/` と `docs/` のみで、quoryが実行するplaybook / roleに影響しない。旧状態: **未着手。** requirement §6 が計画へ入れるよう明示。**本案件は実ホスト適用が無いため、`docs/ai/roles/coordinator.md` ゲート#5 の文言上の条件(「実ホストへの適用を含む案件のみ」)には当たらない。** それでも置く理由は「commitされるまで新Skillは正本になっていない」(`docs/ai/core.md`)。詳細は計画 §6 |
 | **W2** | **AC3(harnessのskill一覧に `subagent-briefing` が現れる)の確認** | **Coordinator** | **U1完了後**(ゲート決定7で確定。計画 §6 工程表が「順9=W1のcommit後」としていたのは誤りで、AC3はsymlinkの存在だけで成立しcommitに依存しない。**位置の正本はこの行**) | **解消(2026-07-28)。** U1・U2完了直後、**同一セッション中に3件(`subagent-briefing` / `document-norm-review` / `incident-recording`)ともCoordinatorのskill一覧へ出現**。commit前・作業ツリーのsymlinkだけで成立することを実測した。持ち越しは発生していない。harnessの登録タイミングは版依存(`docs/ai/role-routing-index.md`「セッション途中に作成した定義が登録されるかは、harnessの版に依存する」)。**同一セッションで現れない場合もクローズのブロッカーにしない。** ただし持ち越しをこのファイルへ必ず書く(黙って落とすとAuditorの「未解決の明示」に引っかかる) |
 
 ---
