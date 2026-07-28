@@ -20,7 +20,11 @@
 
 | # | 項目 | 現在地 | 次にやること |
 |---|---|---|---|
-| 1 | **障害の自動捕捉・評価** — Operator役の第一歩 | **Policyを策定済み**(`docs/ai/policies/incident_capture_policy.md`、2026-07-28 Yoshinobu承認)。パイプラインは3段(捕捉=quory → 転送 → 評価=ansy)で、**捕捉は本番稼働中**。案件記録は `docs/ai/reviews/incident_auto_capture/`(Step 1、クローズ済み)と `docs/ai/reviews/incident_auto_capture_step2/`(現行) | **本線は転送経路(quory→ansy)の設計**。制約はPolicy IC-012〜IC-015・IC-030〜IC-032。**未決の一覧はPolicy §8が正本**(ここへ写さない)。あわせて①出力先の再決定(`docs/ai/adr/005` は前提が変わり再検討中)②評価側の読取範囲拡大は**Yoshinobu承認が要る**(IC-019) |
+| 1 | **障害の自動捕捉・評価** — Operator役の第一歩 | **Policyを策定済み**(`docs/ai/policies/incident_capture_policy.md`、2026-07-28 Yoshinobu承認)。パイプラインは3段(捕捉=quory → 転送 → 評価=ansy)で、**捕捉は本番稼働中**。残り2段のrequirementを確定済み(`.../incident_auto_capture_step2/2026-07-28_006_step2_requirement.md`、Tier 4)。案件記録は `docs/ai/reviews/incident_auto_capture/`(Step 1、クローズ済み)と `docs/ai/reviews/incident_auto_capture_step2/`(現行) | **Tech Leadへ渡して分解・見積もり・ADR-005改訂**(requirement §12)。**未決の一覧はPolicy §8とrequirement §9が正本**(ここへ写さない)。**期限は2026-08-26の月次timer発火**(requirement §11) |
+
+**2026-07-28にYoshinobuが決めた2点**(requirement §4 D-2・D-3・D-4が正本。ここは所在を示すだけ)。①評価結果は**repo内のgitignore済みパス**へ出し、`docs/ai/memory/incidents/` への昇格は人が行う → **ADR-005 Decision (1)・(4)「作業ツリーの外」は改訂される** ②月次 `claude -p` へ **`Read(reports/incidents/**)` の追加を承認**(IC-019)。拡大はこの1エントリのみ。
+
+**OQ5(自動起票が作業ツリーを汚し月次評価を止める)は、IC-007で書き手が月次評価自身だけになったため実質解消した。** 書込が清潔チェックの後に起きるため、`roles/knowledge_review/tasks/main.yml:44-51` が既に許容する「先月分が未commitなら止まる」以上の新しい衝突は生じない。**この判断は未検証であり、ADR-005改訂時にTech Leadが現物で反証すること。**
 
 **Step 1の残件2つは、使う場所へ書かず現状ここにしか無い**(規律1の例外として明示する)。①**R8(Semaphore外ジョブの保険)が未実装** ②シェルとPythonで staged mode 取得を**二重実装**している負債。一次記録は `docs/ai/reviews/incident_auto_capture/`。
 
@@ -57,7 +61,6 @@
 | 時刻表記JST規約をrepoへ明文化 | 規約本体がCoordinatorのauto-memoryにあり、repo内は `autonomous_recovery_policy.md` L174(通知文言の1行)のみ。Implementerが従うべき規約なのでrepo側が正本であるべき。**障害バンドルがSemaphoreのUTCとreportsのJSTを混在させる**ため実害が出る前に片付ける | `grep -rn "JST" docs/` が通知文言1件のみ。`docs/ai/memory-classification.md` 第0段 |
 | **ADRの `Status` を実態へ揃える** | 全5件が `Proposed` のまま。**001・002は対応完了済み**(2026-07-28 Yoshinobu確認)。**003〜005は本件の完了時にまとめて更新できる**見込み。Tier 1 | `docs/ai/adr/` 各ファイルの `**Status:**` 行 |
 | `docs/ai/context-classification.md` の `## 6.` 重複 | `## 6.` で始まる節が2つあり、節番号で参照すると誤った節へ着地する。Tier 1 | 同ファイルの現物 |
-| `job-settings.json.j2` の宙ぶらりん参照 | `roles/knowledge_review/templates/job-settings.json.j2` が正本として指すLessonファイルが存在しない(実在は `claude-code-unattended-session-confinement.md`)。**このLessonは評価側の権限設計の根拠そのもの**であり、着手前に直す。Tier 1 | `.../incident_auto_capture_step2/2026-07-28_002_oq5_investigation.md` §5 |
 | 収集器へ「消費済みidの記憶」防御を入れるか | 「消費済み」の正本は「spoolファイルが存在しないこと」の1つのみ。state.jsonへの二重化は**両者が食い違う新しい欠陥クラス**を生むため意図的に見送った。検出は `collection_errors` + exit 2 + systemd `failed` で効いている | `.../incident_auto_capture/2026-07-28_018_acl_mask_plan.md` D7 |
 | ACL付きパスへのchmodをpre-commitで検査するか | **検査対象がパス変数の解決を要する**ため、パス文字列のgrepでは現に壊れている箇所を1件も拾えないことが実証済み。**効かない検査は「掃引済み」という誤った安心を生む**ため見送った | 同上 D9 |
 
