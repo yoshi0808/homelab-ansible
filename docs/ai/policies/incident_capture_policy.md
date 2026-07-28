@@ -1,6 +1,6 @@
 # Incident Capture Policy
 
-状態: **草案**(2026-07-28作成。**Yoshinobuの承認待ち**。Policy本文の策定・改訂はYoshinobuの領域である — `docs/ai/roles/coordinator.md`)
+状態: **正本**(2026-07-28作成・**Yoshinobu承認済み**。以後の改訂もYoshinobuの領域である — `docs/ai/roles/coordinator.md`)
 
 本書は**障害の証拠の捕捉・転送・評価**における許可、禁止、停止条件の正本である。環境事実と実装詳細は対応するADR・Contextを参照し、競合時は本Policyを優先する。個別の設計判断の根拠は複製せず参照する。
 
