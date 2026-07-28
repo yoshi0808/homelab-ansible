@@ -53,4 +53,4 @@
 - restore先は検証専用storageと専用固定restore VMIDである。storage名と数値VM IDはvars / codeを正本とし、本Contextへ固定しない。
 - backup restore verificationは本番VMのconfigを選定情報として参照するが、restore / boot / cleanupの変更対象は使い捨ての専用restore VMに分離される。
 
-想定読者Role: Tech Lead=依存とrolling順序を詳細確認、Implementer/Reviewer/Tester=Proxmox案件時に全体を詳細確認、その他=概要のみ。
+想定読者Role: Coordinator=依存とrolling順序を詳細確認(2026-07-29、Tech Lead廃止に伴い統合)、Implementer/Reviewer/Tester=Proxmox案件時に全体を詳細確認、その他=概要のみ。

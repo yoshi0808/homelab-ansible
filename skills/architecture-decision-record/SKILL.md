@@ -1,6 +1,6 @@
 ---
 name: architecture-decision-record
-description: homelab-ansibleのTech Leadが技術選択(実装方式の決定)を記録するときに使う。「ADRを書く」「技術選択を記録する」「実装方式を決める」場面で使う。Coordinatorの優先順位付け(Decision Memo)とは別物であり混同しない。
+description: homelab-ansibleのCoordinatorがTier 3/4案件で技術選択(実装方式の決定)を記録するときに使う。「ADRを書く」「技術選択を記録する」「実装方式を決める」場面で使う。Coordinatorの優先順位付け(Decision Memo)とは別物であり混同しない。
 ---
 
 # Architecture Decision Record(ADR)
@@ -39,7 +39,7 @@ Molecule採用可否、Codex/Claude Code固定化の判断など、技術選択�
 
 新設予定の`docs/ai/adr/`。
 
-**Coordinatorの`skills/goal-tracking/SKILL.md`(Decision Memo)とは統合しない**: ADRはスコープ確定後の実装方式選択(How)を扱い、Tech Leadの権限。優先順位づけ(What/When)はCoordinatorのDecision Memoが扱う(2026-07-23確定)。
+**`skills/goal-tracking/SKILL.md`(Decision Memo)とは統合しない**: ADRはスコープ確定後の実装方式選択(How)を扱う。優先順位づけ(What/When)はCoordinatorのDecision Memoが扱う(2026-07-23確定。2026-07-29、Tech Lead廃止によりADR・Decision Memoとも作成者はCoordinatorだが、扱う論点が異なるため引き続き別Skillのまま運用する)。
 
 ## 適用条件
 

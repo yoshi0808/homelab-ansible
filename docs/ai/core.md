@@ -1,6 +1,6 @@
 # homelab-ansible AI共通原則
 
-このファイルは、Claude CodeによるCoordinatorと、Coordinatorが必要に応じて呼び出すsubagent(Tech Lead / Implementer / Reviewer / Tester / Auditor相当)が作業開始時に読む共通原則の正本である。製品別入口はリポジトリ直下の `AGENTS.md` と `CLAUDE.md` とし、共通原則をそれらへ複製しない。
+このファイルは、Claude CodeによるCoordinatorと、Coordinatorが必要に応じて呼び出すsubagent(Implementer / Reviewer / Tester / Auditor相当)が作業開始時に読む共通原則の正本である。製品別入口はリポジトリ直下の `AGENTS.md` と `CLAUDE.md` とし、共通原則をそれらへ複製しない。
 
 ## 目的と正本
 
@@ -116,3 +116,4 @@ Role間の連携はCoordinatorを起点とするsubagentの起動と、その最
 | 2026-07-22 | 旧共通promptから全AI Role共通原則を分離し、現行coreを正本化 |
 | 2026-07-25 | 共通原則本文を変更せず、正本保守のため変更履歴を追加 |
 | 2026-07-27 | 現在地(状態)の正本として `docs/ai/status.md` を新設し、読む順へ追加。規範はリポジトリにあるが状態はセッションの記憶にしかない、という非対称を解消するため |
+| 2026-07-29 | Tech Lead役廃止に伴い、subagent一覧から「Tech Lead」を除去。詳細は `docs/ai/reviews/process_retrospective/2026-07-29_005_techlead_retirement.md` |

@@ -43,4 +43,4 @@
 - Lokiはremote writerへ公開せず、current transport riskと運用判断はPolicyを正本とする。
 - source数、label、file path、port、allowlist、dashboard query等のrepository詳細はcodeを正本とする。
 
-想定読者Role: Tech Lead=観測喪失の波及を詳細確認、Implementer/Reviewer/Tester=監視案件時に詳細確認、その他=概要のみ。
+想定読者Role: Coordinator=観測喪失の波及を詳細確認(2026-07-29、Tech Lead廃止に伴い統合)、Implementer/Reviewer/Tester=監視案件時に詳細確認、その他=概要のみ。

@@ -58,4 +58,4 @@ Ansible: 配置、実行、JSON読込、期待値比較、warning/critical分類
 
 ## この文書の使い方
 
-Tech Leadは案件のpilot setupメモから、この文書のうち関係する節だけを指定する。全節を毎回読ませる想定ではない。Implementer/Reviewer/Testerは、指定された節を読んだ上で疑問が残る場合のみ、対象roleの実コードを直接確認する(このContextより現在のコードを優先する)。
+Coordinatorは案件のpilot setupメモから、この文書のうち関係する節だけを指定する(2026-07-29、Tech Lead廃止に伴い統合)。全節を毎回読ませる想定ではない。Implementer/Reviewer/Testerは、指定された節を読んだ上で疑問が残る場合のみ、対象roleの実コードを直接確認する(このContextより現在のコードを優先する)。

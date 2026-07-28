@@ -38,7 +38,7 @@ Coordinatorが Tier 2以上でsubagentを起動するとき、および差し戻
 
 | Role | 依頼文の要点 |
 |---|---|
-| Tech Lead | `docs/ai/roles/coordinator.md`「Tech Leadへ渡すもの」の一覧をそのまま渡す。詳細設計・機能分割・インターフェースの確定はTech Leadの責務であり渡さない(同箇所) |
+| Reviewer(計画査読) | Coordinator自身が確定した詳細分解・見積もりをそのまま渡す(要約・再解釈しない)。査読観点は`docs/ai/roles/reviewer.md`「計画査読」(2026-07-29、Tech Lead廃止に伴い新設。詳細設計・機能分割・インターフェースの確定は現在Coordinator自身の責務であり、subagentへは渡さない) |
 | Implementer | 確定したrequirement/契約(概要設計を含む)を渡す。実装方法・章立て以下の作り方は指定しない |
 | Reviewer | 対象diffと、requirement/契約上の**観測事実**を渡す。他のsubagentが導いた**因果の結論**は渡さない — 独立照合の出発点を固定しないため |
 | Tester | 実ホストへの到達性、承認済みscope、decoy/`--check`可否を明示する。実装方法は指定しない |

@@ -4,7 +4,7 @@
 
 このリポジトリが扱うhomelabは、Git管理されたAnsibleコードを開発する`ansy`、確定済みコードを取得して本番実行する`quory`、仮想化基盤の`proxmox`、認証の`radius_servers`、観測の`monitoring_servers`を中心に構成される。Semaphoreは`quory`を本番実行基盤とするGUI・定期実行の入口であり、`ansy`にも開発側のSemaphoreがある。
 
-AI作業は`role-routing-index.md`に従い、Coordinator、Tech Lead、Implementer、Reviewer、Tester、Auditorが分担する(Auditorは案件クローズ時の記録受入のみを担い、本System Contextを読まない。`role-context-matrix.md`「Auditorの参照範囲」)。System Contextは、Tech Leadが対象領域と依存を選び、各Roleが実環境への影響と安全境界を判断するための地図である。現在のコード、inventory、対象Policyが常に優先される。
+AI作業は`role-routing-index.md`に従い、Coordinator、Implementer、Reviewer、Tester、Auditorが分担する(Auditorは案件クローズ時の記録受入のみを担い、本System Contextを読まない。`role-context-matrix.md`「Auditorの参照範囲」)。System Contextは、Coordinatorが対象領域と依存を選び(2026-07-29、Tech Lead廃止に伴いCoordinatorの直接責務へ統合)、各Roleが実環境への影響と安全境界を判断するための地図である。現在のコード、inventory、対象Policyが常に優先される。
 
 ## ノードの役割
 
@@ -40,6 +40,6 @@ AI作業は`role-routing-index.md`に従い、Coordinator、Tech Lead、Implemen
 - healthcheckと変更系処理を同じ安全分類として扱わない。各playbook先頭の`tester-gate`と対象Policyを読む。
 - リポジトリへIPアドレス、VLAN ID、VM ID、認証情報、秘密情報を記載しない。ホストはinventory名またはFQDNで表す。
 - `quory`上でコードを直接編集・commitせず、Gitの確定済み内容を本番実行の正本とする。
-- System Contextの記述と現在のinventory・コードが異なる場合は、現在のコードを確認し、勝手に統合せずTech Leadへ不一致を報告する。
+- System Contextの記述と現在のinventory・コードが異なる場合は、現在のコードを確認し、勝手に統合せずCoordinatorへ不一致を報告する。
 
-想定読者Role: Tech Lead=全体を詳細に確認、他Role=概要を確認してから対象領域のみ詳細に読む。
+想定読者Role: Coordinator=全体を詳細に確認(2026-07-29、Tech Lead廃止に伴い統合)、他Role=概要を確認してから対象領域のみ詳細に読む。

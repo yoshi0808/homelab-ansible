@@ -13,23 +13,23 @@
 
 ## マトリクス
 
-| 情報 | Coordinator | Tech Lead | Implementer | Reviewer | Tester |
-|---|---|---|---|---|---|
-| `docs/ai/core.md` | 起動時 | 起動時 | 起動時 | 起動時 | 起動時 |
-| `docs/ai/role-routing-index.md` | 起動時 | 起動時 | 起動時 | 起動時 | 起動時 |
-| `docs/ai/status.md`(現在地) | **起動時**(SessionStart hookが自動で載せる。更新責任もCoordinatorにある) | 必要時 | 不要 | 不要 | 不要 |
-| `docs/ai/context/system/overview.md` | 着手時 | 着手時 | 必要時 | 必要時 | 必要時 |
-| 対象領域System Context(`proxmox.md`/`radius.md`/`monitoring.md`/`semaphore.md`、該当するもののみ) | 必要時 | 着手時(詳細) | 着手時(詳細) | 着手時(詳細) | 着手時(詳細) |
-| `docs/ai/context/ansible/repository-overview.md` | 必要時 | 着手時 | 必要時 | 必要時 | 必要時 |
-| `docs/ai/context/ansible/inventory-map.md` | 必要時 | 着手時(対象host/group特定) | 着手時(対象特定に必須) | 必要時 | 着手時(対象特定に必須) |
-| `docs/ai/context/ansible/playbook-map.md` | 必要時 | 着手時(対象playbook・種別・Policy候補の特定に必須) | 着手時(対象行) | 着手時(対象行) | 着手時(対象行) |
-| `docs/ai/context/ansible/role-map.md` | 必要時 | 必要時(概要はplaybook-mapで足りる) | 着手時(実装対象roleの入出力確認に必須) | 着手時(対象role) | 着手時(対象role) |
-| Policy(`docs/ai/policies/`、対象分野のみ) | 必要時 | 着手時(該当分野) | 着手時(該当分野) | 着手時(該当分野) | 着手時(該当分野) |
-| Issue / 受入条件(案件の依頼文) | 起動時点で自分が起点 | 着手時(必須) | 着手時(必須) | 着手時(必須) | 着手時(必須) |
-| PR / diff | 必要時(Tech Leadの統合報告で足りることが多い) | 必要時 | 自分の実装(常時) | 着手時(必須、レビュー対象そのもの) | 着手時(必須、検証対象そのもの) |
-| Knowledge(`docs/ai/memory/`、Claude Memoryを含む) | 起動時(重要Decisionは常に前提とする) | 必要時(重要Decision) | 必要時(対象関連) | 必要時(対象関連) | 必要時(対象関連) |
-| 委任Skill(Tier判定、`skills/delegation-tier/SKILL.md`) | 案件ごとに毎回参照(Tier判定はCoordinatorが確定する) | 着手時(受領した案件がTier 3以上であることの確認) | 不要 | 不要 | 不要 |
-| 規範文書レビュー(`skills/document-norm-review/SKILL.md`) | 必要時(自ら規範を書き換えるとき) | 必要時(規範の再配置を伴う分解のとき) | 不要 | **着手時(レビュー対象が規範文書を含む場合は必須)** | 不要 |
+| 情報 | Coordinator | Implementer | Reviewer | Tester |
+|---|---|---|---|---|
+| `docs/ai/core.md` | 起動時 | 起動時 | 起動時 | 起動時 |
+| `docs/ai/role-routing-index.md` | 起動時 | 起動時 | 起動時 | 起動時 |
+| `docs/ai/status.md`(現在地) | **起動時**(SessionStart hookが自動で載せる。更新責任もCoordinatorにある) | 不要 | 不要 | 不要 |
+| `docs/ai/context/system/overview.md` | 着手時 | 必要時 | 必要時 | 必要時 |
+| 対象領域System Context(`proxmox.md`/`radius.md`/`monitoring.md`/`semaphore.md`、該当するもののみ) | 着手時(詳細。2026-07-29、Tech Lead廃止に伴いCoordinatorが直接確認する) | 着手時(詳細) | 着手時(詳細) | 着手時(詳細) |
+| `docs/ai/context/ansible/repository-overview.md` | 着手時 | 必要時 | 必要時 | 必要時 |
+| `docs/ai/context/ansible/inventory-map.md` | 着手時(対象host/group特定) | 着手時(対象特定に必須) | 必要時 | 着手時(対象特定に必須) |
+| `docs/ai/context/ansible/playbook-map.md` | 着手時(対象playbook・種別・Policy候補の特定に必須) | 着手時(対象行) | 着手時(対象行) | 着手時(対象行) |
+| `docs/ai/context/ansible/role-map.md` | 必要時(概要はplaybook-mapで足りる) | 着手時(実装対象roleの入出力確認に必須) | 着手時(対象role) | 着手時(対象role) |
+| Policy(`docs/ai/policies/`、対象分野のみ) | 着手時(該当分野) | 着手時(該当分野) | 着手時(該当分野) | 着手時(該当分野) |
+| Issue / 受入条件(案件の依頼文) | 起動時点で自分が起点 | 着手時(必須) | 着手時(必須) | 着手時(必須) |
+| PR / diff | 必要時 | 自分の実装(常時) | 着手時(必須、レビュー対象そのもの) | 着手時(必須、検証対象そのもの) |
+| Knowledge(`docs/ai/memory/`、Claude Memoryを含む) | 起動時(重要Decisionは常に前提とする) | 必要時(対象関連) | 必要時(対象関連) | 必要時(対象関連) |
+| 委任Skill(Tier判定、`skills/delegation-tier/SKILL.md`) | 案件ごとに毎回参照(Tier判定はCoordinatorが確定する) | 不要 | 不要 | 不要 |
+| 規範文書レビュー(`skills/document-norm-review/SKILL.md`) | 必要時(自ら規範を書き換えるとき) | 不要 | **着手時(レビュー対象が規範文書を含む場合は必須)** | 不要 |
 
 ## Auditorの参照範囲(2026-07-28新設。退役したPMOの節を置き換え)
 
@@ -44,11 +44,11 @@
 
 **Coordinatorの説明は入力にしない。** 依頼文に書いてよいのは「どの案件か」「どこから読み始めるか」だけである。**「Coordinatorが説明しなければ分からないこと」は、記録の欠落として指摘されるべきもの**であり、説明で補ってはならない。前身のPMO役はCoordinatorの自己申告を点検対象にした結果、最も重要な逸脱を検出できずに退役した(`docs/ai/reviews/process_retrospective/2026-07-28_003_pmo_retirement.md`)。
 
-**System Context / Ansible Context / Policy / 実装Skillは読まない。** Auditorは技術的な正否を判定しないため、読んでも判断に使えず、読むこと自体が役割の越境になる。ただし**記録どうしの矛盾**は技術的な内容であっても指摘してよい(読解だけで判別できるため)。技術的な精査が要ると判断した場合は、2人目のTech Leadの起用をCoordinatorへ進言する(`docs/ai/roles/auditor.md`)。
+**System Context / Ansible Context / Policy / 実装Skillは読まない。** Auditorは技術的な正否を判定しないため、読んでも判断に使えず、読むこと自体が役割の越境になる。ただし**記録どうしの矛盾**は技術的な内容であっても指摘してよい(読解だけで判別できるため)。技術的な精査が要ると判断した場合は、追加のReviewer照合の起用をCoordinatorへ進言する(`docs/ai/roles/auditor.md`)。
 
 ## 判断の原則(計画書からの引き継ぎ、変更なし)
 
-- Tech Leadは全体像を理解し、必要Contextを選ぶ。Tech LeadのContext指定に不足があれば、各Roleは追加調査する。
+- Coordinatorは全体像を理解し、必要Contextを選ぶ(2026-07-29、Tech Lead廃止に伴いCoordinatorの直接責務へ統合)。Coordinatorのcontext指定に不足があれば、各Roleは追加調査する。
 - Implementerは対象機能と接続部分を深く理解する。
 - Reviewerは要件・差分・影響する構成を理解する。
 - Testerは対象構成・依存関係・期待状態・安全な検証範囲を理解する。
@@ -56,9 +56,9 @@
 
 ## Coordinatorの扱い(2026-07-22、pilot2/3レビューの指摘を反映)
 
-pilot3のTODO2-2レビューで「Role別Contextマトリクスにタイミング軸とCoordinatorの明示的な扱いが欠けている」との指摘があり、この節で解消する。Coordinatorは実装Contextの大半を「必要時」に留め、Tech Leadへの委任時に対象System/Ansible Contextの選定を委ねる。ただしIssue受理・Knowledge(重要Decision)・委任Skill(Tier判定)の3つは常時参照する。これはCoordinatorがコンテキスト量を抑えつつ、委任判断とTier判定の質を保つための線引きである。
+pilot3のTODO2-2レビューで「Role別Contextマトリクスにタイミング軸とCoordinatorの明示的な扱いが欠けている」との指摘があり、この節で解消する。**2026-07-29のTech Lead廃止以前は**、Coordinatorは実装Contextの大半を「必要時」に留め、Tech Leadへの委任時に対象System/Ansible Contextの選定を委ねていた。**Tech Lead廃止後は、Tier 3/4の詳細分解をCoordinator自身が行うため、対象領域のSystem/Ansible Contextを「着手時」に自ら読む**(上表。`docs/ai/reviews/process_retrospective/2026-07-29_005_techlead_retirement.md`)。Issue受理・Knowledge(重要Decision)・委任Skill(Tier判定)は変わらず常時参照する。
 
-2026-07-27に`docs/ai/status.md`(現在地)を追加した。subagentは都度コールドスタートし、案件の依頼文で必要な文脈を受け取るため、進行中作業の一覧を読む必要がない(Knowledgeを全件読ませないのと同じ理由)。Tech Leadだけ「必要時」としてあるのは、分解時に他の進行中案件との競合を確かめる場合があるため。**subagentへ渡すべき状態は、Coordinatorが依頼文へ書く。**
+2026-07-27に`docs/ai/status.md`(現在地)を追加した。subagentは都度コールドスタートし、案件の依頼文で必要な文脈を受け取るため、進行中作業の一覧を読む必要がない(Knowledgeを全件読ませないのと同じ理由)。**subagentへ渡すべき状態は、Coordinatorが依頼文へ書く。**
 
 ## 完了条件の確認
 

@@ -32,4 +32,4 @@
 - 認証に関するcertificate、private key、password、token、共有secretを表示・記録・複製しない。
 - IPアドレス、VLAN ID、VM IDを記載せず、`authy`または`authy.internal`で表す。
 
-想定読者Role: Tech Lead=認証依存と停止影響を詳細確認、Implementer/Reviewer/Tester=RADIUS案件時に詳細確認、その他=概要のみ。
+想定読者Role: Coordinator=認証依存と停止影響を詳細確認(2026-07-29、Tech Lead廃止に伴い統合)、Implementer/Reviewer/Tester=RADIUS案件時に詳細確認、その他=概要のみ。

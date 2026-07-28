@@ -1,6 +1,6 @@
 ---
 name: requirements-analysis
-description: homelab-ansibleのCoordinator/Tech Leadが新規案件の要求を明確化し requirement.md を書くときの構成テンプレート。「要件をまとめる」「requirementを書く」「案件を整理する」場面で使う。
+description: homelab-ansibleのCoordinatorが新規案件の要求を明確化し requirement.md を書くときの構成テンプレート。「要件をまとめる」「requirementを書く」「案件を整理する」場面で使う。
 ---
 
 # Requirements Analysis(要求整理フォーマット)

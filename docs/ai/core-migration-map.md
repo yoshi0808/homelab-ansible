@@ -71,8 +71,8 @@
 | C12-02 | L401-404: module/package更新だけなら一律timerにせずSemaphore可 | 例外・訂正 | 移す | Scheduling Policy / Knowledge | **[分類のみ Phase 2]** Scheduling Policy; 経緯は **[予定 Phase 6]** Lesson | 過剰なtimer適用を防ぐ例外 |
 | C13-01 | L455: 実運用がない `all.yml.example` を無条件に作らない | 作成条件 | 移す | Repository Policy / Skill | **[分類のみ Phase 2/5]** Repository Policy / Contribution Skill | 不要なplaceholder作成を防ぐ |
 | C14-01 | §14: YoshinobuのGOなしに危険操作・commitしない | 停止条件 | 残す | core | **[既存]** `docs/ai/core.md` | 人間ゲートの根幹 |
-| C14-02 | L503-506: ASK代行はtask ownerのみ、未GO破壊操作は不可、移管後旧ownerは停止 | 許可・停止・移管条件 | 移す | Role / Workflow | **[予定 Phase 3]** Tech Lead / Coordinator Roleとrouting移管規則 | owner競合を防ぐ |
-| C14-03 | L507-508: Yoshinobuは`claude` / `techlead`へ同一案件を同時依頼せず、逐次引継ぎは許容する | 禁止・引継ぎ許可条件 | 移す | Role / Workflow / Operations Context | **[予定 Phase 3]** owner / routing規則 | 二重ownerを防ぎつつ、明示的な逐次引継ぎを可能にする |
+| C14-02 | L503-506: ASK代行はtask ownerのみ、未GO破壊操作は不可、移管後旧ownerは停止 | 許可・停止・移管条件 | 移す | Role / Workflow | **[予定 Phase 3]** Coordinator Roleとrouting移管規則(2026-07-29、Tech Lead廃止によりTech Lead側の宛先は消滅) | owner競合を防ぐ |
+| C14-03 | L507-508: Yoshinobuは`claude` / `techlead`へ同一案件を同時依頼せず、逐次引継ぎは許容する | 禁止・引継ぎ許可条件 | 移す | Role / Workflow / Operations Context | **[予定 Phase 3]** owner / routing規則(`techlead`は2026-07-26の常駐trio廃止、2026-07-29のTech Lead役廃止のいずれでも現存しないidentityである。Phase 3実施時はCoordinator/subagent体制向けに書き直すこと) | 二重ownerを防ぎつつ、明示的な逐次引継ぎを可能にする |
 | C15-01 | L587-588: 空の工程ファイルを事前作成しない | 禁止 | 移す | Documentation Skill | **[分類のみ Phase 4–5]** Documentation Skill | 不要成果物を防ぐ |
 | C15-02 | §15 agmsg: 本文はrepo、messageはpath中心 | 正本条件 | 一部残す | core / Workflow | **[既存]** core; **[予定 Phase 3]** Workflow | 監査証跡と配送を分ける |
 | C15-03 | §15 watcher: 通知を承認と扱わず秘密を転載しない | 禁止・停止条件 | 移す | Operations Context / agmsg Skill | **[分類のみ Phase 2/5]** Agent Operations Context / agmsg Skill | ASK検知は実行許可ではない |

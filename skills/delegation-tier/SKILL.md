@@ -1,11 +1,11 @@
 ---
 name: delegation-tier
-description: homelab-ansibleのCoordinatorが案件をどこまで分解するかを決めるときに使う。「Tierを判定する」「誰に振るか決める」「分解方針を決める」場面で使う。Tech Leadへ渡した時点で分解は既に選択されているため、判定を下流へ委ねない。
+description: homelab-ansibleのCoordinatorが案件をどこまで分解するかを決めるときに使う。「Tierを判定する」「誰に振るか決める」「分解方針を決める」場面で使う。Tier 3/4の分解は着手前に確定させるため、判定を後から選ばない。
 ---
 
 # 委任Tier判定
 
-案件を受けたCoordinatorが、Roleへ渡す前にTierを確定する。Tech Leadへ渡すこと自体が分解の選択であるため、判定を下流へ委ねない。
+案件を受けたCoordinatorが、実装や計画に着手する前にTierを確定する。Tierごとに工程(計画・査読・実装・検証の要否と担い手)が変わるため、判定を後から選ばない。
 
 ## 判定はいつ行うか — 着手前に必ず声に出す
 
@@ -22,7 +22,7 @@ description: homelab-ansibleのCoordinatorが案件をどこまで分解する�
 
 判定は**2軸を独立に**問う。一方の答えでもう一方を決めない(2026-07-26改訂。この2つを「工程の重さ」という1つの尺度で扱っていたことが、旧版で2つの節が矛盾した原因である)。
 
-- **軸A: 実装に専門性・実機検証が要るか** → Tier番号(Implementer / Tester / Tech Leadを入れるか)を決める。
+- **軸A: 実装に専門性・実機検証が要るか** → Tier番号(Implementer / Testerを入れるか、Tier 3/4としてCoordinator自身が分解・計画を行うか)を決める。
 - **軸B: 取りこぼしが起きても自分では気づけない形か** → `+R`(Reviewerを入れるか)を決める。
 
 **ファイル数は軸Aの判定材料にしない。** 多ファイルであることは「専門性が要る」を意味せず、「一括変換の選定を自己検証できない」を意味するため、軸Bで扱う。
@@ -60,31 +60,29 @@ Tier 1 / 2に該当する場合は`1+R` / `2+R`と表記する。**Tier 3 / 4は
 
 Tier 4であっても、意味判断(何をどう変えるか)はCoordinatorが確定してから渡す。下流に発明させない。
 
-**例外: 破壊的操作でもTier 2に留まる場合(2026-07-26)**: 3.の「破壊的操作」は本来、trio側に「何をどう壊すか」の設計判断が残っている場合にTech Leadの査読を要求する趣旨である。Yoshinobuが実行内容(具体的な操作・コマンド)そのものを直接指定・承認済みで、Coordinator/trioに設計判断の余地が残っていない場合は、その指定範囲内での実行はTier 2のまま扱ってよい。ただし破壊的操作である以上、「Tier 2でTech Leadへ一報を入れる理由」節の運用(着手前共有)は必須とする。trioや実行者側が手順・方式を選ぶ余地がある破壊的操作は、この例外の対象外でありTier 3とする。
+**例外: 破壊的操作でもTier 2に留まる場合(2026-07-26)**: 3.の「破壊的操作」は本来、実行側に「何をどう壊すか」の設計判断が残っている場合にTier 3以上の計画査読を要求する趣旨である。Yoshinobuが実行内容(具体的な操作・コマンド)そのものを直接指定・承認済みで、Coordinatorに設計判断の余地が残っていない場合は、その指定範囲内での実行はTier 2のまま扱ってよい。実行者側が手順・方式を選ぶ余地がある破壊的操作は、この例外の対象外でありTier 3とする。
 
 この例外でTier 2に留めた場合も、軸Bは別に問う。Yoshinobuが指定した操作が多ファイルへの一括変換や規範の移設を含むなら`2+R`とする。
 
-## Tier 2でTech Leadへ一報を入れる理由(2026-07-26の実例)
+## Tier 2のエスカレーション経路(2026-07-26の実例、2026-07-29に構造ごと解消)
 
-Tier 2はTech Leadを飛ばしてCoordinatorが直接Testerへ依頼する経路である。しかし**Testerは想定外の事態に遭遇したとき、自分の担当Tech Leadへエスカレーションする**(`docs/ai/roles/tester.md`の経路)。このときTech Leadに案件の文脈が無いと、誰が何を承認したか分からないまま判断を迫られる。
+Tier 2はTech Leadを飛ばしてCoordinatorが直接Testerへ依頼する経路であり、**Testerが想定外の事態に遭遇したときのエスカレーション先は常にCoordinatorである**(`docs/ai/roles/tester.md`)。
 
-2026-07-26、CoordinatorがLoki全データ削除をTesterへ直接依頼した際、削除後にLokiが起動せず、Testerが指示範囲を超える復旧手順の可否をTech Leadへ確認した。Tech Leadは案件自体を知らず、Yoshinobuが直接依頼した可能性を疑ってCoordinatorへ照会することになった。Tech Leadの判断(サービス停止中のため復旧を優先して許可)自体は適切だったが、文脈の欠落は避けられた。
-
-したがってTier 2では、**指示は出さなくてよいが、着手前に「誰が何をTesterへ依頼したか」をTech Leadへ共有する**。あわせて承認所有権がCoordinatorにあることを明示し、Tech Leadが同じTesterへ二重に指示しない状態をつくる。二重承認は誤操作の原因になる(`feedback_confirm_prompt_proxy_scope`の所有権ルール)。
+2026-07-26当時はTech Leadが別途存在し、Testerのエスカレーション先が「担当Tech Lead」だったため、Tier 2(Tech Leadを飛ばす経路)ではTech Leadが案件の文脈を持たないまま照会を受ける不整合があった(Loki全データ削除時、削除後にLokiが起動せずTesterが復旧手順の可否をTech Leadへ確認したが、Tech Leadは案件自体を知らずCoordinatorへ照会し直した実例)。**2026-07-29のTech Lead廃止により、Tester(そしてImplementer・Reviewer)のエスカレーション先はTierによらず常にCoordinatorに統一されたため、この不整合自体が構造的に解消した**(`docs/ai/reviews/process_retrospective/2026-07-29_005_techlead_retirement.md`)。別途の一報や所有権の明示は不要である。
 
 ## 計画レビュー(Tier 3以上、2026-07-27追加)
 
-Tier 3以上では、**実行へ移す前に2人目のTech Leadが計画を査読する**(2026-07-28。当初は専任のPMO役が担ったが、同日退役させた。経緯は `docs/ai/reviews/process_retrospective/2026-07-28_003_pmo_retirement.md`)。Coordinatorは承認するだけで、自分でレビューしない。
+Tier 3以上では、**実行へ移す前にReviewerが計画を査読する**(2026-07-28に専任のPMO役から2人目のTech Leadへ移管、2026-07-29にTech Lead廃止に伴いReviewerへ統合。経緯は `docs/ai/reviews/process_retrospective/2026-07-28_003_pmo_retirement.md`、`docs/ai/reviews/process_retrospective/2026-07-29_005_techlead_retirement.md`)。Coordinatorは承認するだけで、自分でレビューしない。
 
 **Tier 1・2では計画査読を行わない。** 上の工程表がTier 3・4にだけ置いているのはそのためである。`+R`(Reviewerだけを足す任意付加)と同じ要領で**査読を任意に足す形は無い** — Tier 1/2は分解自体を行わないため、査読すべき計画が存在しない。足したくなったら、それはTier判定が誤っている信号として扱い、Tierの側を見直す。
 
 **走行中の定期チェックポイントは置かない**(2026-07-28)。常設の工程管理役を廃したため、走行中は事象駆動になる — 逸脱が**超過方向に**10%を超えた、未決定が単位の着手をブロックした、計画外事象が他工程へ波及した、のいずれかでCoordinatorが立ち止まる。着手前の判断は「計画受領時のゲート」(`docs/ai/roles/coordinator.md`)へ集約し、事後の受入はAuditorが行う。
 
-査読は2層あり、**両方を返す**。詳細は `docs/ai/roles/techlead.md`「計画査読」が正本。
+査読は2層あり、**両方を返す**。詳細は `docs/ai/roles/reviewer.md`「計画査読」が正本。
 
 **層1(数えるだけで判定でき、技術的妥当性を問わない)**
 
-1. **実行単位が80 `tool_uses` を超えるなら差し戻す。理想は30〜40。** 計画・査読単位(Tech Lead自身、査読者)は対象外。**2026-07-28に単位を「分」から変更した** — 「分」の見積もりが単位の大小を予測できていないことが実測されたため(`docs/ai/effort-baseline.md`)。基準値は暫定。
+1. **実行単位が80 `tool_uses` を超えるなら差し戻す。理想は30〜40。** 計画単位(Coordinator自身。`tool_uses`ではなくコンテキスト増加率で別途追う、`docs/ai/effort-baseline.md`)・計画査読単位(Reviewer)は対象外。**2026-07-28に単位を「分」から変更した** — 「分」の見積もりが単位の大小を予測できていないことが実測されたため。基準値は暫定。
 2. **1単位に未決定の設計判断が2つ以上あれば差し戻す。**
 3. 基準1を割れない大型案件は「このままでは無理」とCoordinatorへ報告し、**フェーズ分割はCoordinatorが判断する**。
 
@@ -94,24 +92,24 @@ Tier 3以上では、**実行へ移す前に2人目のTech Leadが計画を査�
 
 **なぜ必要か**: 2026-07-27の案件では、**実装が5回レビューされ、計画は0回だった**。参照モデル(200名規模の実務)で要件定義・基本設計が日程35%を占めるのは、そこに査読サイクルが入っているためであり、それに当たる工程が存在しなかった。結果、日程配分は計画8.8% / 製造45.6%(モデルは50% / 20%)となり、上流の不足がそのまま製造の手戻りとして現れた。
 
-**基準2は現時点では仮説である。** 2026-07-27の3単位で、所要時間(21.2分 / 11.6分 / 16.3分)と独立レビューの検出(Critical 1+Suggestion 7 / Critical 1 / blocking 0)が**単調に対応しなかった**ことは一次記録で確認できる。一方「未決定の数」(約5 / 約1 / 約0)は**Coordinatorが事後に数えた分類であり計測値ではない**。詳細と検証計画は `docs/ai/roles/techlead.md`「計画査読」および `docs/ai/effort-baseline.md` を正本とする。
+**基準2は現時点では仮説である。** 2026-07-27の3単位で、所要時間(21.2分 / 11.6分 / 16.3分)と独立レビューの検出(Critical 1+Suggestion 7 / Critical 1 / blocking 0)が**単調に対応しなかった**ことは一次記録で確認できる。一方「未決定の数」(約5 / 約1 / 約0)は**Coordinatorが事後に数えた分類であり計測値ではない**。詳細と検証計画は `docs/ai/roles/reviewer.md`「計画査読」および `docs/ai/effort-baseline.md` を正本とする。
 
-検証可能にするため、**Tech Leadは見積もりに「単位ごとの未決定の設計判断の一覧」を書く**。査読者は申告された一覧を数えるだけで層1を通せる。
+検証可能にするため、**Coordinatorは見積もりに「単位ごとの未決定の設計判断の一覧」を書く**。Reviewerは申告された一覧を数えるだけで層1を通せる。
 
 ## Tierごとの工程
 
 | Tier | 工程 | 成果物 |
 |---|---|---|
 | 1 | Coordinatorが実装し静的検査まで自分で完了する。Roleへ渡さない | 変更本体。記録は必要な場合だけ |
-| 2 | Coordinatorが実装し、Testerにだけ実機検証を依頼する。**着手前にTech Leadへ一報を入れる**(下記) | 変更本体 + test_result |
-| 3 | Tech Lead(分解+見積もり)→ **2人目のTech Lead(計画査読)** → **Coordinator承認(計画受領時のゲート)** → Implementer → Reviewer → Tester → **Auditor(クローズ時の受入)**。着手前に分解方針をCoordinatorへ報告する(報告の形式は`docs/ai/context/operations/agmsg-message-format.md`。配送手段はsubagentの最終報告へ変わったが、記載すべき項目の規約は有効) | requirement / plan / plan_review / implement / review / test_result / audit |
+| 2 | Coordinatorが実装し、Testerにだけ実機検証を依頼する | 変更本体 + test_result |
+| 3 | Coordinator(分解+見積もり)→ **Reviewer(計画査読)** → **Coordinator承認(計画受領時のゲート)** → Implementer → Reviewer → Tester → **Auditor(クローズ時の受入)** | requirement / plan / plan_review / implement / review / test_result / audit |
 | 4 | Tier 3(**計画査読とAuditorを含む**)に加えて調査→Coordinator受入→実装の2段階とし、Reviewerは逐行照合する | Tier 3の成果物 + investigation |
 
-**+R(Reviewer付加)**: Tier 1または2に、軸Bを理由としてReviewerの逐行照合だけを足す形。Tech Lead / Implementer / Testerは入れない。Policy / Context / docのみの変更が軸Bに当たる場合の標準形であり、`1+R`・`2+R`と表記する。成果物は当該Tierの成果物 + review。
+**+R(Reviewer付加)**: Tier 1または2に、軸Bを理由としてReviewerの逐行照合だけを足す形。Implementer / Testerは入れない。Policy / Context / docのみの変更が軸Bに当たる場合の標準形であり、`1+R`・`2+R`と表記する。成果物は当該Tierの成果物 + review。
 
 `+R`ではCoordinatorが実装者なので、Reviewerには**実装の意図ではなく差分と現物だけを渡す**。特に「置換や移設の**対象範囲の選定**が妥当か」を明示的に問う(選定漏れは実装者側からは見えないため、これを問わないと`+R`の意味が失われる)。
 
-`+R`にはTech Leadが介在しないため、**Reviewerの返却先はCoordinatorとする**(`docs/ai/roles/reviewer.md`「成果物と返却先」の既定はTech Lead経由だが、`+R`はその例外である)。Coordinatorは実装者でもあるため、findingsを自分で受けて自分で修正し、修正後の再照合が必要かを判断する。
+**Reviewerの返却先は常にCoordinatorである**(`docs/ai/roles/reviewer.md`「成果物と返却先」。2026-07-29のTech Lead廃止以前は`+R`だけの例外だったが、現在はTier 3/4の計画査読・差分レビューを含めすべての経路で共通)。Coordinatorは`+R`では実装者でもあるため、findingsを自分で受けて自分で修正し、修正後の再照合が必要かを判断する。
 
 ## 判断の根拠(2026-07-25実測)
 
@@ -132,7 +130,7 @@ Tier 3以上では、**実行へ移す前に2人目のTech Leadが計画を査�
 
 ## 禁止
 
-- Tier判定をTech Leadへ委ねない。Tech Leadが受領した案件はTier 3以上として扱われる。
+- Tier判定をsubagentへ委ねない。Coordinator自身が案件受領時に確定する。
 - **判定を暗黙に済ませない。** 着手前に軸A・軸Bの結論を明示的に述べる(上記「判定はいつ行うか」)。自明に見える案件でも省かない。
 - Tier 1 / 2でCoordinatorが実装する場合も、実ホストへのad-hocコマンド実行は行わない。実機操作が必要なら必ずTier 2としてTesterへ渡す。
 - 所要時間やコンテキスト消費を理由にTierを下げない。判定軸はruntime影響、本番影響、および自己検証で見えない欠陥の有無(軸B)である。

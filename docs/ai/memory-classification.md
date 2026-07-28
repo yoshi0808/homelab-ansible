@@ -22,7 +22,7 @@
 
 **auto-memoryに「残タスク」「将来課題」「完了済み」を書かない。** 検証されないまま索引に残り、repoの現物と食い違う。2026-07-27時点のauto-memory索引には、隣接する2行が同じ案件を「将来課題」と「完走・commit済み」と述べる矛盾が実在し、既に解決済みの項目(`AGENTS.md`要否判断)も残タスクとして残っていた。これは`lessons/always-loaded-summaries-are-the-least-current.md`の構造そのものである。
 
-**第1段 — 誰が読む知識か**: 「この知識を知らないことで、Coordinatorが起動するsubagent(Tech Lead/Implementer/Reviewer/Tester役)の判断や実装が変わるか」。(2026-07-26改訂: 旧「Codex系Role」の判定基準を、Codex撤退後のsubagent体制に合わせて言い換えた。判定の実質は変わらない)
+**第1段 — 誰が読む知識か**: 「この知識を知らないことで、Coordinator自身の判断、またはCoordinatorが起動するsubagent(Implementer/Reviewer/Tester役)の判断や実装が変わるか」。(2026-07-26改訂: 旧「Codex系Role」の判定基準を、Codex撤退後のsubagent体制に合わせて言い換えた。2026-07-29、Tech Lead廃止に伴いCoordinator自身の判断も対象に含めた。判定の実質は変わらない)
 
 - Yes → Knowledge(`docs/ai/memory/`)へ書く。
 - No(Yoshinobuとのコミュニケーションスタイル、Coordinator自身の作業習慣など、Coordinatorの運用に閉じるもの)→ Claude Memoryのままでよい。
@@ -58,15 +58,15 @@ Incident
 Policy または Skill (該当業務のPolicyファイル新設・改訂、または該当作業のSkill新設・改訂)
 ```
 
-- **Incident→Lesson**: 上記条件を満たした時点でTech LeadまたはCoordinatorが判断する。昇格後、元のIncidentファイルは本文を削除し「Lesson `<path>`へ昇格済み」の1行だけ残す(二重保持しない)。
+- **Incident→Lesson**: 上記条件を満たした時点でCoordinatorが判断する。昇格後、元のIncidentファイルは本文を削除し「Lesson `<path>`へ昇格済み」の1行だけ残す(二重保持しない)。
 - **Lesson→Skill**: 単なる注意喚起ではなく、具体的な手順・テンプレートとして再利用できる形に育った場合。昇格後、Lesson側は「Skill `<path>`へ昇格済み」の1行だけ残す。
 - **Skill→core**: 全Roleが例外なく毎回必要とする不変原則になった場合のみ。ハードルは高く保ち、安易に昇格させない。
-- **Incident→Policy/Skill(直接、Lessonを経由しない)**: Incidentの`原因分類`タグ(`skills/incident-recording/SKILL.md`参照)が月次振り返りで複数件にわたり繰り返し検出された場合、個別の再利用可能な気づきを待たず、直接Policy改訂(許可/禁止/停止条件の明文化が必要な場合)またはSkill新設・改訂(再利用手順の整備が必要な場合)を検討する。判断はTech LeadまたはCoordinatorが行う。一度きりの気づきは従来どおりLesson経由とする。
+- **Incident→Policy/Skill(直接、Lessonを経由しない)**: Incidentの`原因分類`タグ(`skills/incident-recording/SKILL.md`参照)が月次振り返りで複数件にわたり繰り返し検出された場合、個別の再利用可能な気づきを待たず、直接Policy改訂(許可/禁止/停止条件の明文化が必要な場合)またはSkill新設・改訂(再利用手順の整備が必要な場合)を検討する。判断はCoordinatorが行う。一度きりの気づきは従来どおりLesson経由とする。
 - **昇格時は根拠を先に移送してから縮約する**(2026-07-27追加)。上記の「1行だけ残す」を機械的に適用すると、**なぜその教訓に至ったかが失われる**。順序は「①昇格先へ本文と根拠(具体的な事例・日付・失敗の経緯)を書く → ②元を1行へ縮約する」であり、逆順や同時に行わない。根拠のない規範は、前提が変わったときに見直す手がかりを持たない。
   - 全体を昇格させたときは元を1行へ縮約する。**一部だけを昇格させたときは全体を縮約しない**(残る項目は根拠として存置する)。
   - 縮約後は、元ファイルへの被参照が壊れていないことを検索で確認する(`skills/document-norm-review/SKILL.md`の宙ぶらりん参照の項)。
 - **Temporaryの削除条件**: 紐づく案件(agmsgの依頼・`docs/ai/reviews/<target>/`)がクローズした時点で削除する。
-- **Decisionの見直し**: 定期レビューはしない。前提条件(依存する環境事実・技術選定)が変わったとYoshinobu・Tech Lead・Coordinatorのいずれかが気づいた時点で見直す。
+- **Decisionの見直し**: 定期レビューはしない。前提条件(依存する環境事実・技術選定)が変わったとYoshinobu・Coordinatorのいずれかが気づいた時点で見直す。
 - **Incidentの月次振り返り**: Coordinatorが月次で`docs/ai/memory/incidents/`を振り返り、上記のPolicy/Skill直接昇格の要否を判断する。
 
 ### 月次振り返りの対象と手順(2026-07-26拡張)
@@ -106,14 +106,13 @@ Policy または Skill (該当業務のPolicyファイル新設・改訂、ま�
 
 | Role | 参照するKnowledge |
 |---|---|
-| Coordinator | 全`decisions/`(重要度問わず)、Tech Lead統合結果に関わる`incidents/` |
-| Tech Lead | 重要`decisions/`、担当領域(自trio)に関連する`lessons/`全般、委任判断に関わる`incidents/` |
+| Coordinator | 全`decisions/`(重要度問わず)、統合結果に関わる`incidents/`。2026-07-29のTech Lead廃止に伴い、対象領域の`lessons/`全般もCoordinator自身が着手時に確認する(旧Tech Lead分) |
 | Auditor | **読まない。** 技術的な正否を判定しないため、Knowledgeを読んでも判断に使えない。参照範囲は`docs/ai/role-context-matrix.md`「Auditorの参照範囲」が正本 |
 | Implementer | 対象role/playbookに関連する`lessons/`(実装例外・落とし穴) |
 | Reviewer | 過去レビューで見つかった`lessons/`(見落としパターン) |
 | Tester | 障害・テスト関連の`lessons/`(検証手段の穴、rc規約等) |
 
-全Roleとも起動時に`docs/ai/memory/`全件を読み込まない。案件と役割に関連するものだけを、Tech Leadの指定または各Roleの追加調査で参照する(`docs/ai/role-context-matrix.md`の原則と同じ)。
+全Roleとも起動時に`docs/ai/memory/`全件を読み込まない。案件と役割に関連するものだけを、Coordinatorの指定または各Roleの追加調査で参照する(`docs/ai/role-context-matrix.md`の原則と同じ)。
 
 ## 5. pilot(2026-07-23)
 

@@ -11,10 +11,10 @@ CoordinatorはYoshinobuとの対話窓口として要求と判断材料を整え
   - Tier 1は自分で実装して静的検査まで完了させる。
   - Tier 2は自分で実装し、Tester役のAgent tool subagentにだけ実機検証(`--check`/dry-run含む)を依頼する。
   - **`1+R` / `2+R`**は上記に加えて、Reviewer役のsubagentへ逐行照合だけを依頼する。多ファイルへの機械的一括変換、規範・正本の移設、安全境界やPolicy本文の再編に当たる場合は、自分で実装したうえで必ずこれを行う(選定漏れは実装者自身には見えないため)。findingsは自分で受けて自分で修正する。
-  - Tier 3/4は、対応する`docs/ai/roles/<role>.md`を読み込ませたAgent tool subagentをTech Lead役として起動し、要求分解・ADR・リスク整理・見積もり・Implementer/Reviewer/Tester分解案の作成までを行わせる(Tech Lead subagent自身は実装しない)。**次に、別体のTech Lead役subagentを起動して計画査読を行わせる**(`docs/ai/roles/techlead.md`「計画査読」。層1=数える、層2=技術的前提の反証)。**査読結果を受けてCoordinatorが「計画受領時のゲート」を1回適用し**(本ファイル後述。第一に決めるのは同時に立てるsubagentの数)、承認してから、Implementer役・Reviewer役・Tester役をそれぞれ別のAgent tool subagentとして個別に起動する(同一subagentに複数役を兼務させない。特にReviewerとTesterは、直前のImplementer役subagentと同一にしない)。**案件をクローズする前にAuditor役subagentを1回起動し、記録の受入を受ける**(`docs/ai/roles/auditor.md`)。**計画査読・ゲート・Auditorの3点はいずれも2026-07-28にPMO役を退役させた際の代替であり、省略しない**(`docs/ai/reviews/process_retrospective/2026-07-28_003_pmo_retirement.md`)。
+  - Tier 3/4は、**Coordinator自身が**要求分解・ADR・リスク整理・見積もり・Implementer/Reviewer/Tester分解案の作成を行う(2026-07-29、Tech Lead役廃止。`docs/ai/reviews/process_retrospective/2026-07-29_005_techlead_retirement.md`)。**次に、Reviewer役subagentを起動して計画査読を行わせる**(`docs/ai/roles/reviewer.md`「計画査読」。層1=数える、層2=技術的前提の反証)。**査読結果を受けてCoordinatorが「計画受領時のゲート」を1回適用し**(本ファイル後述。第一に決めるのは同時に立てるsubagentの数)、承認してから、Implementer役・Reviewer役・Tester役をそれぞれ別のAgent tool subagentとして個別に起動する(同一subagentに複数役を兼務させない。特にReviewerとTesterは、直前のImplementer役subagentと同一にしない。計画査読を行ったReviewerと差分レビューを行うReviewerも別体とする)。**案件をクローズする前にAuditor役subagentを1回起動し、記録の受入を受ける**(`docs/ai/roles/auditor.md`)。**計画査読・ゲート・Auditorの3点はいずれも2026-07-28にPMO役を退役させた際の代替であり、省略しない**(`docs/ai/reviews/process_retrospective/2026-07-28_003_pmo_retirement.md`)。
   - **計画査読とAuditorを起動するのはCoordinatorである。** subagentは互いを起動できないため、この2つを誰も呼ばない状態が起こりうる。Auditorの起動条件は「案件の全単位が完了し、`progress.md` と番号付き成果物が出揃った時点」であり、`docs/ai/status.md` の該当行を消す前に行う。
   - いずれのTierでもCoordinator自身は実ホストへのad-hocコマンド実行を行わない。
-- Tech Lead役subagentの統合結果を、必要に応じて根拠資料やdiffまで確認して評価する。
+- Implementer / Reviewer / Testerの成果物を、必要に応じて根拠資料やdiffまで確認して評価する。
 - 結果を単に転記せず、採否、保留、追加確認の助言としてYoshinobuへ返す。
 - subagentの判断を差し戻しまたは保留できる。運用上の最終判断はYoshinobuに委ねる。
 - Claude Memoryを含む重要Decisionを維持し、案件の判断へ反映する。
@@ -26,14 +26,15 @@ CoordinatorはYoshinobuとの対話窓口として要求と判断材料を整え
 
 **抑制ではなく配分である。** 工程を軽くすることが目的ではない。**重さを選んだ自覚と配分の根拠を持つ**ことが目的である。
 
-- **着手時に決め切って渡す。ただし何を渡すかはRoleで分ける**(2026-07-27 Yoshinobu明示)。
-  - **Tech Leadへ渡すもの**: 目的、ゴール、**概要設計**、受入条件、制約、安全境界。**Tech LeadはOpusであり、詳細設計は任せる。** 機能分割の切れ目とインターフェースの確定はTech Leadの責務である(`docs/ai/roles/techlead.md`)。Coordinatorがここまで決めると、Tech Leadの役割と重複し、かつ方法論の指定として反響を生む
-  - **計画査読を行う2人目のTech Leadへ渡すもの**: 上記に加え、**1人目のTech Leadが出した詳細分解と見積もりをそのまま中継する**(Coordinatorが要約・再解釈しない)。査読の中身は `docs/ai/roles/techlead.md`「計画査読」が正本
+- **着手時に決め切って渡す**(2026-07-27 Yoshinobu明示、2026-07-29にTech Lead廃止へ伴い更新)。
+  - **Coordinator自身が決めるもの**: 目的、ゴール、受入条件、制約、安全境界に加え、**機能分割の切れ目とインターフェースの確定**(2026-07-29以前はTech Leadの責務だったが、Coordinator自身の直接責務へ統合した。`docs/ai/reviews/process_retrospective/2026-07-29_005_techlead_retirement.md`)。詳細設計まで自分で決め切ることで、以前はTech Leadとのhand-offが方法論の指定として反響していた問題を、hand-off自体を無くすことで解消する
+  - **Reviewerによる計画査読へ渡すもの**: 上記で確定した詳細分解と見積もりをそのまま渡す(Coordinatorが要約・再解釈しない)。査読の中身は `docs/ai/roles/reviewer.md`「計画査読」が正本
+  - **Implementerへ渡すもの**: 査読済みの計画のうち、担当する単位の受入条件・制約・境界。実装の形(どう作るか)は指定しない(下記)
   - 決め切れないのは「発見」だけであり、それは計画外事象のルール(下記)で捌く
-- **Tech Leadへの介入は見積もりの乖離が大きいときだけ**(2026-07-27 Yoshinobu明示)。Tech Leadからの相談は「想定と違った」という報告が大半であり、**見積もりが大きく違わなければ任せる**。目的とゴールが伝わっていれば、通常は問題にならない。乖離が大きいときに初めて口を出す。
+- **Implementer / Testerへの介入は見積もりの乖離が大きいときだけ**(2026-07-27 Yoshinobu明示、2026-07-29に対象をTech LeadからImplementer/Testerへ更新)。各単位からの相談は「想定と違った」という報告が大半であり、**見積もりが大きく違わなければ任せる**。計画で示した受入条件・制約が伝わっていれば、通常は問題にならない。乖離が大きいときに初めて口を出す。
   - **「乖離が大きい」の基準は逸脱10%とする。** ただし**超過方向のみ**を対象とする(2026-07-28)。下振れは止める理由にしない — 同日のTier 3案件では全単位が-44%〜-82%で下振れしたが、成果物の質に問題は出なかった。危険なのは超過方向だけである。
 - **実行フェーズでCoordinatorが忙しいのは、計画が仕事をしていない信号である。** 計画が機能していれば実行は「報告を読む→判断する→次を出す」に収束する。2026-07-27はコンテキスト増加率が最後まで平坦(約1,000〜1,400/ターン)で、後半のCoordinatorは前半と同じ重さで働いていた。
-- **依頼文には「何を満たすか」を書き、「どう作るか」を書かない。** 受入条件・制約・境界はCoordinatorの領分、実装の形はTech Lead / Implementerの領分。形を縛る必要がある場合はADRを**参照させる**だけにし、本文へ転記しない。
+- **依頼文には「何を満たすか」を書き、「どう作るか」を書かない。** 受入条件・制約・境界はCoordinatorの領分、実装の形はImplementerの領分。形を縛る必要がある場合はADRを**参照させる**だけにし、本文へ転記しない。
   - **原因の仮説も同じ制約を受ける**(2026-07-28、PMOの初回指摘により追加)。Coordinatorが先に原因を推定していても、依頼文へ書いてよいのは**観測された現象**までで、**因果メカニズムを完成形まで組み立てて渡さない**。「未検証」「反証してよい」と断っても効果は限定的で、完成した因果は検証の出発点を固定する。実例: `docs/ai/reviews/incident_auto_capture/2026-07-28_017_acl_mask_requirement.md` の「Coordinatorの仮説」節はTech Leadが実測で**反証した**が、それはそのTech Leadの検証が徹底していた結果であり、書き方の安全性が示されたわけではない。誤った因果を完成形で渡していた事実は残る。
   - 根拠: **方法論を指定するとそれが質問となって反響し、Coordinatorへ戻る。** 2026-07-27の差し戻し5件のうち、方法を指定した4件はすべて往復が発生し、指定しなかった1件(spoolレコードの消費方式)は発生しなかった。さらに、失敗するたび指示を細かくしたため反響が増える悪循環が観測された。
 - **並列化の判断軸は「Coordinatorを経由するか」。** subagentは横方向に連携できず、調整はすべてCoordinatorを経由する。**agentを1体増やすことはCoordinatorの負荷を増やすこと**であり、経由するものは並列化しても速くならない。
@@ -41,13 +42,13 @@ CoordinatorはYoshinobuとの対話窓口として要求と判断材料を整え
 
 ### 計画受領時のゲート(2026-07-28新設。Tier 3以上)
 
-Tech Leadの計画と、2人目のTech Leadの査読結果を受け取ったとき、**Coordinatorが1回だけ適用する**。走行中は繰り返さない。
+Coordinator自身が書いた計画と、Reviewerの計画査読結果を受け取ったとき、**Coordinatorが1回だけ適用する**。走行中は繰り返さない。
 
 **第一に決めるのは、同時に立てるsubagentの数である。** 単位の大きさより並行幅のほうが効く — 2026-07-28のTier 3案件で実際に効いたのは、インターフェース(パーミッションの所有者分担)を実装より先に固定したことで、3単位が互いを待たずに走れた点だった。一方で単位の大きさの見積もりは3.1倍ばらついて機能していなかった(`docs/ai/effort-baseline.md`)。
 
 | # | 確認 | 通らないとき |
 |---|---|---|
-| 1 | **並行して立てられる単位の組**がTech Leadから申告されているか | 申告が無ければ差し戻す。Coordinatorが推測で組まない |
+| 1 | **並行して立てられる単位の組**が計画に明記されているか | 明記が無ければ差し戻し、計画を書き直す。Coordinatorが推測で組まない |
 | 2 | 並行する単位どうしが**同じファイルに触れないか**。触れ合う面(データ形式、所有者、呼び出し規約)が実装前に確定しているか | 確定していなければ直列化するか、確定を先行単位として切る |
 | 3 | 査読の**層1**(単位の大きさ・未決定の数)が通っているか | 差し戻す |
 | 4 | 査読の**層2**(技術的前提の反証)が実施され、計画の根拠が現物で確かめられているか | 未実施なら査読を差し戻す。**ここを省くと誤った前提のまま実装が走る** |
@@ -65,7 +66,7 @@ Tech Leadの計画と、2人目のTech Leadの査読結果を受け取ったと�
 
 ### 実行フェーズ中の `progress.md` はCoordinatorが書く(2026-07-28追加)
 
-**計画時と統合時はTech Leadが書くが、実行フェーズ(単位を回している間)はCoordinatorが書く。** Tech Leadはその間走っておらず、しかも**実績・逸脱%・単位の状態を持っているのはCoordinatorだけ**だからである。
+**計画時・統合時・実行フェーズのいずれもCoordinatorが書く**(2026-07-29、Tech Lead廃止に伴い一本化。以前は計画時・統合時をTech Leadが書き、実行フェーズだけCoordinatorが書く分担だった)。**実績・逸脱%・単位の状態を持っているのはCoordinatorだけ**である。
 
 各単位の完了時に、実績(`tool_uses`)・逸脱・状態・未決定の残数を記入する。**課題と計画外事象も同じファイルへ書く** — 旧PMO役が維持していた課題管理表はこれに統合した(独立した表を別に持たない)。**これは事務ではない。** 案件の記録が次のセッションへの唯一の引き継ぎであり、クローズ時にAuditorがまさにこの再構成可能性を検査する(`docs/ai/roles/auditor.md`)。書けていなければクローズできない。
 
@@ -80,7 +81,7 @@ Tech Leadの計画と、2人目のTech Leadの査読結果を受け取ったと�
 代わりに3点へ分散させた。いずれも走行中ではない。
 
 1. **計画受領時のゲート**(上記)— Coordinatorが着手前に1回
-2. **2人目のTech Leadによる計画査読** — 手続きに加え**技術的前提の反証**まで行える。2026-07-28に実際に危険だったのは記録の齟齬ではなく誤った因果のほうだった
+2. **Reviewerによる計画査読** — 手続きに加え**技術的前提の反証**まで行える。2026-07-28に実際に危険だったのは記録の齟齬ではなく誤った因果のほうだった
 3. **Auditorによるクローズ時の受入** — repoの成果物だけを読み、再構成できるかを問う
 
 **残る穴を明示しておく。** 走行中のCoordinatorの逸脱は、依然としてYoshinobuの問いかけか、Auditorの事後検出でしか見つからない。**これは既知の残存リスクとして受容している。** 常設役はこの穴を埋めようとして埋まらず、費用だけが付いた。
@@ -91,24 +92,22 @@ Tech Leadの計画と、2人目のTech Leadの査読結果を受け取ったと�
 - 指摘に**同意しない場合**: 却下してよいが、**却下した事実と理由を案件記録へ残す**。黙って無視しない。**記録に残らない却下はこの仕組みを無効化する**
 - **すべてをその場で吸収すると計画が形骸化する**(2026-07-27、計画外4件のうち3件は基準どおり流したが、W6のみ波及するにもかかわらず吸収し、Tech Leadが引いた分割の線を再合成した)
 
-### Coordinatorが起点になって切った増分では、Tech Leadを立て直す(2026-07-27追加)
+### Coordinatorが起点になって切った増分でも、計画査読を経る(2026-07-27追加、2026-07-29改訂)
 
-**Tech Leadは案件の最初に1回だけ起動されるため、構造的に最も情報を持たない役でありながら計画を担う。** その後に生まれる情報(実測値、レビューfindings、テスト結果、本番の状態変化、Yoshinobuとのやりとり)はすべてCoordinatorへ蓄積し、Tech Leadは受け取れない。
+Tech Lead廃止以前は、案件最初の計画にしか計画査読が及ばない構造だった。**当初の工程表を使い切った後にCoordinator自身がスコープを切った増分**についても、Tier 3以上なら**その増分の計画をReviewerの計画査読へ通す**(2026-07-29、`docs/ai/reviews/process_retrospective/2026-07-29_005_techlead_retirement.md`)。入力はCoordinatorの要約ではなく**案件フォルダ(`docs/ai/reviews/<target>/`)そのものをReviewerに読ませる**。
 
-したがって、**当初の工程表を使い切った後にCoordinator自身がスコープを切った増分**については、Tier 3以上なら**Tech Leadを立て直す**。入力はCoordinatorの要約ではなく**案件フォルダ(`docs/ai/reviews/<target>/`)そのものを読ませる**。
+理由は分解の代行ではない。**スコープの判断に第二の頭を入れる**ことである。差分をレビューするReviewerと計画を査読するReviewerが別々に存在しても、「何をどこまで、どう束ねてやるか」という判断そのものを見る者がいなければ、Coordinator自身のスコープの切り方の誤りは誰にも見えない。2026-07-27のW6では、当時のTech Leadが意図的に分けた「多数の呼び出し元へ波及する差分と、別コンポーネントの差分を同じレビューに混ぜない」順序を、Coordinatorが根拠を読んだうえで再合成してしまった事例がある(`docs/ai/reviews/incident_auto_capture/2026-07-27_011_w6_plan.md`)。増分の計画査読は、この種の誤りを実装前に拾うためにある。
 
-理由は分解の代行ではない。**スコープの判断に第二の頭を入れる**ことである。Reviewerがレビューするのは実装であり、「何をどこまで、どう束ねてやるか」という判断は誰も見ていない。2026-07-27のW6では、Tech Leadが意図的に分けた「多数の呼び出し元へ波及する差分と、別コンポーネントの差分を同じレビューに混ぜない」順序を、Coordinatorが根拠を読んだうえで再合成した(`docs/ai/reviews/incident_auto_capture/2026-07-27_011_w6_plan.md`)。
-
-**副次的な効能**: Tech Leadのコールドスタートは、**案件フォルダの自己充足性のテスト**になる。フォルダを読んで再計画できない場合、それはTech Leadの能力不足ではなく、**フォルダに書かれていない情報がCoordinatorの中にだけある**という信号である。
+**副次的な効能**: Reviewerは増分の計画を査読する際、案件フォルダを読んで背景を追う必要がある。これは**案件フォルダの自己充足性のテスト**を兼ねる。Reviewerが計画の背景を追えない場合、それはReviewerの能力不足ではなく、**フォルダに書かれていない情報がCoordinatorの中にだけある**という信号である。
 
 飛ばす選択もあってよいが、**飛ばすなら理由を記録に残す**。暗黙に飛ばさない。
 
 ## 入出力と差戻し
 
 - 入力: Yoshinobuの依頼、制約、最新の明示判断。
-- `requirement`: CoordinatorがTech Lead役subagentへ渡すか、Tier 1/2では自ら正規化する。
-- 入力: Tech Lead役subagentが統合したimplement / review / test_resultと残存リスク。
-- 出力: Yoshinobuへの評価・助言、またはTech Lead役subagentへの差戻し(新規subagent起動として再実行)。
+- `requirement`: 全TierでCoordinatorが自ら正規化する(2026-07-29、Tech Lead廃止によりhand-offが無くなった)。
+- 入力: Implementer / Reviewer / Tester役subagentが返したimplement / review / test_resultと残存リスク。
+- 出力: Yoshinobuへの評価・助言、またはsubagentへの差戻し(新規subagent起動として再実行)。
 - 差戻しは理由と再確認条件を明示したうえで、該当フェーズのsubagentを再起動する。
 
 ## 実ホストへの非冪等操作の承認(2026-07-26確立)
@@ -148,7 +147,7 @@ subagentへ委任する際は、この境界を指示に明記する。Coordinat
 
 読む対象とタイミングは`docs/ai/role-context-matrix.md`のCoordinator列を正本とする。特にIssue、重要Decision、Tier判定用の委任Skillを常時の判断材料とし、実装Contextは必要な場合だけ選ぶ。
 
-- 必須Skill: 要求明確化(`skills/requirements-analysis/SKILL.md`)、優先順位付け・Decision Memo(`skills/goal-tracking/SKILL.md`)、Tier判定・委任(`skills/delegation-tier/SKILL.md`)、統合結果の評価、Agent tool subagentへの委任(objective・output format・対象範囲・タスク境界を明示する)。
+- 必須Skill: 要求明確化(`skills/requirements-analysis/SKILL.md`)、優先順位付け・Decision Memo(`skills/goal-tracking/SKILL.md`)、Tier判定・委任(`skills/delegation-tier/SKILL.md`)、統合結果の評価、Agent tool subagentへの委任(objective・output format・対象範囲・タスク境界を明示する)。**Tier 3/4では加えて**、技術選択の記録(`skills/architecture-decision-record/SKILL.md`)、リスク整理(`skills/risk-assessment/SKILL.md`)を自ら用いる(2026-07-29、Tech Lead廃止に伴いCoordinatorの直接責務へ統合)。
 - 参照するKnowledge: `docs/ai/memory/decisions/`全件、統合結果に関わる`docs/ai/memory/incidents/`。**月次でKnowledgeを振り返り**、Policy/Skill昇格の要否を判断する。対象は`incidents/`だけでなく、前回以降にauto-memoryへ溜まった項目と工程を往復した案件記録を含む(手順と3分類は`docs/ai/memory-classification.md`「月次振り返りの対象と手順」が正本)。次回期日はauto-memoryのインデックス先頭に置き、それを発火装置とする。
 - Context / Policy / Skillの配置判断は`docs/ai/context-classification.md`に従う。
 - 詳細な実行手順は対応するSkillとPolicyを参照し、このRoleへ複製しない。

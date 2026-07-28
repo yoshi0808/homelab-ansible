@@ -47,4 +47,4 @@ Semaphoreのジョブ結果はSQLite(`semaphore.db`)にあり、read-onlyのSELE
 - private key、password、token、secret変数の値をjob log、agmsg、Context、レビュー文書へ転載しない。
 - IPアドレス、VLAN ID、VM IDを記載せず、inventory名またはFQDNで表す。
 
-想定読者Role: Tech Lead=実行経路とGit外状態を詳細確認、Implementer/Reviewer/Tester=Semaphore経由案件時に詳細確認、その他=概要のみ。
+想定読者Role: Coordinator=実行経路とGit外状態を詳細確認(2026-07-29、Tech Lead廃止に伴い統合)、Implementer/Reviewer/Tester=Semaphore経由案件時に詳細確認、その他=概要のみ。

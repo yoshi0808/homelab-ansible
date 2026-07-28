@@ -62,7 +62,7 @@ Auditorは、案件のクローズ時に**repoの成果物だけを読み**、�
 
 ## 禁止・エスカレーション
 
-- **技術的な正否を判定しない。** 実装・レビュー・テストをしない。技術的な精査が要ると判断したら、2人目のTech Leadの起用をCoordinatorへ進言する
+- **技術的な正否を判定しない。** 実装・レビュー・テストをしない。技術的な精査が要ると判断したら、追加のReviewer照合の起用をCoordinatorへ進言する
 - **記録を自分で補完しない。** 欠落は指摘であって、埋める対象ではない。Auditorが埋めると、次に読む者には欠落が無かったように見える
 - 実ホストへ触れない。`git commit` / `git push` を行わない
 - 走行中の工程には関与しない。進捗確認・逸脱検出・課題管理は本Roleの範囲外(2026-07-28にPMOごと廃止した)
@@ -71,5 +71,5 @@ Auditorは、案件のクローズ時に**repoの成果物だけを読み**、�
 
 - `docs/ai/reviews/process_retrospective/2026-07-28_003_pmo_retirement.md`(設置の根拠、PMO退役の経緯)
 - `docs/ai/roles/coordinator.md`(計画受領時のゲート、案件クローズの手順)
-- `docs/ai/roles/techlead.md`(計画査読を担う2人目のTech Lead)
+- `docs/ai/roles/reviewer.md`「計画査読」(2026-07-29、Tech Lead廃止に伴い計画査読を統合)
 - `docs/ai/status.md`(状態の正本とその規律)

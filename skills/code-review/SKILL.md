@@ -34,4 +34,4 @@ https://github.com/anthropics/knowledge-work-plugins/blob/main/engineering/skill
 
 - 重大度分類・エスカレーション基準は `docs/ai/roles/reviewer.md` を参照する。
 - IPアドレス・VLAN ID・VM ID・認証情報などの実値はSeverity/Issue欄にも書かない。inventory group名・変数名・既に公開済みのホスト名(例: pve1、quory)で表現する(`docs/ai/context-classification.md` §3/§4)。
-- Verdictが `Request Changes` の場合、対象Tech Leadへの返却先は `docs/ai/roles/reviewer.md` の「成果物と返却先」に従う。
+- Verdictが `Request Changes` の場合、Coordinatorへの返却先は `docs/ai/roles/reviewer.md` の「成果物と返却先」に従う。

@@ -48,7 +48,7 @@
 | 項目 | 内容 | 根拠 |
 |---|---|---|
 | **`1+R` に計画査読だけを足す形を認めるか** | `skills/delegation-tier/SKILL.md` は「Tier 1/2に査読を足す形は無い。足したくなったらTier判定が誤っている信号」と定める。しかし上流55 `tool_uses` で**実装前に5件**が潰れ、うち1件は**Coordinator自身が書いたrequirementの内部矛盾**だった。`1+R` には計画を見る者が居ない。**現行規定は維持しており、この起票は見直しの検討** | `.../subagent_briefing/2026-07-28_003_plan_review.md`、同 `progress.md`「クローズ判断」 |
-| **計画査読の正本に足りない2点** | ①申告の妥当性に疑義が出たときの扱いが層1/層2のどちらか不明(初回で実際に発生し、査読者が裁量で分けた)②査読者の出力の型が無い。いずれも `docs/ai/roles/techlead.md` の改訂 | `.../subagent_briefing/2026-07-28_003_plan_review.md` §4-1・§4-4 |
+| **計画査読の正本に足りない1点(2026-07-29に1点解消)** | ①申告の妥当性に疑義が出たときの扱いが層1/層2のどちらか不明(初回で実際に発生し、査読者が裁量で分けた)は**未解決**。②査読者の出力の型が無い、はTech Lead廃止でReviewerへ統合した結果、既存の`skills/code-review/SKILL.md`が適用され**解消**。残る①は`docs/ai/roles/reviewer.md`「計画査読」の改訂で対応する | `.../subagent_briefing/2026-07-28_003_plan_review.md` §4-1・§4-4、`docs/ai/reviews/process_retrospective/2026-07-29_005_techlead_retirement.md` |
 | **Auditorの単位分類が `effort-baseline.md` に無い** | 「実行単位」の定義がImplementer / Reviewer / Testerのみで、Auditorがどちらにも属さない。**層1基準(80 `tool_uses`)を実際に適用できなかった** | `docs/ai/effort-baseline.md`「採用する単位」、`.../subagent_briefing/2026-07-28_003_plan_review.md` §4-3 |
 | **Context索引と現物の突合を機械的検査にする** | `role-map.md` / `playbook-map.md` / `playbooks/README.md` に未記載のrole・playbookがあれば落ちる形(`scripts/check-tester-gate.sh` の兄弟)。**索引は2026-07-25以降更新されず、7/27・7/28の追加が丸ごと抜けていた**(role 3件・playbook 6件)。Yoshinobuの指摘で発覚し補修済み。**同種の欠陥は「触れてよいパスの切り方」で4回起き、うち1回は教訓を記録した後だった** — 文章では止まらないことが実証されている | `docs/ai/reviews/incident_auto_capture_step2/progress.md`「後続への申し送り」A-10・A-7 |
 | **`tool_uses` 見積の単位を見直す** | 直近案件でレンジが **0.43〜4.44(10.3倍)** へ拡大し、`effort-baseline.md` 自身が定める見直しトリガ(1.8倍)を超えた。**ずれたのは製造だけで、レビューと検証はほぼ見積どおり**。仮説は「実行時にしか証明できない性質の個数」を見積が数えていないこと | `docs/ai/effort-baseline.md`(3件目の記帳)、同 progress.md A-1 |
@@ -65,6 +65,7 @@
 | `docs/ai/context-classification.md` の `## 6.` 重複 | `## 6.` で始まる節が2つあり、節番号で参照すると誤った節へ着地する。Tier 1 | 同ファイルの現物 |
 | 収集器へ「消費済みidの記憶」防御を入れるか | 「消費済み」の正本は「spoolファイルが存在しないこと」の1つのみ。state.jsonへの二重化は**両者が食い違う新しい欠陥クラス**を生むため意図的に見送った。検出は `collection_errors` + exit 2 + systemd `failed` で効いている | `.../incident_auto_capture/2026-07-28_018_acl_mask_plan.md` D7 |
 | ACL付きパスへのchmodをpre-commitで検査するか | **検査対象がパス変数の解決を要する**ため、パス文字列のgrepでは現に壊れている箇所を1件も拾えないことが実証済み。**効かない検査は「掃引済み」という誤った安心を生む**ため見送った | 同上 D9 |
+| **規範文書間の突合を定期的に自動でかける仕組みの要否** | Auditorは案件クローズ時にしか起動しないため、案件が動いていない期間の規範ドリフトは拾えない。2026-07-29、Yoshinobu依頼によるCoordinatorの自己レビューで6件超の欠陥(2026-07-28以降ずっと存在)が見つかったが、これは人間が明示的に求めた1回限りの検出であり、再発防止の仕組みではない。月次Knowledge振り返りの拡張が候補 | `docs/ai/reviews/process_retrospective/2026-07-29_005_techlead_retirement.md` §4 |
 
 ## 載せていないもの(判断の記録)
 

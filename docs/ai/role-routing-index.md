@@ -6,30 +6,28 @@
 
 ## 現行体制(2026-07-26〜)
 
-常駐する識別子は`claude`(Coordinator、この対話セッション自身)のみである。Tech Lead / Implementer / Reviewer / Testerは常駐identityを持たず、CoordinatorがTierに応じてその場で実行する。
+常駐する識別子は`claude`(Coordinator、この対話セッション自身)のみである。Implementer / Reviewer / Tester / Auditorは常駐identityを持たず、CoordinatorがTierに応じてその場で実行する。
 
 | Role | モデル | 実現方式 |
 |---|---|---|
-| Coordinator | Opus | `claude`。Yoshinobuとの対話窓口、Tier判定、以下Roleの呼び出しと結果評価を行う本セッション自身。 |
-| Tech Lead | **Opus** | Tier 3/4の案件でCoordinatorがAgent tool(Task)でsubagentを起動し、`docs/ai/roles/techlead.md`の責任・権限・禁止事項の範囲で要求分解・ADR・リスク整理・Implementer/Reviewer/Tester分解案の作成までを行わせる。Tech Lead subagent自身は実装しない(役割定義は不変)。 |
-| Implementer | **Sonnet** | Tech Lead(subagentまたはCoordinator自身)がまとめたrequirement/分解案に基づき、Coordinatorが別途Agent toolでsubagentを起動する。`docs/ai/roles/implementer.md`の範囲(最小差分実装、commit/push禁止、本番適用禁止)は不変。 |
-| Reviewer | **Sonnet** | 同様にCoordinatorが別のAgent tool subagentを起動する。Implementerを行ったsubagentとは別セッションとして起動し、独立性を保つ(`docs/ai/roles/reviewer.md`「自分が実装した変更を独立レビュー済みとして扱わない」を、同一subagentの使い回しをしないことで担保する)。 |
+| Coordinator | Opus | `claude`。Yoshinobuとの対話窓口、Tier判定、以下Roleの呼び出しと結果評価に加え、**Tier 3/4の要求分解・ADR・リスク整理・見積もりもCoordinator自身が行う**(2026-07-29、Tech Lead役廃止。`docs/ai/reviews/process_retrospective/2026-07-29_005_techlead_retirement.md`)。 |
+| Implementer | **Sonnet** | Coordinatorがまとめたrequirement/分解案に基づき、Coordinatorが別途Agent toolでsubagentを起動する。`docs/ai/roles/implementer.md`の範囲(最小差分実装、commit/push禁止、本番適用禁止)は不変。 |
+| Reviewer | **Sonnet** | 同様にCoordinatorが別のAgent tool subagentを起動する。Implementerを行ったsubagentとは別セッションとして起動し、独立性を保つ(`docs/ai/roles/reviewer.md`「自分が実装した変更を独立レビュー済みとして扱わない」を、同一subagentの使い回しをしないことで担保する)。**2026-07-29から、Tier 3/4のCoordinatorの計画査読も担う**(`docs/ai/roles/reviewer.md`「計画査読」)。 |
 | Tester | **Sonnet** | 同様にCoordinatorが別のAgent tool subagentを起動する。実ホストへの`--check`/dry-run実行を含め、`docs/ai/roles/tester.md`の禁止事項(本番適用、`--check`なしのcheck-mode-native実行等)はそのまま適用される。 |
 | **Auditor** | **Sonnet** | 2026-07-28新設。**Coordinatorが案件クローズ時に1回だけ**起動し(起動条件と手順は`docs/ai/roles/coordinator.md`。全単位が完了し`progress.md`と番号付き成果物が出揃った時点、`docs/ai/status.md`の該当行を消す前)、`docs/ai/roles/auditor.md`の範囲で「この記録から経緯を再構成できるか、辻褄は合っているか」を検査する。**入力はrepoの成果物のみで、Coordinatorの説明を受け取らない**(受け取ると自己申告の清書になる)。技術的な正否は判定しないが、**記録どうしの矛盾**は指摘する。走行中の工程管理は行わない。 |
 
 ### モデル・effort配分(2026-07-26確定)
 
-CoordinatorとTech LeadはOpus、Implementer / Reviewer / TesterはSonnet。**subagentは指定しなければ親のモデルを継承する**ため、Sonnet側は明示指定が必要である。各Roleのモデルとeffortは`.claude/agents/<role>.md`のfrontmatter(`model:` / `effort:`)に固定してあり、Coordinatorが`subagent_type`でそれを指定すれば配分は自動的に守られる。
+CoordinatorはOpus、Implementer / Reviewer / TesterはSonnet。**subagentは指定しなければ親のモデルを継承する**ため、Sonnet側は明示指定が必要である。各Roleのモデルとeffortは`.claude/agents/<role>.md`のfrontmatter(`model:` / `effort:`)に固定してあり、Coordinatorが`subagent_type`でそれを指定すれば配分は自動的に守られる。
 
 | Role | model | effort | 根拠 |
 |---|---|---|---|
-| Tech Lead | opus | high | 要求分解・ADR・リスク整理は意味判断が支配的。既定値を明示しているだけで、下げていない |
 | Auditor | sonnet | medium | 2026-07-28追加。読むのはrepoの成果物のみで技術的な正否を判定しないため、推論深度を要さない。検査項目は`docs/ai/roles/auditor.md`§1に列挙済み。**「あるべきものが無い」ことの検出**が中核だが、コールドスタートで再構成を試みれば欠落は詰まりとして現れるため、列挙とこの手順でSonnetに足りる |
 | Implementer | sonnet | high | 実装は本番影響のある差分を作る唯一のRoleであり、ここは下げない |
-| Reviewer | sonnet | **medium** | Opus 5世代のガイドが「レビュー精度は低effortでも保たれる」と明示。2026-07-26に試行開始 |
+| Reviewer | sonnet | **medium** | Opus 5世代のガイドが「レビュー精度は低effortでも保たれる」と明示。2026-07-26に試行開始。**2026-07-29から計画査読(旧・2人目のTech Leadがopus/highで担っていた層2の技術的前提の反証を含む)も同じeffortで担う** — mediumで層2相当の反証を確実にこなせるかは新しい観測対象であり、findings品質の低下が見えたら見直す |
 | Tester | sonnet | **medium** | 検証は実行と観測が主で、推論深度より実行経路を通すことが品質を決める。同日試行開始 |
 
-Reviewer / Testerのmediumは**試行中の設定**である。Tier 4の逐行照合でfindings品質の低下が観測された場合は`high`へ戻す。Implementer / Tech Leadを既定のままにしているのは、品質変化が出たときに原因をReviewer / Tester側へ切り分けられるようにするためである。
+Reviewer / Testerのmediumは**試行中の設定**である。Tier 4の逐行照合でfindings品質の低下が観測された場合は`high`へ戻す。Implementerを既定のままにしているのは、品質変化が出たときに原因をReviewer / Tester側へ切り分けられるようにするためである。
 
 根拠: 2026-07-26のTier 4フルサイクル(proxmox_patch_dryrun単一ノード対応)は、Implementer / Reviewer / Testerが実質すべてSonnetで走り、apply安全ゲートの保護漏れ、両ノード健全時のNoneクラッシュ、終了コード4の運用問題、その修正が1行では悪化する罠、の4件を本番影響前に検出した。一方でOpus級の判断が要ったのは「あるべきものが無い」ことの検出(`docs/ai/core.md`が旧モデルのまま残っていたドリフト、決定根拠がリポジトリに存在しなかった欠落)であり、いずれもCoordinatorの領分だった。
 

@@ -1,6 +1,6 @@
 ---
 name: goal-tracking
-description: homelab-ansibleのCoordinatorが優先順位付けや意思決定記録(Decision Memo)をまとめるときに使う。「優先順位をつける」「Decision Memoを書く」「Now/Next/Laterで整理する」場面で使う。Tech Leadの実装方式選択(ADR)とは別物であり混同しない。
+description: homelab-ansibleのCoordinatorが優先順位付けや意思決定記録(Decision Memo)をまとめるときに使う。「優先順位をつける」「Decision Memoを書く」「Now/Next/Laterで整理する」場面で使う。実装方式選択(ADR)とは別物であり混同しない。
 ---
 
 # Goal Tracking(優先順位付け・Decision Memo)
@@ -30,7 +30,7 @@ RICE / MoSCoW / ICE のいずれかを案件の性質に応じて使う。
 ### Alternatives Considered
 ```
 
-**Tech Leadの`skills/architecture-decision-record/SKILL.md`(ADR)とは統合しない**: Decision Memoは優先順位づけ(What/When、Yoshinobuへの提言止まりで決定権を持たない)、ADRはスコープ確定後の実装方式選択(How)。権限が異なるため別Skillのまま運用する(2026-07-23確定)。
+**`skills/architecture-decision-record/SKILL.md`(ADR)とは統合しない**: Decision Memoは優先順位づけ(What/When、Yoshinobuへの提言止まりで決定権を持たない)、ADRはスコープ確定後の実装方式選択(How)。扱う論点が異なるため別Skillのまま運用する(2026-07-23確定。2026-07-29、Tech Lead廃止によりいずれもCoordinatorが作成する)。
 
 ## 適用先
 
