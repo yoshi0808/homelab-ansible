@@ -20,7 +20,7 @@
 
 | # | 項目 | 現在地 | 次にやること |
 |---|---|---|---|
-| 1 | **障害の自動捕捉・評価** — Operator役の第一歩 | **実装フェーズの製造4単位が完了し、独立レビュー2件が走行中**(2026-07-28)。Policy・requirement・実装計画・ADR-005第2版はすべて確定済みで、計画受領ゲートも通過。**捕捉は本番稼働中、転送と評価は未commit・未配備。** 進捗・実績・課題の正本は `docs/ai/reviews/incident_auto_capture_step2/progress.md`(**ここへ写さない**)。Step 1の記録は `docs/ai/reviews/incident_auto_capture/`(クローズ済み) | **レビュー2件のfindingsを1回の修正ラウンドで処理 → `W1`(Yoshinobuのcommit / push)→ 実ホストへの配備と検証(U7・U10・U8・U9・U11の直列)。** `W1` は工程上の待ちであり、**AIはcommitしないためここで必ず止まる**。**期限は2026-08-26の月次timer発火**(requirement §11) |
+| 1 | **障害の自動捕捉・評価** — Operator役の第一歩 | **3段(捕捉→転送→評価)すべてが本番で成立した**(2026-07-28)。全12単位完了、Auditor検査済み(指摘6件は是正済み)。転送は `ansible-incident-sync.timer`(毎時)、評価は既存の月次 `ansible-knowledge-review.timer` の中で2本目の `claude -p` として動く。**月次フル経路を実データで1回通し済み**(`claude -p` 2本で591.70秒 / 予算3600秒)。進捗・実績・課題・申し送りの正本は `docs/ai/reviews/incident_auto_capture_step2/progress.md`(**ここへ写さない**) | **残るのは `git push` のみ。** そのあと**この行を消す**。申し送り9件(見積単位の見直し、decoy技法のLesson昇格ほか)は `progress.md`「後続への申し送り」が正本で、**別案件として起票する**。**2026-08-26 07:15 JSTの月次発火が最初の無人での通し**になる — それはWatch行が持つ |
 
 **Yoshinobuの決定3件**(所在だけを示す。本文はここへ写さない)。①評価結果は**repo内のgitignore済みパス**へ出し `docs/ai/memory/incidents/` への昇格は人が行う ②月次 `claude -p` へ **`Read(reports/incidents/**)` の追加を承認**(IC-019。拡大はこの1エントリのみ)③**中止した月次評価の再実行はYoshinobuが行う**(Policy **IC-033**。「汚れている」の定義と、この運用が成立する前提条件2つも同条文にある)。①②の正本は requirement §4 D-2〜D-4、③は Policy §7。
 
@@ -35,7 +35,8 @@
 | 項目 | 発火条件 | 検証手段 | 一次記録 | 最終確認 |
 |---|---|---|---|---|
 | quoryの作業ツリーを**Testerが直接確認できない** | quoryの作業ツリー状態を検証したいとき | Tester接続identity(`ann`)と所有者(`yoshi`)が異なり `dubious ownership` が `rc=128` で拒否する。回避には `safe.directory` が要り承認範囲外。**AC6のquory側継続確認が原理的に盲目**。2026-07-28にも再発 | `docs/ai/reviews/proxmox_patch_dryrun/2026-07-26_005_test_result.md`、`.../incident_auto_capture_step2/2026-07-28_004_quory_units_survey.md` | 2026-07-28 |
-| 月次Knowledge振り返りの**初回無人実行** | 毎月26日(期日の正本はauto-memory `MEMORY.md` 先頭行。ここへ写さない) | ansyで `systemctl list-timers ansible-knowledge-review.timer` と `journalctl -u ansible-knowledge-review`。実行後は作業ツリーに未commit差分が出る | `roles/knowledge_review/`、`docs/ai/memory-classification.md` | 2026-07-27 |
+| 月次Knowledge振り返りの**初回無人実行**。2026-07-28以降は**障害評価(2本目の `claude -p`)を含む** | 毎月26日(期日の正本はauto-memory `MEMORY.md` 先頭行。ここへ写さない) | ansyで `systemctl list-timers ansible-knowledge-review.timer` と `journalctl -u ansible-knowledge-review`。実行後は作業ツリーに未commit差分が出る。**障害評価の成果物は `reports/incidents/_evaluations/` に出る(gitignore済みなので差分には現れない)。** 手動での通しは2026-07-28に成功済み | `roles/knowledge_review/`、`docs/ai/memory-classification.md`、`docs/ai/reviews/incident_auto_capture_step2/2026-07-28_020_u11_test_result.md` | 2026-07-28 |
+| **中止した月次評価の再実行は人が行う**(IC-033) | 月次が `ABORTED_DIRTY` で中止したとき | Slackへwarningが飛び、本文が再実行手順を案内する。**commitで作業ツリーを清潔にしてから `systemctl start ansible-knowledge-review.service`**。中止は喪失でなく遅延に留まる(ミラーは削除されず、評価はcatch-up型) | `docs/ai/policies/incident_capture_policy.md` §7 IC-033 | 2026-07-28 |
 | weekly full patchの**apply gateを実データで通す**(AC5) | Proxmox dry-runが `PATCH_READY` を返す週 | `playbooks/proxmox_patch_weekly_full.yml` L159-188。`_dryrun_missing_nodes` が実データで空になること。現状の根拠はdecoy検証のみ | `docs/ai/reviews/proxmox_patch_dryrun/2026-07-26_005_test_result.md` L426 | 2026-07-27 |
 | Reviewer / Testerの **effort=medium 試行** | 次にTier 4を回すとき | findings品質(逐行照合の取りこぼし)が落ちていないか。落ちていれば `.claude/agents/reviewer.md` / `tester.md` の `effort:` を `high` へ戻す | `docs/ai/role-routing-index.md`「モデル・effort配分」 | 2026-07-27 |
 | Alloy **Phase 3(異常値のFire)** | Lokiにログが十分蓄積した時点 | requirementは作成済み。Grafana Exploreで対象シグネチャの出現頻度を見て閾値を決める | `docs/ai/reviews/promtail_to_alloy/2026-07-19_phase3_alerting_requirement.md` | 2026-07-27 |

@@ -1,6 +1,6 @@
 # ADR-005: 障害の証拠と評価成果物の置き場所と、月次無人振り返りの中止条件との両立
 
-**Status:** Proposed
+**Status:** Accepted(2026-07-28。第2版の決定 (1′)〜(5′) をStep 2が実装し、本番で検証済み。一次記録は `docs/ai/reviews/incident_auto_capture_step2/` の `_016`〜`_020`)
 
 対象案件: `docs/ai/reviews/incident_auto_capture_step2/2026-07-28_006_step2_requirement.md`(Step 2 — 転送と評価)
 前提決定: `docs/ai/policies/incident_capture_policy.md`(本ADRはPolicyの下位にあり、競合したらPolicyを優先する。**条文の範囲を数で書かない** — IC-033が2026-07-28に追加されたとき、範囲表記「IC-001〜IC-032」が古くなった)、requirement §4 の D-1〜D-4(Yoshinobu / Coordinatorが確定させた線)
