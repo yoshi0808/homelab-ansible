@@ -207,13 +207,39 @@ def record_firing(path, firings):
         json.dump(firings + [time.time()], f)
 
 
-def pvesh_vm_status(cfg, target):
+def pick_pve_host(cfg):
+    """ラダー発火のたびに先頭で1度だけ呼ぶ read-only probe(操作ごとの
+    フォールバックはしない。設計: docs/ai/reviews/proxmox_exec_node_selection/
+    2026-07-29_002_plan.md §3 U5)。
+
+    `cfg["pve_hosts"]` を定義順に `ansible.builtin.ping` で probe し、rc が
+    0 の最初のノードを返す。全滅なら None。
+
+    stdout/stderr の文字列解析は行わない: 本リポジトリの `ansible.cfg` は
+    `display_failed_stderr` を設定しておらず既定 `no` のため、接続失敗の
+    `UNREACHABLE!` は stderr でなく stdout に出る。計画査読(2026-07-29
+    `2026-07-29_003_plan_review.md` Critical #1)で実測済みのため、判定は
+    rc のみで行う。
+    """
+    for host in cfg["pve_hosts"]:
+        r = subprocess.run(
+            ["ansible", host, "-m", "ansible.builtin.ping"],
+            cwd=cfg["repo_dir"], capture_output=True, text=True, timeout=30,
+        )
+        if r.returncode == 0:
+            return host
+    return None
+
+
+def pvesh_vm_status(cfg, pve_host, target):
     """pve 経由で VM 状態を確証する(read-only)。
+    ノードは `pick_pve_host` が選定済みのものを引数で受け取る
+    (`pvesh_vm_start` とは冪等性が異なるため共通ヘルパへは寄せない)。
     返り値: (state, node, vmid)。state は
     'running' / 'stopped' / 'not-found' / 'pve-unreachable'"""
     r = subprocess.run(
         [
-            "ansible", cfg["pve_host"], "--become", "-m", "ansible.builtin.command",
+            "ansible", pve_host, "--become", "-m", "ansible.builtin.command",
             "-a", "pvesh get /cluster/resources --output-format json",
         ],
         cwd=cfg["repo_dir"], capture_output=True, text=True, timeout=120,
@@ -235,11 +261,14 @@ def pvesh_vm_status(cfg, target):
     return ("not-found", None, None)
 
 
-def pvesh_vm_start(cfg, node, vmid):
-    """stopped VM の決定論 start(requirement: stopped → reboot ではなく start)。"""
+def pvesh_vm_start(cfg, pve_host, node, vmid):
+    """stopped VM の決定論 start(requirement: stopped → reboot ではなく
+    start)。ノードは `pick_pve_host` が選定済みのものを引数で受け取る。
+    非冪等操作のためここではリトライしない(呼び出し元 `fire_ladder` も
+    `pick_pve_host` を再度呼ばない — 二重発行を避けるため)。"""
     r = subprocess.run(
         [
-            "ansible", cfg["pve_host"], "--become", "-m", "ansible.builtin.command",
+            "ansible", pve_host, "--become", "-m", "ansible.builtin.command",
             "-a", f"pvesh create /nodes/{node}/qemu/{vmid}/status/start",
         ],
         cwd=cfg["repo_dir"], capture_output=True, text=True, timeout=300,
@@ -282,8 +311,17 @@ def fire_ladder(cfg, target, tconf, failed_probes, drill):
             return
         record_firing(fpath, firings)
 
+        # --- pve ノード選定(発火のたびに1度だけ。以降の pvesh 呼び出しは
+        # 全てこのノードへ送る。操作ごとのフォールバックはしない) ---
+        pve_host = pick_pve_host(cfg)
+
         # --- pvesh 確証 ---
-        vm_status, vm_node, vm_id = pvesh_vm_status(cfg, target)
+        if pve_host is None:
+            # 候補が全滅 → 既存の pve-unreachable 分岐へ合流(制御フローの
+            # 変更を最小に保つ。pvesh_vm_status 自体は呼ばない)
+            vm_status, vm_node, vm_id = "pve-unreachable", None, None
+        else:
+            vm_status, vm_node, vm_id = pvesh_vm_status(cfg, pve_host, target)
         log(f"LADDER {target}: pvesh status = {vm_status}")
         if vm_status == "pve-unreachable":
             queue_notify(
@@ -304,7 +342,7 @@ def fire_ladder(cfg, target, tconf, failed_probes, drill):
             if drill:
                 log(f"LADDER {target}: drill — start はスキップ(実 VM は stopped ではない想定)")
                 return
-            started = pvesh_vm_start(cfg, vm_node, vm_id)
+            started = pvesh_vm_start(cfg, pve_host, vm_node, vm_id)
             log(f"LADDER {target}: vm start ok={started}")
             if started and wait_for_recovery(cfg, target, tconf):
                 queue_notify(

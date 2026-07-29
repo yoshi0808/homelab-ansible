@@ -3,6 +3,27 @@
 # inventories/homelab/host_vars/quory.yml の recovery_probe_service_enabled
 # により enable + start する(CLI の -e は不要)。
 
+- name: Assert recovery_probe_pve_hosts is non-empty and every host exists in inventory
+  # 配備時に検証する(実行時ではない)。recovery-probe.py の pick_pve_host は
+  # `ansible <host> -m ansible.builtin.ping` の rc のみで到達性を判定するが、
+  # host パターンが inventory 上どのホストにもマッチしない場合も ansible は
+  # rc=0("Could not match supplied host pattern, ignoring")を返すため、
+  # 綴り誤り等で値が inventory と食い違っていても実行時には検知できない
+  # (2026-07-29 review Step2 `2026-07-29_010_review_step2.md` Suggestion #1で
+  # decoy検証により観測)。pick_pve_host 自体は変更しない方針のため、この
+  # 妥当性検証は配備側(ここ)だけで行う。
+  ansible.builtin.assert:
+    that:
+      - recovery_probe_pve_hosts | length > 0
+      - recovery_probe_pve_hosts | difference(groups['proxmox']) | length == 0
+    fail_msg: >-
+      recovery_probe_pve_hosts が空、または inventory の proxmox グループ
+      ({{ groups['proxmox'] | join(', ') }}) に存在しないホスト名を含んで
+      います: {{ recovery_probe_pve_hosts | difference(groups['proxmox']) }}。
+      pick_pve_host はホストパターン不一致時も rc=0 を返すため、この値の
+      誤りは実行時には検知できない。recovery_probe_pve_hosts を修正すること。
+    quiet: true
+
 - name: Check whether recovery-probe is already running
   # 反映漏れ防止の判定材料。稼働中の daemon には、enable フラグの値に
   # かかわらず設定・コードの変更を届ける(handlers/main.yml 参照)。

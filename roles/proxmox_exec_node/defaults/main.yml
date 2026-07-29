@@ -1,0 +1,16 @@
+---
+# roles/proxmox_exec_node - 実行ノード選定共通role の既定値。
+# 変数の意味・契約は docs/ai/reviews/proxmox_exec_node_selection/2026-07-29_002_plan.md
+# §1-1 が正本。ここではその契約どおりの既定値のみを持つ。
+
+# 候補ノードのinventory group名。呼び出し側Playの hosts: と一致させること
+# (tasks/main.yml のT1がこの一致をassertする)。
+pen_candidate_group: proxmox
+
+# 優先ノードのinventory名。空文字なら候補groupの定義順の先頭を優先とみなす。
+pen_prefer: ''
+
+# pen_target_group (選定結果を登録するdynamic group名) と
+# pen_caller (失敗メッセージの先頭に付ける呼び出し元識別子) は、
+# 呼び出し側が必ず指定する必須変数のため、ここでは既定値を持たない
+# (未指定なら tasks/main.yml のT1が非空チェックで落とす)。

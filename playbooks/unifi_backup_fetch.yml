@@ -3,12 +3,11 @@
 # 変更系: CloudKey 上で新規バックアップを生成し、Synology NFS に保存・ローテーションする。
 #         CloudKey の設定変更は行わない。
 #
-# 対象: pve1を優先し、到達不能なら pve2 にフェイルオーバーする(どちらも同一の
-#       Synology NFS マウントを持つ実行ホスト)。preflightで両ノードの到達性を
-#       確認し、到達可能な1ホストのみを選んで実行する(二重実行・二重ローテー
-#       ション防止)。両方到達不能な場合は原因が分かるメッセージでfailする。
-#       選定方式の背景は docs/ai/adr/001-unifi_backup_fetch-pve1-shutdown-target.md
-#       を参照(pve1夏季平日シャットダウン運用対応)。
+# 対象: 実行ノードは共通role roles/proxmox_exec_node で選定する(pve1優先、
+#       到達不能なら pve2 にフェイルオーバー。どちらも同一の Synology NFS
+#       マウントを持つ実行ホスト)。選定方式の背景は
+#       docs/ai/adr/001-unifi_backup_fetch-pve1-shutdown-target.md を参照
+#       (pve1夏季平日シャットダウン運用対応)。
 #       CloudKey へは cloudkey.internal で接続する。connection: local は使わず、
 #       選定されたホスト上で become: true(root)で実行する。
 # 実行元: quory(本番 / Semaphore 週次)または ansy(開発 / CLI)。
@@ -27,50 +26,24 @@
 # 詳細は docs/ai/policies/ansible_test_safety_policy.md。
 
 # ---------------------------------------------------------------------------
-# Play 1: pve1/pve2 の到達性を probe し、pve1 優先・pve2 フェイルオーバーで
-#         実行対象を1ホストだけ選ぶ(time_sync_check と同じ ignore_unreachable
-#         パターン)。両方到達不能なら明確な理由で fail する。
+# Play 1: 実行ノードを選定する。候補ノード(inventory group: proxmox)のうち
+#         pve1 を優先し、到達不能なら到達可能な方(pve2)へフェイルオーバー
+#         する。両方到達不能な場合は原因が分かるメッセージでfailする。共通role
+#         roles/proxmox_exec_node の選定ロジックの正本は
+#         docs/ai/reviews/proxmox_exec_node_selection/2026-07-29_002_plan.md
+#         §1-1。外部から見た挙動(pve1優先・pve2フォールバック・両系不能で
+#         fail)はこの寄せ替えで変更しない。
 # ---------------------------------------------------------------------------
 - name: Select unifi_backup_fetch execution host (pve1 preferred, pve2 fallback)
-  hosts: pve1:pve2
+  hosts: proxmox
   gather_facts: false
   become: false
-  tasks:
-    - name: Probe SSH reachability
-      ansible.builtin.ping:
-      register: unifi_backup_fetch_ping
-      ignore_unreachable: true
-      ignore_errors: true
-
-    - name: Record per-host reachability
-      ansible.builtin.set_fact:
-        unifi_backup_fetch_host_reachable: >-
-          {{ not (unifi_backup_fetch_ping.unreachable | default(false) | bool)
-             and not (unifi_backup_fetch_ping is failed) }}
-
-    - name: Fail if neither pve1 nor pve2 is reachable
-      ansible.builtin.fail:
-        msg: >-
-          unifi_backup_fetch: neither pve1 nor pve2 is reachable via SSH,
-          cannot select an execution host. pve1 reachable:
-          {{ hostvars['pve1'].unifi_backup_fetch_host_reachable | default(false) }};
-          pve2 reachable:
-          {{ hostvars['pve2'].unifi_backup_fetch_host_reachable | default(false) }}.
-      run_once: true
-      delegate_to: localhost
-      when: >-
-        not (hostvars['pve1'].unifi_backup_fetch_host_reachable | default(false) | bool)
-        and not (hostvars['pve2'].unifi_backup_fetch_host_reachable | default(false) | bool)
-
-    - name: Select execution host (pve1 preferred, pve2 fallback)
-      ansible.builtin.add_host:
-        name: >-
-          {{ 'pve1' if (hostvars['pve1'].unifi_backup_fetch_host_reachable | default(false) | bool)
-             else 'pve2' }}
-        groups: unifi_backup_fetch_target
-      run_once: true
-      delegate_to: localhost
-      changed_when: false
+  roles:
+    - role: proxmox_exec_node
+      vars:
+        pen_prefer: pve1
+        pen_target_group: unifi_backup_fetch_target
+        pen_caller: unifi_backup_fetch
 
 # ---------------------------------------------------------------------------
 # Play 2: 選定された1ホストに対してのみ、既存の fetch 処理を実行する。

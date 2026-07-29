@@ -22,10 +22,17 @@ recovery_probe_user: yoshi
 # LAN 側が健全な分岐と通知 flush 時のみ(requirement 参照)
 recovery_probe_external_check_url: https://one.one.one.one
 
-# pvesh 確証に使う pve ホスト(inventory 名)。
-# 暫定: pve1は平日日中シャットダウン運用のため常時起動のpve2に向ける
-# (2026-07-21)。pve1を平日常時起動に戻す場合は要見直し。
-recovery_probe_pve_host: pve2
+# pvesh 確証に使う pve ホスト候補(inventory 名、定義順)。ラダー発火の
+# たびに先頭から read-only probe し(recovery-probe.py の
+# pick_pve_host)、最初に到達可能なノードへ以降の pvesh 呼び出しを送る。
+# 全滅なら pve-unreachable として既存の critical 通知経路へ合流する。
+# pve1 が平日日中シャットダウン運用でも pve2 へ自動でフォールバックする
+# ため、pve1 の起動状態に合わせて値を書き換える運用は不要
+# (docs/ai/reviews/proxmox_exec_node_selection/2026-07-29_001_requirement.md
+# R9)。
+recovery_probe_pve_hosts:
+  - pve1
+  - pve2
 
 # true にすると systemd サービスを enable + start する(本番 quory)。
 # 開発(ansy)では配置のみで起動しない(recovery_io_setup と同じ流儀)。

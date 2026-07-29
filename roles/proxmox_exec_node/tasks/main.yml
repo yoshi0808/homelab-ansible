@@ -1,0 +1,96 @@
+---
+# roles/proxmox_exec_node - 実行ノード選定(決め打ちの除去)
+#
+# 目的: Proxmoxクラスタへ入るplaybookの実行ノードを、ホスト名リテラルではなく
+#       「優先ノード(pen_prefer)が到達可能ならそれ、でなければ候補group
+#       (pen_candidate_group)の定義順で最初の到達可能ノード」で選ぶ。
+#       候補が全て到達不能なら、理由を明記してfailする(無言のUNREACHABLEに
+#       しない)。
+#
+# 呼び出し規約: このroleは「候補ノード全体を hosts: に持つ Play」から呼ぶこと。
+#       role自身はPlayを作れないため、この前提はT1でassertする。
+#
+# 出力:
+#   - dynamic group {{ pen_target_group }} に、選定された1ノードだけが登録される。
+#   - 全候補ノードに per-host fact pen_reachable(bool)が立つ。到達不能ノードにも
+#     立つ(set_fact はcontroller側で完結するため、T2の ignore_unreachable で
+#     Playに残ったホストにも実行される — 2026-07-26に実機で確認済みの挙動と
+#     同一。docs/ai/reviews/proxmox_patch_dryrun/2026-07-26_005_test_result.md
+#     §14-4)。
+#
+# fact gatheringではなく明示的な ping probe (T2) で到達性を判定する。
+# Semaphore実行環境で fact caching が有効でも誤判定しないため
+# (requirement.md Q1、docs/ai/reviews/proxmox_exec_node_selection/2026-07-29_001_requirement.md)。
+#
+# 設計の正本: docs/ai/reviews/proxmox_exec_node_selection/2026-07-29_002_plan.md §1-1
+
+- name: Assert required inputs and calling convention
+  ansible.builtin.assert:
+    that:
+      - pen_target_group is defined
+      - pen_target_group | length > 0
+      - pen_caller is defined
+      - pen_caller | length > 0
+      - ansible_play_hosts_all | sort == (groups[pen_candidate_group] | sort)
+      - pen_prefer == '' or pen_prefer in groups[pen_candidate_group]
+    fail_msg: >-
+      {{ pen_caller | default('proxmox_exec_node') }}: invalid inputs or
+      calling convention. pen_target_group and pen_caller must both be
+      non-empty, the calling play's hosts must equal
+      groups['{{ pen_candidate_group }}'] exactly
+      (play hosts: {{ ansible_play_hosts_all }},
+      group members: {{ groups[pen_candidate_group] | default('(undefined group)') }}),
+      and pen_prefer ('{{ pen_prefer }}') must be either empty or a member of
+      that group.
+    quiet: true
+  run_once: true
+  delegate_to: localhost
+
+- name: Probe SSH reachability of every candidate node
+  ansible.builtin.ping:
+  register: pen_ping
+  ignore_unreachable: true
+  ignore_errors: true
+
+- name: Record per-host reachability
+  ansible.builtin.set_fact:
+    pen_reachable: >-
+      {{ not (pen_ping.unreachable | default(false) | bool)
+         and not (pen_ping is failed) }}
+
+- name: Fail if no candidate node is reachable
+  ansible.builtin.fail:
+    msg: >-
+      {{ pen_caller }}: no node in group '{{ pen_candidate_group }}' is
+      reachable via SSH ping, cannot select an execution host. Candidate
+      reachability: {{ pen_reachability_report }}.
+  vars:
+    pen_reachability_report: >-
+      {{ ansible_play_hosts_all
+         | zip(ansible_play_hosts_all | map('extract', hostvars) | map(attribute='pen_reachable'))
+         | map('join', '=')
+         | join(', ') }}
+  run_once: true
+  delegate_to: localhost
+  when: >-
+    ansible_play_hosts_all
+    | map('extract', hostvars)
+    | selectattr('pen_reachable', 'equalto', true)
+    | list | length == 0
+
+- name: Select execution host (pen_prefer honored, else definition-order first reachable)
+  ansible.builtin.add_host:
+    name: >-
+      {{ pen_prefer if (pen_prefer != '' and pen_prefer in pen_reachable_hosts)
+         else pen_reachable_hosts[0] }}
+    groups: "{{ pen_target_group }}"
+  vars:
+    pen_reachable_hosts: >-
+      {{ ansible_play_hosts_all
+         | map('extract', hostvars)
+         | selectattr('pen_reachable', 'equalto', true)
+         | map(attribute='inventory_hostname')
+         | list }}
+  run_once: true
+  delegate_to: localhost
+  changed_when: false

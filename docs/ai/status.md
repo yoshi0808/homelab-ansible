@@ -20,8 +20,9 @@
 
 | # | 項目 | 現在地 | 次にやること |
 |---|---|---|---|
+| 1 | **Proxmox実行ノード選定の共通化**(決め打ちの除去) | Step 1・Step 2とも実装と独立レビュー(Critical 0)を完了。**未commit**。**検証は一様ではない** — AC1・AC3は実機PASS、AC2はdecoyのみ、AC4は未実施(検証状態の正本は `.../2026-07-29_007_test_result_step1.md`)。判断の正本は `docs/ai/adr/006-proxmox-exec-node-selection.md`、案件記録は `docs/ai/reviews/proxmox_exec_node_selection/` | **Yoshinobuのcommit/push → quoryで `git pull --ff-only`。その後に `playbooks/recovery_probe_setup.yml -l quory` を配備**(順序が逆だとquoryのcheckoutが旧ラダーのまま新デーモンが走る)。AC4の実機確認はpve1起動時 |
 
-**進行中の案件は無い**(2026-07-29)。「障害の自動捕捉・評価」は**3段すべてが本番で成立してクローズした** — 捕捉=quory(5分毎)、転送=ansy `ansible-incident-sync.timer`(毎時)、評価=既存の月次 `ansible-knowledge-review.timer` の中の2本目の `claude -p`。**次の観測点は2026-08-26の月次発火**で、Watch行が持つ。
+**この案件が唯一の進行中**(2026-07-29)。「障害の自動捕捉・評価」は**3段すべてが本番で成立してクローズした** — 「障害の自動捕捉・評価」は**3段すべてが本番で成立してクローズした** — 捕捉=quory(5分毎)、転送=ansy `ansible-incident-sync.timer`(毎時)、評価=既存の月次 `ansible-knowledge-review.timer` の中の2本目の `claude -p`。**次の観測点は2026-08-26の月次発火**で、Watch行が持つ。
 
 **規範の正本は `docs/ai/policies/incident_capture_policy.md`**(IC-001〜IC-033)。設計判断は `docs/ai/adr/003` / `004` / `005`(いずれも Accepted)。案件記録は `docs/ai/reviews/incident_auto_capture/`(Step 1)と `.../incident_auto_capture_step2/`(Step 2)。**未決の一覧は Policy §8 が正本。**
 
@@ -41,7 +42,9 @@
 | Alloy **Phase 3(異常値のFire)** | Lokiにログが十分蓄積した時点 | requirementは作成済み。Grafana Exploreで対象シグネチャの出現頻度を見て閾値を決める | `docs/ai/reviews/promtail_to_alloy/2026-07-19_phase3_alerting_requirement.md` | 2026-07-27 |
 | Proxmoxパッチ自動チェーンの **実発火の観測** | パッチ件数が少なく手動介入が要らない週末 | 自動チェーンが最後まで通ったログ。過去2回(07-11/12、07-18/19)は大量パッチで手動対応となり未観測 | `docs/ai/reviews/tester_mode/`、`docs/ai/context/operations/proxmox-patch.md` | 2026-07-27 |
 | Context陳腐化チェック追加後の**`knowledge_review_timeout`(1800秒)が足りるか** | 次回2026-08-26の月次実行 | `journalctl -u ansible-knowledge-review`でタイムアウト終了していないか確認。Testerのdecoy見積もりでは余裕が無い可能性が高いとされた(実測はデータが無く不可) | `docs/ai/reviews/knowledge_review_context_check/2026-07-29_005_u1_test_result.md` | 2026-07-29 |
-| recovery-probeの**自動反映が「実際に内容が変わる配備」で発火するか** | 次に `recovery-probe.py` / config / unit のいずれかが変わる配備をquoryへ行うとき | 配備後に `ExecMainStartTimestamp` が配備物のmtimeより新しくなっていること(playbook末尾のassertが自動で判定し、満たさなければfailする)。**2026-07-29の検証は「内容が変わらない配備」の経路のみ**で、restartが発火する正の経路は本番未観測(ローカルのdecoyでは発火・順序とも確認済み) | `docs/ai/reviews/recovery_probe_auto_reload/2026-07-29_001_test_result.md` | 2026-07-29 |
+| recovery-probeの**自動反映が「実際に内容が変わる配備」で発火するか** | **次の配備が該当する** — `proxmox_exec_node_selection` 案件が `recovery-probe.py` / config / defaults を変更済み(未commit)。commit/push → quoryの `git pull` の後に配備するとき | 配備後に `ExecMainStartTimestamp` が配備物のmtimeより新しくなっていること(playbook末尾のassertが自動で判定し、満たさなければfailする)。**2026-07-29の検証は「内容が変わらない配備」の経路のみ**で、restartが発火する正の経路は本番未観測(ローカルのdecoyでは発火・順序とも確認済み) | `docs/ai/reviews/recovery_probe_auto_reload/2026-07-29_001_test_result.md`、`docs/ai/reviews/proxmox_exec_node_selection/2026-07-29_009_implement_u5.md` | 2026-07-29 |
+| **pve1が起動している時にしか確かめられない2件**(AC4 / unifi #4) | pve1が起動している時間帯(週末のパッチ運用が自然) | ①`playbooks/proxmox_backup_restore_verify.yml` を本実行し、対象VMの `prefer<node>` タグどおりのノードでrestoreされ、レポートJSONの `restore_node_fallback` が **false** になること ②`playbooks/unifi_backup_fetch.yml` の Play 1 が両系到達可能時に **pve1** を選ぶこと。**①②とも共通role `proxmox_exec_node` の同じ分岐**であり、decoyでは両方PASS済み | `docs/ai/reviews/proxmox_exec_node_selection/2026-07-29_007_test_result_step1.md`、`docs/ai/reviews/unifi_backup_fetch/2026-07-25_013_test_result.md` L114 | 2026-07-29 |
+| Semaphore実行環境で **fact caching が無効か**(Q1) | Yoshinobuが Semaphore UI を開いたとき | Semaphoreのジョブ/テンプレート設定に `ANSIBLE_CACHE_PLUGIN` / `ANSIBLE_GATHERING` が注入されていないこと。**有効だと `proxmox_patch_dryrun` が停止中のノードをキャッシュ済みfactsから「到達可能」と誤判定する**(2026-07-26にReviewerが再現済み)。**repo外のためAIからは確認できない。** 新設の `roles/proxmox_exec_node` は明示的な `ping` で判定するため影響を受けず、残る影響は `proxmox_patch_dryrun` 1箇所のみ | `docs/ai/reviews/proxmox_patch_dryrun/2026-07-26_005_test_result.md` §14-5 a、`docs/ai/adr/006-proxmox-exec-node-selection.md` | 2026-07-29 |
 
 ## Next(着手候補) — 工程・体制
 
@@ -61,7 +64,7 @@
 |---|---|---|
 | **global pauseの解除忘れを構造で防ぐ**(TTL付与、または未解除の定期通知) | `homelab-monitoring-pause` はTTLを持たず、未解除を知らせる経路も無い。2026-07-21から**8日間**自律復旧が全target無効のまま誰も気づかなかった。どちらの方式を採るかは設計判断を含むためIncident対応として即断せず案件として扱う。**この行は2026-07-29のIncidentが「起票した」と記載していたが実際には存在せず、同日に追加した**(規範文書間の突合が効いていなかった実例) | `docs/ai/memory/incidents/2026-07-29_global-monitoring-pause-left-on-8-days.md`「修正内容」 |
 | 時刻表記JST規約をrepoへ明文化 | 規約本体がCoordinatorのauto-memoryにあり、repo内は `autonomous_recovery_policy.md` L174(通知文言の1行)のみ。Implementerが従うべき規約なのでrepo側が正本であるべき。**障害バンドルがSemaphoreのUTCとreportsのJSTを混在させる**ため実害が出る前に片付ける | `grep -rn "JST" docs/` が通知文言1件のみ。`docs/ai/memory-classification.md` 第0段 |
-| **ADRの `Status` を実態へ揃える** | 全5件が `Proposed` のまま。**001・002は対応完了済み**(2026-07-28 Yoshinobu確認)。**003〜005は本件の完了時にまとめて更新できる**見込み。Tier 1 | `docs/ai/adr/` 各ファイルの `**Status:**` 行 |
+| **検証実行のSlack通知抑止が「変数の渡し忘れ」で破れる** | `roles/common_slack/tasks/notify.yml` は `tester_mode` / `skip_notifications` が真のときだけ抑止し、**渡し忘れた場合の既定が「本番へ送る」**。`--check` の有無は判定に入っていない。2026-07-29に再発(2026-07-26に前例)。既定を反転させるか `--check` を判定に加えるかは `common_slack` の全利用箇所へ波及するため案件として扱う | `docs/ai/memory/incidents/2026-07-29_tester-slack-notify-misfire.md` |
 | `docs/ai/context-classification.md` の `## 6.` 重複 | `## 6.` で始まる節が2つあり、節番号で参照すると誤った節へ着地する。Tier 1 | 同ファイルの現物 |
 | 収集器へ「消費済みidの記憶」防御を入れるか | 「消費済み」の正本は「spoolファイルが存在しないこと」の1つのみ。state.jsonへの二重化は**両者が食い違う新しい欠陥クラス**を生むため意図的に見送った。検出は `collection_errors` + exit 2 + systemd `failed` で効いている | `.../incident_auto_capture/2026-07-28_018_acl_mask_plan.md` D7 |
 | ACL付きパスへのchmodをpre-commitで検査するか | **検査対象がパス変数の解決を要する**ため、パス文字列のgrepでは現に壊れている箇所を1件も拾えないことが実証済み。**効かない検査は「掃引済み」という誤った安心を生む**ため見送った | 同上 D9 |
@@ -72,6 +75,7 @@
 規律2により意図的に載せていない。再度追加しようとしたときのために理由を残す。
 
 - **proxmox_patch_dryrun AC4(両ノード同時到達不能)の実地検証** — pve2の停止が必要で許可範囲外。残存リスクとして `docs/ai/reviews/proxmox_patch_dryrun/2026-07-26_005_test_result.md` L425 に記録済み。
-- **pve1の夏季平日シャットダウン運用** — `roles/recovery_probe/defaults/main.yml` の `recovery_probe_pve_host` に暫定である旨と復帰条件がある。規律1により使う場所の記載を正とする。
+- **proxmox_exec_node_selection AC2(ラダーの両ノード同時到達不能)の実地検証** — 上と同じ理由(pve2の停止が要り許可範囲外)。decoyでは独立にPASSしており、残存リスクとして `docs/ai/reviews/proxmox_exec_node_selection/2026-07-29_007_test_result_step1.md` に記録済み。**同型の2件が別々の案件で同じ理由により未検証である**ことを、次にこの制約へ当たったときの判断材料として残す。
+- **pve1の夏季平日シャットダウン運用** — **2026-07-29に申し送りが消滅した。** 実行ノードの決め打ちを共通機構(`roles/proxmox_exec_node`)で除去し、`recovery_probe_pve_host`(暫定でpve2を指していた単数変数)を候補リスト `recovery_probe_pve_hosts` へ置き換えたため、**pve1を平日常時起動へ戻す際にrepoを書き換える作業が無くなった**。判断は `docs/ai/adr/006-proxmox-exec-node-selection.md`。運用そのものの現状は Proxmox のノード状態が正本であり、ここでは持たない。
 - **既知条件由来の捕捉が全体に占める割合(実測値)** — `docs/ai/policies/incident_capture_policy.md` IC-022 が正本。規律4により値をここへ写さない。
 - **quoryの作業ツリー同期(`git pull`)の自動化** — 2026-07-29に検討し**見送った**(Yoshinobu判断)。手打ちで残すこと自体が制御である: playbook化するとAIから実行可能になり、Slack(`recovery_io` → Codex)へ載せると露出面が増える。**現状は「漏洩してもCodex経由では破壊的作業ができない」状態にあり、利便性と引き換えにこれを崩さない。** 同日3回この摩擦を踏んでいるが(Coordinator / Tester / Yoshinobu)、摩擦は理由にならない。**再提案しないこと。** なお、この判断が受け入れている残存リスクは「quoryのcheckoutが古いまま、ラダー系playbookが旧コードで走る」ことである — `recovery-probe`本体で今日塞いだのと同じ欠陥クラスであり、**検知だけを読み取り専用で持つ案は境界を崩さない**(適用は手打ちのまま)。未着手。

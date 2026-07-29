@@ -36,8 +36,27 @@
 # 参照: docs/ai/policies/autonomous_recovery_policy.md §5 §8 §13
 #       docs/ai/reviews/autonomous_recovery/2026-06-27_001_requirement.md
 
+# ---------------------------------------------------------------------------
+# Play 0: 実行ノードを選定する。候補ノード(inventory group: proxmox)のうち
+#         到達可能なものを1台だけ recovery_exec_target へ登録する。優先ノードは
+#         指定しない — ha-manager はクラスタ全体APIのため入口ノードがどちらでも
+#         結果は同じ
+#         (docs/ai/reviews/proxmox_exec_node_selection/2026-07-29_002_plan.md §1-2)。
+#         read-onlyのprobe/set_fact/add_hostのみで副作用を持たないため、上記
+#         tester-gate(check-mode-native)の分類には影響しない。
+# ---------------------------------------------------------------------------
+- name: Select execution node for recovery_ha_failover
+  hosts: proxmox
+  gather_facts: false
+  become: false
+  roles:
+    - role: proxmox_exec_node
+      vars:
+        pen_target_group: recovery_exec_target
+        pen_caller: recovery_ha_failover
+
 - name: Recovery - HA failover
-  hosts: pve1
+  hosts: recovery_exec_target
   gather_facts: false
   become: true
   pre_tasks:

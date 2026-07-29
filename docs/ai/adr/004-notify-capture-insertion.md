@@ -1,6 +1,6 @@
 # ADR-004: `notify.yml` への捕捉(T1)の挿入方式・失敗隔離・相関IDの所有者
 
-**Status:** Proposed
+**Status:** Accepted(2026-07-29。ADR-003と同じ理由で実態へ追随。`roles/common_slack/tasks/notify.yml` への捕捉は本番稼働中)
 
 対象案件: `docs/ai/reviews/incident_auto_capture/2026-07-27_002_requirement.md`(R1、R3、R6、AC1、AC3、AC4)
 前提決定: 同 `..._001_design_agreement.md` のD6(捕捉の起点は2つ。`notify.yml` 冒頭は抑止ゲートより前)、D7(要約と生ログの両方)

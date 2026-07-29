@@ -437,7 +437,9 @@
             'preexisting_residue': (_brv_preexisting_residue | bool),
             'cleanup_ok': (_brv_cleanup_ok | bool),
             'failed': (_brv_failed | bool),
-            'error_msg': _brv_error_msg
+            'error_msg': _brv_error_msg,
+            'preferred_node': (verify_preferred_node | default('')),
+            'restore_node_fallback': (verify_restore_fallback | default(false) | bool)
           } | to_nice_json }}"
         dest: "{{ verify_report_dir }}/{{ _brv_run_ts }}_{{ verify_target_vmid }}_verify.json"
       delegate_to: localhost
@@ -466,7 +468,7 @@
 
           実行日時      : {{ lookup('pipe', 'date "+%Y-%m-%d %H:%M:%S %Z"') }}
           対象VM        : {{ verify_target_vmid }} ({{ verify_target_name }})
-          リストア先    : {{ inventory_hostname }} / VMID {{ verify_restore_vmid }}
+          リストア先    : {{ inventory_hostname }} / VMID {{ verify_restore_vmid }}{% if verify_restore_fallback | default(false) | bool %} (preferred: {{ verify_preferred_node | default('?') }} が到達不能なため代替){% endif %}
           期待レベル    : {{ 'agent (osinfo)' if (_brv_agent_expected | bool) else 'running 継続' }}
           バックアップ  : {{ _brv_backup_volid | default('(未特定)') }}
           判定          : {{ _brv_status }}

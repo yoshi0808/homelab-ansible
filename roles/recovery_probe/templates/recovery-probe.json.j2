@@ -7,6 +7,6 @@
   "state_dir": "/var/lib/homelab-recovery/probe",
   "repo_dir": "{{ recovery_probe_repo_dir }}",
   "external_check_url": "{{ recovery_probe_external_check_url }}",
-  "pve_host": "{{ recovery_probe_pve_host }}",
+  "pve_hosts": {{ recovery_probe_pve_hosts | to_nice_json }},
   "targets": {{ recovery_probe_targets | to_nice_json }}
 }

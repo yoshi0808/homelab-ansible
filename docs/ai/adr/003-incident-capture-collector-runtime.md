@@ -1,6 +1,6 @@
 # ADR-003: 証拠バンドル収集器の実行形態・実行identity・Semaphore取得経路
 
-**Status:** Proposed
+**Status:** Accepted(2026-07-29。対象案件が本番で成立してクローズしたことに伴う実態への追随。捕捉=quory・転送=ansy `ansible-incident-sync.timer`・評価=月次 `ansible-knowledge-review.timer` の3段が稼働中。一次記録は `docs/ai/reviews/incident_auto_capture/` と `.../incident_auto_capture_step2/`)
 
 対象案件: `docs/ai/reviews/incident_auto_capture/2026-07-27_002_requirement.md`(Step 1)
 前提決定: 同 `..._001_design_agreement.md` のD1(名前付き操作のみ)、D4(収集はquory・LLMなし)、D5(排他はflock)、D6(捕捉の起点は2つ)、D7(要約と生ログの両方)
