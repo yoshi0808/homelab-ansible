@@ -13,7 +13,7 @@
 | `ansy` | `dev_nodes` | VM | Ansible開発環境 | Policyの方針2。再構築可能でcodeとVM backupを持つ前提から自動rebootに任せる |
 | `quory` | `control_nodes` | 物理node | 本番Ansible / Semaphore実行基盤、Proxmox QDevice | Policyの方針2。実行基盤自身なので固定時刻の自動rebootを使う |
 
-group所属は [`inventory-map.md`](../ansible/inventory-map.md)、認証基盤の依存は [`radius.md`](radius.md)、監視基盤の依存は [`monitoring.md`](monitoring.md)、開発 / 本番実行基盤の分離は [`overview.md`](overview.md) を参照する。nodeの仮想 / 物理種別や実際の配置は固定せず、inventoryと実行時の事実を正本とする。
+group所属は `inventories/homelab/hosts.yml`、認証基盤の依存は [`radius.md`](radius.md)、監視基盤の依存は [`monitoring.md`](monitoring.md)、開発 / 本番実行基盤の分離は [`overview.md`](overview.md) を参照する。nodeの仮想 / 物理種別や実際の配置は固定せず、inventoryと実行時の事実を正本とする。
 
 ## Ubuntu Proとreboot管理
 

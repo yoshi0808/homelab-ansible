@@ -14,9 +14,9 @@
 
 ### Repository Context(`docs/ai/context/ansible/`)
 
-**対象**: 「このリポジトリのAnsibleコードがどう構成されているか」— inventory group、playbook一覧、role一覧、開発から本番実行までの流れ。コードを読めば技術的には分かるが、リポジトリ全体を毎回探索する負担を減らすための地図。
+**対象**: 「このリポジトリのAnsibleコードがどう構成されているか」— ディレクトリ構成、開発から本番実行までの流れ、対象ファイルへの辿り方。inventory group一覧・playbook一覧・role一覧そのものは複製せず、`inventories/homelab/hosts.yml`・`playbooks/*.yml`・`roles/*`を直接参照する(2026-07-29、手動更新の地図が現物と乖離する事例が繰り返され廃止。`docs/ai/reviews/process_retrospective/2026-07-29_006_ansible_context_map_retirement.md`)。
 
-**例**: `repository-overview.md`、`inventory-map.md`、`playbook-map.md`、`role-map.md`。
+**例**: `repository-overview.md`。
 
 **書かないもの**: 個別playbook/roleの実装詳細そのもの(地図であって仕様書ではない。詳細はコードを読む)。
 
@@ -51,7 +51,7 @@
 
 ### 3.1 IPアドレス・VLAN ID・VM ID・認証情報
 
-正本はInventory([[inventory-map.md]])・Ansible変数・秘密管理(Ansible Vault等)に限定する。System/Repository/Operations Context、Policy、Skillのいずれにも実値を書かない。既にリポジトリ規約として運用済み([[feedback_no_ip_in_repo]]、2026-07-08確認・pubic GitHub公開済みのため厳格運用)であり、本分類方針もこれに従う。
+正本はInventory(`inventories/homelab/hosts.yml`、`inventories/homelab/group_vars/`、`inventories/homelab/host_vars/`)・Ansible変数・秘密管理(Ansible Vault等)に限定する。System/Repository/Operations Context、Policy、Skillのいずれにも実値を書かない。既にリポジトリ規約として運用済み([[feedback_no_ip_in_repo]]、2026-07-08確認・pubic GitHub公開済みのため厳格運用)であり、本分類方針もこれに従う。
 
 Context内で対象を指す必要がある場合は、inventory group名・変数名・ホスト役割名(「pve1」「quory」等の既に公開済みのホスト名は可、IPやVLAN IDは不可)で表現する。TODO2-2/2-3の成果物は全てこの基準でreviewerが個別確認済み。
 
@@ -85,7 +85,7 @@ Context内で対象を指す必要がある場合は、inventory group名・変�
 
 | 種別 | 目的 | 更新頻度 | 例 |
 |---|---|---|---|
-| `docs/ai/context/`・`docs/ai/policies/` | **今**を答える生きた参照文書。各Roleが着手時に読む。 | 実態が変わったら更新 | `proxmox.md`、`playbook-map.md` |
+| `docs/ai/context/`・`docs/ai/policies/` | **今**を答える生きた参照文書。各Roleが着手時に読む。 | 実態が変わったら更新 | `proxmox.md`、`repository-overview.md` |
 | `docs/ai/reviews/<feature>/` | **その時**の作業記録・監査証跡(setup→implement→review→test_plan→test_result)。 | 案件ごとに追記、既存ファイルは基本上書きしない | `radius_healthcheck/2026-07-21_020_final.md` |
 | `docs/ai/reviews/`直下のreorg関連ファイル | 本再構成プロジェクト自体の計画・進捗記録。 | プロジェクト進行に応じて更新 | `agent_skills_reorganization_plan.md` |
 

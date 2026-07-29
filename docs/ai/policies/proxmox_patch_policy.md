@@ -1,6 +1,6 @@
 # Proxmox Patch Policy
 
-本書はProxmox VE hostのpatchに関する許可、禁止、停止条件の正本である。playbook / roleの索引は[playbook map](../context/ansible/playbook-map.md)と[role map](../context/ansible/role-map.md)、運用手順は[Operations Context](../context/operations/proxmox-patch.md)、環境事実は[System Context](../context/system/proxmox.md)を参照する。実装詳細はコードを正本とする。Contextは非規範であり、本書と競合する場合は本書を優先する。
+本書はProxmox VE hostのpatchに関する許可、禁止、停止条件の正本である。playbook / roleは`playbooks/*.yml`・`roles/*`を直接参照する(`docs/ai/context/ansible/repository-overview.md`)、運用手順は[Operations Context](../context/operations/proxmox-patch.md)、環境事実は[System Context](../context/system/proxmox.md)を参照する。実装詳細はコードを正本とする。Contextは非規範であり、本書と競合する場合は本書を優先する。
 
 ## 1. 目的
 

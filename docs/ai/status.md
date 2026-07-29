@@ -49,12 +49,11 @@
 |---|---|---|
 | **`1+R` に計画査読だけを足す形を認めるか** | `skills/delegation-tier/SKILL.md` は「Tier 1/2に査読を足す形は無い。足したくなったらTier判定が誤っている信号」と定める。しかし上流55 `tool_uses` で**実装前に5件**が潰れ、うち1件は**Coordinator自身が書いたrequirementの内部矛盾**だった。`1+R` には計画を見る者が居ない。**現行規定は維持しており、この起票は見直しの検討** | `.../subagent_briefing/2026-07-28_003_plan_review.md`、同 `progress.md`「クローズ判断」 |
 | **計画査読の正本に足りない1点(2026-07-29に1点解消)** | ①申告の妥当性に疑義が出たときの扱いが層1/層2のどちらか不明(初回で実際に発生し、査読者が裁量で分けた)は**未解決**。②査読者の出力の型が無い、はTech Lead廃止でReviewerへ統合した結果、既存の`skills/code-review/SKILL.md`が適用され**解消**。残る①は`docs/ai/roles/reviewer.md`「計画査読」の改訂で対応する | `.../subagent_briefing/2026-07-28_003_plan_review.md` §4-1・§4-4、`docs/ai/reviews/process_retrospective/2026-07-29_005_techlead_retirement.md` |
-| **Auditorの単位分類が `effort-baseline.md` に無い** | 「実行単位」の定義がImplementer / Reviewer / Testerのみで、Auditorがどちらにも属さない。**層1基準(80 `tool_uses`)を実際に適用できなかった** | `docs/ai/effort-baseline.md`「採用する単位」、`.../subagent_briefing/2026-07-28_003_plan_review.md` §4-3 |
-| **Context索引と現物の突合を機械的検査にする** | `role-map.md` / `playbook-map.md` / `playbooks/README.md` に未記載のrole・playbookがあれば落ちる形(`scripts/check-tester-gate.sh` の兄弟)。**索引は2026-07-25以降更新されず、7/27・7/28の追加が丸ごと抜けていた**(role 3件・playbook 6件)。Yoshinobuの指摘で発覚し補修済み。**同種の欠陥は「触れてよいパスの切り方」で4回起き、うち1回は教訓を記録した後だった** — 文章では止まらないことが実証されている | `docs/ai/reviews/incident_auto_capture_step2/progress.md`「後続への申し送り」A-10・A-7 |
-| **`tool_uses` 見積の単位を見直す** | 直近案件でレンジが **0.43〜4.44(10.3倍)** へ拡大し、`effort-baseline.md` 自身が定める見直しトリガ(1.8倍)を超えた。**ずれたのは製造だけで、レビューと検証はほぼ見積どおり**。仮説は「実行時にしか証明できない性質の個数」を見積が数えていないこと | `docs/ai/effort-baseline.md`(3件目の記帳)、同 progress.md A-1 |
 | 案件の申し送り(上記2件以外) | decoy定型がモジュールによっては成立しない件のLesson昇格、`requirements-analysis` への索引更新の追加、subagentのscratch漏れ対策ほか**計12件**。**個別にここへ写さない** | `docs/ai/reviews/incident_auto_capture_step2/progress.md`「後続への申し送り」 |
 | Operator役の新設 | 現行6役は**開発工程しか持たず運用工程が空白**。Incident記録・運用レポートをAIへ委ねる方向。着手時期は未定 | `docs/ai/roles/` に運用工程のRoleが無いこと。Yoshinobu表明(2026-07-26) |
 | リポジトリ直下 `AGENTS.md` の要否判断 | Codexが開発工程から外れ、このファイルを読む主体が存在しない。**そこを開く動機を持つ人がいない**ため起票だけをここに置く | `AGENTS.md` L7 |
+| **Context文書の保守をStep計画へ統合する(明文化未着手)** | Context記載の環境事実に触れる変更では、Context更新をその案件のStep計画に含める、という方向性は合意済み。`docs/ai/roles/coordinator.md`への反映が未着手 | `docs/ai/reviews/process_retrospective/2026-07-29_007_context_doc_maintenance_direction.md` |
+| **月次振り返りへContext陳腐化チェックを追加するか** | 方向性は合意。実装には無人実行の読み取り範囲拡張(`roles/`・`playbooks/`・`inventories/`、うち`inventories/vars/`除外要否)の決定が要る | 同上 |
 
 ## Next(着手候補) — システム・運用
 

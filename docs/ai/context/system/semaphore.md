@@ -44,7 +44,7 @@ Semaphoreのジョブ結果はSQLite(`semaphore.db`)にあり、read-onlyのSELE
 - Semaphore UIからの起動も本番操作である。job templateに`--check`や安全用extra variablesがあるという推測だけで変更系playbookを実行しない。playbook先頭の`tester-gate`と実際のtemplate設定を確認する。
 - `cert_renew.yml`は`risk-accepted`であり、`--check`でも対象へのissue・deployが本実行される。`cert_renew_quory.yml`も一部taskは`--check`で実行され、Semaphore deploy/restartだけがgateされる。通常のdry-runと同一視しない。
 - Semaphoreのtemplate、schedule、secret、UI設定を変更する作業はリポジトリ編集とは別の外部状態変更であり、人間の明示依頼なしに行わない。
-- private key、password、token、secret変数の値をjob log、agmsg、Context、レビュー文書へ転載しない。
+- private key、password、token、secret変数の値をjob log、Context、レビュー文書へ転載しない。
 - IPアドレス、VLAN ID、VM IDを記載せず、inventory名またはFQDNで表す。
 
 想定読者Role: Coordinator=実行経路とGit外状態を詳細確認(2026-07-29、Tech Lead廃止に伴い統合)、Implementer/Reviewer/Tester=Semaphore経由案件時に詳細確認、その他=概要のみ。

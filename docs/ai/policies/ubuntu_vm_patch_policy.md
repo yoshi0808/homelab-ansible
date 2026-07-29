@@ -139,7 +139,7 @@ healthcheckが`WARNING`または`CRITICAL`なら通知対象と判定する。
 <!-- UV-016 -->
 aptのpost-install scriptによるservice自動restartは、更新を深夜の低需要時に行いhomelabでの実害がほぼないことを条件に許容する。
 
-monthly full-upgradeはhealthcheck、simulation、分類、通知の順に判定し、manual applyでは確認gateを先に通す。実装の詳細はcodeと[playbook map](../context/ansible/playbook-map.md)、運用順序はOperations Contextを参照する。
+monthly full-upgradeはhealthcheck、simulation、分類、通知の順に判定し、manual applyでは確認gateを先に通す。実装の詳細はcodeと`playbooks/README.md`、運用順序はOperations Contextを参照する。
 
 ### 方針1のreboot
 

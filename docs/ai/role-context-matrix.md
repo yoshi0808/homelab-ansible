@@ -21,9 +21,7 @@
 | `docs/ai/context/system/overview.md` | 着手時 | 必要時 | 必要時 | 必要時 |
 | 対象領域System Context(`proxmox.md`/`radius.md`/`monitoring.md`/`semaphore.md`、該当するもののみ) | 着手時(詳細。2026-07-29、Tech Lead廃止に伴いCoordinatorが直接確認する) | 着手時(詳細) | 着手時(詳細) | 着手時(詳細) |
 | `docs/ai/context/ansible/repository-overview.md` | 着手時 | 必要時 | 必要時 | 必要時 |
-| `docs/ai/context/ansible/inventory-map.md` | 着手時(対象host/group特定) | 着手時(対象特定に必須) | 必要時 | 着手時(対象特定に必須) |
-| `docs/ai/context/ansible/playbook-map.md` | 着手時(対象playbook・種別・Policy候補の特定に必須) | 着手時(対象行) | 着手時(対象行) | 着手時(対象行) |
-| `docs/ai/context/ansible/role-map.md` | 必要時(概要はplaybook-mapで足りる) | 着手時(実装対象roleの入出力確認に必須) | 着手時(対象role) | 着手時(対象role) |
+| 対象inventory(`inventories/homelab/hosts.yml`等)・playbook・role本体(2026-07-29、地図3ファイル廃止に伴い現物を直接参照) | 着手時(対象特定に必須) | 着手時(対象特定に必須) | 着手時(対象特定に必須) | 着手時(対象特定に必須) |
 | Policy(`docs/ai/policies/`、対象分野のみ) | 着手時(該当分野) | 着手時(該当分野) | 着手時(該当分野) | 着手時(該当分野) |
 | Issue / 受入条件(案件の依頼文) | 起動時点で自分が起点 | 着手時(必須) | 着手時(必須) | 着手時(必須) |
 | PR / diff | 必要時 | 自分の実装(常時) | 着手時(必須、レビュー対象そのもの) | 着手時(必須、検証対象そのもの) |
@@ -67,5 +65,4 @@ pilot3のTODO2-2レビューで「Role別Contextマトリクスにタイミン�
 
 ## 未解決・持ち越し事項
 
-- `docs/ai/context/ansible/playbook-map.md`が記録した「`prometheus_update_check`と`ubuntu_vm_patch_policy.md`§3.4の不一致」は、Policy自体の見直しが必要なfollow-up候補として残る(TODO2-4の対象外)。
 - Policy本体(`docs/ai/policies/`配下)はTODO2-1の推奨構成にディレクトリが挙がっているが、個別Policyファイルの本実装はPhase2の本設計(TODO2-1完了確認)後に着手する。

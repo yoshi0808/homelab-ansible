@@ -10,7 +10,7 @@
 
 | Role | モデル | 実現方式 |
 |---|---|---|
-| Coordinator | Opus | `claude`。Yoshinobuとの対話窓口、Tier判定、以下Roleの呼び出しと結果評価に加え、**Tier 3/4の要求分解・ADR・リスク整理・見積もりもCoordinator自身が行う**(2026-07-29、Tech Lead役廃止。`docs/ai/reviews/process_retrospective/2026-07-29_005_techlead_retirement.md`)。 |
+| Coordinator | **Opus以上を原則**(Tier 1/2の直接実装に限りSonnet可。2026-07-29、`docs/ai/reviews/process_retrospective/2026-07-29_008_coordinator_model_tier_policy.md`) | `claude`。Yoshinobuとの対話窓口、Tier判定、以下Roleの呼び出しと結果評価に加え、**Tier 3/4の要求分解・ADR・リスク整理・見積もりもCoordinator自身が行う**(2026-07-29、Tech Lead役廃止。`docs/ai/reviews/process_retrospective/2026-07-29_005_techlead_retirement.md`)。 |
 | Implementer | **Sonnet** | Coordinatorがまとめたrequirement/分解案に基づき、Coordinatorが別途Agent toolでsubagentを起動する。`docs/ai/roles/implementer.md`の範囲(最小差分実装、commit/push禁止、本番適用禁止)は不変。 |
 | Reviewer | **Sonnet** | 同様にCoordinatorが別のAgent tool subagentを起動する。Implementerを行ったsubagentとは別セッションとして起動し、独立性を保つ(`docs/ai/roles/reviewer.md`「自分が実装した変更を独立レビュー済みとして扱わない」を、同一subagentの使い回しをしないことで担保する)。**2026-07-29から、Tier 3/4のCoordinatorの計画査読も担う**(`docs/ai/roles/reviewer.md`「計画査読」)。 |
 | Tester | **Sonnet** | 同様にCoordinatorが別のAgent tool subagentを起動する。実ホストへの`--check`/dry-run実行を含め、`docs/ai/roles/tester.md`の禁止事項(本番適用、`--check`なしのcheck-mode-native実行等)はそのまま適用される。 |
@@ -18,7 +18,7 @@
 
 ### モデル・effort配分(2026-07-26確定)
 
-CoordinatorはOpus、Implementer / Reviewer / TesterはSonnet。**subagentは指定しなければ親のモデルを継承する**ため、Sonnet側は明示指定が必要である。各Roleのモデルとeffortは`.claude/agents/<role>.md`のfrontmatter(`model:` / `effort:`)に固定してあり、Coordinatorが`subagent_type`でそれを指定すれば配分は自動的に守られる。
+**Coordinatorは`Opus`以上を原則とする**(「以上」は特定の1モデルへ固定しない)。**Tier判定そのもの、およびTier 3/4(要求分解・ADR・リスク整理・見積もり)はこの原則の例外を認めない。** Tier 1/2の直接実装(Coordinator自身がplaybook等を書く場面)に限り、Sonnetでもよい(2026-07-29 Yoshinobu明示、`docs/ai/reviews/process_retrospective/2026-07-29_008_coordinator_model_tier_policy.md`)。モデルの選択はYoshinobuが行い、難易度を高いと判断すればTier 1/2でも上位モデルを使ってよい。Implementer / Reviewer / TesterはSonnet。**subagentは指定しなければ親のモデルを継承する**ため、Sonnet側は明示指定が必要である。各Roleのモデルとeffortは`.claude/agents/<role>.md`のfrontmatter(`model:` / `effort:`)に固定してあり、Coordinatorが`subagent_type`でそれを指定すれば配分は自動的に守られる。
 
 | Role | model | effort | 根拠 |
 |---|---|---|---|

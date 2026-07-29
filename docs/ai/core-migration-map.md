@@ -31,13 +31,13 @@
 | §2 主要ノードと役割 | 移す | System Context | **[予定 Phase 2]** `docs/ai/context/system/overview.md` | 環境事実である |
 | §2 ansy / Git / quory境界 | 残す | core | **[既存]** `docs/ai/core.md` | 全Roleの開発・本番境界である |
 | §3 名前解決、DNS、inventory例 | 一部残す | core / Context / Policy | **[既存]** coreのIP禁止; **[予定 Phase 2]** System / Repository ContextとNetwork Policy | 禁止は共通、値と手順は変化する |
-| §4 inventory groupとplaybook対応 | 移す | Repository Context | **[予定 Phase 2]** `docs/ai/context/ansible/inventory-map.md`, `playbook-map.md` | リポジトリ地図である |
+| §4 inventory groupとplaybook対応 | 移す | Repository Context | **[既存→廃止]** `inventory-map.md`/`playbook-map.md`は2026-07-29に作成・廃止済み(現物との乖離が繰り返し発生したため)。現在は`inventories/homelab/hosts.yml`・`playbooks/*.yml`を直接参照する運用(`docs/ai/context/ansible/repository-overview.md`) | リポジトリ地図である |
 | §5 管理user、SSH鍵、例外host | 一部残す | core / Context / Policy | **[既存]** coreの秘密保護; **[予定 Phase 2]** System ContextとSSH / Secrets Policy | 秘密境界以外は環境・認証詳細である |
 | §6 playbook / role / files / vars責務 | 移す | Repository Context | **[予定 Phase 2]** `docs/ai/context/ansible/repository-overview.md` | 構造説明である |
 | §7 check shellとAnsibleの責務 | 移す | Operations Context | **[既存]** `docs/ai/context/operations/healthcheck.md` §1(2026-07-26移設) | 主に実装・レビュー時に必要 |
 | §8 files / templates / script | 移す | Policy / Skill | **[分類のみ Phase 2]** Ansible Design Policy; **[既存]** `skills/ansible-implementation-style/SKILL.md` | 実装手順と例外である |
 | §9 read-onlyと変更系の分離 | 一部残す | core / Policy | **[既存]** coreの共通境界; **[分類のみ Phase 2]** Change Safety Policy | 詳細条件は個別判断である |
-| §10 命名、playbook一覧、Policy一覧 | 移す | Repository Context / Policy index | **[既存]** `playbook-map.md`; Policyは **[既存]** `docs/ai/policies/*_policy.md`(2026-07-23移行完了) | 一覧は変化する |
+| §10 命名、playbook一覧、Policy一覧 | 移す | Repository Context / Policy index | **[既存]** `playbooks/README.md`(2026-07-29、`playbook-map.md`廃止に伴い一覧の正本を一本化); Policyは **[既存]** `docs/ai/policies/*_policy.md`(2026-07-23移行完了) | 一覧は変化する |
 | §11 Git / quory反映 | 一部残す | core / Deployment Policy | **[既存]** coreの正本・自己更新禁止; **[分類のみ Phase 2]** Deployment Policy | 操作詳細だけを分離する |
 | §12 自動実行 | 移す | Operations Context / Policy | **[分類のみ Phase 2]** Scheduling Policy | 実行基盤依存の判断である |
 | §13 `.gitignore` | 一部残す | core / Repository Context / Skill | **[既存]** coreの秘密・生成物境界; **[分類のみ Phase 2/5]** Repository Context / Contribution Skill | pattern詳細はコードから確認可能 |
@@ -74,8 +74,8 @@
 | C14-02 | L503-506: ASK代行はtask ownerのみ、未GO破壊操作は不可、移管後旧ownerは停止 | 許可・停止・移管条件 | 移す | Role / Workflow | **[予定 Phase 3]** Coordinator Roleとrouting移管規則(2026-07-29、Tech Lead廃止によりTech Lead側の宛先は消滅) | owner競合を防ぐ |
 | C14-03 | L507-508: Yoshinobuは`claude` / `techlead`へ同一案件を同時依頼せず、逐次引継ぎは許容する | 禁止・引継ぎ許可条件 | 移す | Role / Workflow / Operations Context | **[予定 Phase 3]** owner / routing規則(`techlead`は2026-07-26の常駐trio廃止、2026-07-29のTech Lead役廃止のいずれでも現存しないidentityである。Phase 3実施時はCoordinator/subagent体制向けに書き直すこと) | 二重ownerを防ぎつつ、明示的な逐次引継ぎを可能にする |
 | C15-01 | L587-588: 空の工程ファイルを事前作成しない | 禁止 | 移す | Documentation Skill | **[分類のみ Phase 4–5]** Documentation Skill | 不要成果物を防ぐ |
-| C15-02 | §15 agmsg: 本文はrepo、messageはpath中心 | 正本条件 | 一部残す | core / Workflow | **[既存]** core; **[予定 Phase 3]** Workflow | 監査証跡と配送を分ける |
-| C15-03 | §15 watcher: 通知を承認と扱わず秘密を転載しない | 禁止・停止条件 | 移す | Operations Context / agmsg Skill | **[分類のみ Phase 2/5]** Agent Operations Context / agmsg Skill | ASK検知は実行許可ではない |
+| C15-02 | §15 agmsg: 本文はrepo、messageはpath中心 | 正本条件 | **廃止(移設不要)** | — | **agmsgは2026-07-29に不要と判断され`docs/ai/context/operations/agmsg-message-format.md`ごと削除**。監査証跡と配送を分ける原則自体は`docs/ai/role-routing-index.md`「証跡の扱い」が引き継ぎ済み | 監査証跡と配送を分ける |
+| C15-03 | §15 watcher: 通知を承認と扱わず秘密を転載しない | 禁止・停止条件 | **廃止(移設不要)** | — | **agmsg watcher(`tmux-ask-watch.sh`)は`permissions.ask`全廃(2026-07-26)・Tech Lead廃止(2026-07-29)により二重に不要となり削除済み** | ASK検知は実行許可ではない |
 | C16-01 | L910-911: SSH自体でなく接続先コマンドの性質で安全分類 | 判断条件 | 移す | Test Safety Policy | **[既存]** `docs/ai/policies/ansible_test_safety_policy.md` | 実行方法でなく副作用を評価する |
 | C16-02 | L914: pve2先行、pve1/本番はdry-run後に人間判断 | 順序・停止条件 | 移す | System Context / Test Policy | **[予定 Phase 2]** Proxmox ContextとTest Safety Policy | 環境固有の先行検証境界 |
 | C16-03 | L917: quory SSHは指定鍵を先に試し、鍵なし失敗で不可と断定しない | 例外 | 移す | System Context / Test Skill | **[分類のみ Phase 2/5]** quory Context / Tester Skill | 誤った到達不能判定を防ぐ |

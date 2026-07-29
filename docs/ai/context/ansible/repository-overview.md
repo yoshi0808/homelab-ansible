@@ -2,14 +2,14 @@
 
 この文書は、新しいIssueから対象のinventory、playbook、role、Policy候補へ進むための入口である。詳細仕様や変化する値は複製せず、現行コードを正本とする。
 
-## 正本と地図の使い方
+## 正本の使い方
 
-1. 対象ホストまたはgroupを [`inventory-map.md`](inventory-map.md) で確認する。
-2. 実行入口、安全上の種別、関連Policy候補を [`playbook-map.md`](playbook-map.md) で絞る。
-3. 処理本体、主要入力、副作用、利用元を [`role-map.md`](role-map.md) で確認する。
-4. 実装判断は、地図ではなく対象ファイル、現在のdiff、関連Policyを読んで確定する。
+**2026-07-29、`inventory-map.md` / `playbook-map.md` / `role-map.md` を廃止した。** 手動更新の索引は現物との乖離が繰り返し発生し(`docs/ai/reviews/process_retrospective/2026-07-29_006_ansible_context_map_retirement.md`)、古い索引を信じて見落とす方が索引なしで現物を確認するより危険と判断したため、要約の地図を持たず現行ファイルへ直接あたる運用へ一本化した。
 
-地図と実体が食い違う場合は、`ansible.cfg`、`inventories/homelab/hosts.yml`、`playbooks/*.yml`、`roles/*` の現行実体を優先し、地図を更新する。安全区分は各playbook先頭の `# tester-gate:` が正本である。
+1. 対象ホストまたはgroupは `inventories/homelab/hosts.yml` を確認する。
+2. 対象playbookの実行入口・対象範囲は `playbooks/*.yml` と `playbooks/README.md` を確認する。安全区分は各playbook先頭の `# tester-gate:` が正本である。
+3. 対象roleの処理本体・主要入力・副作用は `roles/<role>/tasks/`・`roles/<role>/defaults/` を直接確認する。利用元(どのplaybookがどのroleを呼ぶか)は `grep -rl '<role名>' playbooks/` で特定する。
+4. 実装判断は対象ファイル、現在のdiff、関連Policyを読んで確定する。
 
 ## 構造
 
@@ -47,7 +47,5 @@ ansy: Issueに基づく開発・レビュー・検証・commit/push準備
 
 ## 更新時の最小確認
 
-- inventory groupや所属変更: `inventory-map.md` を更新する。
-- playbook追加・改名・対象・role・処理種別・依存変更: `playbook-map.md` と `playbooks/README.md` を更新する。
-- role追加・削除・責務・主要入出力変更: `role-map.md` を更新する。
-- Policy追加・対象変更: playbook mapの関連Policyを更新する。
+- playbook追加・改名・対象・role・処理種別・依存変更: `playbooks/README.md` を更新する。
+- Policy追加・対象変更: 対象playbookのヘッダコメントまたは `playbooks/README.md` から参照できるようにする。

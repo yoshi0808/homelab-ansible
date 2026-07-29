@@ -1,5 +1,7 @@
 # Policy構造標準化 移行追跡表
 
+状態: **凍結(歴史的記録)**。2026-07-24時点のPolicy構造への1回限りの移行追跡表であり、対象Policyはその後複数回改訂され、行番号は現物と一致しない。どの生きた文書からも参照されていない。「role-map」「playbook-map」への言及は2026-07-29に廃止済みのファイルを指す(`docs/ai/reviews/process_retrospective/2026-07-29_006_ansible_context_map_retirement.md`)。参照する場合は現物のPolicy・コードを優先する。
+
 対象: `docs/ai/core.md` と `docs/ai/policies/*_policy.md` 9本（2026-07-24時点、計10文書）。
 
 本表は既存文書を書き換える前の構造索引である。既存記述と実装の意味的整合性は判定せず、標準構造への対応、論理group、Policy境界を追跡する。

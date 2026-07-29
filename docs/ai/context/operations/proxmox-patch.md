@@ -93,5 +93,4 @@ Sophos VMは他のguestと同じく退避対象である。退避時は必要な
 
 - [Policy](../../policies/proxmox_patch_policy.md)
 - [System Context](../system/proxmox.md)
-- [playbook map](../ansible/playbook-map.md)
-- [role map](../ansible/role-map.md)
+- [Repository Overview](../ansible/repository-overview.md)(playbook・roleは `playbooks/*.yml`・`roles/*` を直接参照)

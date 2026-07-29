@@ -94,7 +94,7 @@ Ubuntu senderはsender role、monnie receiverはAlloy roleで管理する。
 <!-- LOG-029 -->
 Lokiへのpushはmonnie localhostへ限定する。
 
-source、現行stream、管理ownerの具体構成は [System Context](../context/system/monitoring.md)、playbook / roleの索引は [playbook map](../context/ansible/playbook-map.md) と [role map](../context/ansible/role-map.md) を参照する。config、template、dashboard JSONの実体はcodeを正本とする。
+source、現行stream、管理ownerの具体構成は [System Context](../context/system/monitoring.md) を参照する。playbook / roleは`playbooks/*.yml`・`roles/*`を直接参照する(`docs/ai/context/ansible/repository-overview.md`)。config、template、dashboard JSONの実体はcodeを正本とする。
 
 ## 3. 対応するPlaybook
 
