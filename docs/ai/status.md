@@ -74,3 +74,4 @@
 - **proxmox_patch_dryrun AC4(両ノード同時到達不能)の実地検証** — pve2の停止が必要で許可範囲外。残存リスクとして `docs/ai/reviews/proxmox_patch_dryrun/2026-07-26_005_test_result.md` L425 に記録済み。
 - **pve1の夏季平日シャットダウン運用** — `roles/recovery_probe/defaults/main.yml` の `recovery_probe_pve_host` に暫定である旨と復帰条件がある。規律1により使う場所の記載を正とする。
 - **既知条件由来の捕捉が全体に占める割合(実測値)** — `docs/ai/policies/incident_capture_policy.md` IC-022 が正本。規律4により値をここへ写さない。
+- **quoryの作業ツリー同期(`git pull`)の自動化** — 2026-07-29に検討し**見送った**(Yoshinobu判断)。手打ちで残すこと自体が制御である: playbook化するとAIから実行可能になり、Slack(`recovery_io` → Codex)へ載せると露出面が増える。**現状は「漏洩してもCodex経由では破壊的作業ができない」状態にあり、利便性と引き換えにこれを崩さない。** 同日3回この摩擦を踏んでいるが(Coordinator / Tester / Yoshinobu)、摩擦は理由にならない。**再提案しないこと。** なお、この判断が受け入れている残存リスクは「quoryのcheckoutが古いまま、ラダー系playbookが旧コードで走る」ことである — `recovery-probe`本体で今日塞いだのと同じ欠陥クラスであり、**検知だけを読み取り専用で持つ案は境界を崩さない**(適用は手打ちのまま)。未着手。
