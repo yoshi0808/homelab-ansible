@@ -141,10 +141,20 @@
           ansible.builtin.reboot:
             reboot_timeout: 300
 
+        # reboot後、freeradiusの起動と1812/1813のbindを待つ。UDPポートのため
+        # ansible.builtin.wait_for は使えない(TCP connectのみを実装しており
+        # UDPのlisten判定機能を持たない)。until/retriesでssの呼び出し自体を
+        # リトライさせる。retries×delay=120秒はmonnie側のwait_for timeout:120
+        # と揃えた。failed_when: falseはuntilと両立する(untilはregisterした
+        # 値で再判定するため、タスク自体の成否とは独立)。
+        # 詳細: docs/ai/memory/incidents/2026-07-30_ubuntu-nightly-monnie-external-port-wait.md
         - name: Check freeradius service status
           ansible.builtin.command:
             cmd: systemctl is-active freeradius
           register: freeradius_active
+          until: freeradius_active.stdout.strip() == 'active'
+          retries: 12
+          delay: 10
           changed_when: false
           failed_when: false
 
@@ -152,6 +162,9 @@
           ansible.builtin.shell:
             cmd: ss -ulnH 'sport = :1812'
           register: port_1812_output
+          until: port_1812_output.stdout | length > 0
+          retries: 12
+          delay: 10
           changed_when: false
           failed_when: false
 
@@ -159,6 +172,9 @@
           ansible.builtin.shell:
             cmd: ss -ulnH 'sport = :1813'
           register: port_1813_output
+          until: port_1813_output.stdout | length > 0
+          retries: 12
+          delay: 10
           changed_when: false
           failed_when: false
 
