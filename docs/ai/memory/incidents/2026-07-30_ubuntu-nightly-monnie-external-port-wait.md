@@ -61,16 +61,18 @@ monnie 側の UFW ログに、コントローラからの TCP 接続が落とさ
 
 ### 発生頻度の訂正(2026-07-30、本Incident初版から訂正)
 
-初版は「2026-06-28の共通化以降、約1か月潜在し2026-07-30が初回顕在化」としていたが、**これは誤りだった**。quoryからansyへ同期済みのSemaphoreログ(`reports/incidents/quory/semaphore-412/semaphore-log.log`)を確認したところ、**1週間前の2026-07-22にも同一の失敗が記録されていた**。
+初版は「2026-06-28の共通化以降、約1か月潜在し2026-07-30が初回顕在化」としていたが、**これは誤りだった**。quoryからansyへ同期済みのSemaphoreログ(`reports/incidents/quory/semaphore-412/semaphore-log.log`)を確認したところ、**1週間前の2026-07-23 JSTにも同一の失敗が記録されていた**。
 
 ```
-=== semaphore-412 (2026-07-22) ===
-18:33:03 UTC  Origin: .../ubuntu_nightly.yml:393:11 (当時の行番号。同一のwait_for)
-18:35:03 UTC  Origin: .../ubuntu_nightly.yml:393:11
-18:35:26 UTC  [ERROR] reboot or post-reboot check failed on monnie
+=== semaphore-412 (2026-07-23 JST / 下記ログ行はUTC表記) ===
+2026-07-22 18:33:03 +0000 UTC  Origin: .../ubuntu_nightly.yml:393:11 (当時の行番号。同一のwait_for)
+2026-07-22 18:35:03 +0000 UTC  Origin: .../ubuntu_nightly.yml:393:11
+2026-07-22 18:35:26 +0000 UTC  [ERROR] reboot or post-reboot check failed on monnie
 ```
 
-timeoutの間隔(120秒×2ポート分、03:33:03→03:35:03 JST)まで2026-07-29と一致する。
+timeoutの間隔(120秒×2ポート分、JSTで03:33:03→03:35:03)まで2026-07-30 JST(=今回)と一致する。
+
+**この節は初版でJST/UTCを混同していた**(Semaphoreログの日付をそのままJSTの日付として書き、`2026-07-22` / `2026-07-29` としていた)。Semaphoreの表示はUTC、`reports/` 配下のレポートと本リポジトリの記述はJSTであり、`docs/ai/status.md` Nextの「時刻表記JST規約をrepoへ明文化」が指摘している混在がそのまま実害として現れた実例である。**JSTでの発生日は2026-07-23と2026-07-30の2回**である。
 
 **この欠陥は確率的ではなく決定論的である。** monnieの9090/3100はUFWで恒常的に外部非公開のため、サービス起動の遅延という「運」の要素は無く、`reboot_required=true`になった夜は**毎回確実に**失敗する。「普段エラーが来ていない」ように見えたのは、`reboot_required`がfalseの日は`meta: end_host`(L331)でホストごとにplayが終わり、この`wait_for`に到達しないためである。
 
@@ -80,7 +82,7 @@ L331          meta: end_host             ← リブート不要ならここで�
 L383-402      reboot → wait_for 9090/3000/3100
 ```
 
-前回(2026-07-22)は、`rescue`の誤った固定文言(「reboot タイムアウトまたは SSH 接続不能」)のせいで原因が特定されないまま見過ごされたと考えられる。初出は `3fdafbc`(2026-05-28)、現在の形は `35979b8`(2026-06-28、healthcheckを`check.yml`へ切り出して共通化したとき)。共通化で正しい内部チェックを足した際に、誤った外部`wait_for`を消さなかった。
+前回(2026-07-23 JST)は、`rescue`の誤った固定文言(「reboot タイムアウトまたは SSH 接続不能」)のせいで原因が特定されないまま見過ごされたと考えられる。初出は `3fdafbc`(2026-05-28)、現在の形は `35979b8`(2026-06-28、healthcheckを`check.yml`へ切り出して共通化したとき)。共通化で正しい内部チェックを足した際に、誤った外部`wait_for`を消さなかった。
 
 ### reboot モジュールの再接続間隔(参考情報として調査)
 
@@ -111,13 +113,13 @@ L383-402      reboot → wait_for 9090/3000/3100
 
 - **リブート経路の実機検証は、次に `reboot_required` が true になる夜まで行えない。** monnie を検証目的で意図的にリブートすることはしていない(監視スタック全体を止めるため)。決定論的な欠陥である以上、修正が正しければ次回は確実に通るはずである。`docs/ai/status.md` の Watch が持つ。
 - radius_servers 側は当初「未着手」としていたが、**同日中に是正した**(下記「追加修正」参照)。
-- **2026-07-22の発生時、原因を特定できず見過ごされていたこと自体が別の問題である。** `rescue` の固定文言が原因調査を誤った方向へ導いたためで、今回その文言は是正した(上記「修正内容」2.)。同種の「固定文言のせいで1回分の発生が捨てられる」構造が他のplaybookに残っていないかは未調査。
+- **2026-07-23 JSTの発生時、原因を特定できず見過ごされていたこと自体が別の問題である。** `rescue` の固定文言が原因調査を誤った方向へ導いたためで、今回その文言は是正した(上記「修正内容」2.)。同種の「固定文言のせいで1回分の発生が捨てられる」構造が他のplaybookに残っていないかは未調査。
 
 ## 追加修正(2026-07-30、radius_servers側)
 
 freeradius/1812/1813のチェックにも**待ちが無い**ことが判明した(`Check freeradius service status` / `Check 1812/udp listening` / `Check 1813/udp listening` はいずれも1回きりで `failed_when: false`)。UDPポートのため `ansible.builtin.wait_for` は使えない(モジュールがTCP connectのみを実装しており、UDPのlisten判定機能を持たない。`ansible/modules/wait_for.py` の `TCPConnectionInfo` で確認)。
 
-本番ログ(`semaphore-412`、2026-07-22)では reboot開始から約20秒でfreeradiusが `active` になっており、これまでは通っていた。しかしこの間隔はコード上保証されたものではなく(`reboot`モジュールの再接続は固定間隔でなく指数バックオフであり、環境やタイミング次第で変動する)、**運が良かっただけで壊れていないと確認されたわけではない**。monnie側と実装を揃え、`until`/`retries`で待つ形にした。
+本番ログ(`semaphore-412`、2026-07-23 JST)では reboot開始から約20秒でfreeradiusが `active` になっており、これまでは通っていた。しかしこの間隔はコード上保証されたものではなく(`reboot`モジュールの再接続は固定間隔でなく指数バックオフであり、環境やタイミング次第で変動する)、**運が良かっただけで壊れていないと確認されたわけではない**。monnie側と実装を揃え、`until`/`retries`で待つ形にした。
 
 ```yaml
 - name: Check freeradius service status

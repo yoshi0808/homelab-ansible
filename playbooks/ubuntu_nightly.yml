@@ -111,7 +111,7 @@
         slack_message: |
           Host: {{ inventory_hostname }}
           check-mode: reboot is required but was not performed (--check).
-          Time: {{ ansible_facts["date_time"]["iso8601"] }}
+          Time: {{ lookup('pipe', "TZ='Asia/Tokyo' date '+%Y-%m-%dT%H:%M:%S+09:00'") }}
 
     - name: Set recovery mute before reboot
       ansible.builtin.include_tasks: "{{ playbook_dir }}/../roles/recovery_mute/tasks/set.yml"
@@ -131,7 +131,7 @@
         slack_message: |
           Host: {{ inventory_hostname }}
           Action: Reboot started
-          Time: {{ ansible_facts["date_time"]["iso8601"] }}
+          Time: {{ lookup('pipe', "TZ='Asia/Tokyo' date '+%Y-%m-%dT%H:%M:%S+09:00'") }}
 
     - name: Reboot and post-reboot verification (radius_servers)
       when: not ansible_check_mode
@@ -233,7 +233,7 @@
             slack_message: |
               Host: {{ inventory_hostname }}
               Result: {{ 'CRITICAL' if nightly_criticals | length > 0 else 'OK' }}
-              Time: {{ ansible_facts["date_time"]["iso8601"] }}
+              Time: {{ lookup('pipe', "TZ='Asia/Tokyo' date '+%Y-%m-%dT%H:%M:%S+09:00'") }}
 
               Service:
                 freeradius: {{ freeradius_active.stdout.strip() }}
@@ -396,7 +396,7 @@
         slack_message: |
           Host: {{ inventory_hostname }}
           check-mode: reboot is required but was not performed (--check).
-          Time: {{ ansible_facts["date_time"]["iso8601"] }}
+          Time: {{ lookup('pipe', "TZ='Asia/Tokyo' date '+%Y-%m-%dT%H:%M:%S+09:00'") }}
 
     - name: Set recovery mute before reboot
       ansible.builtin.include_tasks: "{{ playbook_dir }}/../roles/recovery_mute/tasks/set.yml"
@@ -416,7 +416,7 @@
         slack_message: |
           Host: {{ inventory_hostname }}
           Action: Reboot started
-          Time: {{ ansible_facts["date_time"]["iso8601"] }}
+          Time: {{ lookup('pipe', "TZ='Asia/Tokyo' date '+%Y-%m-%dT%H:%M:%S+09:00'") }}
 
     - name: Reboot and post-reboot verification (monitoring_servers)
       when: not ansible_check_mode
@@ -483,7 +483,7 @@
             slack_message: |
               Host: {{ inventory_hostname }}
               Result: {{ monitoring_report.result.status }}
-              Time: {{ ansible_facts["date_time"]["iso8601"] }}
+              Time: {{ lookup('pipe', "TZ='Asia/Tokyo' date '+%Y-%m-%dT%H:%M:%S+09:00'") }}
 
               Service:
                 prometheus: {{ monitoring_report.services.prometheus }}
