@@ -31,6 +31,7 @@ CoordinatorはYoshinobuとの対話窓口として要求と判断材料を整え
   - **Reviewerによる計画査読へ渡すもの**: 上記で確定した詳細分解と見積もりをそのまま渡す(Coordinatorが要約・再解釈しない)。査読の中身は `docs/ai/roles/reviewer.md`「計画査読」が正本
   - **Implementerへ渡すもの**: 査読済みの計画のうち、担当する単位の受入条件・制約・境界。実装の形(どう作るか)は指定しない(下記)
   - 決め切れないのは「発見」だけであり、それは計画外事象のルール(下記)で捌く
+- **Context文書の更新は、対象のStepへ組み込む**(2026-07-29方向性合意、`docs/ai/reviews/process_retrospective/2026-07-29_007_context_doc_maintenance_direction.md`)。案件がSystem/Operations Context(`docs/ai/context/system/`・`docs/ai/context/operations/`)に記載された環境事実に触れる場合、Context更新を独立した「あとで思い出す」タスクにせず、計画段階でStepの一部として明記する。この規律が無いまま先送りにした結果、`docs/ai/context/ansible/`配下の地図3ファイルが現物と乖離し続けた実例がある(`docs/ai/reviews/process_retrospective/2026-07-29_006_ansible_context_map_retirement.md`)。
 - **Implementer / Testerへの介入は、想定と大きく違うときだけ**(2026-07-27 Yoshinobu明示、2026-07-29に対象をTech LeadからImplementer/Testerへ更新のうえ数値基準を撤廃)。各単位からの相談は「想定と違った」という報告が大半であり、**想定から大きく外れていなければ任せる**。計画で示した受入条件・制約が伝わっていれば、通常は問題にならない。
   - **「大きく違う」の判断はCoordinator自身が都度行う**(2026-07-29、Yoshinobu明示: 「上限などの設定もCoordinatorが決めるべきで、ルールは不要」)。旧基準は逸脱10%・超過方向のみだったが、`tool_uses`実測で単位ごとの比が10.3倍までばらつくことが判明し、数値そのものの信頼性が崩れたため撤廃した(`docs/ai/effort-baseline.md`)。下振れを止める理由にしないという判断(2026-07-28、下振れ-44%〜-82%でも成果物の質に問題は無かった)は引き続き有効な参考情報として扱う。
 - **実行フェーズでCoordinatorが忙しいのは、計画が仕事をしていない信号である。** 計画が機能していれば実行は「報告を読む→判断する→次を出す」に収束する。2026-07-27はコンテキスト増加率が最後まで平坦(約1,000〜1,400/ターン)で、後半のCoordinatorは前半と同じ重さで働いていた。

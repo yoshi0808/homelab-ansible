@@ -102,6 +102,8 @@ Policy または Skill (該当業務のPolicyファイル新設・改訂、ま�
 
 **無人実行は`docs/ai/status.md`を書き換えない**(2026-07-27)。書込allowlistは上記3パスのみで、`status.md`はそこに含まれない(`role-routing-index.md`「無人実行されるCoordinator」の表)。読取は`docs/`配下なので可能である。したがって上記「状態の突合」で見つかった差分は、**書き換えずに報告へ列挙する**。auto-memoryを読み取りのみとしている扱いと同じで、反映は後で対話セッションかYoshinobuが行う。allowlistを広げて`status.md`を書けるようにするのは、封じ込めが成立している3条件(`docs/ai/memory/lessons/claude-code-unattended-session-confinement.md`)を崩さないか確認したうえで別途判断する。
 
+**Context陳腐化チェックが追加された(2026-07-29)**。上記3系統(Incident/auto-memory/工程往復案件)とは別軸で、`docs/ai/context/system/`・`docs/ai/context/operations/`・`docs/ai/context/ansible/repository-overview.md`の記述内容が`roles/`・`playbooks/`・`inventories/homelab/`の現物と整合しているかを検査する。詳細は`roles/knowledge_review/templates/review-prompt.md.j2`「Context陳腐化チェック」節、読取範囲拡張の経緯は`docs/ai/reviews/knowledge_review_context_check/`を参照。
+
 ## 4. Role別のKnowledge参照範囲(TODO6-3)
 
 | Role | 参照するKnowledge |

@@ -14,6 +14,16 @@
 
 **denylist(`--disallowedTools`で禁止パスを列挙)は使わない。** 列挙から漏れた経路には柵が無く、モデルの自制以外に歯止めが無い。列挙漏れは書いた本人には見えない([[verify-the-outside-of-a-claimed-boundary]])。
 
+### 追記(2026-07-29) — `Read`はcwd内で「allowlist方式」になっていなかった
+
+上記「書込と読取は別の軸として両方絞る」は、**cwd外の拒否だけを実測しており、cwd内の挙動までは確認していなかった。** `roles/knowledge_review`の権限プロファイルへ`Read(roles/**)`等を追加する案件で、Testerがdecoy実測により次を発見した。
+
+**Claude Code(v2.1.220時点)のReadは、cwd内かつallow/denyのどちらにも一致しないpathを、既定で許可する。** cwd外は正しく拒否される(`/etc/hostname`等で確認済み)。つまり`Read(docs/**)`・`Read(skills/**)`だけを`allow`に書いていた元の構成でも、**cwd内にある`roles/`・`playbooks/`・`inventories/vars/`(秘密を含み得る)は、そもそも`allow`に載せていなくても読めていた可能性が高い。** 「path を絞ると読取が絞られる」という理解は誤りで、実際には「allowは追加の許可、denyだけが拒否として効く。cwd内でallowに載らないpathは黙って通る」という挙動だった。
+
+**是正**: cwd内の機密パス(このrepoでは`inventories/vars/`)は、**`allow`から外すだけでなく`deny`へ明示的に書く**(`roles/knowledge_review/templates/job-settings.json.j2`の`deny`配列、2026-07-29時点で`Bash`/`WebFetch`/`WebSearch`と並べて追加)。denylistを主たる防御にしない、という上段の方針とは矛盾しない——ここは「allowlistで防げると誤解していた1箇所」に対する、狙いを定めた例外的な追加であり、防御の主体は引き続きcwd境界とEdit側のallowlistである。
+
+**教訓**: `Edit`(書込)は今回もallowlist通りに機能した(`docs/ai/memory/**`等の3パス以外は拒否)。**`Read`と`Edit`で同じ「allowlist」という言葉を使っていても、既定挙動(cwd内の扱い)が異なる場合がある。** 新しい権限プロファイルを作る・広げるときは、追加するツール(`Read`/`Edit`/`Bash`等)ごとに「未指定pathがどちらに転ぶか」を実測で確認し、思い込みで転用しない。
+
 ### 効かない構成(実測)
 
 | 構成 | 許可パス | 列挙外(`CLAUDE.md`) | repo外 |

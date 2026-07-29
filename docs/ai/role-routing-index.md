@@ -50,7 +50,7 @@ Tier 1/2はこれまで通りCoordinator自身が実装し、Tier 2のみTester�
 | 起動 | systemd timer(ansy専用。auto-memoryがansyにしか無いため) |
 | 判断の委譲先 | 無し。subagentを起動せず単独で完結する |
 | 書込可(allowlist方式) | `docs/ai/memory/`、`docs/ai/context/`、`skills/` の3つ**のみ**(実装: `roles/knowledge_review/templates/job-settings.json.j2`) |
-| 読取可 | `docs/`、`skills/`、`--add-dir`で渡したauto-memoryのみ。それ以外は拒否 |
+| 読取可 | `docs/`、`skills/`、`roles/`、`playbooks/`、`inventories/homelab/`(`inventories/vars/`は不可)、`--add-dir`で渡したauto-memoryのみ。それ以外は拒否(2026-07-29拡張、Context陳腐化チェック用) |
 | Bash | 禁止 |
 | auto-memory | **読み取りのみ**。repo外への書込はこの構成では許可できない。縮約が必要な項目は報告に列挙し、後で対話セッションかYoshinobuが行う |
 | commit/push | しない。差分は作業ツリーに残しYoshinobuがcommitする |

@@ -22,12 +22,30 @@
     "Read() が全ファイル読取ツールを、Edit() が全ファイル編集ツールをそれぞれ兼ねる。",
     "",
     "--setting-sources '' には副次的な保護もある: .claude/agents/ の定義もロードされないため、",
-    "カスタム subagent 経由の特権昇格ができない(実測で subagent も同じプロファイルに拘束される)。"
+    "カスタム subagent 経由の特権昇格ができない(実測で subagent も同じプロファイルに拘束される)。",
+    "",
+    "2026-07-29、Context陳腐化チェックの追加に伴い Read(roles/**)・Read(playbooks/**)・",
+    "Read(inventories/homelab/**) を追加した。Context文書が名指しするrole/playbook/hostが",
+    "現物と整合するか確認するには、その現物を読める必要があるため。inventories/vars/ は",
+    "意図的に対象外のまま: docs/ai/context/ansible/repository-overview.md が秘密を含み得ると",
+    "唯一名指ししているパスであり、Context記載内容(node役割・依存関係・運用順序)の検証に",
+    "その中身は不要。",
+    "",
+    "重要(2026-07-29 Tester実測で発覚): allow に無い path は自動的に拒否されるとは限らない。",
+    "Claude Code は cwd 内のファイルについて、allow/deny のどちらにも一致しない Read を",
+    "既定で許可する(cwd 外は正しく拒否される。実測確認済み)。つまり inventories/vars/ は",
+    "allow へ書かなかっただけでは読めてしまう。deny(Bash/WebFetch/WebSearch と同格)へ明示的に",
+    "書くことで初めて拒否される。今後 cwd 内に新しい機密パスを持ち込む場合、必ず deny 側へも",
+    "明示すること。allow に書かないことを『拒否』と混同しない。",
+    "詳細は docs/ai/memory/lessons/claude-code-unattended-session-confinement.md を参照。"
   ],
   "permissions": {
     "allow": [
       "Read(docs/**)",
       "Read(skills/**)",
+      "Read(roles/**)",
+      "Read(playbooks/**)",
+      "Read(inventories/homelab/**)",
       "Edit(docs/ai/memory/**)",
       "Edit(docs/ai/context/**)",
       "Edit(skills/**)"
@@ -35,7 +53,8 @@
     "deny": [
       "Bash",
       "WebFetch",
-      "WebSearch"
+      "WebSearch",
+      "Read(inventories/vars/**)"
     ]
   }
 }

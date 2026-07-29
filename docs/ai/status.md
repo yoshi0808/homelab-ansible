@@ -40,6 +40,7 @@
 | Reviewer / Testerの **effort=medium 試行** | 次にTier 4を回すとき | findings品質(逐行照合の取りこぼし)が落ちていないか。落ちていれば `.claude/agents/reviewer.md` / `tester.md` の `effort:` を `high` へ戻す | `docs/ai/role-routing-index.md`「モデル・effort配分」 | 2026-07-27 |
 | Alloy **Phase 3(異常値のFire)** | Lokiにログが十分蓄積した時点 | requirementは作成済み。Grafana Exploreで対象シグネチャの出現頻度を見て閾値を決める | `docs/ai/reviews/promtail_to_alloy/2026-07-19_phase3_alerting_requirement.md` | 2026-07-27 |
 | Proxmoxパッチ自動チェーンの **実発火の観測** | パッチ件数が少なく手動介入が要らない週末 | 自動チェーンが最後まで通ったログ。過去2回(07-11/12、07-18/19)は大量パッチで手動対応となり未観測 | `docs/ai/reviews/tester_mode/`、`docs/ai/context/operations/proxmox-patch.md` | 2026-07-27 |
+| Context陳腐化チェック追加後の**`knowledge_review_timeout`(1800秒)が足りるか** | 次回2026-08-26の月次実行 | `journalctl -u ansible-knowledge-review`でタイムアウト終了していないか確認。Testerのdecoy見積もりでは余裕が無い可能性が高いとされた(実測はデータが無く不可) | `docs/ai/reviews/knowledge_review_context_check/2026-07-29_005_u1_test_result.md` | 2026-07-29 |
 
 ## Next(着手候補) — 工程・体制
 
@@ -52,8 +53,6 @@
 | 案件の申し送り(上記2件以外) | decoy定型がモジュールによっては成立しない件のLesson昇格、`requirements-analysis` への索引更新の追加、subagentのscratch漏れ対策ほか**計12件**。**個別にここへ写さない** | `docs/ai/reviews/incident_auto_capture_step2/progress.md`「後続への申し送り」 |
 | Operator役の新設 | 現行6役は**開発工程しか持たず運用工程が空白**。Incident記録・運用レポートをAIへ委ねる方向。着手時期は未定 | `docs/ai/roles/` に運用工程のRoleが無いこと。Yoshinobu表明(2026-07-26) |
 | リポジトリ直下 `AGENTS.md` の要否判断 | Codexが開発工程から外れ、このファイルを読む主体が存在しない。**そこを開く動機を持つ人がいない**ため起票だけをここに置く | `AGENTS.md` L7 |
-| **Context文書の保守をStep計画へ統合する(明文化未着手)** | Context記載の環境事実に触れる変更では、Context更新をその案件のStep計画に含める、という方向性は合意済み。`docs/ai/roles/coordinator.md`への反映が未着手 | `docs/ai/reviews/process_retrospective/2026-07-29_007_context_doc_maintenance_direction.md` |
-| **月次振り返りへContext陳腐化チェックを追加するか** | 方向性は合意。実装には無人実行の読み取り範囲拡張(`roles/`・`playbooks/`・`inventories/`、うち`inventories/vars/`除外要否)の決定が要る | 同上 |
 
 ## Next(着手候補) — システム・運用
 
