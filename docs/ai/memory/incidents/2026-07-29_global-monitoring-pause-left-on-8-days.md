@@ -56,5 +56,6 @@ pause自体は**解除で復旧する**(`homelab-monitoring-resume`がflagを削
 
 ## 残存リスク
 
-- **8日間の空白期間中に自律復旧の発火を要する事象が発生していたかは未確認。** 遡って確認するならLokiの当該期間を`recovery-probe`のログで走査する必要がある(retentionは有効な削除設定が無いためデータは残っている)。
+- **8日間の空白期間中に自律復旧の発火を要する事象が発生していたかは未確認。追跡はクローズした**(2026-07-29 Yoshinobu判断)。Slack経由のログ調査経路(`recovery_io` → Codex → Loki)が同日に成立し、必要が生じた時点で随時遡れるようになったため、恒久の申し送りとして持たない。`docs/ai/reviews/slack_loki_investigation/` 参照。retentionは有効な削除設定が無いためデータ自体は残っている。
+  - **遡るときに`recovery-probe`のログを見ても分からない**(2026-07-29訂正。本Incidentの初版はこれを確認手段として挙げていた)。`roles/recovery_probe/files/recovery-probe.py`のmainループはpause判定をprobeより**前**に置いて`continue`するため、pause中は`monitoring paused (global) — skip`しか残らず、**probe結果そのものが存在しない**。証跡が要るならmonnieのPrometheus(対象VMの`up`の欠落)や、authy / monnie / sophos自身のログなど、probe以外の系から取る。
 - pauseを立てた主体・目的の特定は推定に留まる。pause flagが理由を保持しない設計である以上、記録から確定させることはできない。
