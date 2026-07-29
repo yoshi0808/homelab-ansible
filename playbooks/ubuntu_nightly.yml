@@ -232,15 +232,37 @@
               {% endfor %}
 
       rescue:
-        - name: Send reboot failure notification
+        # この rescue は block 全体(reboot / ポート待ち / healthcheck / レポート /
+        # 通知)を覆う。2026-07-30 まで失敗箇所によらず「reboot タイムアウトまたは
+        # SSH 接続不能」の固定文言を送っていたため、ポート待ちの失敗を SSH 障害と
+        # 誤認させた。失敗したタスク名と理由を必ず本文へ載せる。
+        # 詳細: docs/ai/memory/incidents/2026-07-30_ubuntu-nightly-monnie-external-port-wait.md
+        - name: Summarize which task failed and why
+          ansible.builtin.set_fact:
+            _nightly_failed_task: "{{ ansible_failed_task.name | default('(タスク名が取得できなかった)', true) }}"
+            # ループしたタスクは msg を持たず results を持つため両方を扱う。
+            # join は空文字列を返しうるので default(..., true) で拾う。
+            _nightly_fail_reason: >-
+              {{ (ansible_failed_result.results | default([])
+                  | selectattr('failed', 'defined') | selectattr('failed')
+                  | map(attribute='msg') | list | join(' / ')
+                  | default('(理由が取得できなかった)', true))
+                 if (ansible_failed_result.results is defined)
+                 else (ansible_failed_result.msg | default('(理由が取得できなかった)', true)) }}
+
+        - name: Send failure notification
           ansible.builtin.include_tasks: "{{ playbook_dir }}/../roles/common_slack/tasks/notify.yml"
           vars:
             slack_channel: "alerts"
             slack_status: "critical"
-            slack_title: "[ubuntu_nightly] reboot FAILED - {{ inventory_hostname }}"
+            slack_title: "[ubuntu_nightly] FAILED - {{ inventory_hostname }}"
             slack_message: |
               Host: {{ inventory_hostname }}
-              reboot タイムアウトまたは SSH 接続不能。手動確認が必要。
+              失敗タスク: {{ _nightly_failed_task }}
+              理由: {{ _nightly_fail_reason }}
+
+              reboot 自体の失敗か、reboot 後の検証の失敗かは上記タスク名で判断する
+              こと(SSH 接続不能と決めつけない)。手動確認が必要。
               Time: {{ lookup('pipe', "TZ='Asia/Tokyo' date '+%Y-%m-%dT%H:%M:%S+09:00'") }}
 
         - name: Re-raise reboot failure
@@ -388,14 +410,22 @@
           ansible.builtin.reboot:
             reboot_timeout: 300
 
+        # monnie 上で自分自身のループバックへ接続して待つ。
+        # 2026-07-30 まで delegate_to: localhost でコントローラから
+        # ansible_host へ外部接続していたが、Prometheus 9090 と Loki 3100 は
+        # 外部公開していないため UFW が正しく落とし、リブートした夜だけ必ず
+        # 失敗していた(外から届くのは Grafana 3000 のみ)。host を省略して
+        # 既定のループバックを使う — ループバックで到達できることは
+        # roles/alloy(loki push)と roles/recovery_exec の localhost URL が
+        # 実績として示している。IPアドレスは書かない(pre-commit が拒否する)。
+        # 直後の Run monitoring healthcheck が同じ3ポートを monnie 上の ss で
+        # 判定するため、このタスクの役目は「待つ」ことだけである。
+        # 詳細: docs/ai/memory/incidents/2026-07-30_ubuntu-nightly-monnie-external-port-wait.md
         - name: Wait for monitoring services to be ready after reboot
           ansible.builtin.wait_for:
-            host: "{{ ansible_host }}"
             port: "{{ item }}"
             timeout: 120
             state: started
-          delegate_to: localhost
-          become: false
           loop:
             - 9090
             - 3000
@@ -456,15 +486,37 @@
               {% endfor %}
 
       rescue:
-        - name: Send reboot failure notification
+        # この rescue は block 全体(reboot / ポート待ち / healthcheck / レポート /
+        # 通知)を覆う。2026-07-30 まで失敗箇所によらず「reboot タイムアウトまたは
+        # SSH 接続不能」の固定文言を送っていたため、ポート待ちの失敗を SSH 障害と
+        # 誤認させた。失敗したタスク名と理由を必ず本文へ載せる。
+        # 詳細: docs/ai/memory/incidents/2026-07-30_ubuntu-nightly-monnie-external-port-wait.md
+        - name: Summarize which task failed and why
+          ansible.builtin.set_fact:
+            _nightly_failed_task: "{{ ansible_failed_task.name | default('(タスク名が取得できなかった)', true) }}"
+            # ループしたタスクは msg を持たず results を持つため両方を扱う。
+            # join は空文字列を返しうるので default(..., true) で拾う。
+            _nightly_fail_reason: >-
+              {{ (ansible_failed_result.results | default([])
+                  | selectattr('failed', 'defined') | selectattr('failed')
+                  | map(attribute='msg') | list | join(' / ')
+                  | default('(理由が取得できなかった)', true))
+                 if (ansible_failed_result.results is defined)
+                 else (ansible_failed_result.msg | default('(理由が取得できなかった)', true)) }}
+
+        - name: Send failure notification
           ansible.builtin.include_tasks: "{{ playbook_dir }}/../roles/common_slack/tasks/notify.yml"
           vars:
             slack_channel: "alerts"
             slack_status: "critical"
-            slack_title: "[ubuntu_nightly] reboot FAILED - {{ inventory_hostname }}"
+            slack_title: "[ubuntu_nightly] FAILED - {{ inventory_hostname }}"
             slack_message: |
               Host: {{ inventory_hostname }}
-              reboot タイムアウトまたは SSH 接続不能。手動確認が必要。
+              失敗タスク: {{ _nightly_failed_task }}
+              理由: {{ _nightly_fail_reason }}
+
+              reboot 自体の失敗か、reboot 後の検証の失敗かは上記タスク名で判断する
+              こと(SSH 接続不能と決めつけない)。手動確認が必要。
               Time: {{ lookup('pipe', "TZ='Asia/Tokyo' date '+%Y-%m-%dT%H:%M:%S+09:00'") }}
 
         - name: Re-raise reboot failure
