@@ -20,9 +20,7 @@
 
 | # | 項目 | 現在地 | 次にやること |
 |---|---|---|---|
-| 1 | **Slack/Codex から Loki 横断ログを調査できるようにする**(Tier 4) | 調査 → requirement → 計画査読 → 実装 → 差分レビュー(Critical 0 / Approve)まで完了。作業ツリーに未commit差分あり。案件記録は `docs/ai/reviews/slack_loki_investigation/`。Policy 改訂(AR-026 改訂 + **AR-095〜AR-101** 新設)も適用済み | **Yoshinobu待ち**: ①差分の確認と commit ②quory の checkout 同期 ③`playbooks/recovery_exec_setup.yml -l quory` で配備。**配備後でないと AC1/2/3/5/7 は検証できない**(Tester 工程が配備待ちで止まっている)。その後 Tester → Auditor |
-
-**上記以外に進行中の案件は無い**(2026-07-28)。「障害の自動捕捉・評価」は**3段すべてが本番で成立してクローズした** — 捕捉=quory(5分毎)、転送=ansy `ansible-incident-sync.timer`(毎時)、評価=既存の月次 `ansible-knowledge-review.timer` の中の2本目の `claude -p`。**次の観測点は2026-08-26の月次発火**で、Watch行が持つ。
+**進行中の案件は無い**(2026-07-29)。「障害の自動捕捉・評価」は**3段すべてが本番で成立してクローズした** — 捕捉=quory(5分毎)、転送=ansy `ansible-incident-sync.timer`(毎時)、評価=既存の月次 `ansible-knowledge-review.timer` の中の2本目の `claude -p`。**次の観測点は2026-08-26の月次発火**で、Watch行が持つ。
 
 **規範の正本は `docs/ai/policies/incident_capture_policy.md`**(IC-001〜IC-033)。設計判断は `docs/ai/adr/003` / `004` / `005`(いずれも Accepted)。案件記録は `docs/ai/reviews/incident_auto_capture/`(Step 1)と `.../incident_auto_capture_step2/`(Step 2)。**未決の一覧は Policy §8 が正本。**
 
