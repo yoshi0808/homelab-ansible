@@ -209,9 +209,23 @@ def cmd_window(argv):
         print(formatted)
 
     if truncated:
+        # 行数だけでなく「要求した窓のうち実際に読めた範囲」を示す。行数だけの
+        # 通知では、窓の後半を読まないまま「異常なし」と結論できてしまうことが
+        # 実運用で起きた(2026-07-29、Codexが05:55-06:10を要求し、切り詰めで
+        # 06:03頃までしか読めていない状態で「errorなし」と報告した。窓の後半に
+        # 目的の事象があった)。direction=forwardのため落ちるのは常に末尾側で、
+        # 「どこまで読めたか」が分からないことが欠陥の本体である。
+        # entriesはtruncated成立時に必ずMAX_LINES-1件あるので空にならない。
+        covered_end = datetime.fromtimestamp(
+            entries[-1][0] / 1e9, tz=timezone.utc
+        ).astimezone(JST)
+        fmt = "%m-%d %H:%M:%S"
         print(
-            f"[truncated: showing earliest {MAX_LINES - 1} of >{MAX_LINES} "
-            "matching lines in this window; narrow the window or job to see more]"
+            f"[TRUNCATED — read {start.strftime(fmt)}..{covered_end.strftime(fmt)} "
+            f"of requested {start.strftime(fmt)}..{end.strftime(fmt)} JST; "
+            f"earliest {MAX_LINES - 1} of >{MAX_LINES} lines. The rest of the "
+            "window was NOT read — narrow the window or job and re-query before "
+            "concluding.]"
         )
 
 
