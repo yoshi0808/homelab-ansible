@@ -20,8 +20,9 @@
 
 | # | 項目 | 現在地 | 次にやること |
 |---|---|---|---|
+| 1 | **Slack/Codex から Loki 横断ログを調査できるようにする**(Tier 4) | 調査 → requirement → 計画査読 → 実装 → 差分レビュー(Critical 0 / Approve)まで完了。作業ツリーに未commit差分あり。案件記録は `docs/ai/reviews/slack_loki_investigation/`。Policy 改訂(AR-026 改訂 + **AR-095〜AR-101** 新設)も適用済み | **Yoshinobu待ち**: ①差分の確認と commit ②quory の checkout 同期 ③`playbooks/recovery_exec_setup.yml -l quory` で配備。**配備後でないと AC1/2/3/5/7 は検証できない**(Tester 工程が配備待ちで止まっている)。その後 Tester → Auditor |
 
-**進行中の案件は無い**(2026-07-28)。「障害の自動捕捉・評価」は**3段すべてが本番で成立してクローズした** — 捕捉=quory(5分毎)、転送=ansy `ansible-incident-sync.timer`(毎時)、評価=既存の月次 `ansible-knowledge-review.timer` の中の2本目の `claude -p`。**次の観測点は2026-08-26の月次発火**で、Watch行が持つ。
+**上記以外に進行中の案件は無い**(2026-07-28)。「障害の自動捕捉・評価」は**3段すべてが本番で成立してクローズした** — 捕捉=quory(5分毎)、転送=ansy `ansible-incident-sync.timer`(毎時)、評価=既存の月次 `ansible-knowledge-review.timer` の中の2本目の `claude -p`。**次の観測点は2026-08-26の月次発火**で、Watch行が持つ。
 
 **規範の正本は `docs/ai/policies/incident_capture_policy.md`**(IC-001〜IC-033)。設計判断は `docs/ai/adr/003` / `004` / `005`(いずれも Accepted)。案件記録は `docs/ai/reviews/incident_auto_capture/`(Step 1)と `.../incident_auto_capture_step2/`(Step 2)。**未決の一覧は Policy §8 が正本。**
 
@@ -58,6 +59,8 @@
 
 | 項目 | 内容 | 根拠 |
 |---|---|---|
+| **recovery-probe の外部到達性チェックが再起動のたびに誤検知しうる** | `external_reachable()` は閾値が無く1サンプルの成否で判定し、`isp_down_since` は `main()` のローカル変数なのでプロセス再起動でリセットされる。**再起動直後1回目の HEAD が失敗すると、そのまま「断→回復」warning になり、通知本文の「〜から到達不能でした」に入る時刻は再起動時刻**なので実際より長い断と誤読される。2026-07-29 06:07 JST に実際に発生し、外部断として調査が起きた。修正案の候補は「初回サンプルを捨てる」「閾値を付ける」「起動直後のグレース期間」。Yoshinobu 判断で本件とは別案件(2026-07-29) | `roles/recovery_probe/files/recovery-probe.py:107-118, 446-458`、`docs/ai/reviews/slack_loki_investigation/2026-07-29_001_measurement.md` AC2 |
+| **recovery-io の Slack 投稿が 3800 文字で無言に切られる** | `say(text=f"...{response[:3800]}")` で打ち切るだけで、切ったことが読み手に分からない。Codex の要約が返る限り足りるが、時系列や生ログを見たい依頼では黙って欠落する。thread 分割投稿が候補。**認可層(Slack token を持つ唯一の層)の変更なので forced command allowlist 拡張とは risk クラスが違う**と判断し別案件にした(2026-07-29 Yoshinobu 判断) | `roles/recovery_io/templates/recovery-io.py.j2:97` |
 | 時刻表記JST規約をrepoへ明文化 | 規約本体がCoordinatorのauto-memoryにあり、repo内は `autonomous_recovery_policy.md` L174(通知文言の1行)のみ。Implementerが従うべき規約なのでrepo側が正本であるべき。**障害バンドルがSemaphoreのUTCとreportsのJSTを混在させる**ため実害が出る前に片付ける | `grep -rn "JST" docs/` が通知文言1件のみ。`docs/ai/memory-classification.md` 第0段 |
 | **ADRの `Status` を実態へ揃える** | 全5件が `Proposed` のまま。**001・002は対応完了済み**(2026-07-28 Yoshinobu確認)。**003〜005は本件の完了時にまとめて更新できる**見込み。Tier 1 | `docs/ai/adr/` 各ファイルの `**Status:**` 行 |
 | `docs/ai/context-classification.md` の `## 6.` 重複 | `## 6.` で始まる節が2つあり、節番号で参照すると誤った節へ着地する。Tier 1 | 同ファイルの現物 |

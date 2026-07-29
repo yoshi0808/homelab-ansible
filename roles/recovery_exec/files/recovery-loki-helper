@@ -1,0 +1,232 @@
+#!/usr/bin/env python3
+"""recovery-loki-helper: read-only Loki横断ログ調査 helper (monnie専用)。
+
+Loki横断ログ調査(2026-07-29, requirement:
+docs/ai/reviews/slack_loki_investigation/2026-07-29_002_requirement.md,
+Policy: docs/ai/policies/autonomous_recovery_policy.md AR-095〜AR-101)。
+
+呼び出し元:
+  recovery-investigate-dispatch.sh (monnie側dispatch) から、SSH forced
+  commandで受け取ったoperandを正規表現/allowlistで検証した後、argvとして
+  位置渡しで呼び出される(evalやshell文字列の再解釈は経由しない — AR-097/
+  AR-048と同じ規律)。この検証がLoki問い合わせに対する主たる認可境界であ
+  り、本ファイルはPython側でも同じallowlistを再確認するが、それは防御の
+  重複であって二層目の独立したtrust boundaryではない(信頼境界は
+  wrapper(quory) → dispatch(monnie)の2層であり、dispatchとこのhelperは
+  同一host・同一呼び出しの内部実装分割)。
+
+  recovery-loki-helper count  <since> <window>
+  recovery-loki-helper window <job> <since> <window> <level>
+
+`<since>` は "YYYY-MM-DDTHH:MM"(分精度)で、常にJSTとして解釈する
+(実行hostのTZ設定に依存させない — AR-100)。
+
+出力量はLokiへのquery limit、返す行数、1行の長さの3点で固定する
+(AR-098、値の根拠は2026-07-29実測 001_measurement.md)。dispatchを正本、
+wrapper(homelab-investigate.sh.j2)をmirrorとする(AR-047と同じ規律) —
+このhelperの定数がその正本の実体であり、wrapper側は同じ数値を持たない
+(wrapperはLokiへ問い合わせず、operand形式の事前検証だけを行うため)。
+"""
+import json
+import sys
+import urllib.error
+import urllib.parse
+import urllib.request
+from datetime import datetime, timedelta, timezone
+
+LOKI_BASE = "http://localhost:3100"
+
+# JST is a fixed UTC+9 offset with no DST, so a plain fixed-offset
+# datetime.timezone is used instead of zoneinfo.ZoneInfo("Asia/Tokyo").
+# This avoids depending on the IANA tzdata database being installed/current
+# on the target host (datetime.timezone is stdlib-only, no external data
+# file) — deliberately narrower than a general timezone solution, but JST
+# never needs the DST-awareness that zoneinfo would add here (AR-100: JST
+# fixed interpretation, independent of the host's own TZ configuration).
+JST = timezone(timedelta(hours=9))
+
+# --- R4/AR-098: fixed output-volume limits (initial values, 2026-07-29 実測) ---
+QUERY_LIMIT = 300  # loki-window: query_range `limit` param (返すlog行数の上限)
+MAX_LINES = 300  # loki-window: stdout行数の上限(切り詰め通知に1行分を予約する)
+MAX_LINE_LENGTH = 300  # loki-window: 1行あたりの文字数上限
+
+# --- R9(P2)/将来のjob・host増加への保険。実測は11系列。 ---
+MAX_SERIES = 500
+
+ALLOWED_COUNT_WINDOWS = {"5m", "10m", "15m", "30m", "1h", "3h", "6h", "12h", "24h"}
+ALLOWED_WINDOW_WINDOWS = {"5m", "10m", "15m", "30m", "1h"}
+ALLOWED_JOBS = {"unifi", "network-devices", "pve-nodes", "sophos-fw", "ubuntu-nodes"}
+ALLOWED_LEVELS = {"any", "error", "warning", "info"}
+
+WINDOW_SECONDS = {
+    "5m": 300,
+    "10m": 600,
+    "15m": 900,
+    "30m": 1800,
+    "1h": 3600,
+    "3h": 10800,
+    "6h": 21600,
+    "12h": 43200,
+    "24h": 86400,
+}
+
+
+def deny(msg):
+    print(f"denied: {msg}", file=sys.stderr)
+    sys.exit(1)
+
+
+def parse_since_jst(since):
+    try:
+        naive = datetime.strptime(since, "%Y-%m-%dT%H:%M")
+    except ValueError:
+        deny(f"invalid since value '{since}'")
+        return None  # unreachable, keeps type-checkers happy
+    return naive.replace(tzinfo=JST)
+
+
+def rfc3339_utc(dt):
+    return dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def loki_get(path, params):
+    url = f"{LOKI_BASE}{path}?{urllib.parse.urlencode(params)}"
+    try:
+        with urllib.request.urlopen(url, timeout=15) as resp:
+            body = resp.read()
+    except urllib.error.URLError as exc:
+        print(f"error: Loki request failed: {exc}", file=sys.stderr)
+        sys.exit(1)
+    try:
+        return json.loads(body)
+    except json.JSONDecodeError:
+        print("error: Loki returned non-JSON response", file=sys.stderr)
+        sys.exit(1)
+
+
+def cmd_count(argv):
+    if len(argv) != 2:
+        deny("invalid parameter count for 'count'")
+    since, window = argv
+    if window not in ALLOWED_COUNT_WINDOWS:
+        deny(f"invalid window '{window}' for 'count'")
+    start = parse_since_jst(since)
+    end = start + timedelta(seconds=WINDOW_SECONDS[window])
+
+    # R2: sum by (job, host, level) (count_over_time({job=~".+"}[<window>]))
+    query = 'sum by (job, host, level) (count_over_time({job=~".+"}[%s]))' % window
+    data = loki_get("/loki/api/v1/query", {"query": query, "time": rfc3339_utc(end)})
+    result = data.get("data", {}).get("result", [])
+
+    truncated_series = len(result) > MAX_SERIES
+    if truncated_series:
+        print(
+            f"warning: {len(result)} series exceeds safety cap of {MAX_SERIES}; "
+            f"showing first {MAX_SERIES}",
+            file=sys.stderr,
+        )
+        result = result[:MAX_SERIES]
+
+    rows = []
+    for series in result:
+        metric = series.get("metric", {})
+        job = metric.get("job", "")
+        host = metric.get("host", "")
+        # R2: level ラベルが存在しない系列を、存在して空である系列と区別する。
+        # metricにkeyそのものが無ければ None(=ラベル無し)、存在すれば
+        # (空文字列であっても)その値をそのまま表示する。
+        if "level" in metric:
+            level_display = metric["level"] if metric["level"] != "" else "(empty)"
+        else:
+            level_display = "(no level label)"
+        value = series.get("value", [None, "0"])
+        count = value[1] if len(value) > 1 else "0"
+        rows.append((job, host, level_display, count))
+    rows.sort(key=lambda r: (r[0], r[1], r[2]))
+
+    print(f"{'job':<20}{'host':<15}{'level':<20}{'count':>8}")
+    for job, host, level_display, count in rows:
+        print(f"{job:<20}{host:<15}{level_display:<20}{count:>8}")
+    print(f"\ntotal series: {len(rows)}" + (" (truncated)" if truncated_series else ""))
+
+
+def cmd_window(argv):
+    if len(argv) != 4:
+        deny("invalid parameter count for 'window'")
+    job, since, window, level = argv
+    if job not in ALLOWED_JOBS:
+        deny(f"invalid job '{job}'")
+    if window not in ALLOWED_WINDOW_WINDOWS:
+        deny(f"invalid window '{window}'")
+    if level not in ALLOWED_LEVELS:
+        deny(f"invalid level '{level}'")
+    start = parse_since_jst(since)
+    end = start + timedelta(seconds=WINDOW_SECONDS[window])
+
+    # R3: any は「level で絞らない」であって「全 level を列挙する」では
+    # ない。selectorへlevelを含めるとラベル無しの行が黙って消えるため、
+    # any のときはlevelをselectorへ入れない。
+    if level == "any":
+        selector = '{job="%s"}' % job
+    else:
+        selector = '{job="%s", level="%s"}' % (job, level)
+
+    params = {
+        "query": selector,
+        "start": rfc3339_utc(start),
+        "end": rfc3339_utc(end),
+        # QUERY_LIMIT+1 を要求し、実際にそれを超えて返ってきたかどうかで
+        # 「この窓に上限を超える一致がある」ことを検出する(オープンクエ
+        # スチョンOQ1への対応。AC2「行数がR4の上限を超えない」の範囲内で
+        # 切り詰めたことが分かる出力にする)。
+        "limit": str(QUERY_LIMIT + 1),
+        "direction": "forward",
+    }
+    data = loki_get("/loki/api/v1/query_range", params)
+    result = data.get("data", {}).get("result", [])
+
+    entries = []
+    for stream in result:
+        labels = stream.get("stream", {})
+        host = labels.get("host") or labels.get("unit") or job
+        for ts_ns, line in stream.get("values", []):
+            entries.append((int(ts_ns), host, line))
+    # Loki does not merge entries across streams; do it here so the output
+    # is globally time-ascending across all matched hosts/units (AC2).
+    entries.sort(key=lambda e: e[0])
+
+    truncated = len(entries) > MAX_LINES
+    if truncated:
+        # Reserve exactly one line for the truncation notice so total
+        # stdout lines never exceed MAX_LINES (R4 / AC2).
+        entries = entries[: MAX_LINES - 1]
+
+    for ts_ns, host, line in entries:
+        ts = datetime.fromtimestamp(ts_ns / 1e9, tz=timezone.utc).astimezone(JST)
+        formatted = f"{ts.strftime('%Y-%m-%dT%H:%M:%S+09:00')} [{host}] {line}"
+        if len(formatted) > MAX_LINE_LENGTH:
+            formatted = formatted[: MAX_LINE_LENGTH - 3] + "..."
+        print(formatted)
+
+    if truncated:
+        print(
+            f"[truncated: showing earliest {MAX_LINES - 1} of >{MAX_LINES} "
+            "matching lines in this window; narrow the window or job to see more]"
+        )
+
+
+def main():
+    if len(sys.argv) < 2:
+        deny("missing subcommand")
+    sub = sys.argv[1]
+    rest = sys.argv[2:]
+    if sub == "count":
+        cmd_count(rest)
+    elif sub == "window":
+        cmd_window(rest)
+    else:
+        deny(f"unknown subcommand '{sub}'")
+
+
+if __name__ == "__main__":
+    main()

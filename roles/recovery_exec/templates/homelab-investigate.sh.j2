@@ -1,27 +1,100 @@
 #!/bin/bash
 # homelab-investigate-{{ target.name }}: SSH investigation wrapper for {{ target.name }}.
 # Called by Codex: homelab-investigate-{{ target.name }} <check>
-# Hostname is hardcoded (§4.3: connection target fixed in script, not from args).
+{% if 'loki' in target.investigate_services %}#              or: homelab-investigate-{{ target.name }} loki-count <since> <window>
+#              or: homelab-investigate-{{ target.name }} loki-window <job> <since> <window> <level>
+{% endif %}# Hostname is hardcoded (§4.3: connection target fixed in script, not from args).
 # -F /dev/null: skip system ssh_config (bwrap UID mapping breaks ownership checks).
+#
+# Allowlist and validators mirror the dispatch script on {{ target.name }}
+# (AR-047). This wrapper is a first-line filter, not the sole gate: only
+# validated operands are formatted into SSH's required single remote-command
+# string, and the {{ target.name }} dispatch never evals that string —  it
+# independently re-parses and re-validates every operand (AR-097).
 set -euo pipefail
 
 KEY=/home/recovery-exec/.ssh/id_recovery_investigate
 KNOWN=/home/recovery-exec/.ssh/known_hosts
 
-# Allowlist mirrors the dispatch script on {{ target.name }}.
-case "${1:-status}" in
-  {% for svc in target.investigate_services %}{{ svc }}|journal-{{ svc }}|journal-{{ svc }}-1h|journal-{{ svc }}-24h|journal-{{ svc }}-err|journal-{{ svc }}-warn|{% endfor %}failed|disk|memory|load|network|ports|journal-system|dmesg|status{% for extra in target.investigate_extra | default([]) %}|{{ extra.name }}{% endfor %})
-    exec ssh -T \
-        -F /dev/null \
-        -i "$KEY" \
-        -o StrictHostKeyChecking=yes \
-        -o UserKnownHostsFile="$KNOWN" \
-        -o ConnectTimeout=10 \
-        -o BatchMode=yes \
-        "recovery-exec@{{ target.host }}" "${1:-status}"
+check="${1:-status}"
+p1="${2:-}"
+p2="${3:-}"
+p3="${4:-}"
+p4="${5:-}"
+argc=$#
+
+if (( argc > 5 )); then
+  echo "denied: too many parameters for '${check:-unknown}'" >&2
+  exit 1
+fi
+
+deny_count() {
+  echo "denied: invalid parameter count for '$check'" >&2
+  exit 1
+}
+
+deny_invalid() {
+  local param_name="$1"
+  echo "denied: invalid ${param_name} for ${check}" >&2
+  exit 1
+}
+{% if 'loki' in target.investigate_services %}
+
+valid_since() {
+  [[ "$1" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}$ ]]
+}
+{% endif %}
+
+run_remote() {
+  local remote_command="$1"
+  exec ssh -T \
+      -F /dev/null \
+      -i "$KEY" \
+      -o StrictHostKeyChecking=yes \
+      -o UserKnownHostsFile="$KNOWN" \
+      -o ConnectTimeout=10 \
+      -o BatchMode=yes \
+      "recovery-exec@{{ target.host }}" "$remote_command"
+}
+
+# Backslash-continued with no indent on continuation lines so the pattern
+# tokens carry no leading whitespace.
+case "$check" in
+  {% for svc in target.investigate_services %}{{ svc }}|journal-{{ svc }}|journal-{{ svc }}-1h|journal-{{ svc }}-24h|journal-{{ svc }}-err|journal-{{ svc }}-warn|\
+{% endfor %}failed|disk|memory|load|network|ports|journal-system|dmesg|status{% for extra in target.investigate_extra | default([]) %}|{{ extra.name }}{% endfor %})
+    (( argc == 0 || argc == 1 )) || deny_count
+    run_remote "$check"
     ;;
+{% if 'loki' in target.investigate_services %}
+  loki-count)
+    (( argc == 3 )) || deny_count
+    valid_since "$p1" || deny_invalid since
+    case "$p2" in
+      5m|10m|15m|30m|1h|3h|6h|12h|24h) ;;
+      *) deny_invalid window ;;
+    esac
+    run_remote "$check $p1 $p2"
+    ;;
+  loki-window)
+    (( argc == 5 )) || deny_count
+    case "$p1" in
+      unifi|network-devices|pve-nodes|sophos-fw|ubuntu-nodes) ;;
+      *) deny_invalid job ;;
+    esac
+    valid_since "$p2" || deny_invalid since
+    case "$p3" in
+      5m|10m|15m|30m|1h) ;;
+      *) deny_invalid window ;;
+    esac
+    case "$p4" in
+      any|error|warning|info) ;;
+      *) deny_invalid level ;;
+    esac
+    run_remote "$check $p1 $p2 $p3 $p4"
+    ;;
+{% endif %}
   *)
-    echo "denied: unknown check '${1:-}'" >&2
+    echo "denied: unknown check '${check:-}'" >&2
     exit 1
     ;;
 esac

@@ -72,6 +72,20 @@
   delegate_to: "{{ target_item.name }}"
   become: true
 
+- name: Deploy recovery-loki-helper on target nodes with Loki (Loki横断ログ調査, AR-095〜AR-101)
+  ansible.builtin.copy:
+    src: recovery-loki-helper
+    dest: /usr/local/sbin/recovery-loki-helper
+    owner: root
+    group: root
+    mode: "0755"
+  loop: "{{ recovery_exec_targets }}"
+  loop_control:
+    loop_var: target_item
+  when: "'loki' in target_item.investigate_services"
+  delegate_to: "{{ target_item.name }}"
+  become: true
+
 - name: Deploy action script on target nodes
   ansible.builtin.template:
     src: recovery-action.sh.j2

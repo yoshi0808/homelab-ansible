@@ -15,6 +15,7 @@
 | service recovery対象 | `authy`、`monnie` | target内の許可serviceを扱う |
 | VM recovery対象 | `authy`、`monnie`、`sophos-fw` | target別に許可されたreboot / failoverを扱う |
 | Proxmox調査対象 | `pve1`、`pve2` | cluster / HA / replication / VM / task / storage / ZFS / journalのread-only調査 |
+| Loki横断ログ調査対象 | `monnie` | homelab全体で収集済みの集約ログ(job/host問わず)をLoki経由で参照する起点。target自身のログに限らない(2026-07-29、AR-095〜AR-101) |
 | 開発環境 | ansy | 自律復旧action対象外 |
 
 service recoveryの現行対象は、`authy`の`freeradius`と、`monnie`の`prometheus` / `grafana-server` / `loki` / `unpoller`である。`sophos-fw`にはservice recovery経路がない。現行tagは`sophos-fw`と`authy`が`hacritical`、`monnie`が`ops`で、home preference tagもtargetごとに設定されている。targetと数値VM IDの対応、tagの具体値はinventory、role defaults、templateを正本とする。

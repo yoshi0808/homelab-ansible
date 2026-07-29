@@ -222,7 +222,7 @@ investigateはservice、journal、extra、common checkのallowlistだけを許�
 service調査の追加はtargetごとの`investigate_services`へ限定して反映する。
 
 <!-- AR-026 -->
-extra調査は固定name / commandとして追加し、sudoが必要なら対応sudoersを個別に同期する。
+extra調査は固定name / commandとして追加し、sudoが必要なら対応sudoersを個別に同期する。検証済みparameterを取る調査を追加する場合はこの限りでなく、「Loki横断ログ調査」の条項に従う。
 
 <!-- AR-027 -->
 `recovery_exec_targets`をwrapperとdispatchの共通allowlist正本とする。
@@ -235,6 +235,29 @@ common check categoryを追加する場合だけ両templateへ直接追加し、
 
 <!-- AR-031 -->
 actionは無引数でallowlist内の全serviceを一括restartし、個別service指定を許可しない。
+
+### Loki横断ログ調査
+
+<!-- AR-095 -->
+Loki横断ログ調査は、`recovery_exec` roleのdispatch templateが列挙する検証済みparameter付きcheckの範囲だけを許可する。
+
+<!-- AR-096 -->
+parameterは固定arityとし、時刻は分精度の固定書式、それ以外は列挙allowlistに限定する。自由文字列によるlog本文filterを許可しない。
+
+<!-- AR-097 -->
+quory側wrapperを一次filter、対象host側dispatchを権限の本gateとし、dispatchが独立に再parseして不正tokenをLoki問い合わせ到達前に拒否する。
+
+<!-- AR-098 -->
+出力量はLokiへのquery limit、返す行数、1行の長さの3点で固定し、対象host側で強制する。quory側wrapperへ出力量制限を置かない — logが認可境界を越えた後の切り詰めは防御にならず、二層あるという誤解だけを生む。二層で検証するのはparameterであり、出力量ではない。
+
+<!-- AR-099 -->
+level labelでの絞り込みを既定にしない。label自体が付かないlogが存在するため、絞り込みを既定にすると該当logが無言で欠落する。
+
+<!-- AR-100 -->
+時刻parameterはJST固定解釈とし、実行hostのTZ設定に依存させない。
+
+<!-- AR-101 -->
+このcheckが返すlog本文はhomelab全体の集約であり、対象hostのlogに限られない。Alloyが収集済みのlogがCodexへ渡ることを許容するが、`docs/ai/core.md`が定義する秘密情報は対象外とする。
 
 ### Report / Semaphore調査
 
@@ -338,3 +361,4 @@ Codex wrapperはsudo、setuid、file capabilityによる権限昇格を前提に
 | 日付 | 変更 |
 |---|---|
 | 2026-07-24 | Git HEADの旧288行版を標準8節へ再編。Policy核を維持し、非規範の環境・Repository・Operations情報をContextへ分離。旧表の数値VM IDは転載せず、inventory / vars / codeを正本とした |
+| 2026-07-29 | Loki横断ログ調査(AR-095〜AR-101)を新設し、AR-026に検証済みparameter付き調査の例外を追加。案件記録: `docs/ai/reviews/slack_loki_investigation/` |
