@@ -106,16 +106,37 @@ def probe_target(cfg, target, tconf):
 
 def external_reachable(cfg):
     """外部到達性(ISP 切り分け・通知 flush 判定用)。DNS は sophos-fw 依存で
-    よい: この関数を評価するのは LAN 側が健全な分岐と flush 時のみ。"""
+    よい: この関数を評価するのは LAN 側が健全な分岐と flush 時のみ。
+
+    戻り値は `(到達可否, 失敗理由)`。失敗理由は成功時 None。
+
+    例外を握り潰さない理由(2026-07-29): どの層(名前解決 / TCP / TLS /
+    timeout)で失敗したかは例外の型と本文にしか現れず、捨てると後から
+    切り分けられない。2026-07-29 06:07 JST の失敗は、この情報が無いため
+    Loki 全ログを走査しても「未特定」で終わった。
+    事後に icmp / dns / tcp の層別チェックを走らせる案は採らない —
+    それは失敗の「後」に実行されるため、単発の揺らぎでは復旧後の健全な
+    状態しか観測できず、原因を取り違える。失敗の瞬間に捕まえた例外が
+    唯一の証拠である。
+    """
     try:
         req = urllib.request.Request(cfg["external_check_url"], method="HEAD")
         with urllib.request.urlopen(req, timeout=5):
-            return True
+            return True, None
     except urllib.error.HTTPError:
         # HTTP 応答が返っている(403 等)= ネットワーク到達性はある
-        return True
-    except Exception:
-        return False
+        return True, None
+    except Exception as exc:
+        # 文字列化自体を保護する。`str(exc)` が例外を送出する例外オブジェクト
+        # は実在し、その場合ここが未捕捉のまま main() のループを突き破って
+        # デーモンが無言で停止する(2026-07-29 Tester が実際に再現、AC5)。
+        # urllib / socket / ssl の標準例外はいずれも正常な __str__ を持つため
+        # 実運用で踏む確率は低いが、監視が消える方向の失敗なので塞ぐ。
+        # 型名はクラス属性の参照だけで得られ、失敗しえない。
+        try:
+            return False, f"{type(exc).__name__}: {exc}"
+        except Exception:
+            return False, type(exc).__name__
 
 
 # ---------------------------------------------------------------------------
@@ -377,6 +398,13 @@ def main():
     os.makedirs(os.path.join(cfg["state_dir"], "drill"), exist_ok=True)
     counters = {t: 0 for t in cfg["targets"]}
     isp_down_since = None
+    # 外部到達性チェックの連続失敗数と、最初の失敗理由。閾値は設けない
+    # (このチェックはアクションを起こさず通知のみで、閾値を入れると
+    # 1〜4分の実際の短時間断が見えなくなる。2026-07-29 Yoshinobu 判断)。
+    # 回数は通知に載せるためだけに数える — 単発の揺らぎと実際の断を
+    # 読み手が区別できるようにする。
+    ext_fail_count = 0
+    ext_first_reason = None
     log(f"recovery-probe start (interval={cfg['interval_s']}s, "
         f"threshold={cfg['threshold']}, once={once})")
 
@@ -444,18 +472,32 @@ def main():
                     clear_drill(cfg, target)
 
         # --- 外部到達性の状態遷移監視(ISP/FW 断。発火はしない。回復後に遅延通知) ---
-        ext_ok = external_reachable(cfg)
-        if not ext_ok and isp_down_since is None:
-            isp_down_since = datetime.now().astimezone().isoformat(timespec="seconds")
-            log("EXTERNAL unreachable (ISP または FW 断) — 監視のみ、発火しない")
-        elif ext_ok and isp_down_since is not None:
+        ext_ok, ext_reason = external_reachable(cfg)
+        if not ext_ok:
+            ext_fail_count += 1
+            if isp_down_since is None:
+                isp_down_since = datetime.now().astimezone().isoformat(timespec="seconds")
+                ext_first_reason = ext_reason
+            log(f"EXTERNAL check failed ({ext_fail_count} 回連続) — "
+                f"監視のみ、発火しない。理由: {ext_reason}")
+        elif isp_down_since is not None:
+            # 原因を断定しない(2026-07-29)。このチェックが確かめたのは
+            # 「HEAD が連続で失敗した」ことだけで、ISP / FW / 名前解決 /
+            # 監視ホスト側のどれであるかは決まらない。旧文言は「ISP または
+            # FW 断」と断定しており、実際に外部障害ではない事象(systemd
+            # daemon-reexec に伴う単発失敗)を外部障害として調査させた。
             queue_notify(
                 cfg, "warning",
-                "[recovery-probe] 外部到達性の回復",
-                f"{isp_down_since} から外部到達不能でした(ISP または FW 断)。"
-                f"現在は回復しています。",
+                "[recovery-probe] 外部到達性チェックの回復",
+                f"{isp_down_since} から {ext_fail_count} 回連続"
+                f"({cfg['interval_s']}秒間隔)で外部到達性チェックに失敗し、"
+                f"現在は回復しています。最初の失敗理由: {ext_first_reason}。"
+                f"原因(ISP / FW / 名前解決 / 監視ホスト側)は"
+                f"このチェックだけでは確定しません。",
             )
             isp_down_since = None
+            ext_fail_count = 0
+            ext_first_reason = None
 
         flush_notify_queue(cfg, ext_ok)
         if once:
