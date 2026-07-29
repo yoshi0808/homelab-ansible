@@ -1,9 +1,22 @@
 ---
+# 設定・daemon 本体・unit のいずれかが変わったら、稼働中の daemon へ必ず届ける。
+#
+# 条件が `recovery_probe_service_enabled` だけだった頃は、本番(quory)への配備で
+# `-e recovery_probe_service_enabled=true` を渡し忘れるとファイルだけが新しくなり、
+# daemon は旧コードのまま走り続けた(2026-07-29 実測。
+# docs/ai/reviews/recovery_probe_external_check/2026-07-29_002_test_result_deployed.md)。
+# sha256sum や git diff では「配備済み」に見えるため、検出できない。
+#
+# 「現に動いているなら反映する」を条件に加えることで、フラグの渡し忘れが反映漏れに
+# ならないようにする。dev(ansy)は daemon を起動していないため、ここで start される
+# ことはない(state: restarted は停止中のサービスを起動してしまうため、この区別が要る)。
 - name: Restart recovery-probe
   ansible.builtin.systemd:
     name: recovery-probe
     daemon_reload: true
     state: restarted
   become: true
-  when: recovery_probe_service_enabled | bool
+  when: >-
+    recovery_probe_service_enabled | bool
+    or recovery_probe_running_before | default(false) | bool
   check_mode: false

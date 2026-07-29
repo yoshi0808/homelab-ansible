@@ -1,6 +1,24 @@
 ---
 # recovery-probe の配置。開発(ansy)は配置のみ、本番(quory)は
-# -e recovery_probe_service_enabled=true で enable + start する。
+# inventories/homelab/host_vars/quory.yml の recovery_probe_service_enabled
+# により enable + start する(CLI の -e は不要)。
+
+- name: Check whether recovery-probe is already running
+  # 反映漏れ防止の判定材料。稼働中の daemon には、enable フラグの値に
+  # かかわらず設定・コードの変更を届ける(handlers/main.yml 参照)。
+  # state / enabled を指定しない systemd module は状態を返すだけで収束しない。
+  # unit 未配備のホストでは失敗するため、失敗も「稼働していない」として扱う
+  ansible.builtin.systemd:
+    name: recovery-probe
+  register: recovery_probe_unit
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  become: true
+
+- name: Record whether recovery-probe was running before this deploy
+  ansible.builtin.set_fact:
+    recovery_probe_running_before: "{{ (recovery_probe_unit.status.ActiveState | default('')) == 'active' }}"
 
 - name: Install dig (dnsutils) for DNS probe
   ansible.builtin.apt:
@@ -62,3 +80,53 @@
     state: started
   become: true
   when: recovery_probe_service_enabled | bool
+
+# 反映確認。ここまでで restart handler は未実行(handler は play 末尾で走る)
+# なので、先に flush して「配備後の daemon」を観測対象にする。
+- name: Flush handlers so the freshness check observes the restarted daemon
+  ansible.builtin.meta: flush_handlers
+
+- name: Verify the running daemon is not older than the deployed files
+  when: >-
+    recovery_probe_service_enabled | bool
+    or recovery_probe_running_before | default(false) | bool
+  block:
+    - name: Collect daemon start time and deployed file mtimes
+      # shell は収集と JSON 整形のみ。新旧の判定は次の assert が行う
+      ansible.builtin.shell: |
+        set -o pipefail
+        started=$(systemctl show recovery-probe --property=ExecMainStartTimestamp --value)
+        started_epoch=0
+        if [ -n "$started" ]; then
+          started_epoch=$(date -d "$started" +%s 2>/dev/null || echo 0)
+        fi
+        newest=$(stat -c %Y /usr/local/sbin/recovery-probe.py \
+                            /etc/homelab-recovery/recovery-probe.json \
+                            /etc/systemd/system/recovery-probe.service |
+                 sort -n | tail -1)
+        printf '{"started":"%s","started_epoch":%s,"newest_mtime":%s}\n' \
+          "$started" "$started_epoch" "$newest"
+      args:
+        executable: /bin/bash
+      register: recovery_probe_freshness
+      changed_when: false
+      check_mode: false
+      become: true
+
+    - name: Assert the running process is not older than what was deployed
+      ansible.builtin.assert:
+        that:
+          - (recovery_probe_freshness.stdout | from_json).started_epoch | int > 0
+          - >-
+            (recovery_probe_freshness.stdout | from_json).started_epoch | int
+            >= (recovery_probe_freshness.stdout | from_json).newest_mtime | int
+        fail_msg: >-
+          recovery-probe が配備物より古いプロセスのまま走っている
+          (起動: {{ (recovery_probe_freshness.stdout | from_json).started
+          | default('(未起動)') }} /
+          配備物の最終更新 epoch:
+          {{ (recovery_probe_freshness.stdout | from_json).newest_mtime }})。
+          ファイルだけが新しくなり daemon は旧コードで動き続けている状態で、
+          sha256sum や git diff では検出できない。systemctl status
+          recovery-probe を確認し、restart が発火しなかった原因を調べること。
+        quiet: true

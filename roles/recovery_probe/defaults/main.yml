@@ -28,7 +28,11 @@ recovery_probe_external_check_url: https://one.one.one.one
 recovery_probe_pve_host: pve2
 
 # true にすると systemd サービスを enable + start する(本番 quory)。
-# 開発(ansy)では配置のみで起動しない(recovery_io_setup と同じ流儀)
+# 開発(ansy)では配置のみで起動しない(recovery_io_setup と同じ流儀)。
+# 本番の true は inventories/homelab/host_vars/quory.yml が持つ — CLI の -e に
+# 頼ると渡し忘れが「配備したのに旧コードのまま」を生むため(2026-07-29)。
+# なお、このフラグが false でも「既に走っている daemon」への反映は行われる
+# (handlers/main.yml)。この値が決めるのは enable + 起動の有無だけである。
 recovery_probe_service_enabled: false
 
 # 検知対象。action: ladder = 決定論ラダー(VM reboot → hacritical なら failover)/

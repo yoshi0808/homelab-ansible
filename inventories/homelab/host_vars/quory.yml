@@ -11,6 +11,15 @@
 # preflight check (lookup('pipe', 'hostname -s')).
 ansible_connection: "{{ 'local' if lookup('pipe', 'hostname -s') == 'quory' else 'ssh' }}"
 
+# recovery_probe (roles/recovery_probe/defaults/main.yml):
+# quory は recovery-probe を常駐させる本番ホストである、という事実をここに置く。
+# 以前はこの真実がCLIの `-e recovery_probe_service_enabled=true` にしか無く、
+# 渡し忘れると「ファイルだけ配備され daemon は旧コードのまま」という、
+# sha256sum でも git diff でも見えない状態になった(2026-07-29 実測。
+# docs/ai/reviews/recovery_probe_external_check/2026-07-29_002_test_result_deployed.md)。
+# dev(ansy)は role default の false のままで、配置のみ・起動しない。
+recovery_probe_service_enabled: true
+
 # ubuntu_vm_full_upgrade (roles/ubuntu_vm_full_upgrade/defaults/main.yml):
 # how Ansible itself is installed here, so the role's important-component
 # report/Slack output can say "apt管理: 判定対象" instead of leaving it

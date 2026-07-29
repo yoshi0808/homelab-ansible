@@ -6,8 +6,10 @@
 #   # service is deployed but NOT enabled/auto-started
 #
 # Production (quory):
-#   ansible-playbook playbooks/recovery_probe_setup.yml -l quory \
-#     -e recovery_probe_service_enabled=true
+#   ansible-playbook playbooks/recovery_probe_setup.yml -l quory
+#   # recovery_probe_service_enabled=true comes from
+#   # inventories/homelab/host_vars/quory.yml — no -e needed. Config/daemon/unit
+#   # changes always reach a running daemon (roles/recovery_probe/handlers).
 #
 # 設計: docs/ai/reviews/autonomous_recovery/2026-07-02_001_requirement.md
 #

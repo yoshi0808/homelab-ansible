@@ -108,12 +108,19 @@ sudo systemctl status recovery-io   # quoryでは Active: active (running)
 ## 6. `recovery_probe` デプロイ(pull型監視)
 
 ```bash
-# quory: 自動起動ON
-ansible-playbook playbooks/recovery_probe_setup.yml -l quory -e recovery_probe_service_enabled=true
+# quory: 自動起動ON(`recovery_probe_service_enabled: true` は
+# inventories/homelab/host_vars/quory.yml が持つ。-e は不要)
+ansible-playbook playbooks/recovery_probe_setup.yml -l quory
 
 # ansy: 配置のみ
 ansible-playbook playbooks/recovery_probe_setup.yml -l ansy
 ```
+
+設定・`recovery-probe.py`・unit のいずれかが変わると、稼働中の daemon は自動で
+restart される(`roles/recovery_probe/handlers/main.yml`)。playbook 末尾には
+「稼働中プロセスが配備物より古くないか」の assert があり、反映漏れはここで
+fail する — ファイルだけ新しく daemon は旧コードのまま、という状態は
+`sha256sum` や `git diff` では見えないため(2026-07-29 実測)。
 
 デプロイ後の確認:
 

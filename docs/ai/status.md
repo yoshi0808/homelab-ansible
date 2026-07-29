@@ -41,6 +41,7 @@
 | Alloy **Phase 3(異常値のFire)** | Lokiにログが十分蓄積した時点 | requirementは作成済み。Grafana Exploreで対象シグネチャの出現頻度を見て閾値を決める | `docs/ai/reviews/promtail_to_alloy/2026-07-19_phase3_alerting_requirement.md` | 2026-07-27 |
 | Proxmoxパッチ自動チェーンの **実発火の観測** | パッチ件数が少なく手動介入が要らない週末 | 自動チェーンが最後まで通ったログ。過去2回(07-11/12、07-18/19)は大量パッチで手動対応となり未観測 | `docs/ai/reviews/tester_mode/`、`docs/ai/context/operations/proxmox-patch.md` | 2026-07-27 |
 | Context陳腐化チェック追加後の**`knowledge_review_timeout`(1800秒)が足りるか** | 次回2026-08-26の月次実行 | `journalctl -u ansible-knowledge-review`でタイムアウト終了していないか確認。Testerのdecoy見積もりでは余裕が無い可能性が高いとされた(実測はデータが無く不可) | `docs/ai/reviews/knowledge_review_context_check/2026-07-29_005_u1_test_result.md` | 2026-07-29 |
+| recovery-probeの**自動反映が「実際に内容が変わる配備」で発火するか** | 次に `recovery-probe.py` / config / unit のいずれかが変わる配備をquoryへ行うとき | 配備後に `ExecMainStartTimestamp` が配備物のmtimeより新しくなっていること(playbook末尾のassertが自動で判定し、満たさなければfailする)。**2026-07-29の検証は「内容が変わらない配備」の経路のみ**で、restartが発火する正の経路は本番未観測(ローカルのdecoyでは発火・順序とも確認済み) | `docs/ai/reviews/recovery_probe_auto_reload/2026-07-29_001_test_result.md` | 2026-07-29 |
 
 ## Next(着手候補) — 工程・体制
 
@@ -58,6 +59,7 @@
 
 | 項目 | 内容 | 根拠 |
 |---|---|---|
+| **global pauseの解除忘れを構造で防ぐ**(TTL付与、または未解除の定期通知) | `homelab-monitoring-pause` はTTLを持たず、未解除を知らせる経路も無い。2026-07-21から**8日間**自律復旧が全target無効のまま誰も気づかなかった。どちらの方式を採るかは設計判断を含むためIncident対応として即断せず案件として扱う。**この行は2026-07-29のIncidentが「起票した」と記載していたが実際には存在せず、同日に追加した**(規範文書間の突合が効いていなかった実例) | `docs/ai/memory/incidents/2026-07-29_global-monitoring-pause-left-on-8-days.md`「修正内容」 |
 | 時刻表記JST規約をrepoへ明文化 | 規約本体がCoordinatorのauto-memoryにあり、repo内は `autonomous_recovery_policy.md` L174(通知文言の1行)のみ。Implementerが従うべき規約なのでrepo側が正本であるべき。**障害バンドルがSemaphoreのUTCとreportsのJSTを混在させる**ため実害が出る前に片付ける | `grep -rn "JST" docs/` が通知文言1件のみ。`docs/ai/memory-classification.md` 第0段 |
 | **ADRの `Status` を実態へ揃える** | 全5件が `Proposed` のまま。**001・002は対応完了済み**(2026-07-28 Yoshinobu確認)。**003〜005は本件の完了時にまとめて更新できる**見込み。Tier 1 | `docs/ai/adr/` 各ファイルの `**Status:**` 行 |
 | `docs/ai/context-classification.md` の `## 6.` 重複 | `## 6.` で始まる節が2つあり、節番号で参照すると誤った節へ着地する。Tier 1 | 同ファイルの現物 |
