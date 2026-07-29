@@ -14,7 +14,7 @@
 | Implementer | **Sonnet** | Coordinatorがまとめたrequirement/分解案に基づき、Coordinatorが別途Agent toolでsubagentを起動する。`docs/ai/roles/implementer.md`の範囲(最小差分実装、commit/push禁止、本番適用禁止)は不変。 |
 | Reviewer | **Sonnet** | 同様にCoordinatorが別のAgent tool subagentを起動する。Implementerを行ったsubagentとは別セッションとして起動し、独立性を保つ(`docs/ai/roles/reviewer.md`「自分が実装した変更を独立レビュー済みとして扱わない」を、同一subagentの使い回しをしないことで担保する)。**2026-07-29から、Tier 3/4のCoordinatorの計画査読も担う**(`docs/ai/roles/reviewer.md`「計画査読」)。 |
 | Tester | **Sonnet** | 同様にCoordinatorが別のAgent tool subagentを起動する。実ホストへの`--check`/dry-run実行を含め、`docs/ai/roles/tester.md`の禁止事項(本番適用、`--check`なしのcheck-mode-native実行等)はそのまま適用される。 |
-| **Auditor** | **Sonnet** | 2026-07-28新設。**Coordinatorが案件クローズ時に1回だけ**起動し(起動条件と手順は`docs/ai/roles/coordinator.md`。全単位が完了し`progress.md`と番号付き成果物が出揃った時点、`docs/ai/status.md`の該当行を消す前)、`docs/ai/roles/auditor.md`の範囲で「この記録から経緯を再構成できるか、辻褄は合っているか」を検査する。**入力はrepoの成果物のみで、Coordinatorの説明を受け取らない**(受け取ると自己申告の清書になる)。技術的な正否は判定しないが、**記録どうしの矛盾**は指摘する。走行中の工程管理は行わない。 |
+| **Auditor** | **Sonnet** | 2026-07-28新設。**Coordinatorが案件クローズ時に1回だけ**起動し(起動条件と手順は`docs/ai/roles/coordinator.md`。全単位が完了し番号付き成果物が出揃った時点、`docs/ai/status.md`の該当行を消す前)、`docs/ai/roles/auditor.md`の範囲で「この記録から経緯を再構成できるか、辻褄は合っているか」を検査する。**入力はrepoの成果物のみで、Coordinatorの説明を受け取らない**(受け取ると自己申告の清書になる)。技術的な正否は判定しないが、**記録どうしの矛盾**は指摘する。走行中の工程管理は行わない。 |
 
 ### モデル・effort配分(2026-07-26確定)
 

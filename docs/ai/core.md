@@ -33,6 +33,8 @@ harnessの安全機構(permission classifier、`permissions.deny`)が操作を�
 - Coordinatorは、報告を受けてもそれを自分では解除できない。**`soft_deny` を解除できるのはYoshinobuのintentだけであり、セッション内のCoordinatorの承認はharness層でintentとして数えられない**(2026-07-28実測)。したがってCoordinatorはYoshinobuへ上げる。
 - ブロックされた事実と、その後の対応は記録に残す。**隠して迂回した場合、記録には成功だけが残る** — これが最も避けたい状態である。
 
+**この機構は `.claude/settings.json` の `permissions.defaultMode` と `autoMode` の両方が揃って初めて機能する**(値そのものは同ファイルが正本であり、ここへ写さない)。片方が欠けたときの症状は「確認プロンプトが増える」という**安全側の壊れ方**で、2026-07-28に実際に `defaultMode` の書き漏らしが約2日間気づかれなかった。**壊れていても異常に見えない**ため、この層を変更したときは症状ではなく設定そのものを確認する。
+
 根拠と実例は `docs/ai/memory/lessons/permission-boundaries-must-be-designed-not-prompted.md`。2026-07-28に、承認済みの削除操作でclassifierが2回ブロックし、subagentが3つ目の形で通過させた事例がある。**その形自体は妥当だった可能性が高いが、妥当かどうかを判定したのがブロックされた当人だった点が問題だった。**
 
 ## 開発と本番の境界

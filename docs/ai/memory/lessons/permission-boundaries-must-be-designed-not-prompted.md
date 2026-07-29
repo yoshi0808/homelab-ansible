@@ -88,4 +88,4 @@ Coordinatorの寄与も記録する。「globを使わず名前を明示指定�
 - 一次記録: `docs/ai/reviews/incident_auto_capture/2026-07-28_028_u5_test_result.md` §T8・§4
 - 先行事例: 2026-07-26 decoy inventoryへの無許可実行
 - 承認境界の正本: `docs/ai/roles/coordinator.md`「実ホストへの非冪等操作の承認」
-- 実行機構: `.claude/settings.json` の `permissions` / `autoMode`(`docs/ai/roles/coordinator.md`「この境界を実際に強制している機構」)
+- 実行機構: `.claude/settings.json` の `permissions.defaultMode` / `autoMode`(設定そのものが正本。`docs/ai/core.md`「安全機構がブロックしたとき」も参照)
