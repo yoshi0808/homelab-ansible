@@ -155,6 +155,9 @@
       {% endfor -%}
       {% set _ = summary.parts.append('SUMMARY proxmox_healthcheck') -%}
       {% set _ = summary.parts.append('Result=' ~ summary.result) -%}
+      {% if (prn_unreachable_nodes | default([])) | length > 0 -%}
+      {% set _ = summary.parts.append('Unchecked=' ~ (prn_unreachable_nodes | join(','))) -%}
+      {% endif -%}
       {% if summary.result == 'CRITICAL' -%}
       {% set _ = summary.parts.append('Next=fix criticals; patch must not proceed') -%}
       {% elif summary.result == 'WARNING' -%}

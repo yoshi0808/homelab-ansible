@@ -117,6 +117,9 @@
       {% endfor -%}
       {% set _ = summary.parts.append('SUMMARY proxmox_hw_check') -%}
       {% set _ = summary.parts.append('Result=' ~ summary.result) -%}
+      {% if (prn_unreachable_nodes | default([])) | length > 0 -%}
+      {% set _ = summary.parts.append('Unchecked=' ~ (prn_unreachable_nodes | join(','))) -%}
+      {% endif -%}
       {% if summary.result == 'WARNING' -%}
       {% set _ = summary.parts.append('Next=review hardware warnings before patch') -%}
       {% else -%}

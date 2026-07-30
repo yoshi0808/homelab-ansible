@@ -122,7 +122,8 @@
       {% endif -%}
       {% set _ = ns.lines.append(host ~ '=' ~ r.result.status ~ '(stale=' ~ (r.stale_count | string) ~ '/' ~ (r.total_snapshots | string) ~ ',collection_ok=' ~ (r.collection_ok | string | lower) ~ ',errors=' ~ (r.errors | length | string) ~ ')') -%}
       {% endfor -%}
-      SUMMARY proxmox_snapshot_check | Result={{ ns.result }} | {{ ns.lines | join(' | ') }} | Threshold={{ proxmox_snapshot_check_threshold_seconds | int // 86400 }}d
+      {% set _unchecked = prn_unreachable_nodes | default([]) -%}
+      SUMMARY proxmox_snapshot_check | Result={{ ns.result }}{% if _unchecked | length > 0 %} | Unchecked={{ _unchecked | join(',') }}{% endif %} | {{ ns.lines | join(' | ') }} | Threshold={{ proxmox_snapshot_check_threshold_seconds | int // 86400 }}d
   run_once: true
 
 - name: Print snapshot check summary

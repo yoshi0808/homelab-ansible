@@ -1,9 +1,17 @@
 ---
 # tester-gate: safe-readonly — read-only診断（冪等な収集script配置とlocal report保存を含む）。異常時通知はcallerのskip_notificationsとcommon_slack内のtester_mode/skip_notificationsで抑止する
+#
+# 2026-07-30: 到達不能nodeを除外して残りのnodeで継続する
+# (ignore_unreachable + proxmox_reachable_nodes)。理由と契約は
+# docs/ai/adr/008-proxmox-readonly-check-unreachable-node.md。
 - name: Proxmox healthcheck
   hosts: proxmox
   gather_facts: true
   become: true
+  ignore_unreachable: true
 
   roles:
+    - role: proxmox_reachable_nodes
+      vars:
+        prn_caller: proxmox_healthcheck
     - proxmox_healthcheck

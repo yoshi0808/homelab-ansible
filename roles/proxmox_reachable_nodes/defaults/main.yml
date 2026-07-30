@@ -1,0 +1,14 @@
+---
+# roles/proxmox_reachable_nodes - 到達不能nodeをplayから除外する共通role の
+# 既定値。変数の意味・契約は
+# docs/ai/reviews/proxmox_readonly_check_single_node/2026-07-30_002_plan.md
+# §1-1 が正本。ここではその契約どおりの既定値のみを持つ。
+
+# 候補ノードのinventory group名。呼び出し側Playの hosts: はこのgroupの
+# 部分集合であること(tasks/main.yml のT1がこの部分集合関係と非空をassert
+# する。厳密一致ではない — `--limit <node>` で縮んだ集合も許容する)。
+prn_candidate_group: proxmox
+
+# prn_caller (失敗メッセージの先頭に付ける呼び出し元識別子) は、呼び出し側が
+# 必ず指定する必須変数のため、ここでは既定値を持たない
+# (未指定なら tasks/main.yml のT1が非空チェックで落とす)。

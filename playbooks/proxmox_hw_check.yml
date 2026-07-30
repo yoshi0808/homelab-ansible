@@ -1,9 +1,17 @@
 ---
 # tester-gate: safe-readonly — read-only診断（冪等な収集script配置とlocal report保存を含む）。通知経路はない
+#
+# 2026-07-30: 到達不能nodeを除外して残りのnodeで継続する
+# (ignore_unreachable + proxmox_reachable_nodes)。理由と契約は
+# docs/ai/adr/008-proxmox-readonly-check-unreachable-node.md。
 - name: Proxmox hardware check
   hosts: proxmox
   gather_facts: true
   become: true
+  ignore_unreachable: true
 
   roles:
+    - role: proxmox_reachable_nodes
+      vars:
+        prn_caller: proxmox_hw_check
     - proxmox_hw_check

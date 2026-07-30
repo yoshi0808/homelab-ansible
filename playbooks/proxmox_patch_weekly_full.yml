@@ -112,11 +112,37 @@
 - import_playbook: proxmox_healthcheck.yml
 
 # Step 1b: Stop if either node is not OK
+#
+# 2026-07-30: proxmox_healthcheck.yml (Step 1a) は到達不能nodeを除外して
+# 片肺で完走するようになった(docs/ai/adr/008-proxmox-readonly-check-unreachable-node.md)。
+# 到達不能nodeはこのplayに残ったままだが proxmox_report を持たないため、次の
+# fail タスクの `when:` がそのnode上では未定義変数エラーになる。停止すること
+# 自体は正しい(apply側は両nodeを要求する、SB-027/SB-028/SB-032)が、理由が
+# 読める形で止まるようにする1タスクを先に置く。
 - name: Abort if either node healthcheck is not OK
   hosts: proxmox
   gather_facts: false
   any_errors_fatal: true
   tasks:
+    - name: Fail if any candidate node was unreachable during healthcheck
+      ansible.builtin.fail:
+        msg: >-
+          weekly full patch requires every node in group 'proxmox' to be
+          reachable, but {{ _wf_unreachable | join(', ') }} did not answer
+          during the healthcheck play. Apply-side drift avoidance
+          (SB-027 / SB-028 / SB-032) requires the full fixed pair.
+      vars:
+        _wf_unreachable: >-
+          {{ ansible_play_hosts_all
+             | map('extract', hostvars)
+             | selectattr('prn_reachable', 'defined')
+             | selectattr('prn_reachable', 'equalto', false)
+             | map(attribute='inventory_hostname') | list }}
+      run_once: true
+      delegate_to: localhost
+      become: false
+      when: _wf_unreachable | length > 0
+
     - name: Fail if healthcheck is not OK
       ansible.builtin.fail:
         msg: >-

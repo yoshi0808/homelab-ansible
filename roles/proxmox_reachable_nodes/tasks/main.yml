@@ -1,0 +1,118 @@
+---
+# roles/proxmox_reachable_nodes - 到達不能nodeを検出しplayから除外する。
+#
+# 目的: read-only点検3本(proxmox_healthcheck / proxmox_hw_check /
+#       proxmox_snapshot_check)が、候補node(既定group `proxmox`)の一部が
+#       到達不能でも、到達できたnodeだけで点検を継続し、終了コード0で
+#       完走できるようにする。全候補nodeが到達不能なら理由を明記してfailする
+#       (空reportやサイレント成功にしない)。
+#
+# roles/proxmox_exec_node(到達可能な候補から1台を選ぶ)と本roleは、probe
+# (T1〜T3)までは同じだが出力が違う(本roleは到達不能nodeを落として残り全部で
+# 続ける)。統合しない理由は docs/ai/adr/008-proxmox-readonly-check-unreachable-node.md
+# Options (a) を参照。
+#
+# 呼び出し規約: このroleは「候補group(既定 prn_candidate_group)の
+#       **部分集合**を hosts: に持つ Play」から `roles:` リストの**先頭**で
+#       呼ぶこと。T1は厳密一致ではなく部分集合(かつ非空)をassertするため、
+#       `--limit <node>` による単一node実行(SB-021が許可する既存能力)も
+#       正しく通る。呼び出し側Playには play-levelの `ignore_unreachable: true`
+#       が必須(roleはplay-levelキーワードを設定できないため、この前提はT1で
+#       assertできない - 設定漏れは「rcが4のまま」という形で現れる)。
+#
+# 出力:
+#   - 全候補ノードに per-host fact prn_reachable(bool)が立つ。到達不能ノードにも
+#     立つ(set_fact はcontroller側で完結するため、ignore_unreachable で
+#     Playに残ったホストにも実行される - 2026-07-26に実機で確認済みの挙動と
+#     同一。docs/ai/reviews/proxmox_patch_dryrun/2026-07-26_005_test_result.md
+#     §14-4)。
+#   - fact prn_reachable_nodes(list)/ prn_unreachable_nodes(list)が全ホスト
+#     (到達不能ノードを含む)に立つ。呼び出し側roleのsummaryは
+#     prn_unreachable_nodes を読む。
+#   - 到達不能ノードは meta: end_host でplayから落ちる。以降のroleのタスクは
+#     実行されない。
+#
+# fact gatheringではなく明示的な ping probe (T2) で到達性を判定する。
+# Semaphore実行環境で fact caching が有効でも誤判定しないため
+# (ADR-006と同じ理由)。
+#
+# 設計の正本: docs/ai/reviews/proxmox_readonly_check_single_node/2026-07-30_002_plan.md §1-1
+#
+# Q2(2026-07-30): meta: end_host がrole内のタスクとして機能するかは、実装
+# 着手時にdecoy(実host名を含まない、localhost/閉ポートのみで構成した一時
+# inventory)で確認済み。roles: 経由で呼ばれたrole内の end_host は、対象host
+# をそのhost分だけplayから正しく落とす(post_tasksを含む以降の全タスクが
+# 実行されない)。この確認記録は
+# docs/ai/reviews/proxmox_readonly_check_single_node/2026-07-30_004_implement.md
+# を参照。
+
+- name: Assert required inputs and calling convention
+  ansible.builtin.assert:
+    that:
+      - prn_caller is defined
+      - prn_caller | length > 0
+      - ansible_play_hosts_all | difference(groups[prn_candidate_group]) | length == 0
+      - ansible_play_hosts_all | length > 0
+    fail_msg: >-
+      {{ prn_caller | default('proxmox_reachable_nodes') }}: invalid inputs or
+      calling convention. prn_caller must be non-empty, and the calling
+      play's hosts must be a non-empty subset of groups['{{ prn_candidate_group }}']
+      (play hosts: {{ ansible_play_hosts_all }},
+      group members: {{ groups[prn_candidate_group] | default('(undefined group)') }}).
+    quiet: true
+  run_once: true
+  delegate_to: localhost
+  become: false
+
+- name: Probe SSH reachability of every candidate node
+  ansible.builtin.ping:
+  register: prn_ping
+  ignore_unreachable: true
+  ignore_errors: true
+  become: false
+
+- name: Record per-host reachability
+  ansible.builtin.set_fact:
+    prn_reachable: >-
+      {{ not (prn_ping.unreachable | default(false) | bool)
+         and not (prn_ping is failed) }}
+
+- name: Compute reachable and unreachable node lists
+  ansible.builtin.set_fact:
+    prn_reachable_nodes: "{{ _prn_reachable_calc }}"
+    prn_unreachable_nodes: "{{ ansible_play_hosts_all | difference(_prn_reachable_calc) }}"
+  vars:
+    _prn_reachable_calc: >-
+      {{ ansible_play_hosts_all
+         | map('extract', hostvars)
+         | selectattr('prn_reachable', 'equalto', true)
+         | map(attribute='inventory_hostname')
+         | list }}
+
+# T5より先にT6(end_host)を置くと、両node到達不能時に run_once を担うホストが
+# 残らずこのガードがdead codeになる
+# (playbooks/proxmox_patch_dryrun.yml:59-65 と同じ理由)。
+- name: Fail if no candidate node is reachable
+  ansible.builtin.fail:
+    msg: >-
+      {{ prn_caller }}: no node in group '{{ prn_candidate_group }}' is
+      reachable via SSH ping, cannot continue the check on any node.
+      Candidate reachability: {{ prn_reachability_report }}.
+  vars:
+    prn_reachability_report: >-
+      {{ ansible_play_hosts_all
+         | zip(ansible_play_hosts_all | map('extract', hostvars) | map(attribute='prn_reachable'))
+         | map('join', '=')
+         | join(', ') }}
+  run_once: true
+  delegate_to: localhost
+  become: false
+  when: >-
+    ansible_play_hosts_all
+    | map('extract', hostvars)
+    | selectattr('prn_reachable', 'equalto', true)
+    | list | length == 0
+
+- name: Drop unreachable nodes from the play
+  ansible.builtin.meta: end_host
+  when: not prn_reachable

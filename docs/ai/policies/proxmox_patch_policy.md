@@ -98,6 +98,9 @@ quorumなし、ZFS異常、apt / dpkg異常、重要service停止、systemd fail
 <!-- SB-094 -->
 dry-runは到達可能かつhealthcheckがOKのnodeが1node以上あれば開始する。pve1 / pve2の両方が到達可能な場合は従来どおり両nodeのhealthcheckがOKであることを要求する。片方のnodeが通信断、`--limit`で対象外、またはhealthcheck失敗(SB-022が定めるquorum / ZFS / apt-dpkg / 重要service等の実障害)により除外された場合は、残る側のnodeのhealthcheckがOKであれば単一node dry-runとして開始し、通知で対象nodeを明示する。ただし通知文言は通信断とhealthcheck失敗を断定的に区別せず(両者ともAnsible実行上は同様に対象から脱落するため)、`--limit`による意図的な単一node実行だけは別文言で明示する。pve1 / pve2の両方が到達不能な場合は開始せず、明確なエラーで停止する(空reportやサイレント成功にしない)。package metadata更新とsimulationは行うがpackage本体を変更せず、実patchを適用しない。単一node dry-runの`PATCH_READY`は、apply側(SB-027、SB-028、SB-032)が要求する両node揃ったfixed pair dry-run条件を満たしたとはみなさない。
 
+<!-- SB-095 -->
+read-only点検(`proxmox_healthcheck.yml`、`proxmox_hw_check.yml`)は、到達可能なnodeが1node以上あれば実行し、到達不能なnodeを対象から除外して継続する。除外したnodeはSemaphore summaryへ明示し、点検できた範囲を読み取れる状態にする。全nodeが到達不能な場合は明確なエラーで停止する(空reportやサイレント成功にしない)。到達不能による除外は点検結果の`OK`を保証しない — 除外されたnodeの状態は未確認である。applyの前提(SB-027、SB-028、SB-032が要求する両node揃った状態)は本項で緩めない。
+
 <!-- SB-025 -->
 dry-runは次の順でStatusを決める。
 
@@ -402,6 +405,7 @@ Sophos Firewall VMのHA relocateはstop → migrate → startであり、VM再�
 
 | 日付 | 変更 |
 |---|---|
+| 2026-07-30 | 夏季pve1平日シャットダウン運用でread-only点検3本(`proxmox_healthcheck.yml`、`proxmox_hw_check.yml`、木曜の`proxmox_snapshot_check.yml`)がSemaphoreで毎回`error`表示になっていた問題を受け、SB-095を新設。到達可能nodeが1node以上あれば継続し、除外nodeをsummaryへ明示、全node到達不能時は明確なエラーで停止する。除外による`OK`はapplyの両node要求(SB-027、SB-028、SB-032)を緩めない。`proxmox_snapshot_check`はpatch domain外のためADR-008と当該playbookのheader comment側で同一挙動を規定する |
 | 2026-07-26 | 夏季pve1平日シャットダウン運用でdry-runが機能しない問題を受け、SB-023(pve1 / pve2固定pair限定、単一node実行禁止)を廃止し、到達・healthcheck OKなnodeが1node以上あれば開始する条件分岐へ改めたSB-094へ置き換え。両node到達不能時は明確なエラーで停止すること、単一node dry-runの`PATCH_READY`がapply側fixed-pair gate条件(SB-027、SB-028、SB-032)を満たさないことをSB-094内に明記。apply側(SB-027、SB-028、SB-032)の両node要求(drift回避)は変更していない。退番: SB-023(再利用しない) |
 | 2026-07-25 | 移行完了済みのSophos前提(SB-083、SB-001の1 bullet、SB-060 / SB-085の条件節)を削除し、退避の一般規則で足りるSB-084とUrgency判断境界のないSB-086を廃止。代わりにHA relocateによるVM再起動・internet断とautonomous_recovery_policyのmute契約への依拠をSB-092 / SB-093として明記。定義が存在しない`Mode A` / `Mode B`参照および汎用形の「Mode別」表記を条件記述へ統一(Operations Contextの該当見出しも同時に改称)。冗長かつ曜日が事実誤りのSB-049を削除。SB-014を分類規則と終端不変条件(SB-091)へ分離。退番: SB-049 / SB-083 / SB-084 / SB-086(再利用しない) |
 | 2026-07-24 | v2.0の安全境界を維持したまま標準8節へ再編。実装、運用、環境、時点依存計画をContext / reviewへ分離し、旧§22を付録Aへ移した |
