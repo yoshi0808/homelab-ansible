@@ -1,0 +1,198 @@
+---
+# restart_and_verify.yml — provider/alertingのいずれかがchangedならgrafana-server
+# をrestartし、restart前後の非回帰をread-onlyに確認する(requirement R5/R6、
+# 計画§1-6、§3 U3)。
+#
+# **grafana-serverのrestartは本案件で唯一の破壊的操作である。** Implementerは
+# このファイルを書くだけで、実行(--checkなしのansible-playbook実行)は行わない
+# — 実行はTester/Yoshinobuの工程(「到達してはいけない状態」参照)。
+#
+# `grafana_provisioning_provider_result` / `grafana_provisioning_alerting_result`
+# は deploy_provider.yml / deploy_alerting.yml の`register`。タグで実行され
+# なかったタスク(例: `--tags provider`のみでalertingが動いていない場合)は
+# registerそのものが未定義になるため `| default(false)` で吸収する(タグ経由の
+# 未実行と、`when: not ansible_check_mode`によるskip経由の両方に対応 —
+# skip経由はregisterが`changed: false`付きで存在するため素通りする)。
+
+- name: "Determine whether a restart is needed"
+  ansible.builtin.set_fact:
+    grafana_provisioning_restart_needed: >-
+      {{ (grafana_provisioning_provider_result.changed | default(false))
+         or (grafana_provisioning_alerting_result.changed | default(false)) }}
+  check_mode: false
+  tags: [provider, alerting]
+
+# TS-015(複数の破壊的taskが相互依存する場合は個別taskへwhenを付けるより
+# blockでまとめる)に従い、mute→restart→port待ち→非回帰確認の一連を1つの
+# named blockにしてblock単位でゲートする。
+- name: "Restart grafana-server and verify non-regression (destructive)"
+  when:
+    - grafana_provisioning_restart_needed | bool
+    - not ansible_check_mode
+  tags: [provider, alerting, destructive]
+  block:
+    # repoの確立された方式(playbooks/proxmox_restore_vm_placement.yml、
+    # ubuntu_nightly.yml、proxmox_patch_weekly_full.yml、
+    # roles/ubuntu_vm_full_upgrade/tasks/apply.yml 等15箇所以上)に揃え、
+    # playbook_dir基点で参照する。ubuntu_vm_full_upgrade/tasks/apply.ymlは
+    # 本ファイルと同じ条件(role内のtaskファイルからrecovery_muteを呼ぶ)で
+    # この方式を使い実際に機能している先例であり、role_path基点にする技術的
+    # 必然性は無かった(2026-07-30、U3レビュー Suggestion 1への対応。
+    # 元実装はrole_path基点だったが、同じ結果に対し2通りの書き方を持ち込む
+    # 理由が無いため先例へ統一した)。
+    - name: "Mute monnie before grafana-server restart"
+      ansible.builtin.include_tasks: "{{ playbook_dir }}/../roles/recovery_mute/tasks/set.yml"
+      vars:
+        recovery_mute_target: monnie
+        recovery_mute_minutes: "{{ grafana_provisioning_mute_minutes }}"
+        recovery_mute_reason: "grafana_provisioning: grafana-server restart for provider/alerting deploy"
+
+    - name: "Record restart start time (for post-restart grafana-server log scan)"
+      ansible.builtin.command:
+        cmd: date '+%Y-%m-%d %H:%M:%S'
+      register: grafana_provisioning_restart_started_at
+      changed_when: false
+
+    - name: "Restart grafana-server"
+      ansible.builtin.systemd:
+        name: grafana-server
+        state: restarted
+
+    - name: "Wait for Grafana to accept connections on port 3000"
+      ansible.builtin.wait_for:
+        port: 3000
+        timeout: 30
+
+    # 手順4: alert_configuration.configuration_hash のread-only確認。
+    # Step 0調査時点の値(002_investigation.md)から不変であることを確認する —
+    # policy tree・contact pointに触れていないことの機械的証拠(R4非ゴール)。
+    # grafana.db / /etc/grafana/provisioning/** はansible接続identity(ann)
+    # では読めず特権(become)が要る(Step 1実測、002_investigation.md)。
+    # playはplay levelでbecome: trueのため、ここは追加指定不要。
+    - name: "Read alert_configuration.configuration_hash (read-only)"
+      ansible.builtin.command:
+        cmd: >-
+          python3 -c "import sqlite3; conn = sqlite3.connect('file:/var/lib/grafana/grafana.db?mode=ro', uri=True); cur = conn.cursor(); cur.execute('SELECT configuration_hash FROM alert_configuration ORDER BY id DESC LIMIT 1'); row = cur.fetchone(); print(row[0] if row else '')"
+      register: grafana_provisioning_configuration_hash_check
+      changed_when: false
+
+    # 期待値は defaults/main.yml の `grafana_provisioning_expected_configuration_hash`
+    # (Step 0時点のnotification policy tree + contact pointのhash)。
+    #
+    # **この値は将来、正当な理由で変わりうる** — Yoshinobuがcontact point /
+    # notification policy treeをUI上で意図的に変更した場合。そのときこの
+    # assertは、restartが起きるたび(providerだけの変更を含む)毎回failし
+    # 続ける。**対応は「assertを外す」ことではなく**、変更が意図したものか
+    # 確認したうえで defaults/main.yml の
+    # `grafana_provisioning_expected_configuration_hash` を新しい値へ更新
+    # すること(手順はdefaults/main.ymlのコメントに明記済み)。
+    # (2026-07-30、U3レビュー Suggestion 2への対応)
+    - name: "Assert alert_configuration.configuration_hash is unchanged"
+      ansible.builtin.assert:
+        that:
+          - grafana_provisioning_configuration_hash_check.stdout.strip() == grafana_provisioning_expected_configuration_hash
+        fail_msg: >-
+          alert_configuration.configuration_hash が
+          {{ grafana_provisioning_expected_configuration_hash }} から
+          {{ grafana_provisioning_configuration_hash_check.stdout }} へ変化した。
+          notification policy tree または contact point が変更された可能性が
+          あり、requirement R4/非ゴールに反する。Yoshinobuが意図してUIで
+          変更したことが確認できた場合は、assertを外すのではなく
+          defaults/main.yml の grafana_provisioning_expected_configuration_hash
+          を新しい値へ更新すること(同ファイルのコメント参照)。
+        quiet: true
+
+    # 2026-07-30 Coordinator差し戻し: 手順5・6は「このrunでalertingが配られた
+    # とき」にしか意味を持たない。provider単独のrestart(タグ無しのフル実行で
+    # deploy_alertingが`never`タグでskipされるケースを含む)でこの2手順を
+    # 実行すると、R8手順1(旧4ルール削除)後は`alert_rule`が空であるため
+    # 「providerは配備成功したのにplay全体がfailする」という紛らわしい状態に
+    # なる(計画§1-6が「4ルールの存在確認はalerting配備を前提とする」条件を
+    # 明記していなかったことによるCoordinator側の記述漏れ。Implementerの解釈
+    # ミスではない)。
+    #
+    # 判定材料は`grafana_provisioning_alerting_result`が定義されているか否か
+    # ——`never`タグでdeploy_alerting.ymlのcopyタスクがそもそも実行されな
+    # かった場合、registerは未定義のままになる(decoy検証で確認済み)。
+    # R8ゲート(assertion)がfailした場合はplay自体がfatalで停止するため、
+    # ここまで到達する時点で「copyタスクが実行され終えている」ことは保証
+    # されている。
+    - name: "Determine whether alerting was deployed in this run"
+      ansible.builtin.set_fact:
+        grafana_provisioning_alerting_deployed_this_run: "{{ grafana_provisioning_alerting_result is defined }}"
+
+    # 手順5: 4ルールがalert_ruleテーブルに存在することの確認。旧4ルールは
+    # R8手順1でYoshinobuが削除済みのため「既存ルールが残る」ことは期待しない
+    # (requirement AC3)。不在ならfailする — R4のQ3(alerting provisionerが
+    # dashboard providerの作ったfolder 'UniFi' を参照できるか)が想定する
+    # 失敗をここで検出する(計画§1-4)。
+    #
+    # 手順6(ログ確認)は補助であり、この手順5(DB上の存在確認)が主である。
+    # ログ側のパターン('provisioning'と'error'を同一行に含む)は実際の
+    # 失敗時の文言をStep 0調査で観測していない未検証の判定条件のため、
+    # ログ側が空振り(false negative)してもこの手順5が主として捕まえる
+    # 構造にしている(2026-07-30、Coordinator承認)。
+    - name: "Verify the 4 provisioned alert rules and grafana-server log (only meaningful if alerting was deployed this run)"
+      when: grafana_provisioning_alerting_deployed_this_run
+      block:
+        - name: "Count the 4 provisioned alert rules in alert_rule table (read-only)"
+          ansible.builtin.command:
+            cmd: >-
+              python3 -c "import sqlite3; conn = sqlite3.connect('file:/var/lib/grafana/grafana.db?mode=ro', uri=True); cur = conn.cursor(); uids = ['dfoih9pbfckxsf', 'bfoii89j7l88wf', 'dfoiihloh6hogd', 'dfoiiku15evi8e']; cur.execute('SELECT count(*) FROM alert_rule WHERE uid IN (%s)' % ','.join('?' * len(uids)), uids); print(cur.fetchone()[0])"
+          register: grafana_provisioning_alert_rule_count_check
+          changed_when: false
+
+        - name: "Assert all 4 provisioned alert rules exist"
+          ansible.builtin.assert:
+            that:
+              - grafana_provisioning_alert_rule_count_check.stdout.strip() == '4'
+            fail_msg: >-
+              alert_rule テーブルに存在するはずの4ルール(uid dfoih9pbfckxsf /
+              bfoii89j7l88wf / dfoiihloh6hogd / dfoiiku15evi8e)のうち
+              {{ grafana_provisioning_alert_rule_count_check.stdout }} 件しか
+              見つからなかった。alerting provisionerがfolder参照に失敗した
+              可能性がある(計画§1-4 Q3)。下のgrafana-serverログ確認と
+              あわせて判断する。
+            quiet: true
+
+        # 手順6: grafana-serverのログにprovisioningエラーが出ていないことを
+        # 確認する。Q3(folder参照)が失敗した場合、ルール不在とログの両方に
+        # 現れる想定(計画§1-4)。あくまで手順5(上記)を補う位置づけであり、
+        # この手順単独の判定でpassしたことをQ3が解消した根拠にはしない。
+        - name: "Fetch grafana-server log since restart (read-only)"
+          ansible.builtin.command:
+            cmd: >-
+              journalctl -u grafana-server
+              --since "{{ grafana_provisioning_restart_started_at.stdout }}"
+              --no-pager
+          register: grafana_provisioning_post_restart_log
+          changed_when: false
+
+        - name: "Assert no provisioning error appears in the post-restart grafana-server log"
+          ansible.builtin.assert:
+            that:
+              - >-
+                (grafana_provisioning_post_restart_log.stdout_lines
+                 | select('search', '(?i)provisioning')
+                 | select('search', '(?i)error')
+                 | list | length) == 0
+            fail_msg: >-
+              grafana-server のログ(restart時刻以降)に 'provisioning' と
+              'error' を同時に含む行が見つかった。requirement R4 Q3
+              (folder参照の失敗)が想定する失敗モードに該当する可能性がある
+              ため、上のDB確認結果とあわせて判断すること。
+            quiet: true
+
+    # 条件が偽の場合に黙ってskipすると、「4ルールを確認して問題なかった」のか
+    # 「そもそも確認していない」のかを実行ログから区別できなくなる
+    # (docs/ai/memory/lessons/distinguish-nothing-found-from-not-run.md の
+    # 欠陥クラス)。このrunがproviderのみの変更だった場合にその旨を明示する。
+    - name: "Note: alert rule / log verification was skipped (alerting was not deployed in this run)"
+      ansible.builtin.debug:
+        msg: >-
+          このrunではalertingが配られなかった(--tags alertingが指定されて
+          いないか、`never`タグでskipされた)ため、4ルールの存在確認と
+          grafana-serverログのprovisioningエラー確認を実行していない。
+          provider単独のrestartではこの2手順は意味を持たない
+          (2026-07-30 Coordinator差し戻し)。
+      when: not grafana_provisioning_alerting_deployed_this_run

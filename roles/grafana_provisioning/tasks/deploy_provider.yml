@@ -1,0 +1,39 @@
+---
+# deploy_provider.yml — dashboard provider yaml(現行 unifi.yaml)の明示化版を
+# /etc/grafana/provisioning/dashboards/ へ配る(requirement R2、計画§1-3、§3 U3)。
+#
+# name / folder / type / path / orgId は現行の unifi.yaml から1文字も変えない。
+# 追加するのは allowUiUpdates: false と updateIntervalSeconds: 10 の2行のみ —
+# 現在Grafanaの既定値に依存している挙動を明文化するだけで、挙動そのものを
+# 変えるものではない(計画§1-3)。
+#
+# 「既定値と一致する」という確度は文献レベルに留まる旨が計画§1-3に明記されて
+# いる。ただし updateIntervalSeconds: 10 が実際に効くことは、Step 1のAC2
+# (2026-07-30 実機検証、docs/ai/reviews/grafana_provisioning/
+# 2026-07-30_008_test_result_step1.md 後日追記)で既に実地確認済み
+# (restart無しでGrafanaがJSONを読み直すことを`resource`テーブルの
+# `generation`/`updatedTimestamp`遷移で確認している)。allowUiUpdates: false の
+# 方は「UI編集が実際に拒否される」ことの確認手段がYoshinobuのUI操作しかない
+# ため、現状追認として扱う(計画§1-3)。
+#
+# owner/modeは計画§1-8の表のとおり(root:grafana 0640、
+# docs/ai/reviews/grafana_provisioning/2026-07-30_002_investigation.md R1-1の
+# directory listingで実測済み)。
+#
+# 「Ansible外で配置されたファイルをAnsibleが初めて上書きする」ため、内容は
+# 実質無変更(2行追加のみ)でも初回は changed=true になる(計画§1-8)。
+#
+# ホスト上のファイル名は現行のまま `unifi.yaml` を維持する(provider名/パスの
+# 無変化がR2の要件のため、repo側のファイル名 `dashboards-provider-unifi.yml`
+# とは意図的に異なる)。
+
+- name: Deploy dashboard provider yaml to monnie
+  ansible.builtin.copy:
+    src: dashboards-provider-unifi.yml
+    dest: "{{ grafana_provisioning_provider_dir }}/unifi.yaml"
+    owner: root
+    group: grafana
+    mode: "0640"
+  register: grafana_provisioning_provider_result
+  when: not ansible_check_mode
+  tags: [provider, destructive]

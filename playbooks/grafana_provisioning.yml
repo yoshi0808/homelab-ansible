@@ -2,9 +2,9 @@
 # grafana_provisioning.yml - Grafanaダッシュボード/アラートのrepo正本化(provisioning
 # as code)。対象: monnie(grafana-server)。
 #
-# 現時点(Step 1 / U1)ではdashboard JSON 7枚の複製のみを行う。restart無し・
-# mute不要・本番無風(AC1: repoとホストの内容が一致していれば初回はchanged=0)。
-# provider yamlの明示化・alerting配備・restartはStep 2(U3)で追加する。
+# Step 1(U1)はdashboard JSON 7枚の複製のみで本番無風(AC1: repoとホストの
+# 内容が一致していれば初回はchanged=0)。Step 2(U3)でprovider yamlの明示化・
+# alerting配備・restartを追加した(本案件で唯一の破壊的操作)。
 #
 # 参照は playbooks/cert_renew.yml の "hosts: monnie" の1 play(become: true を
 # play levelに置く形)だけであり、cert_renew.yml全体の構成(複数play・
@@ -15,12 +15,29 @@
 # 使用例:
 #   事前確認(--check --diff、ホストへの変更なし):
 #     ansible-playbook playbooks/grafana_provisioning.yml --tags dashboards --check --diff
-#   本実行(dashboard JSON配布):
+#   本実行(dashboard JSON配布のみ):
 #     ansible-playbook playbooks/grafana_provisioning.yml --tags dashboards
+#   **Step 2の本実行(provider明示化 + alerting配備を1回のrestartで済ませる)**:
+#     ansible-playbook playbooks/grafana_provisioning.yml \
+#       --tags provider,alerting -e alert_rules_predecessor_confirmed=true
+#     ↑ これがStep 2の正しい起動である。旧4件のUI削除(R8手順1)を済ませてから実行する。
+#       requirement R5は「restartは案件全体で1回に集約する」を要求しており、
+#       下記の --tags provider と --tags alerting を別々に実行すると
+#       **restartが2回発生してR5に反する**(2026-07-30、配備前の読み直しで判明。
+#       計画§1-6は意図だけ書いて起動方法を書いていなかった)。
 #
-# tester-gate: check-mode-native — dashboard JSONのnameベースdatasource参照を
-# 検査するpreflightはread-onlyで--checkでも常に本実行し、dashboard JSONの
-# copyタスクだけをansible_check_modeでゲートする。詳細は
+#   個別実行(上記を分けたい特段の理由があるときだけ。restartが増える):
+#     ansible-playbook playbooks/grafana_provisioning.yml --tags provider
+#     ansible-playbook playbooks/grafana_provisioning.yml --tags alerting -e alert_rules_predecessor_confirmed=true
+#   `alerting` タグは既定実行(--tags省略時のフル実行、--tags dashboards、
+#   --tags providerのいずれも)に含まれない。deploy_alerting.yml側で
+#   Ansibleの特殊タグ `never` を使っているため、`--tags alerting` を明示した
+#   ときだけ実行される(requirement R8、計画§1-7)。
+#
+# tester-gate: check-mode-native — dashboard JSON/alerting YAMLのnameベース
+# datasource参照・top-levelキー検査などのpreflightはread-onlyで--checkでも
+# 常に本実行し、copyタスク・R8確認ゲート・grafana-server restartだけを
+# ansible_check_modeでゲートする。詳細は
 # docs/ai/policies/ansible_test_safety_policy.md、設計判断の正本は
 # docs/ai/reviews/grafana_provisioning/2026-07-30_004_plan.md。
 

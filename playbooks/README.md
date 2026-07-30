@@ -30,7 +30,7 @@ playbook の入口を置く。処理本体は原則として `roles/` に実装�
 | Playbook | 対象 | 用途 | `tester-gate` | 主な role / 実装 |
 | --- | --- | --- | --- | --- |
 | [`alloy_setup.yml`](alloy_setup.yml) | `monitoring_servers` | Grafana Alloy、rsyslog受信振り分け、Loki転送経路の構築・更新 | `check-mode-native` | `alloy` |
-| [`grafana_provisioning.yml`](grafana_provisioning.yml) | `monnie` | Grafanaダッシュボード/アラートのrepo正本化(provisioning as code)。Step 1時点はdashboard JSON複製のみ | `check-mode-native` | `grafana_provisioning` |
+| [`grafana_provisioning.yml`](grafana_provisioning.yml) | `monnie` | Grafanaダッシュボード/アラートのrepo正本化(provisioning as code)。dashboard JSONの複製、dashboard provider定義、alert ruleのprovisioning配備 | `check-mode-native` | `grafana_provisioning` |
 | [`monitoring_healthcheck.yml`](monitoring_healthcheck.yml) | `monitoring_servers` | Prometheus、Grafana、Loki等の監視基盤healthcheck | `safe-readonly` | `monitoring_healthcheck` |
 | [`prometheus_update_check.yml`](prometheus_update_check.yml) | `monnie` | 手動導入Prometheusの更新確認と承認された更新処理 | `check-mode-native` | `prometheus_update_check` |
 | [`rsyslog_forward_to_monnie.yml`](rsyslog_forward_to_monnie.yml) | `ansy:quory:authy` | Ubuntu系ノードのjournald/syslogをmonnieへ転送 | `check-mode-native` | `rsyslog_forward_to_monnie` |

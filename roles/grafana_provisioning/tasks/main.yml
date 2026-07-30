@@ -2,14 +2,34 @@
 # grafana_provisioning: Grafanaダッシュボード/アラートのrepo正本化。
 # tag: dashboards / provider / alerting を束ねるだけ(計画 §1-1)。
 #
-# 現時点(Step 1 / U1)では "dashboards" タグのみが有効な状態にしている。
-# "provider" / "alerting" タグの実体(deploy_provider.yml、deploy_alerting.yml、
-# restart_and_verify.yml)は Step 2(U3)で追加する。
-# 詳細: docs/ai/reviews/grafana_provisioning/2026-07-30_004_plan.md §2 U1。
+# タグの付与位置は task 側に統一する。この import_tasks 行そのものには
+# tags を付けず、各tasksファイル内の個々のtaskへ [dashboards] / [provider] /
+# [alerting] (+ 該当する場合 destructive / never) を付ける。
+# `preflight_dashboards.yml` は元々この形(import側にtags無し、task側に
+# [dashboards, provider, alerting])だった。U1時点では `Deploy | dashboard JSON`
+# importにだけ `tags: [dashboards]` が残っており、deploy_dashboards.yml自身の
+# taskが既に持つ `tags: [dashboards, destructive]` と重複していたため、
+# ここで撤去して揃えた(2026-07-30、計画§3 U3「タグの付与位置をStep 1と
+# 統一する」への対応。deploy_dashboards.yml自体の内容は変更していない)。
+#
+# `alerting` タグは default 実行に含めない — deploy_alerting.yml の全taskに
+# Ansibleの特殊タグ `never` を付けており、`--tags alerting` を明示しない限り
+# (通常の `ansible-playbook` フル実行、`--tags dashboards`、`--tags provider`の
+# いずれでも)実行されない(requirement R8、計画§1-7)。
+#
+# 詳細: docs/ai/reviews/grafana_provisioning/2026-07-30_004_plan.md §1-1、§3 U3。
 
 - name: Preflight | scan all managed dashboard JSON before any deploy
   ansible.builtin.import_tasks: preflight_dashboards.yml
 
 - name: Deploy | dashboard JSON
   ansible.builtin.import_tasks: deploy_dashboards.yml
-  tags: [dashboards]
+
+- name: Deploy | dashboard provider yaml
+  ansible.builtin.import_tasks: deploy_provider.yml
+
+- name: Deploy | alerting YAML
+  ansible.builtin.import_tasks: deploy_alerting.yml
+
+- name: Restart grafana-server and verify, if provider/alerting changed anything
+  ansible.builtin.import_tasks: restart_and_verify.yml

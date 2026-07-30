@@ -20,3 +20,26 @@ grafana_provisioning_dashboard_files:
 
 grafana_provisioning_alert_rule_file: unifi-switch-port-errors.yaml
 grafana_provisioning_mute_minutes: 15
+
+# alert_configuration.configuration_hash の期待値(Step 0調査時点、
+# docs/ai/reviews/grafana_provisioning/2026-07-30_002_investigation.md
+# 「07-19記録の再確認」節のMETA値)。restart_and_verify.ymlが、
+# grafana-server restart後にnotification policy tree / contact pointへ
+# 一切触れていないことを機械的に確認するために比較する(requirement R4非ゴール)。
+#
+# **この値は将来、正当な理由で変わりうる** — Yoshinobuがcontact pointや
+# notification policy treeをUI上で意図的に変更した場合、Grafanaはこの
+# hashを再計算する。そのときrestart_and_verify.ymlのassertは「意図した
+# 変更」を「異常」として検出しfailし続ける(providerだけを配ってrestartする
+# runでも、alertingを配るrunでも、restartが起きるたび毎回)。
+#
+# **正当な変更が確認できた場合の対応はこの値を更新することであり、
+# assertそのものを外すことではない。** 手順:
+#   1. Yoshinobuが意図してcontact point / notification policy treeを
+#      変更したことを確認する(意図しない変更であればrestart前の状態へ
+#      戻す判断が優先)。
+#   2. monnie上で新しい`alert_configuration.configuration_hash`をread-only
+#      で確認する(restart_and_verify.ymlの「Read alert_configuration.
+#      configuration_hash」タスクと同じread-only sqlite3手段)。
+#   3. この変数の値を新しいhashへ更新する(commitに変更理由を残す)。
+grafana_provisioning_expected_configuration_hash: c6c0ff263e3ebf225d478e187c42cd99

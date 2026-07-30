@@ -317,6 +317,25 @@ $ sed -n '2064,2075p' /etc/grafana/grafana.ini
 - `is_paused` は4件とも `0`(未一時停止)。
 - `updated` は4件とも `2026-06-11 09:25:59` で同一(最後の一括更新と推測されるが、更新理由は今回のDB参照範囲では分からない)。
 
+## R1-4b. `/etc/grafana/provisioning/alerting/` の listing(2026-07-30 追補)
+
+**この listing は初版に存在したが、特権での再取得時にR1-4を書き換えた際に落ちていた。** 下流の実装(`roles/grafana_provisioning/tasks/deploy_alerting.yml`)と計画§1-8がこれを owner/mode の根拠として引用していたため、U3のレビューで「引用先に該当する記録が無い」と指摘された(`010_review_u3.md`)。Coordinatorが実測を取り直して補う。
+
+```
+$ ls -la /etc/grafana/provisioning/alerting/
+total 20
+drwxr-xr-x 2 root grafana  4096 May 26 20:37 .
+drwxr-xr-x 7 root grafana  4096 May 26 20:37 ..
+-rw-r----- 1 root grafana 10185 May 26 20:37 sample.yaml
+```
+
+- ディレクトリ: `root:grafana`、mode `755`
+- `sample.yaml`: `root:grafana`、mode `640`
+
+**したがって alerting 配置先の owner/mode は類推ではなく実測値である**(`root:grafana` `0640`)。dashboards側(R1-1)と同一。
+
+**教訓**: 記録を「最新の状態を指すよう更新する」規律(`docs/ai/core.md`)は正しいが、**下流が引用している証拠を落とすことがある**。書き換えで消す前に、その記録が引用されていないかを確認する必要がある。
+
 ## R1-5. 通知本文の`annotations`判定
 
 `annotations`の生値(4件):

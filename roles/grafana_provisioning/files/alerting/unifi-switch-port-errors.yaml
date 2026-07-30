@@ -1,0 +1,215 @@
+apiVersion: 1
+groups:
+    - orgId: 1
+      name: 'Evaluation interval: 1m'
+      folder: UniFi
+      interval: 1m
+      rules:
+        - uid: dfoih9pbfckxsf
+          title: UniFi Switch TX Drop
+          condition: C
+          data:
+            - refId: A
+              relativeTimeRange:
+                from: 600
+                to: 0
+              datasourceUid: ffn83gysyghs0c
+              model:
+                editorMode: code
+                expr: increase(unpoller_device_port_transmit_dropped_total[15m])
+                instant: true
+                intervalMs: 1000
+                legendFormat: __auto
+                maxDataPoints: 43200
+                range: false
+                refId: A
+            - refId: C
+              queryType: expression
+              datasourceUid: __expr__
+              model:
+                conditions:
+                    - evaluator:
+                        params:
+                            - 0.5
+                        type: gt
+                      operator:
+                        type: and
+                      query:
+                        params:
+                            - C
+                      reducer:
+                        params: []
+                        type: last
+                      type: query
+                datasource:
+                    type: __expr__
+                    uid: __expr__
+                expression: A
+                intervalMs: 1000
+                maxDataPoints: 43200
+                refId: C
+                type: threshold
+          noDataState: OK
+          execErrState: Error
+          for: 1m
+          annotations:
+            TX Drop: 'TX Drop検知: {{ $labels.name }} {{ $labels.port_id }} ({{ $labels.port_name }}) 直近15分で{{ $values.A.Value }}件'
+          isPaused: false
+          notification_settings:
+            receiver: slack-homelab
+        - uid: bfoii89j7l88wf
+          title: UniFi Switch RX Drop
+          condition: C
+          data:
+            - refId: A
+              relativeTimeRange:
+                from: 600
+                to: 0
+              datasourceUid: ffn83gysyghs0c
+              model:
+                editorMode: code
+                expr: increase(unpoller_device_port_receive_dropped_total[15m])
+                instant: true
+                intervalMs: 1000
+                legendFormat: __auto
+                maxDataPoints: 43200
+                range: false
+                refId: A
+            - refId: C
+              queryType: expression
+              datasourceUid: __expr__
+              model:
+                conditions:
+                    - evaluator:
+                        params:
+                            - 0.5
+                        type: gt
+                      operator:
+                        type: and
+                      query:
+                        params:
+                            - C
+                      reducer:
+                        params: []
+                        type: last
+                      type: query
+                datasource:
+                    type: __expr__
+                    uid: __expr__
+                expression: A
+                intervalMs: 1000
+                maxDataPoints: 43200
+                refId: C
+                type: threshold
+          noDataState: OK
+          execErrState: Error
+          for: 1m
+          annotations:
+            RX Drop: 'RX Drop検知: {{ $labels.name }} {{ $labels.port_id }} ({{ $labels.port_name }}) 直近15分で{{ $values.A.Value }}件'
+          isPaused: false
+          notification_settings:
+            receiver: slack-homelab
+        - uid: dfoiihloh6hogd
+          title: UniFi Switch TX Error
+          condition: C
+          data:
+            - refId: A
+              relativeTimeRange:
+                from: 600
+                to: 0
+              datasourceUid: ffn83gysyghs0c
+              model:
+                editorMode: code
+                expr: increase(unpoller_device_port_transmit_errors_total[15m])
+                instant: true
+                intervalMs: 1000
+                legendFormat: __auto
+                maxDataPoints: 43200
+                range: false
+                refId: A
+            - refId: C
+              queryType: expression
+              datasourceUid: __expr__
+              model:
+                conditions:
+                    - evaluator:
+                        params:
+                            - 0.5
+                        type: gt
+                      operator:
+                        type: and
+                      query:
+                        params:
+                            - C
+                      reducer:
+                        params: []
+                        type: last
+                      type: query
+                datasource:
+                    type: __expr__
+                    uid: __expr__
+                expression: A
+                intervalMs: 1000
+                maxDataPoints: 43200
+                refId: C
+                type: threshold
+          noDataState: OK
+          execErrState: Error
+          for: 1m
+          annotations:
+            TX Error: 'TX Error検知: {{ $labels.name }} {{ $labels.port_id }} ({{ $labels.port_name }}) 直近15分で{{ $values.A.Value }}件'
+          isPaused: false
+          notification_settings:
+            receiver: slack-homelab
+        - uid: dfoiiku15evi8e
+          title: UniFi Switch RX Error
+          condition: C
+          data:
+            - refId: A
+              relativeTimeRange:
+                from: 600
+                to: 0
+              datasourceUid: ffn83gysyghs0c
+              model:
+                editorMode: code
+                expr: increase(unpoller_device_port_receive_errors_total[15m])
+                instant: true
+                intervalMs: 1000
+                legendFormat: __auto
+                maxDataPoints: 43200
+                range: false
+                refId: A
+            - refId: C
+              queryType: expression
+              datasourceUid: __expr__
+              model:
+                conditions:
+                    - evaluator:
+                        params:
+                            - 0.5
+                        type: gt
+                      operator:
+                        type: and
+                      query:
+                        params:
+                            - C
+                      reducer:
+                        params: []
+                        type: last
+                      type: query
+                datasource:
+                    type: __expr__
+                    uid: __expr__
+                expression: A
+                intervalMs: 1000
+                maxDataPoints: 43200
+                refId: C
+                type: threshold
+          noDataState: OK
+          execErrState: Error
+          for: 1m
+          annotations:
+            RX Error: 'RX Error検知: {{ $labels.name }} {{ $labels.port_id }} ({{ $labels.port_name }}) 直近15分で{{ $values.A.Value }}件'
+          isPaused: false
+          notification_settings:
+            receiver: slack-homelab

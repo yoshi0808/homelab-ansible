@@ -1,0 +1,82 @@
+---
+# deploy_alerting.yml — unifi-switch-port-errors.yaml を
+# /etc/grafana/provisioning/alerting/ へ配る(requirement R4/R8/R14、計画§1-4、
+# §1-7、§3 U3)。
+#
+# ファイルの中身は 2026-07-30_003_ui_export_alert_rules.yaml (Yoshinobu提供の
+# Grafana UI export)の無編集複製に、annotationsへの実測値プレースホルダ
+# ({{ $values.A.Value }})を追加しただけである。UID・folder・PromQL・比較値・
+# for・interval・notification_settings は一切変えていない
+# (roles/grafana_provisioning/files/alerting/unifi-switch-port-errors.yaml 側の
+# コメント、および本実装のimplement記録でdiffを確認済み)。
+#
+# `alerting` タグは default 実行に含めない。Ansibleの特殊タグ `never` を
+# 本ファイルの全taskへ付けている — `never` タグの task は `--tags alerting`
+# のように明示的に要求されない限り実行されない(`--tags`省略時のフル実行や
+# `--tags dashboards` / `--tags provider` では常にskipされる)。dashboard編集の
+# 反映(通常運用)のたびにR8確認フラグを要求するのは不自然で、alerting変更は
+# 本来まれ(R13サイクル)だから明示operationにするのが自然という判断
+# (計画§1-7)。
+#
+# owner/modeは計画§1-8の表のとおり(root:grafana 0640)。**これは実測値である**
+# — /etc/grafana/provisioning/alerting/ 配下の sample.yaml が root:grafana
+# 0640であることを
+# docs/ai/reviews/grafana_provisioning/2026-07-30_002_investigation.md R1-4bの
+# listingで確認している(2026-07-30、U3レビューCritical 1への対応でCoordinator
+# が実測を取り直して補った。旧版のこのコメントはR1-1(別ディレクトリである
+# dashboards側のlisting)を出典として誤って引用しており、「同ディレクトリからの
+# 類推」という記述自体が誤りだった。実測の結果、値そのもの(root:grafana 0640)
+# は変わらず正しいと確認された)。
+
+- name: "Preflight | alerting YAML must contain only apiVersion and groups"
+  ansible.builtin.assert:
+    that: >-
+      (lookup('file', role_path ~ '/files/alerting/' ~ grafana_provisioning_alert_rule_file)
+       | from_yaml | dict2items | map(attribute='key') | list | sort)
+      == ['apiVersion', 'groups']
+    fail_msg: "alerting YAMLに policies/contactPoints 等の禁止キーが含まれる。requirement R4参照。"
+    quiet: true
+  delegate_to: localhost
+  become: false
+  run_once: true
+  tags: [alerting, never]
+
+# R8対応: 旧4ルール(bfoii89j7l88wf / dfoih9pbfckxsf / dfoiihloh6hogd /
+# dfoiiku15evi8e)がYoshinobuによりUIで削除済みであることの明示的な確認を、
+# 実配備の直前に毎回要求する(初回以降も同様。provenance判定手段が今回のStep 0
+# 調査で確定していないため「初回だけ」区別する機構は採らない — 計画§1-7)。
+#
+# `--check` 実行時はこのassertをスキップする(`--check --diff` だけでこの
+# フラグ無しに動作を見られるようにするため、requirement AC6)。実配備
+# (`--check` 無し)のときだけ要求する。
+#
+# `destructive`タグは意図的に付けていない — このタスク自体はホストの状態を
+# 一切変更しない(単なる人間確認フラグのassertion)ため、TS-014が言う
+# 「破壊的task」には該当しない。`when: not ansible_check_mode`でゲートしている
+# のは「configuration変更の直前に必ず要求する確認ゲート」という別の性質による
+# もので、状態変更を理由にした`destructive`分類とは別軸である
+# (2026-07-30、U3レビュー Suggestion 3への対応。TS-026「マーカー分類名と実
+# ガードの一致確認」の観点でここに明記する)。
+- name: "Require explicit acknowledgement that the pre-existing 4 rules were deleted"
+  ansible.builtin.assert:
+    that: alert_rules_predecessor_confirmed | default(false) | bool
+    fail_msg: >-
+      alert_rules_predecessor_confirmed=true を明示しないとalerting YAMLは
+      配備されない。配備前に、Grafana UIで旧4ルール(bfoii89j7l88wf /
+      dfoih9pbfckxsf / dfoiihloh6hogd / dfoiiku15evi8e)を削除済みであることを
+      確認すること。requirement R8参照。
+    quiet: true
+  run_once: true
+  when: not ansible_check_mode
+  tags: [alerting, never]
+
+- name: Deploy alerting YAML to monnie
+  ansible.builtin.copy:
+    src: "alerting/{{ grafana_provisioning_alert_rule_file }}"
+    dest: "{{ grafana_provisioning_alerting_dir }}/{{ grafana_provisioning_alert_rule_file }}"
+    owner: root
+    group: grafana
+    mode: "0640"
+  register: grafana_provisioning_alerting_result
+  when: not ansible_check_mode
+  tags: [alerting, destructive, never]
