@@ -1,6 +1,6 @@
 ---
 name: architecture-decision-record
-description: homelab-ansibleのCoordinatorがTier 3/4案件で技術選択(実装方式の決定)を記録するときに使う。「ADRを書く」「技術選択を記録する」「実装方式を決める」場面で使う。Coordinatorの優先順位付け(Decision Memo)とは別物であり混同しない。
+description: homelab-ansibleのCoordinatorが技術選択(実装方式の決定)を記録するときに使う。「ADRを書く」「技術選択を記録する」「実装方式を決める」場面で使う。Coordinatorの優先順位付け(Decision Memo)とは別物であり混同しない。
 ---
 
 # Architecture Decision Record(ADR)

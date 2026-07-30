@@ -1,6 +1,6 @@
 ---
 name: risk-assessment
-description: homelab-ansibleのCoordinatorがTier 3/4案件でrequirement作成時やADR内でリスクを整理するときに使う。「リスクを洗い出す」「risk registerを作る」場面で使う。
+description: homelab-ansibleのCoordinatorがrequirement作成時やADR内でリスクを整理するときに使う。「リスクを洗い出す」「risk registerを作る」場面で使う。
 ---
 
 # Risk Assessment(リスク整理フォーマット)

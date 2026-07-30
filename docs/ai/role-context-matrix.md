@@ -26,7 +26,6 @@
 | Issue / 受入条件(案件の依頼文) | 起動時点で自分が起点 | 着手時(必須) | 着手時(必須) | 着手時(必須) |
 | PR / diff | 必要時 | 自分の実装(常時) | 着手時(必須、レビュー対象そのもの) | 着手時(必須、検証対象そのもの) |
 | Knowledge(`docs/ai/memory/`、Claude Memoryを含む) | 起動時(重要Decisionは常に前提とする) | 必要時(対象関連) | 必要時(対象関連) | 必要時(対象関連) |
-| 委任Skill(Tier判定、`skills/delegation-tier/SKILL.md`) | 案件ごとに毎回参照(Tier判定はCoordinatorが確定する) | 不要 | 不要 | 不要 |
 | 規範文書レビュー(`skills/document-norm-review/SKILL.md`) | 必要時(自ら規範を書き換えるとき) | 不要 | **着手時(レビュー対象が規範文書を含む場合は必須)** | 不要 |
 
 ## Auditorの参照範囲(2026-07-28新設。退役したPMOの節を置き換え)
@@ -37,7 +36,6 @@
 |---|---|
 | **案件フォルダ `docs/ai/reviews/<target>/` の全成果物** | 起動時(必須)。これが検査対象そのもの。**番号付き成果物**(各単位の `_implement.md` / `_review.md` / `_test_result.md`)を**互いに突き合わせる** — 書き手は各単位を実行した本人であり、**記録どうしの食い違いはそれ自体が指摘になる**。`progress.md` は2026-07-29に必須成果物から撤廃した(`docs/ai/roles/coordinator.md`)。過去の案件フォルダには残っているので、在れば読んでよい |
 | `docs/ai/status.md`(現在地) | 起動時。行の記述内容が実態と一致しているか、新たな観測待ちの計上漏れがないかを見る。**該当行が残っていること自体は指摘にしない**(Auditorは消す前に呼ばれる設計のため)。除去はAuditorの合否通知を受けた**同じセッションのうちに**Coordinatorが行う(次回へ持ち越さない) |
-| `docs/ai/effort-baseline.md`(実績と測り方) | 起動時。当該案件が記帳されているかを見る |
 | 成果物から**参照されている先** | 必要時。file:line・commitが実在し内容が一致するかの確認。**参照が無効になっていることを見つけるのが仕事の一部** |
 
 **Coordinatorの説明は入力にしない。** 依頼文に書いてよいのは「どの案件か」「どこから読み始めるか」だけである。**「Coordinatorが説明しなければ分からないこと」は、記録の欠落として指摘されるべきもの**であり、説明で補ってはならない。前身のPMO役はCoordinatorの自己申告を点検対象にした結果、最も重要な逸脱を検出できずに退役した(`docs/ai/reviews/process_retrospective/2026-07-28_003_pmo_retirement.md`)。
@@ -54,7 +52,7 @@
 
 ## Coordinatorの扱い(2026-07-22、pilot2/3レビューの指摘を反映)
 
-pilot3のTODO2-2レビューで「Role別Contextマトリクスにタイミング軸とCoordinatorの明示的な扱いが欠けている」との指摘があり、この節で解消する。**2026-07-29のTech Lead廃止以前は**、Coordinatorは実装Contextの大半を「必要時」に留め、Tech Leadへの委任時に対象System/Ansible Contextの選定を委ねていた。**Tech Lead廃止後は、Tier 3/4の詳細分解をCoordinator自身が行うため、対象領域のSystem/Ansible Contextを「着手時」に自ら読む**(上表。`docs/ai/reviews/process_retrospective/2026-07-29_005_techlead_retirement.md`)。Issue受理・Knowledge(重要Decision)・委任Skill(Tier判定)は変わらず常時参照する。
+pilot3のTODO2-2レビューで「Role別Contextマトリクスにタイミング軸とCoordinatorの明示的な扱いが欠けている」との指摘があり、この節で解消する。**2026-07-29のTech Lead廃止以前は**、Coordinatorは実装Contextの大半を「必要時」に留め、Tech Leadへの委任時に対象System/Ansible Contextの選定を委ねていた。**Tech Lead廃止後は、詳細分解をCoordinator自身が行うため、対象領域のSystem/Ansible Contextを「着手時」に自ら読む**(上表。`docs/ai/reviews/process_retrospective/2026-07-29_005_techlead_retirement.md`)。Issue受理とKnowledge(重要Decision)は変わらず常時参照する。
 
 2026-07-27に`docs/ai/status.md`(現在地)を追加した。subagentは都度コールドスタートし、案件の依頼文で必要な文脈を受け取るため、進行中作業の一覧を読む必要がない(Knowledgeを全件読ませないのと同じ理由)。**subagentへ渡すべき状態は、Coordinatorが依頼文へ書く。**
 

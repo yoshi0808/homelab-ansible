@@ -39,7 +39,7 @@
 | 月次Knowledge振り返りの**初回無人実行**。2026-07-28以降は**障害評価(2本目の `claude -p`)を含む** | 毎月26日(期日の正本はauto-memory `MEMORY.md` 先頭行。ここへ写さない) | ansyで `systemctl list-timers ansible-knowledge-review.timer` と `journalctl -u ansible-knowledge-review`。実行後は作業ツリーに未commit差分が出る。**障害評価の成果物は `reports/incidents/_evaluations/` に出る(gitignore済みなので差分には現れない)。** 手動での通しは2026-07-28に成功済み | `roles/knowledge_review/`、`docs/ai/memory-classification.md`、`docs/ai/reviews/incident_auto_capture_step2/2026-07-28_020_u11_test_result.md` | 2026-07-28 |
 | **中止した月次評価の再実行は人が行う**(IC-033) | 月次が `ABORTED_DIRTY` で中止したとき | Slackへwarningが飛び、本文が再実行手順を案内する。**commitで作業ツリーを清潔にしてから `systemctl start ansible-knowledge-review.service`**。中止は喪失でなく遅延に留まる(ミラーは削除されず、評価はcatch-up型) | `docs/ai/policies/incident_capture_policy.md` §7 IC-033 | 2026-07-28 |
 | weekly full patchの**apply gateを実データで通す**(AC5) | Proxmox dry-runが `PATCH_READY` を返す週 | `playbooks/proxmox_patch_weekly_full.yml` L159-188。`_dryrun_missing_nodes` が実データで空になること。現状の根拠はdecoy検証のみ | `docs/ai/reviews/proxmox_patch_dryrun/2026-07-26_005_test_result.md` L426 | 2026-07-27 |
-| Reviewer / Testerの **effort=medium 試行** | 次にTier 4を回すとき | findings品質(逐行照合の取りこぼし)が落ちていないか。落ちていれば `.claude/agents/reviewer.md` / `tester.md` の `effort:` を `high` へ戻す | `docs/ai/role-routing-index.md`「モデル・effort配分」 | 2026-07-27 |
+| Reviewer / Testerの **effort=medium 試行** | 次に逐行照合を伴うレビュー・検証を回すとき | findings品質(逐行照合の取りこぼし)が落ちていないか。落ちていれば `.claude/agents/reviewer.md` / `tester.md` の `effort:` を `high` へ戻す | `docs/ai/role-routing-index.md`「モデル・effort配分」 | 2026-07-27 |
 | Alloy **Phase 3(異常値のFire)** | Lokiにログが十分蓄積した時点 | requirementは作成済み。Grafana Exploreで対象シグネチャの出現頻度を見て閾値を決める | `docs/ai/reviews/promtail_to_alloy/2026-07-19_phase3_alerting_requirement.md` | 2026-07-27 |
 | Proxmoxパッチ自動チェーンの **実発火の観測** | パッチ件数が少なく手動介入が要らない週末 | 自動チェーンが最後まで通ったログ。過去2回(07-11/12、07-18/19)は大量パッチで手動対応となり未観測 | `docs/ai/reviews/tester_mode/`、`docs/ai/context/operations/proxmox-patch.md` | 2026-07-27 |
 | Context陳腐化チェック追加後の**`knowledge_review_timeout`(1800秒)が足りるか** | 次回2026-08-26の月次実行 | `journalctl -u ansible-knowledge-review`でタイムアウト終了していないか確認。Testerのdecoy見積もりでは余裕が無い可能性が高いとされた(実測はデータが無く不可) | `docs/ai/reviews/knowledge_review_context_check/2026-07-29_005_u1_test_result.md` | 2026-07-29 |
@@ -51,12 +51,10 @@
 
 ## Next(着手候補) — 工程・体制
 
-2026-07-28のTier 3案件(`docs/ai/reviews/subagent_briefing/`)で、新体制を初めて通した結果として出た未決。
+**2026-07-31、Yoshinobu指示によりTierの概念を廃止し、規範文書の簡素化を完了した。** どこまで分解し誰へ委任するかはCoordinatorの裁量である。`docs/ai/core.md` / `docs/ai/role-routing-index.md` / `CLAUDE.md` / `docs/ai/roles/*.md` / `skills/` すべて反映済みで、`skills/delegation-tier/` は削除した。**残っているTierの語は `docs/ai/reviews/` / `docs/ai/memory/` の過去記録だけ**(当時の事実の記述であり書き換えない)。見積もり実績の記帳先だった `docs/ai/effort-baseline.md` はYoshinobu判断で削除した(履歴は`git log`が持つ)。
 
 | 項目 | 内容 | 根拠 |
 |---|---|---|
-| **`1+R` に計画査読だけを足す形を認めるか** | `skills/delegation-tier/SKILL.md` は「Tier 1/2に査読を足す形は無い。足したくなったらTier判定が誤っている信号」と定める。しかし上流55 `tool_uses` で**実装前に5件**が潰れ、うち1件は**Coordinator自身が書いたrequirementの内部矛盾**だった。`1+R` には計画を見る者が居ない。**現行規定は維持しており、この起票は見直しの検討** | `.../subagent_briefing/2026-07-28_003_plan_review.md`、同 `progress.md`「クローズ判断」 |
-| **計画査読の正本に足りない1点(2026-07-29に1点解消)** | ①申告の妥当性に疑義が出たときの扱いが層1/層2のどちらか不明(初回で実際に発生し、査読者が裁量で分けた)は**未解決**。②査読者の出力の型が無い、はTech Lead廃止でReviewerへ統合した結果、既存の`skills/code-review/SKILL.md`が適用され**解消**。残る①は`docs/ai/roles/reviewer.md`「計画査読」の改訂で対応する | `.../subagent_briefing/2026-07-28_003_plan_review.md` §4-1・§4-4、`docs/ai/reviews/process_retrospective/2026-07-29_005_techlead_retirement.md` |
 | 案件の申し送り(上記2件以外) | decoy定型がモジュールによっては成立しない件のLesson昇格、`requirements-analysis` への索引更新の追加、subagentのscratch漏れ対策ほか**計12件**。**個別にここへ写さない** | `docs/ai/reviews/incident_auto_capture_step2/progress.md`「後続への申し送り」 |
 | Operator役の新設 | 現行6役は**開発工程しか持たず運用工程が空白**。Incident記録・運用レポートをAIへ委ねる方向。着手時期は未定 | `docs/ai/roles/` に運用工程のRoleが無いこと。Yoshinobu表明(2026-07-26) |
 | リポジトリ直下 `AGENTS.md` の要否判断 | Codexが開発工程から外れ、このファイルを読む主体が存在しない。**そこを開く動機を持つ人がいない**ため起票だけをここに置く | `AGENTS.md` L7 |
@@ -72,8 +70,8 @@
 | **検証実行のSlack通知抑止が「変数の渡し忘れ」で破れる** | `roles/common_slack/tasks/notify.yml` は `tester_mode` / `skip_notifications` が真のときだけ抑止し、**渡し忘れた場合の既定が「本番へ送る」**。`--check` の有無は判定に入っていない。2026-07-29に再発(2026-07-26に前例)。既定を反転させるか `--check` を判定に加えるかは `common_slack` の全利用箇所へ波及するため案件として扱う | `docs/ai/memory/incidents/2026-07-29_tester-slack-notify-misfire.md` |
 | **`roles/proxmox_exec_node` のT1 assertが`--limit`を拒否する** | 同roleのT1は`ansible_play_hosts_all \| sort == groups[...] \| sort`(厳密一致)であり、呼び出し側5本(`unifi_backup_fetch` / `proxmox_backup_restore_verify` / recovery系3本)は`--limit`付きで実行できない。**新設した`roles/proxmox_reachable_nodes`では同じassertが実際に回帰を生み、部分集合へ緩めた**(healthcheckは SB-021 が`--limit`を明示的に許可していた)。exec_node側で`--limit`が許容されるべきかはPolicyを見ないと言えず、独立した確認を要するため今回は触っていない | `docs/ai/adr/008-proxmox-readonly-check-unreachable-node.md` Consequences、`docs/ai/reviews/proxmox_readonly_check_single_node/2026-07-30_005_review.md` Critical #1 |
 | **`proxmox_patch_dryrun`のinline機構を`proxmox_reachable_nodes`へ寄せ替える**(P1-1) | 同一機構が2つ並存している既知の負債。寄せ替えると副産物として上のWatch「fact cachingが無効か(Q1)」がrepo側で塞がる(roleは`ping` probeで判定するため)。今回外したのは、weekly full chainのapply gateが実データで未観測の段階で作り直すと回帰の切り分けができないため | `docs/ai/reviews/proxmox_readonly_check_single_node/2026-07-30_001_requirement.md` §5 P1、ADR-008 Consequences |
-| `proxmox_hw_check.yml`がSB-020の安全度表に無い(P1-2) | Policy側の記載漏れ。`proxmox_healthcheck.yml`は表にあるが`proxmox_hw_check.yml`は入っておらず、safe分類の根拠がplaybook冒頭の`tester-gate`コメントにしかない。Tier 1 | `docs/ai/policies/proxmox_patch_policy.md` §3.1、同 requirement §5 P1 |
-| `docs/ai/context-classification.md` の `## 6.` 重複 | `## 6.` で始まる節が2つあり、節番号で参照すると誤った節へ着地する。Tier 1 | 同ファイルの現物 |
+| `proxmox_hw_check.yml`がSB-020の安全度表に無い(P1-2) | Policy側の記載漏れ。`proxmox_healthcheck.yml`は表にあるが`proxmox_hw_check.yml`は入っておらず、safe分類の根拠がplaybook冒頭の`tester-gate`コメントにしかない | `docs/ai/policies/proxmox_patch_policy.md` §3.1、同 requirement §5 P1 |
+| `docs/ai/context-classification.md` の `## 6.` 重複 | `## 6.` で始まる節が2つあり、節番号で参照すると誤った節へ着地する | 同ファイルの現物 |
 | 収集器へ「消費済みidの記憶」防御を入れるか | 「消費済み」の正本は「spoolファイルが存在しないこと」の1つのみ。state.jsonへの二重化は**両者が食い違う新しい欠陥クラス**を生むため意図的に見送った。検出は `collection_errors` + exit 2 + systemd `failed` で効いている | `.../incident_auto_capture/2026-07-28_018_acl_mask_plan.md` D7 |
 | ACL付きパスへのchmodをpre-commitで検査するか | **検査対象がパス変数の解決を要する**ため、パス文字列のgrepでは現に壊れている箇所を1件も拾えないことが実証済み。**効かない検査は「掃引済み」という誤った安心を生む**ため見送った | 同上 D9 |
 | **規範文書間の突合を定期的に自動でかける仕組みの要否** | Auditorは案件クローズ時にしか起動しないため、案件が動いていない期間の規範ドリフトは拾えない。2026-07-29、Yoshinobu依頼によるCoordinatorの自己レビューで6件超の欠陥(2026-07-28以降ずっと存在)が見つかったが、これは人間が明示的に求めた1回限りの検出であり、再発防止の仕組みではない。月次Knowledge振り返りの拡張が候補 | `docs/ai/reviews/process_retrospective/2026-07-29_005_techlead_retirement.md` §4 |

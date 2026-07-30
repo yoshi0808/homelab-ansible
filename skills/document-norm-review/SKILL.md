@@ -7,7 +7,7 @@ description: homelab-ansibleで規範文書(Policy / Context / Role文書 / SKIL
 
 `skills/code-review/SKILL.md`はコード差分向けの出力型、`skills/ansible-security-review/SKILL.md`はAnsible実装の攻撃面を扱う。本Skillは**規範文書そのものの変更**を対象とし、2026-07-24〜27の案件で反復して検出された欠陥クラスを項目化したもの。
 
-**適用対象**: 規範の移設・削除・正本の差し替え、判定基準の改訂、安全境界・責任分界の変更、Policy群の横断的な再配置。`skills/delegation-tier/SKILL.md`の軸Bで`+R`が付く作業とほぼ一致する。
+**適用対象**: 規範の移設・削除・正本の差し替え、判定基準の改訂、安全境界・責任分界の変更、Policy群の横断的な再配置。いずれも**「結果の検証は通るのに、対象の選定が間違っている」が成立する形**であり、書いた本人には見えない。
 
 ## 前提: 掃引は目視でなく機械的に行う
 
@@ -55,9 +55,9 @@ grep -rn "<撤回した文言>" docs/ai/ skills/ roles/ playbooks/ inventories/ 
 
 上から順に問い最初のYesで止める形式の判定手順は、**先取り**と**到達不能分岐**が生じる。
 
-- **先取り**: 上位項目の条件が広すぎて、下位項目が名指しする対象を先に捕まえる(「runtimeを変えないdoc変更→Tier1」が「責任分界の変更→Tier4」を先取りし、Tier4がdoc編集に対して到達不能になった)。
+- **先取り**: 上位項目の条件が広すぎて、下位項目が名指しする対象を先に捕まえ、下位項目が到達不能になる。
 - **全域性の欠落**: どの項目にも当たらない入力がある。
-- **一意性の欠落**: 複数項目に当たり、並び順だけで結果が決まる(「ロジックが自明→Tier2」と「破壊的操作→Tier3」に除外文言が無く、trivialな破壊的操作がTier2で確定した)。
+- **一意性の欠落**: 複数項目に当たり、並び順だけで結果が決まる(除外文言が無いまま「軽い作業」と「危険な操作」の両方に当たる入力が、先に書かれた側で確定する)。
 - **矛盾を消すと穴ができる**。修正のたびに、矛盾の解消と全域性の維持を**別々に**確認する。
 
 **最良の反例は「今やっている作業自体」**。判定基準を書き換えたら、その基準で自分の今の変更を判定してみる。2026-07-26の2巡目レビューは、Coordinatorがその瞬間編集していた`reviewer.md`/`coordinator.md`を反例として突きつけた。
@@ -103,7 +103,7 @@ check系shell全般に掛かる規範が、「6 roleを対象とする最小サ�
 
 ## 出力
 
-`skills/code-review/SKILL.md`の構造(Summary / Critical Issues / Suggestions / What Looks Good / Verdict)に差し込んで報告する。重大度分類・返却先は`docs/ai/roles/reviewer.md`が正本(`+R`工程での返却先はCoordinator。`skills/delegation-tier/SKILL.md`参照)。
+`skills/code-review/SKILL.md`の構造(Summary / Critical Issues / Suggestions / What Looks Good / Verdict)に差し込んで報告する。重大度分類・返却先は`docs/ai/roles/reviewer.md`が正本(返却先は常にCoordinator)。
 
 **「規範本体に消失・意味変化・条件の緩みは無い」ことを確認できた項目はWhat Looks Goodへ明記する。** 規範レビューでは「変わっていないこと」の確認が成果物であり、書かないと再照合が必要になる。
 
