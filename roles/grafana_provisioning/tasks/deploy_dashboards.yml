@@ -1,19 +1,60 @@
 ---
-# deploy_dashboards.yml — dashboard JSON 7枚を /var/lib/grafana/dashboards へ
-# 複製する(requirement R2/R3、Step 1)。
+# deploy_dashboards.yml — 全managed dashboard JSONを、ファイルごとに定まる
+# 配置先ディレクトリへ複製する(requirement R2/R3/R10、Step 1、U6で拡張)。
 #
 # 配備は複製に限る。テンプレート展開・変換は行わない(ansible.builtin.copy を使い
 # template は使わない)。dashboard providerが updateIntervalSeconds 間隔でpollして
-# 反映するため、restart/reloadは不要(R5)。owner/modeは計画§1-8の実測値
-# (/var/lib/grafana/dashboards のlisting、grafana:grafana 0644)をそのまま使う。
+# 反映するため、restart/reloadは不要(R5)。
+#
+# unifi-*.json 7枚の owner/mode は計画§1-8の実測値
+# (/var/lib/grafana/dashboards のlisting、grafana:grafana 0644)。
+# infra-syslog-all-nodes.json(2026-07-30、U6で追加)も同じ owner/mode を
+# 適用する — dashboard JSONという同じ種類の配備物であり、値が変わる理由が
+# 無いため(配置先ディレクトリだけが違う)。
 #
 # ansible.builtin.copy はchecksum比較でidempotentなので、AC1(repoとホストの内容が
-# 一致していれば changed=0)は追加ロジック無しで満たされる。
+# 一致していれば changed=0)は追加ロジック無しで満たされる。unifi 7枚については
+# 配置先を `grafana_provisioning_dashboard_destinations` 経由の間接参照へ変えた
+# 後も、辞書の値は従来と同じ `grafana_provisioning_dashboards_dir` であるため
+# dest文字列・owner・mode・冪等性は一切変わらない(scratchpad decoyで
+# loop+dict lookupの評価結果を確認済み。implement記録参照)。
+#
+# **infra-syslog用の配置先ディレクトリはこのplaybookが新設する。** 既存の
+# unifi providerのpath(/var/lib/grafana/dashboards)へ置いてはいけない
+# (requirement R10 — 同じpathへ置くとUniFi folderに入ってしまう)。
+#
+# **owner/modeが「実測値」でない点を明記する。** 計画は「ディレクトリの
+# owner/modeは/var/lib/grafana/dashboardsの実測値(002_investigation.md
+# R1-2のlisting)に揃える」としているが、R1-2のlistingは
+# `ls -la /var/lib/grafana/dashboards/` の実行結果でありながら、記録されて
+# いるのはディレクトリ内の7ファイルの行のみで、ディレクトリ自身(`.`)の
+# 行が無い(2026-07-30、Implementerが `git show c37cffa:...` で初版まで遡って
+# 確認)。**Implementerはこの時点で下記の値を「類推」として実装し、実測を
+# 推奨する未解決事項として報告した。**
+#
+# **Coordinatorが実測を取り、類推と一致することを確認した(2026-07-30)。**
+# 調査記録 `002_investigation.md` の **R1-2b** が正本:
+#
+#     $ stat -c '%U:%G %a %n' /var/lib/grafana/dashboards /var/lib/grafana
+#     grafana:grafana 755 /var/lib/grafana/dashboards
+#     grafana:grafana 755 /var/lib/grafana
+#
+# したがって下記の grafana:grafana 0755 は **実測に裏付けられた値である**
+# (親 /var/lib/grafana も同じ)。
+- name: "Ensure the infra-syslog dashboards directory exists on monnie"
+  ansible.builtin.file:
+    path: "{{ grafana_provisioning_infra_syslog_dashboards_dir }}"
+    state: directory
+    owner: grafana
+    group: grafana
+    mode: "0755"
+  when: not ansible_check_mode
+  tags: [dashboards, destructive]
 
 - name: Deploy dashboard JSON to monnie
   ansible.builtin.copy:
     src: "dashboards/{{ item }}"
-    dest: "{{ grafana_provisioning_dashboards_dir }}/{{ item }}"
+    dest: "{{ grafana_provisioning_dashboard_destinations[item] }}/{{ item }}"
     owner: grafana
     group: grafana
     mode: "0644"

@@ -4,6 +4,16 @@
 # 値はすべて確定値であり、Implementerが推測で変えたものではない。
 
 grafana_provisioning_dashboards_dir: /var/lib/grafana/dashboards
+# Step 3(R10、2026-07-30追加)。syslogダッシュボードは既存unifi providerの
+# pathへ置いてはいけない(そのpathはfolder: 'UniFi'を指すproviderの管轄であり、
+# 同じpathへ置くとsyslogダッシュボードがUniFi folderに入ってしまう —
+# requirement R10)。そのため別ディレクトリ・別providerを新設する。
+# ディレクトリ名は既存のgrafana_provisioning_dashboards_dirと衝突しない
+# 兄弟パスとして選んだ(サブディレクトリにしなかった理由: unifi providerが
+# foldersFromFilesStructureを明示していないため、既存pathの配下に
+# サブディレクトリを作った場合にunifi provider自身がそれを走査するかどうかが
+# 未確認だった。兄弟パスであれば無関係であることが構造上明らか)。
+grafana_provisioning_infra_syslog_dashboards_dir: /var/lib/grafana/dashboards-infra-syslog
 grafana_provisioning_provider_dir: /etc/grafana/provisioning/dashboards
 grafana_provisioning_alerting_dir: /etc/grafana/provisioning/alerting
 
@@ -15,8 +25,49 @@ grafana_provisioning_dashboard_files:
   - unifi-pdu.json
   - unifi-sites.json
   - unifi-switches.json
-  # Step 3(R10)で infra-syslog-all-nodes.json をここへ追加する。
-  # このリストがpreflight(datasource参照検査)とdeploy(copy対象)の唯一の入力。
+  - infra-syslog-all-nodes.json
+  # 全managed dashboard JSON(2026-07-30、U6でinfra-syslog-all-nodes.jsonを
+  # 追加。requirement R10)。preflight(R3のnameベースdatasource参照検査、
+  # および新設したuid不変assert)の対象は、配置先ディレクトリによらずこの
+  # フラットなリストが唯一の入力である。
+  #
+  # **ただし配置先ディレクトリの情報はこのリストに無い。** unifi-*.json 7枚は
+  # grafana_provisioning_dashboards_dir、infra-syslog-all-nodes.json だけは
+  # grafana_provisioning_infra_syslog_dashboards_dir(別provider・別folder)へ
+  # 配る。配置先の対応は grafana_provisioning_dashboard_destinations
+  # (下記)が持つ唯一の入力であり、deploy_dashboards.yml と
+  # preflight_dashboards.yml のSHA256比較タスクの両方がこれを参照する。
+  # 二重管理(このリストとdestinationsの両方にファイル名を書く)を避けられ
+  # ないため、ファイルを追加/削除するときは両方を同時に変更すること。
+  #
+  # **対応が漏れた場合はpreflightで停止するが、エラーメッセージは原因を
+  # 示さない。** SHA256比較タスクが destinations を引けず、Jinjaの
+  # `object of type 'dict' has no attribute '<ファイル名>'` 相当の汎用
+  # AttributeErrorでfatalになる(2026-07-30、レビューが実際に欠損データを
+  # 注入して確認)。**fail-closedだがfail-clearではない** — このメッセージを
+  # 見たら、まず本リストと destinations の対応を疑うこと。
+
+grafana_provisioning_dashboard_destinations:
+  unifi-access-points.json: "{{ grafana_provisioning_dashboards_dir }}"
+  unifi-clients.json: "{{ grafana_provisioning_dashboards_dir }}"
+  unifi-dpi.json: "{{ grafana_provisioning_dashboards_dir }}"
+  unifi-gateway.json: "{{ grafana_provisioning_dashboards_dir }}"
+  unifi-pdu.json: "{{ grafana_provisioning_dashboards_dir }}"
+  unifi-sites.json: "{{ grafana_provisioning_dashboards_dir }}"
+  unifi-switches.json: "{{ grafana_provisioning_dashboards_dir }}"
+  infra-syslog-all-nodes.json: "{{ grafana_provisioning_infra_syslog_dashboards_dir }}"
+
+grafana_provisioning_providers:
+  - src: dashboards-provider-unifi.yml
+    dest: unifi.yaml
+  - src: dashboards-provider-infra-syslog.yml
+    dest: infra-syslog.yaml
+  # provider yaml配備(2026-07-30、U6で複数provider対応へ拡張)の入力。
+  # unifiエントリの src/dest はStep 2から1文字も変えていない
+  # (deploy_provider.ymlがループ化されただけで、配備結果は不変)。
+  # owner/group/modeは3種の配備物共通でroot:grafana 0640(計画§1-8)であり
+  # provider間で差が無いため、ここには持たずdeploy_provider.ymlのcopyタスクに
+  # 直書きする(Step 1/2の既存の書き方を踏襲)。
 
 grafana_provisioning_alert_rule_file: unifi-switch-port-errors.yaml
 grafana_provisioning_mute_minutes: 15

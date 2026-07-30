@@ -95,7 +95,7 @@
 |---|---|---|
 | 証明書・CA | `cert_renew_policy.md`、`cert_renew_cloudkey_policy.md`; `cert_renew*.yml`、`ca_trust_deploy.yml`、`cloudkey_cert_deploy.yml` | 鍵・CA・配信検証・削除ゲートという独立した安全境界を持つ |
 | backup / restore | `proxmox_backup_restore_verify_policy.md`、`unifi_backup_fetch_policy.md`; 各対応playbook | 一時restore、backup鮮度、世代削除は健康監視や容量管理とは異なる破壊的境界を持つ。`proxmox_snapshot_check.yml`もこの系統の健全性索引候補 |
-| observability | `log_observability_policy.md`; `alloy_setup.yml`、`rsyslog_forward_to_monnie.yml` | ログ収集平面、cutover、送信・受信境界が主目的 |
+| observability | `log_observability_policy.md`; `alloy_setup.yml`、`rsyslog_forward_to_monnie.yml`、**`grafana_provisioning.yml`** | ログ収集平面、cutover、送信・受信境界に加え、**2026-07-30のv4.0でdashboard / alert ruleの配備方式(repo正本化・provisioning as code)を含む観測プレーン全体へscopeを拡張した**(LOG-074、`docs/ai/adr/007-grafana-provisioning-as-code.md`) |
 | autonomous recovery | `autonomous_recovery_policy.md`; recovery系playbook群 | 検知からrestart/reboot/failoverへ進む権限・ラダーが独立 |
 | time sync | `time_sync_check_policy.md`; `time_sync_check.yml`、`time_sync_ntp_reference.yml` | 異種NTP取得方式と基準ノードゲートが独立 |
 

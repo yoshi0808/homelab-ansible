@@ -32,6 +32,29 @@
   tags: [dashboards, provider, alerting]
 
 # ---------------------------------------------------------------------------
+# uid不変assert(requirement R10、2026-07-30 U6で追加)。
+#
+# infra-syslog-all-nodes.jsonのuidが変わると、既存のブックマークやリンクが
+# 切れる(requirement R10「uidが変わるとブックマークや既存リンクが切れる」)。
+# 上のR3スキャンとは別の関心事であり(名前ベースdatasource参照ではなくuid
+# そのものの不変性)、新規タスクとして追加する。read-only・
+# delegate_to: localhostでrepoのファイルを直接読む(monnie側は参照しない)。
+- name: "Preflight | assert infra-syslog dashboard uid is unchanged"
+  ansible.builtin.assert:
+    that:
+      - (lookup('file', role_path ~ '/files/dashboards/infra-syslog-all-nodes.json') | from_json).uid == 'infra-syslog-all-nodes-v1'
+    fail_msg: >-
+      infra-syslog-all-nodes.json の uid が 'infra-syslog-all-nodes-v1' から
+      変わっている。uidが変わると既存のブックマークやリンクが切れるため、
+      ファイル配置前に停止する。
+      docs/ai/reviews/grafana_provisioning/2026-07-30_001_requirement.md R10参照。
+    quiet: true
+  delegate_to: localhost
+  become: false
+  run_once: true
+  tags: [dashboards, provider, alerting]
+
+# ---------------------------------------------------------------------------
 # repo↔ホストのSHA256比較(計画§1-5b、2026-07-30追加)。
 #
 # requirement R7は当初「--check --diff でホストとrepoの差分が読めることが主要な
@@ -45,10 +68,20 @@
 # 読む必要があるため delegate_to は付けない(playのhosts: monnieで実行する)。
 # 不一致があっても停止しない — 停止すべきはR3の欠陥クラスだけであり、SHA256の
 # 不一致は「repo側を意図的に変更した直後」でも正当に起こりうる状態である。
+#
+# **stat先のパスは grafana_provisioning_dashboard_destinations 経由の間接参照**
+# (2026-07-30、U6でsyslogダッシュボード追加時に修正)。当初このタスクは
+# `{{ grafana_provisioning_dashboards_dir }}/{{ item }}` に決め打ちしていたが、
+# infra-syslog-all-nodes.json は別ディレクトリ
+# (grafana_provisioning_infra_syslog_dashboards_dir)へ配備されるため、決め打ち
+# のままだと常に誤ったパスをstatして「host_present: false」を返す欠陥になる
+# ところだった。unifi 7枚については辞書の値が従来と同じ
+# grafana_provisioning_dashboards_dirであるため、stat結果・比較結果は不変
+# (decoyで確認済み、implement記録参照)。
 
 - name: "Preflight | collect host-side SHA256 for managed dashboard JSON"
   ansible.builtin.stat:
-    path: "{{ grafana_provisioning_dashboards_dir }}/{{ item }}"
+    path: "{{ grafana_provisioning_dashboard_destinations[item] }}/{{ item }}"
     checksum_algorithm: sha256
     get_checksum: true
   loop: "{{ grafana_provisioning_dashboard_files }}"

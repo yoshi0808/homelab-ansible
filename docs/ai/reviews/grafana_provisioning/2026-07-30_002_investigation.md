@@ -143,6 +143,23 @@ afd10b5f83f9d1c4825f9e57be9b6a6a840951db118379fec04ba09fffb54858  roles/unpoller
 
 **3値(monnieの現在値、repoの現在値、前回R1-2記録値)は完全に一致した。** UI drag&drop importの後もディスク上の `/var/lib/grafana/dashboards/unifi-switches.json` はバイト単位で不変であり、Coordinatorの判断(「ブラウザのUI操作はサーバー上のprovisioningファイルを書き換える経路を持たない」)を実測で裏付けた。UI importで得られたexport JSON(panel型の書き換え等の差分を含む)は、Grafanaの別ストア(DB)側にのみ反映されており、file provisioning対象のディスクファイルには影響していない。
 
+## R1-2b. `/var/lib/grafana/dashboards` **ディレクトリ自体**のowner/mode(2026-07-30 追補)
+
+**R1-2のlistingは7ファイルのowner/mode(`grafana:grafana` `644`)だけを記録しており、ディレクトリエントリ自体の値を持っていなかった。** U6(Step 3)でsyslogダッシュボード用の新規ディレクトリを作る必要が生じ、依頼文でCoordinatorが「R1-2の実測値に揃えよ」と指示したが、**引用先にディレクトリの値が存在しなかった**(Implementerが検出。`014_implement_u6.md`)。Coordinatorが実測を取り直して補う。
+
+```
+$ stat -c '%U:%G %a %n' /var/lib/grafana/dashboards /var/lib/grafana
+grafana:grafana 755 /var/lib/grafana/dashboards
+grafana:grafana 755 /var/lib/grafana
+```
+
+- `/var/lib/grafana/dashboards`: `grafana:grafana`、mode **`0755`**
+- 親の `/var/lib/grafana` も同じ(`grafana:grafana` `0755`)
+
+**Implementerが慣習として選んだ値(`grafana:grafana` `0755`)は実測と一致していた。** したがって実装の値は正しく、欠けていたのは根拠だけだった。
+
+**これはR1-4bと同一クラスの2件目である。** どちらも「Coordinatorが調査記録を引用したが、引用先にその値が無かった」形。R1-4bは記録の書き換えで証拠が落ちた例、本件は**そもそも記録していなかった値を記録済みと誤認した**例である。**引用するときは引用先を開いて該当行を確かめること** — 記憶で引かない。
+
 ## R1-3. `infra_syslog_all_nodes.json`(v2形式)のclassic file provisioner可否
 
 repo実体(前回確認どおり):

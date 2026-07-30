@@ -1,6 +1,6 @@
 # ADR-007: Grafanaのダッシュボード/アラートをrepo正本のprovisioningで配る
 
-**Status:** Proposed(2026-07-30。Step 1は実装・独立レビュー・実機検証(AC1/AC2/AC5/AC6)まで完了しcommit `c37cffa`。Step 2は実装と独立レビュー(Approve)まで完了、**実機検証は未実施** — 旧アラート4件のUI削除(R8手順1)がYoshinobuの手作業として前段に必須。Step 3(syslogダッシュボード)は未着手。検証状態の正本は `docs/ai/reviews/grafana_provisioning/2026-07-30_008_test_result_step1.md`)
+**Status:** Accepted(2026-07-30。**Step 1・2・3すべて実装・独立レビュー・実機検証まで完了**し、Policy v4.0(`log_observability_policy.md` LOG-078〜LOG-089)へ規範として反映済み。検証状態の正本は `docs/ai/reviews/grafana_provisioning/` の `008`(Step 1: AC1/AC2/AC5/AC6)・`011`(Step 2: AC3)・`016`(Step 3)。**AC4(実発火時のSlack本文に実測値が入るか)のみ意図的に未検証** — 健全なネットワークでは発火しないため、次回実発火時の観測項目として `docs/ai/status.md` のWatchへ移した(requirement §11で明記済み))
 
 ## Context
 
@@ -140,14 +140,21 @@ Yoshinobu表明(2026-07-30): 「grafanaで発火する条件、これはきち�
 ## Consequences
 
 - **Grafanaの可視化とアラートがrepoから配備できるようになる。** 発火条件の変更がgit diffに現れ、UIでの直接編集が塞がる。
-- **`log_observability_policy.md` の改訂が必要になる。** 現行LOG-073/074は「metrics系統の検知ルールは本Policyで定義せず将来別Policyへ集約する」「alert ruleの実体はGrafana UI側にありGit管理外」と明文で決めており、**後者は本案件の完了をもって事実として偽になる。** Yoshinobu判断(2026-07-30)により、scopeを観測プレーン全体へ広げる改訂を行う(ファイル名は既に `log_observability_policy` であり Observability を名乗っている)。
+- **`log_observability_policy.md` を v4.0 へ改訂した(2026-07-30、実施済み)。** 旧LOG-073/074は「metrics系統の検知ルールは本Policyで定義せず将来別Policyへ集約する」「alert ruleの実体はGrafana UI側にありGit管理外」と明文で決めており、**後者は本案件の完了をもって事実として偽になった**。Yoshinobu判断によりscopeを観測プレーン全体へ拡張し、**LOG-073を退番・LOG-074を方針変更**、配備方式の規範として**LOG-078〜LOG-086を新設**した。あわせてLOG-047の「2 playbook / 2 roleでは配備しない」という限定を外し(`grafana_provisioning.yml`がalert ruleを配備するため数え上げでは表現できない)、**Loki参照かどうかで未実装性を判断する**形へ変えた。§3へ入口を追加しLOG-087で起動とrestartの関係を明記した。
 - **上流取り込み(upstream → repo)は別案件として残る。** UID書き換え変換のコード化を含む。`product_inventory` 残ギャップ2(「Techno Timダッシュボードの上流追跡手段が無く13.1破損を事前に拾えない」)と統合して起票する。
+- **Step 3では「実ホスト適用前にcommit」の順序が崩れた**(2026-07-30、Auditorが検出)。`docs/ai/roles/coordinator.md`「計画受領ゲート」項目5は、実ホスト適用を含む案件でYoshinobuのcommit/pushが工程上の待ちとして計画に入っているかを確認事項として定める。**Step 1・Step 2では守られていた** — Tester実機実行の前にYoshinobuが `c37cffa`(18:02)・`a2b0367`(19:02)をcommitしており、`011` はそれを明記している。**しかしStep 3では、`roles/grafana_provisioning/` の変更が未commitのまま実配備・restartが実行された。** 一時的に「monnieで動いているコードとgit HEADが一致しない」状態が生じた。
+
+  **計画(`004`)にも計画査読(`005`)にもこの項目への言及がなく、崩れたこと自体もどの記録にも書かれていなかった。** Coordinatorが自己検出して記録した「AC1/AC2をCoordinator自身が実行した逸脱」(`008`)とは対照的に、**こちらは誰も気づいていない** — Coordinator・Reviewer・Testerの全員が見落とし、案件クローズ時のAuditorが初めて拾った。
+
+  **申し送り**: 実ホスト適用を含む案件では、**計画の段階で「commitはどのStepの前に入るか」を明示する**。Step 1・2で守れたのは意識していたからではなく、たまたまYoshinobuがそのタイミングでcommitしたためである。順序を人の記憶に依存させると、Stepが増えたときに崩れる。
+
 - **記録の書き換えが下流の引用を壊しうる**という規律を得た。調査記録を「最新の状態を指すよう更新する」(`core.md`)過程で、下流(計画・実装コメント)が引用していたlistingが落ち、レビューで「引用先が存在しない」と検出された。**書き換えで消す前に、その記録が引用されていないかを確認する。**
 - **Grafana 13.1のApp Platform移行**という環境事実を把握した。旧 `dashboard` / `dashboard_provisioning` テーブルは空であり、それを見て「provisioningされていない」と判断すると誤る。alert ruleは従来どおり `alert_rule` テーブルにある。
 
 ## 関連
 
-- 案件記録: `docs/ai/reviews/grafana_provisioning/`(001 requirement / 002 investigation / 003 UI export / 004 plan / 005 plan_review / 006 implement_u1 / 007 review_u1 / 008 test_result_step1 / 009 implement_u3 / 010 review_u3)
+- 案件記録: `docs/ai/reviews/grafana_provisioning/` — 001 requirement / 002 investigation(**R1-2b・R1-4bは後から追補**) / 003 UI export(alert rules) / 004 plan / 005 plan_review / 006 implement_u1 / 007 review_u1 / 008 test_result_step1 / 009 implement_u3 / 010 review_u3 / **011 test_result_step2** / **012 classic export(syslog dashboard)** / **013 syslog dashboard investigation** / **014 implement_u6** / **015 review_final(実装+Policy)** / **016 test_result_step3**
+- 調整サイクルの手順: `docs/ai/context/operations/grafana-alerting-tuning.md`(非規範Context)
 - 先行調査: `docs/ai/reviews/promtail_to_alloy/2026-07-19_grafana_alerting_grounding.md`
 - 07-12のIncident経緯: `docs/ai/reviews/ubuntu_vm_full_upgrade/2026-07-12_028_investigation.md`
 - 改訂対象Policy: `docs/ai/policies/log_observability_policy.md`(LOG-063 / 073 / 074 / 065)
