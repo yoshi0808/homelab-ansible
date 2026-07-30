@@ -1,0 +1,85 @@
+---
+# preflight_dashboards.yml — dashboard JSON全枚を毎回スキャンし、nameベースの
+# datasource参照を配置前に止める(requirement R3、判定表は001_requirement.md §5)。
+# 2026-07-12にGrafana 13.1でnameベースfallback解決が廃止され全パネル描画不能に
+# なった事故の恒久対応。read-only・delegate_to: localhostでrepoのファイルを直接
+# 読む(monnie側は一切参照しない)。
+#
+# tag: dashboards, provider, alerting のいずれでも実行する。dashboard JSON自体を
+# 配らないprovider/alerting配備であっても、preflightは全JSONを毎回スキャンする
+# (計画 §1-1)。
+#
+# 判定式そのものはCoordinatorが計画時に確定させたものであり、Implementerは
+# 再設計しない(計画査読が7枚の実ファイルで誤検出/検出漏れ無しを確認済み)。
+
+- name: "Preflight | scan managed dashboard JSON for name-based datasource references"
+  ansible.builtin.assert:
+    that:
+      - "'${DS_' not in lookup('file', role_path ~ '/files/dashboards/' ~ item)"
+      - (lookup('file', role_path ~ '/files/dashboards/' ~ item) | regex_findall('\"datasource\"\\s*:\\s*\"') | length) == 0
+    fail_msg: >-
+      {{ item }} が名前ベースのdatasource参照(${DS_...}、または文字列型の
+      "datasource"値)を含む。2026-07-12にGrafana 13.1で全パネル描画不能を
+      起こした欠陥クラスと同一のため、ファイル配置前に停止する。
+      docs/ai/reviews/grafana_provisioning/2026-07-30_001_requirement.md R3参照。
+    quiet: true
+  loop: "{{ grafana_provisioning_dashboard_files }}"
+  loop_control:
+    label: "{{ item }}"
+  delegate_to: localhost
+  become: false
+  run_once: true
+  tags: [dashboards, provider, alerting]
+
+# ---------------------------------------------------------------------------
+# repo↔ホストのSHA256比較(計画§1-5b、2026-07-30追加)。
+#
+# requirement R7は当初「--check --diff でホストとrepoの差分が読めることが主要な
+# 安全機構になる」としていたが、これはPolicy(ansible_test_safety_policy.md
+# TS-014)と両立しなかった — TS-014は破壊的taskに`when: not ansible_check_mode`を
+# 要求し、Policy準拠のcopyタスク(deploy_dashboards.yml)は--check下でskipされる
+# ため`--diff`は何も出さない。requirement/planはこの矛盾を訂正済みで、
+# 代わりにread-onlyの比較タスクでAC6の「配備前に差が読める」を満たす。
+#
+# R3(nameベース参照検査、上のタスク)とは異なり、こちらはmonnie側のファイルを
+# 読む必要があるため delegate_to は付けない(playのhosts: monnieで実行する)。
+# 不一致があっても停止しない — 停止すべきはR3の欠陥クラスだけであり、SHA256の
+# 不一致は「repo側を意図的に変更した直後」でも正当に起こりうる状態である。
+
+- name: "Preflight | collect host-side SHA256 for managed dashboard JSON"
+  ansible.builtin.stat:
+    path: "{{ grafana_provisioning_dashboards_dir }}/{{ item }}"
+    checksum_algorithm: sha256
+    get_checksum: true
+  loop: "{{ grafana_provisioning_dashboard_files }}"
+  loop_control:
+    label: "{{ item }}"
+  register: grafana_provisioning_host_dashboard_stat
+  check_mode: false
+  tags: [dashboards, provider, alerting]
+
+- name: "Preflight | build repo/host SHA256 comparison entries"
+  ansible.builtin.set_fact:
+    # rstrip=False は必須。file lookupは既定でrstrip=trueであり、末尾改行を
+    # 含むJSON(dashboard JSON全枚がこれに該当)のSHA256をhash filterに通すと
+    # ansible.builtin.stat(生バイト)のchecksumと一致しなくなる
+    # (2026-07-30、decoy検証で実測 — 目視でなくmatch判定まで通して発覚)。
+    grafana_provisioning_dashboard_checksum_summary: >-
+      {{ (grafana_provisioning_dashboard_checksum_summary | default([])) + [{
+        'file': item.item,
+        'host_present': item.stat.exists,
+        'repo_sha256': (lookup('file', role_path ~ '/files/dashboards/' ~ item.item, rstrip=False) | hash('sha256')),
+        'host_sha256': (item.stat.checksum | default(None)),
+        'match': (item.stat.exists and ((item.stat.checksum | default('')) == (lookup('file', role_path ~ '/files/dashboards/' ~ item.item, rstrip=False) | hash('sha256'))))
+      }] }}
+  loop: "{{ grafana_provisioning_host_dashboard_stat.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+  check_mode: false
+  tags: [dashboards, provider, alerting]
+
+- name: "Preflight | repo <-> host dashboard JSON SHA256 comparison (read-only, does not stop on mismatch)"
+  ansible.builtin.debug:
+    var: grafana_provisioning_dashboard_checksum_summary
+  check_mode: false
+  tags: [dashboards, provider, alerting]

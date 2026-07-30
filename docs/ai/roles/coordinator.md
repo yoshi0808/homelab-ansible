@@ -91,12 +91,14 @@ Yoshinobuへの発話は以下を基本形とする。**中身の無い着手宣
 | 区分 | 扱い |
 |---|---|
 | `git commit`/`git push`、Policy本文の改訂、要件段階で未許可の破壊的操作、復旧不能なデータ削除、安全境界そのものの変更 | 常にYoshinobuへ上げる |
-| Proxmox/Sophos/UniFi等への非冪等操作でYoshinobu承認済みscope内のもの | Coordinatorが着手前に計画を確認し承認。scope外/不明なら停止してYoshinobuへ |
+| **保護対象ホスト**(`pve1` / `pve2` / `authy` / `sophos-fw` / UniFi機器)への非冪等操作でYoshinobu承認済みscope内のもの | Coordinatorが着手前に計画を確認し承認。scope外/不明なら停止してYoshinobuへ |
+| **保護対象ホスト以外**(`monnie` / `quory` / `ansy`)への非冪等操作 | **確認不要**。Coordinatorが判断し実施、事後報告(2026-07-30 Yoshinobu: 「pve、authy、sophos、unifiに冪等でないコマンドを実行すること以外なら確認取らなくてok」) |
 | 冪等な操作カタログへの追加（allowlist等） | 事前承認不要。追加した事実と内容を事後報告。Codexからも呼べるカタログの場合はその旨明記 |
 | systemd timer/serviceの有効化・無効化等、Policyに関わらず逆操作で戻せる運用切替 | Coordinatorが判断し実施、事後報告 |
 | `soft_deny`/`hard_deny` に該当する操作 | Coordinatorの承認では通らない。harnessのブロックはYoshinobu本人のintentのみ解除可。発火したらYoshinobuへ上げる |
 
 - 迷ったら上げてよい。ただし必ず推奨を添える。既に推奨済みの事項へ同意の再確認を求めない。
+- **境界はホストで引く。「書き込むかどうか」では引かない**(2026-07-30改訂)。判断根拠はYoshinobuの表明「データはgitで保全されてるし、自宅の提供するサービスに全く影響ない」 — `monnie`(監視VM) / `quory`(QDevice・実行基盤) / `ansy`(開発VM)はいずれも家庭向けサービスを提供しておらず、内容はGitから再現可能か、失っても停止を招かない観測データである。**この境界は`.claude/settings.json`の`autoMode`と対応させて維持する**(片方だけ変えるとドリフトする。`allow`はauto mode中に`permissions.allow`のBashルールが停止する — `classifyAllShell: true` — ため、`permissions`側ではなく`autoMode.allow`に書く)。
 - 提示不要：read-only確認（healthcheck / `--syntax-check` / `--check`経由 / `ansible-lint`）、decoy inventoryでの検証、ansyリポジトリ作業ツリーと`/tmp`に閉じた操作、`hosts: localhost`+`connection: local`で副作用のない使い捨てplaybook（検証後削除、実行事実をimplement/test_resultへ記録）。
 
 ---

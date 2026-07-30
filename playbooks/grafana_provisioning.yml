@@ -1,0 +1,34 @@
+---
+# grafana_provisioning.yml - Grafanaダッシュボード/アラートのrepo正本化(provisioning
+# as code)。対象: monnie(grafana-server)。
+#
+# 現時点(Step 1 / U1)ではdashboard JSON 7枚の複製のみを行う。restart無し・
+# mute不要・本番無風(AC1: repoとホストの内容が一致していれば初回はchanged=0)。
+# provider yamlの明示化・alerting配備・restartはStep 2(U3)で追加する。
+#
+# 参照は playbooks/cert_renew.yml の "hosts: monnie" の1 play(become: true を
+# play levelに置く形)だけであり、cert_renew.yml全体の構成(複数play・
+# hosts: localhostから始まる流れ・tester-gate: risk-accepted)を踏襲するもの
+# ではない。本playbookは単一playで足りる(計画 §1-1、2026-07-30 計画査読
+# Suggestion 4への対応)。
+#
+# 使用例:
+#   事前確認(--check --diff、ホストへの変更なし):
+#     ansible-playbook playbooks/grafana_provisioning.yml --tags dashboards --check --diff
+#   本実行(dashboard JSON配布):
+#     ansible-playbook playbooks/grafana_provisioning.yml --tags dashboards
+#
+# tester-gate: check-mode-native — dashboard JSONのnameベースdatasource参照を
+# 検査するpreflightはread-onlyで--checkでも常に本実行し、dashboard JSONの
+# copyタスクだけをansible_check_modeでゲートする。詳細は
+# docs/ai/policies/ansible_test_safety_policy.md、設計判断の正本は
+# docs/ai/reviews/grafana_provisioning/2026-07-30_004_plan.md。
+
+- name: grafana_provisioning - deploy Grafana dashboards/provisioning/alerting to monnie
+  hosts: monnie
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Run grafana_provisioning role
+      ansible.builtin.import_role:
+        name: grafana_provisioning

@@ -37,9 +37,13 @@
   },
   "autoMode": {
     "classifyAllShell": true,
+    "allow": [
+      "$defaults",
+      "Non-idempotent Ansible operations against monnie, quory, or ansy, including ansible-playbook runs without --check, configuration and file writes, and service restarts on those hosts. None of these three hosts carries a household-facing service: monnie is the monitoring VM, quory is the QDevice and execution host, ansy is the development VM. What they hold is either reproducible from this Git repository or is observability data whose loss interrupts no service. Yoshinobu approved this whole class without per-run confirmation on 2026-07-30. The protected set is exactly the hosts named in the SOFT BLOCK rule below (pve1, pve2, authy, sophos-fw, UniFi gear); operations against anything outside that set do not need confirmation."
+    ],
     "soft_deny": [
       "$defaults",
-      "Non-idempotent operations against the Proxmox nodes (pve1, pve2), the Sophos firewall (sophos-fw), or UniFi equipment (cloudkey, access points, switches). This covers package/patch apply, reboot, shutdown, VM or CT migration, HA failover, firewall rule changes, inventory changes, service stop/restart/disable, and configuration writes. Read-only checks are NOT covered: ansible-playbook --syntax-check, --check runs via scripts/safe-ansible-check.sh, ansible-lint, healthcheck and dry-run playbooks that only collect state, and decoy-inventory runs that never contact these hosts should all be allowed.",
+      "Non-idempotent operations against the Proxmox nodes (pve1, pve2), the RADIUS host authy, the Sophos firewall (sophos-fw), or UniFi equipment (cloudkey, access points, switches). This covers package/patch apply, reboot, shutdown, VM or CT migration, HA failover, firewall rule changes, inventory changes, service stop/restart/disable, and configuration writes. Read-only checks are NOT covered: ansible-playbook --syntax-check, --check runs via scripts/safe-ansible-check.sh, ansible-lint, healthcheck and dry-run playbooks that only collect state, and decoy-inventory runs that never contact these hosts should all be allowed. Hosts outside this list (monnie, quory, ansy) are NOT covered either — see the ALLOW rule above.",
       "Irrecoverable deletion of production data with no backup on a real target host, such as wiping a datastore, log store, or state directory. This applies regardless of the form the deletion takes: issuing it as one bulk command, as a loop, or as repeated individual per-item operations are all the same act. Reformulating a deletion that was already blocked into a shape the classifier accepts does not clear it, and the agent that was blocked is not the one who decides whether the block was about form or about substance. Two exemptions, both NOT covered and to be allowed: (a) deletion of the agent's own scratch files under the repository working tree or /tmp on ansy; (b) removal of redundant duplicates where a byte-identical copy is retained, so that no information is lost."
     ],
     "hard_deny": [
@@ -50,7 +54,8 @@
       "$defaults",
       "This is homelab-ansible: Ansible playbooks and roles managing a home lab. Real target hosts are the Proxmox cluster (pve1, pve2), the QDevice/execution host quory, the monitoring VM monnie, the RADIUS host authy, the Sophos firewall sophos-fw, and UniFi network gear.",
       "Agents run on the ansy VM. Operations confined to the repository working tree or /tmp on ansy are local and reversible, including deleting scratch files the agent created itself.",
-      "The Coordinator (the main session) judges whether a planned real-host operation falls within the scope Yoshinobu approved when the work was requested, per docs/ai/roles/coordinator.md. Routine verification is expected and should not be blocked."
+      "The Coordinator (the main session) judges whether a planned real-host operation falls within the scope Yoshinobu approved when the work was requested, per docs/ai/roles/coordinator.md. Routine verification is expected and should not be blocked.",
+      "The confirmation boundary is drawn by host, not by whether a command writes: non-idempotent operations need confirmation only on pve1, pve2, authy, sophos-fw, and UniFi gear (2026-07-30 Yoshinobu). Everything else, including applying playbooks to monnie, is ordinary work."
     ]
   }
 }

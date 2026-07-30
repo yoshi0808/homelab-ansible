@@ -20,8 +20,9 @@
 
 | # | 項目 | 現在地 | 次にやること |
 |---|---|---|---|
+| 1 | **Grafanaダッシュボード/アラートのrepo正本化**(Tier 4) | **Step 0(調査)完了・受入済み**(2026-07-30)。repo↔hostのドリフト無し(SHA256 7/7一致)。**アラート4件はYoshinobu提供のUI export `003_ui_export_alert_rules.yaml` を無編集で配備**(順序は削除→配備)。syslogダッシュボードもUIの `Model: Classic` export経路が判明し対象化 | Coordinatorが計画(`004_plan.md`)を作成 → Reviewer計画査読 → Step 1(dashboard JSON配布、**restart不要で本番無風**)。**アラート4件の発火条件がUIにしか無い属人性の解消が主目的** |
 
-**進行中の案件は無い**(2026-07-29)。「Proxmox実行ノード選定の共通化」は commit `beff0f5` / push / quory への配備まで完了してクローズした(判断の正本は `docs/ai/adr/006-proxmox-exec-node-selection.md`、案件記録は `docs/ai/reviews/proxmox_exec_node_selection/`)。**pve1が起動している時にしか確かめられないAC4だけがWatchに残る。**「障害の自動捕捉・評価」も**3段すべてが本番で成立してクローズ済み** — 捕捉=quory(5分毎)、転送=ansy `ansible-incident-sync.timer`(毎時)、評価=既存の月次 `ansible-knowledge-review.timer` の中の2本目の `claude -p`。**次の観測点は2026-08-26の月次発火**で、Watch行が持つ。
+以前の案件は2026-07-29時点ですべてクローズ済みである。「Proxmox実行ノード選定の共通化」は commit `beff0f5` / push / quory への配備まで完了してクローズした(判断の正本は `docs/ai/adr/006-proxmox-exec-node-selection.md`、案件記録は `docs/ai/reviews/proxmox_exec_node_selection/`)。**pve1が起動している時にしか確かめられないAC4だけがWatchに残る。**「障害の自動捕捉・評価」も**3段すべてが本番で成立してクローズ済み** — 捕捉=quory(5分毎)、転送=ansy `ansible-incident-sync.timer`(毎時)、評価=既存の月次 `ansible-knowledge-review.timer` の中の2本目の `claude -p`。**次の観測点は2026-08-26の月次発火**で、Watch行が持つ。
 
 **規範の正本は `docs/ai/policies/incident_capture_policy.md`**(IC-001〜IC-033)。設計判断は `docs/ai/adr/003` / `004` / `005`(いずれも Accepted)。案件記録は `docs/ai/reviews/incident_auto_capture/`(Step 1)と `.../incident_auto_capture_step2/`(Step 2)。**未決の一覧は Policy §8 が正本。**
 

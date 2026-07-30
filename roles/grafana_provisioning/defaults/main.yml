@@ -1,0 +1,22 @@
+---
+# grafana_provisioning: Grafanaダッシュボード/アラートのrepo正本化。
+# 設計の正本は docs/ai/reviews/grafana_provisioning/2026-07-30_004_plan.md §1-2。
+# 値はすべて確定値であり、Implementerが推測で変えたものではない。
+
+grafana_provisioning_dashboards_dir: /var/lib/grafana/dashboards
+grafana_provisioning_provider_dir: /etc/grafana/provisioning/dashboards
+grafana_provisioning_alerting_dir: /etc/grafana/provisioning/alerting
+
+grafana_provisioning_dashboard_files:
+  - unifi-access-points.json
+  - unifi-clients.json
+  - unifi-dpi.json
+  - unifi-gateway.json
+  - unifi-pdu.json
+  - unifi-sites.json
+  - unifi-switches.json
+  # Step 3(R10)で infra-syslog-all-nodes.json をここへ追加する。
+  # このリストがpreflight(datasource参照検査)とdeploy(copy対象)の唯一の入力。
+
+grafana_provisioning_alert_rule_file: unifi-switch-port-errors.yaml
+grafana_provisioning_mute_minutes: 15

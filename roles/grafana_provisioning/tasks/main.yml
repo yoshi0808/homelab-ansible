@@ -1,0 +1,15 @@
+---
+# grafana_provisioning: Grafanaダッシュボード/アラートのrepo正本化。
+# tag: dashboards / provider / alerting を束ねるだけ(計画 §1-1)。
+#
+# 現時点(Step 1 / U1)では "dashboards" タグのみが有効な状態にしている。
+# "provider" / "alerting" タグの実体(deploy_provider.yml、deploy_alerting.yml、
+# restart_and_verify.yml)は Step 2(U3)で追加する。
+# 詳細: docs/ai/reviews/grafana_provisioning/2026-07-30_004_plan.md §2 U1。
+
+- name: Preflight | scan all managed dashboard JSON before any deploy
+  ansible.builtin.import_tasks: preflight_dashboards.yml
+
+- name: Deploy | dashboard JSON
+  ansible.builtin.import_tasks: deploy_dashboards.yml
+  tags: [dashboards]
