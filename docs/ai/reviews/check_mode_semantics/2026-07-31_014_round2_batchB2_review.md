@@ -77,3 +77,15 @@ requirement: `docs/ai/reviews/check_mode_semantics/2026-07-31_006_round2_require
 ## Verdict
 
 **Approve**
+
+---
+
+## Coordinatorの処理(2026-07-31、Auditor指摘により追記)
+
+本ファイルはCoordinatorの処理節を欠いたまま次工程へ進んでいた。**Auditor(`2026-07-31_022_audit.md` 指摘#1)がこれを検出したため、経緯を後から補う。**
+
+| Suggestion | 扱い |
+|---|---|
+| `main.yml` の鍵生成3task→chmodがバッチB-1の同型チェーンと違いblock化されていない(一貫性説明が不十分) | **同意・是正。** Implementerへ差し戻し、当該4taskを1つのnamed block(`Generate and lock down recovery-exec SSH keys (destructive; TS-015 chain)`)へまとめてblock単位でゲートさせた。`target_setup.yml` の非連続な依存(slurp → `authorized_keys` 配布)は個別ゲートのまま維持した |
+
+**この指摘は個別の是正で終わらせず、判定基準そのものをPolicyへ制度化した。** 「block化するかは依存taskがファイル上で連続しているかで分ける。非連続なら並べ替えず個別ゲートにし、理由をコメントに書く」を **TS-033** として新設した(同日)。基準が曖昧だったこと自体がCoordinator側の不備であり、同型の判断が担当ごとに割れる余地を残していた。
