@@ -1,10 +1,9 @@
 {
-  "queue_dir": "{{ incident_investigate_queue_dir }}",
   "artifact_dir": "{{ incident_investigate_artifact_dir }}",
   "reports_incidents_dir": "{{ incident_investigate_bundle_dir }}",
+  "max_bundle_age_s": {{ incident_investigate_max_bundle_age_s }},
   "semaphore_query_bin": "{{ incident_investigate_semaphore_query_bin }}",
   "semaphore_query_timeout_s": {{ incident_investigate_semaphore_query_timeout_s }},
-  "f2_recent_failed_batch": {{ incident_investigate_f2_recent_failed_batch }},
   "bundle_wait_max_s": {{ incident_investigate_bundle_wait_max_s }},
   "inspect_user": "{{ incident_investigate_inspect_user }}",
   "inspect_wrapper": "{{ incident_investigate_inspect_wrapper }}",

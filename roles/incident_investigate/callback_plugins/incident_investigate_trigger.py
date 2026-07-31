@@ -3,6 +3,32 @@
 設計の正本: docs/ai/adr/009-per-incident-investigation-runtime.md (a) a-4。
 Policy: docs/ai/policies/incident_capture_policy.md IC-034/IC-037/IC-038。
 
+**現在無効化されている(2026-07-31、方針C、暫定)**: `ansible.cfg` から
+`callback_plugins` / `callbacks_enabled` の2行を外したため、このファイルは
+配備されていても読み込まれない。原因は、本番のSemaphore実行で
+`SEMAPHORE_TASK_DETAILS_*` 環境変数がansible-playbookプロセスへ渡っておらず、
+下記 `_maybe_enqueue` が常に早期returnしていたこと(一次記録:
+docs/ai/memory/incidents/2026-07-31_incident-investigate-callback-did-not-
+enqueue.md)。起動契機は「証拠バンドル(`reports/incidents/semaphore-<id>/
+summary.json`)の出現を走査で拾う」方式へ切り替えた
+(`roles/incident_investigate/files/incident-investigate.py` を参照)。
+
+**戻し方(この記述がこの機構全体で唯一の場所 — 二重に書かない、T9)**:
+`ansible.cfg` の `[defaults]` セクションへ次の2行を追加する。
+
+```
+callback_plugins = roles/incident_investigate/callback_plugins
+callbacks_enabled = incident_investigate_trigger
+```
+
+このファイル自体はその間も変更不要(削除されていないため)。ただし、
+`roles/incident_investigate/tasks/main.yml` がキューディレクトリ
+(下記 `QUEUE_DIR`)を作らなくなっている(T8)ため、callback経路へ戻す場合は
+そちらの作成も合わせて復元する必要がある。戻す判断そのものと、判断に
+必要な経緯(なぜCへ切り替えたか)は
+`docs/ai/memory/incidents/2026-07-31_incident-investigate-callback-did-not-
+enqueue.md`「対応の選択肢と決定」を参照する(ここへは複製しない)。
+
 やること・やらないこと(この1ファイルの不変条件。変更するときは必ず両方を
 自己検証すること — 検証手順は
 docs/ai/reviews/incident_auto_investigation/2026-07-31_005_u2_implement.md):
@@ -52,12 +78,17 @@ DOCUMENTATION = r"""
     version_added: "1.0"
 """
 
-# 配備済みかどうかの唯一の合図(a-4)。roles/incident_investigate が作る。
-# ここに書くパスは roles/incident_investigate/defaults/main.yml の
-# incident_investigate_queue_dir と**文字どおり一致していなければならない**
-# (incident_sync_outer_lock_path と同型の注意 — 片方だけ変更すると
-# 無言で機構全体が動かなくなる)。callback pluginはAnsible変数を参照できない
-# (ロード時点でplaybook変数のスコープが無い)ため、リテラルで持たざるを得ない。
+# 配備済みかどうかの唯一の合図(a-4)。**2026-07-31(T8)以降、
+# roles/incident_investigate はこのディレクトリを作らない** — したがって
+# 現行の配備状態ではこのパスは存在せず、下の `_maybe_enqueue` は
+# `os.path.isdir(QUEUE_DIR)` の時点で常にno-opになる(ansible.cfgでの
+# 無効化と合わせた二重の無効化。上のdocstring「戻し方」参照)。
+# callback経路へ戻す場合、このパスは roles/incident_investigate/tasks/
+# main.yml が作っていたディレクトリ(yoshi:yoshi 0750)と文字どおり
+# 一致させる必要がある(incident_sync_outer_lock_path と同型の注意 —
+# 片方だけ変更すると無言で機構全体が動かなくなる)。callback pluginは
+# Ansible変数を参照できない(ロード時点でplaybook変数のスコープが無い)ため、
+# リテラルで持たざるを得ない。
 QUEUE_DIR = "/var/lib/homelab-recovery/incident-investigate/queue"
 
 JST = timezone(timedelta(hours=9))

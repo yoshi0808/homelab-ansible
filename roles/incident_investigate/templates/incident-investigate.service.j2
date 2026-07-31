@@ -10,7 +10,7 @@ Environment=INCIDENT_INVESTIGATE_CONFIG={{ incident_investigate_config_path }}
 # 多重起動抑止(AC7・IC-039)。incident-capture.service の前例に倣い、通常の
 # 失敗(exit 1)と区別できる終了コードを明示する。
 ExecStart=/usr/bin/flock -n -E 75 {{ incident_investigate_lock_path }} /usr/bin/python3 {{ incident_investigate_script_path }}
-# 1回の起動で処理するキューエントリは最大1件(incident-investigate.py の
+# 1回の起動で処理する候補バンドルは最大1件(T4。incident-investigate.py の
 # main() 参照)。llm_timeout_s(既定300)+ I/Oのゆとりとして420秒とした。
 TimeoutStartSec={{ incident_investigate_timeout_start_sec }}
 # 2026-07-31差し戻し(独立レビュー Suggestion #3)。SuccessExitStatus=75 が

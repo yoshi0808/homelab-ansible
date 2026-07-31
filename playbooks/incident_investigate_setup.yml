@@ -3,14 +3,21 @@
 #
 # Design authority: docs/ai/adr/009-per-incident-investigation-runtime.md
 # Requirement: docs/ai/reviews/incident_auto_investigation/2026-07-31_001_requirement.md
+# Trigger mechanism (2026-07-31, current): docs/ai/reviews/incident_investigate_trigger/
+# 2026-07-31_001_requirement.md (T1-T9) — see that file and
+# roles/incident_investigate/files/incident-investigate.py's module
+# docstring for what changed and why.
 #
-# This playbook deploys the QUEUE side of the pipeline (a-4 pickup:
-# roles/incident_investigate) — it does NOT deploy the callback plugin
-# itself (that file lives at roles/incident_investigate/callback_plugins/
-# and is active on every host as soon as ansible.cfg is checked out there;
-# see that file's docstring and this repo's ansible.cfg for the two lines
-# that enable it) and it does NOT deploy the investigation identity/Codex
-# entry point (roles/incident_inspect — U1's playbook).
+# This playbook deploys the picker (roles/incident_investigate): the
+# systemd timer/oneshot that scans reports/incidents/ directly for
+# unprocessed `semaphore-<id>/summary.json` bundles (2026-07-31 — this
+# role no longer creates or reads a queue directory; T1/T8). It does NOT
+# deploy the callback plugin itself (that file lives at
+# roles/incident_investigate/callback_plugins/ and stays on disk but is
+# currently NOT loaded by any host — enabling it requires adding two lines
+# back to this repo's ansible.cfg; see that file's docstring for the
+# revert procedure) and it does NOT deploy the investigation
+# identity/Codex entry point (roles/incident_inspect — U1's playbook).
 #
 # Prerequisites (this playbook does not create any of these):
 #   - playbooks/recovery_exec_setup.yml already run (homelab-semaphore-query

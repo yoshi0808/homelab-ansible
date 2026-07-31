@@ -3,31 +3,50 @@
 
 設計の正本: docs/ai/adr/009-per-incident-investigation-runtime.md
 Policy: docs/ai/policies/incident_capture_policy.md §3.5(IC-034〜IC-042)
-起動契機(a-4): roles/incident_investigate/callback_plugins/incident_investigate_trigger.py
-が書くキューファイルを、本スクリプトが systemd timer 経由で拾う(実装判断・
-OQ4の解決: 即時性より、被観測ジョブの終了/バンドル生成タイミングとの
-非同期性を優先した理由は下記「R3の扱い」を参照)。
+
+起動契機(2026-07-31、方針C。ADR-009 (a) a-4からの暫定切り替え。契約は
+docs/ai/reviews/incident_investigate_trigger/2026-07-31_001_requirement.md
+T1〜T9): callback plugin(roles/incident_investigate/callback_plugins/
+incident_investigate_trigger.py)が書くキューファイルを読む経路はやめた
+(本番のSemaphore実行でこの経路が発火しなかった — 一次記録は
+docs/ai/memory/incidents/2026-07-31_incident-investigate-callback-did-not-
+enqueue.md)。代わりに、本スクリプトが起動のたびに
+`reports_incidents_dir`(reports/incidents/)を直接走査し、`semaphore-<id>/
+summary.json` の出現そのものを「調査すべき事象がある」の合図として使う。
+「未調査」の判定は `_investigations/semaphore-<id>.json` の不在のみ
+(T2、IC-039 — 状態を二重に持たない)。callback plugin のファイルは残るが
+`ansible.cfg` からは無効化されている(再有効化の手順は同ファイルの
+docstring)。
 
 実行identity: yoshi(ADR-009 (d) d-2の変形。呼び出し側はyoshi、LLMが動くのは
 incident-inspect側)。
 
 終了コード:
   0 = このプロセスが担当した範囲(1件以下)に調査失敗が無い。
-      キューが空だった/対象がまだ準備できていなかった(R3参照)場合も含む。
-  2 = 調査を1件試みたが失敗した(バンドル未着・LLM呼び出し失敗・応答の
-      構造化失敗・ジョブ番号を解決できなかった等)。成果物は必ず書く
-      (R10/IC-038 — 黙って空の結果を作らない)。
-  3 = 想定外の内部例外(バグ)。
+      未調査バンドルが無かった/見つかったが全て準備待ち(R3参照)で
+      deferした場合も含む。
+  2 = 調査を1件試みたが失敗した(task-timeが未確定のまま諦めた・LLM呼び出し
+      失敗・応答の構造化失敗等)。成果物は必ず書く(IC-038 — 黙って空の
+      結果を作らない)。
+  3 = 想定外の内部例外(バグ)。**走査の起点(reports/incidents/自体の
+      os.listdir)、または個々のバンドルのsummary.json統計(stat)で発生
+      した「ファイル未存在」以外のOSError(権限退行等)もここに含む** —
+      握りつぶして候補ゼロ・exit 0で完走させると、この機構が直そうと
+      している障害(callbackが黙って早期returnして誰も気づかなかったこと)
+      と同じクラスの沈黙になるため、意図的に伝播させている(2026-07-31
+      差し戻し対応。詳細は list_candidate_bundles / _summary_mtime の
+      docstring)。
 
 R3の扱い(「被観測ジョブがSemaphore上で終了しステータスと出力が確定した後に
-読むこと」): callback pluginはansible-playbookプロセスの終盤(v2_playbook_
-on_stats)で発火するため、Semaphore自身がジョブの最終status/endをDBへ
-書き込む前に発火しうる小さな競合がある。加えて証拠バンドル(reports/
-incidents/semaphore-<id>/)は収集器(incident_capture)の5分周期でしか
-作られない。本スクリプトはこの両方を「即座に処理しようとして失敗する」
-のではなく、「まだ確定していなければ今回は何もせず、次の周期(1分毎)へ
-持ち越す」形で吸収する(incident_investigate_bundle_wait_max_s を超えて
-なお確定しない場合だけ、諦めた事実を成果物へ残して失敗扱いにする)。
+読むこと」): 証拠バンドル(summary.json)が現れても、Semaphore自身がその
+ジョブの最終status/endをDBへ書き込むタイミングとの間に小さな競合がありうる
+(task-timeがまだendを返さない)。本スクリプトはこれを「即座に処理しようと
+して失敗する」のではなく、「まだ確定していなければこのバンドルは今回
+飛ばして次の候補へ進み、次の周期(1分毎)で同じバンドルを再度見直す」形で
+吸収する(summary.jsonのmtimeから数えて incident_investigate_bundle_wait_
+max_s を超えてなお確定しない場合だけ、諦めた事実を成果物へ残して失敗
+扱いにする)。「deferしたら次の候補へ進む」は、1件が待ち続けて他の未調査
+バンドルを塞ぐ経路を作らないための実装判断(requirement §8 Q3)。
 """
 import json
 import os
@@ -137,10 +156,6 @@ def now_jst_str():
     return to_rfc3339_jst(now_jst())
 
 
-def parse_rfc3339(raw):
-    return datetime.fromisoformat(raw)
-
-
 # ---------------------------------------------------------------------------
 # homelab-semaphore-query(既存の読み取り口。新規SQLを増やさず既存の引数を
 # 呼ぶだけ — ADR-003 (c) と同じ流儀を踏襲)。
@@ -172,105 +187,102 @@ def parse_task_time_row(stdout):
     }
 
 
-def parse_recent_failed_rows(stdout):
-    rows = []
-    for line in stdout.splitlines():
-        if not line.strip():
-            continue
-        parts = line.split("|", 4)
-        if len(parts) != 5:
-            continue
-        task_id_raw, template, playbook, status, start = parts
-        try:
-            task_id = int(task_id_raw)
-        except ValueError:
-            continue
-        rows.append(
-            {"id": task_id, "template": template, "playbook": playbook, "status": status, "start_raw": start}
-        )
-    return rows
-
-
 # ---------------------------------------------------------------------------
-# キュー
+# バンドルの走査(T1・T2・T5・T6)
+#
+# ADR-009 (f) f-3(f-1優先、取れなければ recent-failed で突合するf-2)は、
+# 起動契機がcallbackのキューレコードだった旧設計での「ジョブ番号をどこから
+# 取るか」の決定だった。この切り替えでは、走査対象のディレクトリ名
+# `semaphore-<id>` 自体がジョブ番号を持つ(捕捉側が既にSemaphoreのDBから
+# 得たidでバンドルを作っている)ため、f-1/f-2のような推定・突合は不要に
+# なった。ADR-009本文の(f)節にはこの暫定supersedeを注記済み。
 # ---------------------------------------------------------------------------
-def list_queue_entries(queue_dir):
-    """(path, record_dict_or_None) のリストを、record内のdetected_atで昇順に
-    返す(parse失敗時はファイルmtimeで代用)。record が None のもの(壊れた
-    JSON)は取得できた事実だけ残して呼び出し側が処理する。"""
-    entries = []
-    if not os.path.isdir(queue_dir):
-        return entries
-    for name in os.listdir(queue_dir):
-        if not name.endswith(".json"):
-            continue
-        path = os.path.join(queue_dir, name)
-        if not os.path.isfile(path):
-            continue
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                rec = json.load(f)
-        except (OSError, json.JSONDecodeError):
-            rec = None
-        try:
-            sort_key = parse_rfc3339(rec["detected_at"]) if rec else None
-        except (KeyError, TypeError, ValueError):
-            sort_key = None
-        if sort_key is None:
-            try:
-                sort_key = datetime.fromtimestamp(os.stat(path).st_mtime, tz=timezone.utc)
-            except OSError:
-                sort_key = datetime.now(timezone.utc)
-        entries.append((sort_key, path, rec))
-    entries.sort(key=lambda t: t[0])
-    return [(path, rec) for _sort_key, path, rec in entries]
+BUNDLE_DIR_RE = re.compile(r"^semaphore-(\d+)$")
 
 
-def consume_queue_entry(path):
-    try:
-        os.remove(path)
-    except OSError:
-        pass  # 消費できなくても致命的ではない(次回同じ内容で再処理されるだけ)。
+def _summary_mtime(bundle_dir):
+    """bundle_dir/summary.json の mtime(epoch秒)。
 
-
-# ---------------------------------------------------------------------------
-# ジョブ番号の解決(f-3: f-1優先、取れなければf-2)
-# ---------------------------------------------------------------------------
-def resolve_task_id(cfg, record):
-    """(task_id_or_None, resolution_note) を返す。
-
-    f-1: record['semaphore_task_id'] があればそれを使う(callback plugin が
-    SEMAPHORE_TASK_DETAILS_ID から直接得た値。最も確実)。
-    f-2: 無ければ、record['playbook'] と recent-failed の playbook 列が一致する
-    行のうち、record['detected_at'] に最も時刻が近いものを1件だけ採用する。
-    複数候補・0候補は「解決できなかった」として None を返す(取り違えを
-    黙って採用しない)。
+    `summary.json` がまだ存在しない(`FileNotFoundError`)場合だけ `None` を
+    返す — これは正常系である(収集器の5分周期でまだ書かれていないだけ、
+    T6)。**それ以外の `OSError`(`PermissionError` 等)は握りつぶさず
+    呼び出し元へ伝播させる。** ここで `OSError` を種別を問わず `None` へ
+    畳むと、権限退行のような異常系が「まだ捕捉されていない」という正常系と
+    区別できなくなり、そのバンドルだけが恒久的に(バンドルが存在し続ける
+    限り無期限に)候補から無言で外れ続ける(2026-07-31独立レビュー
+    `2026-07-31_003_review.md` Suggestion #2の指摘。対処は
+    `2026-07-31_002_implement.md` 追記4を参照)。
     """
-    if record.get("semaphore_task_id") is not None:
-        return record["semaphore_task_id"], "resolved via SEMAPHORE_TASK_DETAILS_ID (f-1)"
+    try:
+        return os.stat(os.path.join(bundle_dir, "summary.json")).st_mtime
+    except FileNotFoundError:
+        return None
 
-    playbook = record.get("playbook")
-    if not playbook:
-        return None, "f-1 unavailable (no task id env var) and f-2 needs a playbook path, which is also missing"
 
-    rc, out, err = run_semaphore_query(
-        cfg["semaphore_query_bin"], cfg["semaphore_query_timeout_s"], "recent-failed", str(cfg["f2_recent_failed_batch"])
-    )
-    if rc != 0:
-        return None, f"f-1 unavailable and f-2 query failed: rc={rc} stderr={err.strip()!r}"
+def list_candidate_bundles(bundles_dir, artifact_dir, max_age_s):
+    """未調査かつ古すぎない候補バンドルを、summary.jsonのmtime昇順(古い方が
+    先、AC5)で返す。戻り値: (candidates, scan_errors)。
 
-    rows = parse_recent_failed_rows(out)
-    # playbook列は絶対/相対の形が食い違いうる(basenameで緩く比較する)。
-    target_base = os.path.basename(playbook)
-    candidates = [r for r in rows if os.path.basename(r.get("playbook") or "") == target_base]
-    if len(candidates) == 0:
-        return None, f"f-2 found no recent-failed row whose playbook matches {playbook!r}"
-    if len(candidates) > 1:
-        return None, (
-            f"f-2 found {len(candidates)} ambiguous recent-failed rows matching playbook {playbook!r}; "
-            "refusing to guess which one this queue entry corresponds to"
-        )
-    return candidates[0]["id"], f"resolved via recent-failed playbook correlation (f-2, no id env var present)"
+    candidates: [(task_id, bundle_dir, summary_mtime), ...]。
+
+    走査対象は `semaphore-<id>` 形式のディレクトリで summary.json を持つもの
+    に限る(T6)。`spool-*` `_runs/` `_spool/` `_investigations/`
+    `_heartbeat.json` はこの正規表現に一致しないため自動的に対象外になる。
+    「未調査」は `_investigations/semaphore-<id>.json` の不在のみで判定する
+    (T2)。「古すぎる」は summary.json の mtime が max_age_s を超えているか
+    どうかで判定する(T5・AC3)。
+
+    `bundles_dir` 自体の `os.listdir` が失敗した場合(権限退行・NFS障害等)、
+    ここで `OSError` を握りつぶさない。**この機構が直そうとしている障害
+    (callbackが黙って早期returnし、誰も気づかないまま調査が起動しなかった
+    こと)と同じクラスの沈黙を、走査という唯一の起動契機自身で再現しない
+    ため**(2026-07-31独立レビュー `2026-07-31_003_review.md` Suggestion #1
+    の指摘)。呼び出し元(`main()`)はこれを catch せず、`__main__` の最外側
+    `except Exception` まで伝播させて `EXIT_INTERNAL_ERROR=3`(traceback付き、
+    systemdの `failed` で可視化)にする — 旧実装(削除済み
+    `list_queue_entries`)の対応箇所も同じく try/except を持たず、同じ経路で
+    可視化していた。
+
+    scan_errors: [(bundle_name, message), ...]。個々のバンドルの
+    `summary.json` 統計(`_summary_mtime`)が「ファイル未存在」以外の
+    `OSError`(`PermissionError` 等)で失敗した場合、**そのバンドル1件だけを
+    候補から除外して走査は続行し**、理由をここへ積む(Suggestion #2の指摘
+    — R1(走査の起点そのものが読めない)と異なり、影響範囲は1バンドルに
+    留まるため、走査全体を止める必要は無い。1件のACL退行が、それとは無関係
+    な新しい未調査バンドルの投入まで道連れにしてはならない)。ただし
+    黙って隠しはしない: `main()` はこのリストが非空なら、その周期で他の
+    候補を正常に処理できていても最終的な終了コードを `EXIT_INTERNAL_ERROR=3`
+    にする(R1と同じ終了コードを再利用する — 理由は「新設のOSError系検知」
+    という同じクラスの異常であるため。詳細は `main()` を参照)。
+    """
+    candidates = []
+    scan_errors = []
+    names = os.listdir(bundles_dir)
+    now = time.time()
+    for name in names:
+        m = BUNDLE_DIR_RE.match(name)
+        if not m:
+            continue
+        bundle_dir = os.path.join(bundles_dir, name)
+        if not os.path.isdir(bundle_dir):
+            continue
+        try:
+            mtime = _summary_mtime(bundle_dir)
+        except OSError as e:
+            scan_errors.append((name, f"{type(e).__name__}: {e}"))
+            continue  # この1件だけを飛ばし、走査は続ける(影響範囲をバンドル
+            # 単位に留める)。
+        if mtime is None:
+            continue  # summary.json がまだ無い(FileNotFoundError) = 捕捉が
+            # 完了していない。正常系(T6)。
+        task_id = int(m.group(1))
+        if artifact_already_exists(artifact_dir, task_id):
+            continue  # T2: 既に調査済み。
+        if now - mtime > max_age_s:
+            continue  # T5・AC3: 古すぎる。初回の積み残しを一気に投げない。
+        candidates.append((task_id, bundle_dir, mtime))
+    candidates.sort(key=lambda t: t[2])
+    return candidates, scan_errors
 
 
 # ---------------------------------------------------------------------------
@@ -598,51 +610,13 @@ def artifact_already_exists(artifact_dir, task_id):
 # ---------------------------------------------------------------------------
 # メイン
 # ---------------------------------------------------------------------------
-def process_one(cfg, path, record):
-    """1件のキューエントリを処理する。
+def process_bundle(cfg, task_id, bundle_dir):
+    """1件の候補バンドルを処理する。task_idはlist_candidate_bundlesが走査時に
+    ディレクトリ名から確定済み(T1: バンドル名自体がジョブ番号を持つため、
+    旧実装のf-1/f-2のような推定は不要)。
 
-    戻り値: "processed_ok" | "processed_failed" | "deferred" | "skipped_duplicate"
+    戻り値: "processed_ok" | "processed_failed" | "deferred"
     """
-    if record is None:
-        # キューファイル自体が壊れている(JSON parse失敗)。ジョブを
-        # 特定できないため、諦めた事実だけを記録して消費する(R4)。
-        artifact = assemble_artifact(
-            task_id=None,
-            semaphore_meta=None,
-            bundle_dir=None,
-            llm_outcome=(None, None, "queue entry could not be parsed as JSON"),
-            notes_extra=[f"malformed queue entry: {os.path.basename(path)}"],
-        )
-        write_artifact(cfg["artifact_dir"], f"unresolved-{os.path.basename(path)[:-5]}", artifact)
-        consume_queue_entry(path)
-        return "processed_failed"
-
-    task_id, resolution_note = resolve_task_id(cfg, record)
-
-    if task_id is None:
-        detected_at = record.get("detected_at")
-        age_s = _age_seconds(detected_at)
-        if age_s is not None and age_s < cfg["bundle_wait_max_s"]:
-            # f-2がまだ拾えていないだけかもしれない(recent-failedにまだ
-            # 現れていない等)。すぐには諦めず次周期へ持ち越す。
-            return "deferred"
-        artifact = assemble_artifact(
-            task_id=None,
-            semaphore_meta=None,
-            bundle_dir=None,
-            llm_outcome=(None, None, f"could not resolve a Semaphore task id: {resolution_note}"),
-            notes_extra=[f"queue record: {json.dumps(record, ensure_ascii=False)}"],
-        )
-        fallback_name = os.path.splitext(os.path.basename(path))[0]
-        write_artifact(cfg["artifact_dir"], fallback_name, artifact)
-        consume_queue_entry(path)
-        return "processed_failed"
-
-    if artifact_already_exists(cfg["artifact_dir"], task_id):
-        # AC7: 既に成果物がある = 調査済み。LLMを再度呼ばない。
-        consume_queue_entry(path)
-        return "skipped_duplicate"
-
     rc, out, err = run_semaphore_query(cfg["semaphore_query_bin"], cfg["semaphore_query_timeout_s"], "task-time", str(task_id))
     semaphore_meta = None
     finalized = False
@@ -657,31 +631,27 @@ def process_one(cfg, path, record):
         except ValueError as e:
             query_problem = f"task-time {task_id} parse failed: {e}"
 
-    bundle_dir = os.path.join(cfg["reports_incidents_dir"], f"semaphore-{task_id}")
-    bundle_ready = os.path.isfile(os.path.join(bundle_dir, "summary.json"))
-
-    if not finalized or not bundle_ready:
-        detected_at = record.get("detected_at")
-        age_s = _age_seconds(detected_at)
+    if not finalized:
+        # R3: バンドル(summary.json)は既に存在するが、Semaphore自身の
+        # 最終status/endがまだDBに確定していない可能性がある。summary.jsonの
+        # 出現(mtime)からの経過時間で待つかどうかを決める。
+        mtime = _summary_mtime(bundle_dir)
+        age_s = (time.time() - mtime) if mtime is not None else None
         if age_s is not None and age_s < cfg["bundle_wait_max_s"]:
-            return "deferred"  # R3: まだ確定していない。次周期へ。
+            return "deferred"  # まだ確定していない。次の候補へ進む(Q3)。
         # 諦める(IC-038): 何を試みて何が取れなかったかを残す。
         reasons = []
         if query_problem:
             reasons.append(query_problem)
-        if not finalized:
-            reasons.append("Semaphore has not recorded a finalized end time for this task yet")
-        if not bundle_ready:
-            reasons.append(f"evidence bundle not found at {bundle_dir}/summary.json")
+        reasons.append("Semaphore has not recorded a finalized end time for this task yet")
         artifact = assemble_artifact(
             task_id=task_id,
             semaphore_meta=semaphore_meta,
-            bundle_dir=bundle_dir if bundle_ready else None,
-            llm_outcome=(None, None, "gave up waiting for job/bundle to finalize: " + "; ".join(reasons)),
-            notes_extra=[resolution_note],
+            bundle_dir=bundle_dir,
+            llm_outcome=(None, None, "gave up waiting for job to finalize: " + "; ".join(reasons)),
+            notes_extra=[],
         )
         write_artifact(cfg["artifact_dir"], task_id, artifact)
-        consume_queue_entry(path)
         return "processed_failed"
 
     prompt = build_prompt(task_id, bundle_dir)
@@ -701,21 +671,10 @@ def process_one(cfg, path, record):
         semaphore_meta=semaphore_meta,
         bundle_dir=bundle_dir,
         llm_outcome=(llm_rc, parsed, llm_error),
-        notes_extra=[resolution_note],
+        notes_extra=[],
     )
     write_artifact(cfg["artifact_dir"], task_id, artifact)
-    consume_queue_entry(path)
     return "processed_ok" if artifact["status"] == "new" else "processed_failed"
-
-
-def _age_seconds(rfc3339_str):
-    if not rfc3339_str:
-        return None
-    try:
-        dt = parse_rfc3339(rfc3339_str)
-    except ValueError:
-        return None
-    return (datetime.now(timezone.utc) - dt.astimezone(timezone.utc)).total_seconds()
 
 
 def main():
@@ -725,18 +684,36 @@ def main():
 
     os.makedirs(cfg["artifact_dir"], exist_ok=True)
 
-    entries = list_queue_entries(cfg["queue_dir"])
-    if not entries:
-        return EXIT_OK
+    candidates, scan_errors = list_candidate_bundles(
+        cfg["reports_incidents_dir"], cfg["artifact_dir"], cfg["max_bundle_age_s"]
+    )
+    for name, message in scan_errors:
+        # 2026-07-31差し戻し対応(R2): バンドル単位のOSError(PermissionError
+        # 等)を「summary.jsonがまだ無い」という正常系と同じ扱いに畳まない。
+        # 黙って隠さず、非ゼロ終了(下記)とあわせて外から見えるようにする。
+        sys.stderr.write(f"incident-investigate: could not stat bundle {name!r}: {message}\n")
 
-    # 1回の起動につき最も古い1件だけを処理する(実装判断。次周期は1分後 —
-    # 詳細は 2026-07-31_005_u2_implement.md「処理件数を1件に絞った理由」)。
-    path, record = entries[0]
-    outcome = process_one(cfg, path, record)
+    # T4: 1回の起動で処理する(=成果物を書く)のは最大1件。deferしたバンドルは
+    # 消費されない(次回の走査で再び候補になる)ため、ここで次の候補へ進んでも
+    # 取りこぼしにはならない — 進まないと、1件が待ち続ける間ずっとそれより
+    # 新しい未調査バンドルを塞ぐ経路ができる(requirement §8 Q3)。
+    exit_code = EXIT_OK
+    for task_id, bundle_dir, _summary_mtime_val in candidates:
+        outcome = process_bundle(cfg, task_id, bundle_dir)
+        if outcome == "deferred":
+            continue
+        exit_code = EXIT_INVESTIGATION_FAILED if outcome == "processed_failed" else EXIT_OK
+        break
 
-    if outcome == "processed_failed":
-        return EXIT_INVESTIGATION_FAILED
-    return EXIT_OK
+    # scan_errorsが1件でもあれば、この周期で他の候補を問題なく処理できて
+    # いても最終的な終了コードをEXIT_INTERNAL_ERRORにする(R1と同じ終了
+    # コードを再利用 — 走査で発生したOSErrorという同じクラスの異常である
+    # ため)。1件のバンドルの異常が走査全体・他の候補の処理を止めることは
+    # 無いが、その事実自体を握りつぶしてEXIT_OKで完走させることもしない
+    # (IC-038)。
+    if scan_errors:
+        return EXIT_INTERNAL_ERROR
+    return exit_code
 
 
 if __name__ == "__main__":

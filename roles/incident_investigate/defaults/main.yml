@@ -59,38 +59,48 @@ incident_investigate_llm_timeout_s: 300
 incident_investigate_semaphore_query_bin: /usr/local/bin/homelab-semaphore-query
 incident_investigate_semaphore_query_timeout_s: 15
 
-# f-2フォールバック(ADR-009 (f) f-3)でのrecent-failed取得件数上限。
-# incident_capture_recent_failed_batch と同じ値・同じ理由(取りこぼしの
-# 可能性はnotesへ記録される — resolve_task_idが候補ゼロ/複数のときは
-# 諦める側に倒す。取り違えを黙って採用しない)。
-incident_investigate_f2_recent_failed_batch: 50
-
 # ---------------------------------------------------------------------------
-# R3の扱い: 被観測ジョブの終了(Semaphore DBの確定)・証拠バンドルの生成
-# (incident_captureの5分周期)のいずれかが未確定な間は、キューエントリを
-# 消費せず次周期(timerは1分毎)へ持ち越す。この秒数を超えてなお確定しない
-# 場合だけ諦め、諦めた事実を成果物へ残す(IC-038)。
-# incident_capture_schedule(5分)の6倍 = 30分。1周期の遅延・タイムアウトの
-# 積み重ねを吸収しつつ、無限に待ち続けない値として選んだ(実装判断)。
+# R3の扱い: 証拠バンドル(summary.json)は既に出現しているが、Semaphore DB側の
+# 終了確定がまだのとき、その事実だけで諦めずに次周期(timerは1分毎)へ
+# 持ち越す。この秒数を超えてなお確定しない場合だけ諦め、諦めた事実を
+# 成果物へ残す(IC-038)。incident_capture_schedule(5分)の6倍 = 30分。
+# 1周期の遅延・タイムアウトの積み重ねを吸収しつつ、無限に待ち続けない値
+# として選んだ(実装判断)。
 # ---------------------------------------------------------------------------
 incident_investigate_bundle_wait_max_s: 1800
+
+# ---------------------------------------------------------------------------
+# 起動契機(2026-07-31、方針C。docs/ai/reviews/incident_investigate_trigger/
+# 2026-07-31_001_requirement.md T1・T5、§8 Q1)。ADR-009 (a) a-4(callback
+# plugin がキューへ書き、それを読む)は本番のSemaphore実行で発火しなかった
+# (一次記録: docs/ai/memory/incidents/2026-07-31_incident-investigate-
+# callback-did-not-enqueue.md)。代わりに、incident-investigate.py が
+# 起動のたびに incident_investigate_bundle_dir(reports/incidents/)配下を
+# 直接走査し、`semaphore-<id>/summary.json` の出現を起動契機として使う。
+# 「未調査」の判定は _investigations/semaphore-<id>.json の不在のみ
+# (IC-039、状態を二重に持たない)。callback plugin のファイル自体は残すが
+# ansible.cfg からは無効化した — 再有効化の手順は
+# roles/incident_investigate/callback_plugins/incident_investigate_trigger.py
+# のdocstring(戻し方を書く場所はここ1箇所に限定する)。
+#
+# 走査対象バンドルのうち、summary.json の mtime がこの秒数より古いものは
+# 対象外にする(T5・AC3)。値は72時間(requirement §8 Q1のCoordinator判断):
+#   1. 配備が週末へずれても直近のインシデント(07-31 22:00生成)が窓に入る
+#   2. 初回の積み残しが実測7件に収まる(3日以内のバンドル数)
+#   3. これより古い失敗の一次調査は月次評価が傾向として扱う範囲であり、
+#      事象ごとの一次調査の有用性が薄い
+# コード変更なしで実値を変えられるよう変数化してある(requirement §8 Q1)。
+incident_investigate_max_bundle_age_s: 259200
 
 # ---------------------------------------------------------------------------
 # 出力先(e-2: reports/incidents/_investigations/)。
 # ACLに一切触れない(証拠バンドルのACL付きツリーの外)。RSK-06/IC-030同様、
 # reports/ 直下ではなく reports/incidents/ 配下にのみ書く。
+# incident_investigate_bundle_dir は成果物の出力先の起点であると同時に、
+# 上記の起動契機が走査する対象(証拠バンドルの置き場)でもある。
 # ---------------------------------------------------------------------------
 incident_investigate_bundle_dir: "{{ reports_base_dir }}/incidents"
 incident_investigate_artifact_dir: "{{ incident_investigate_bundle_dir }}/_investigations"
-
-# キューディレクトリ(a-4)。reports/incidents/ の外(ACL関連のC1不変条件を
-# 完全に回避するため)。**このディレクトリの存在自体が callback plugin に
-# とっての「配備済み」の合図である**(callback pluginはAnsible変数を
-# 参照できないため、パスは
-# roles/incident_investigate/callback_plugins/incident_investigate_trigger.py
-# 内にリテラルで重複している — 変更する場合は両方を揃えること。
-# incident_sync_outer_lock_path と同型の注意)。
-incident_investigate_queue_dir: /var/lib/homelab-recovery/incident-investigate/queue
 
 # 配備先のスクリプト・設定・unitパス(incident_capture と同じ命名規則)。
 incident_investigate_script_path: /usr/local/sbin/incident-investigate.py
@@ -101,13 +111,15 @@ incident_investigate_lock_path: /run/lock/homelab-incident-investigate.lock
 # systemd timer間隔。OQ4(待機時間の実値は実装時に測る)への回答:
 # 即時性ではなく非同期性を優先し(R3の扱いは上記参照)、1分毎の短い周期で
 # 「準備できていればすぐ拾う、できていなければ何もせず戻る」を繰り返す形に
-# した。1回の起動が空振り(キュー空)のときのコストはディレクトリ一覧の
-# 取得1回のみで無視できる。
+# した。1回の起動が空振り(未調査バンドルが無い)ときのコストは
+# reports/incidents/ のディレクトリ一覧取得1回のみで無視できる。
 incident_investigate_schedule: minutely
 
 # 1回のLLM呼び出し(llm_timeout_s、既定300)に対して十分な余裕を持たせる。
-# 1回の起動で処理するキューエントリは最大1件(処理件数を1件に絞った理由は
-# 2026-07-31_005_u2_implement.md を参照)。
+# 1回の起動で処理する候補バンドルは最大1件(T4。処理件数を1件に絞った理由は
+# 2026-07-31_005_u2_implement.md、走査の切り替え自体は
+# docs/ai/reviews/incident_investigate_trigger/2026-07-31_002_implement.md
+# を参照)。
 incident_investigate_timeout_start_sec: 420
 
 # true にすると systemd timer を enable + start する(本番quory)。

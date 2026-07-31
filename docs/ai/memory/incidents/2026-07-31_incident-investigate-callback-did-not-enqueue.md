@@ -1,10 +1,12 @@
 # Incident: Semaphoreジョブ失敗時に一次調査のcallbackがenqueueしなかった
 
 日付: 2026-07-31
-状態: 原因判明・対応方針決定(暫定)・実装未着手
+状態: **調査中**(原因確定・修正実装/レビュー/検証まで完了。**本番配備と実発火の観測が未了**のため `解決済み` にはしない)
 対象: `roles/incident_investigate/callback_plugins/incident_investigate_trigger.py`、quory上のSemaphore実行経路
 種別: 動作不具合
-原因分類: (判明後に記入)
+原因分類: #テスト不足
+
+> **中核**: ジョブ番号の環境変数(`SEMAPHORE_TASK_DETAILS_*`)は、**Semaphoreのソースに存在することだけを根拠に設計の前提へ組み込まれ、この環境の実行時に実際に注入されるかを一度も実測しないまま本番稼働に入った。** 起動契機はその1本に依存していた。**ソースコードの確認は「存在しうる」ことしか示さない。**
 
 ## 症状
 
@@ -91,23 +93,29 @@ PWD=/opt/semaphore/project_1/repository_1_template_11
 
 ## 修正内容
 
-**未実施。方針(C)は決まっており、実装はこれから。** 着手時の計画は次のとおり(2026-07-31にCoordinatorが提示、Yoshinobu合意済み)。
+**実装・独立レビュー・Tester検証まで完了(2026-07-31、未commit)。残るのは本番配備と実発火の観測。** 案件記録は `docs/ai/reviews/incident_investigate_trigger/`(001 requirement / 002 implement / 003 review / 004 test_result / 005 audit)、実装契約の正本は同 `001_requirement.md`。
 
-1. requirement を `docs/ai/reviews/incident_investigate_trigger/` に書く。
-2. `incident-investigate.py` のトリガを**キュー読みから「未調査バンドルの走査」へ**変える。`ansible.cfg` の2行を外して callback を無効化(pluginファイルは残す)。
-3. 独立レビュー。
-4. Tester — **`semaphore-495` が実際に拾われて `_investigations/` に成果物が出ること**(通過側)と、**調査済みバンドルが再投入されないこと**(非通過側)の両方を観測する。片方だけでは機構が効いた証明にならない。
-5. **ADR-009 にトリガ機構の暫定supersessionを注記**し、`docs/ai/policies/incident_capture_policy.md` IC-034〜042 の該当箇所を確認する。
+実施した内容:
 
-**Coordinatorが決めた設計点**(実装時に覆すなら理由を記録すること):
+1. **起動契機を「証拠バンドルの走査」へ切り替えた。** `incident-investigate.py` は起動のたびに `reports/incidents/` を走査し、`semaphore-<id>/summary.json` の出現を契機とする。「未調査」の判定は `_investigations/semaphore-<id>.json` の不在**のみ**(IC-039、状態を二重に持たない)。ディレクトリ名自体がジョブ番号を持つため、旧 f-1 / f-2 のジョブ番号推定は削除した。
+2. **`ansible.cfg` の2行を外して callback を無効化した。plugin本体のファイルは残した**(可逆)。roleがキューディレクトリを作るのもやめたため、plugin単体でも常にno-opになる(二重の無効化)。**戻し方は plugin の docstring 1箇所にだけ書いた。**
+3. **1周期1件・古いバンドル(72時間超)は対象外**とした。閾値は変数(`incident_investigate_max_bundle_age_s`)。実測で quory に48件のバンドルがあり、閾値が無いと切り替え直後に48件をCodexへ投げるため。
+4. **独立レビューの指摘2件を反映した。** 走査の起点(`reports/incidents/` 自体)が読めないときに `except OSError` で沈黙し「未調査バンドルが無かった」と区別できなくなる退行があった — **この機構が直そうとしている「黙って何も起きない」と同じクラスの欠陥**であり、例外を伝播させて `EXIT=3` で可視化する形へ戻した。個々のバンドルが `stat` できない場合は、そのバンドルだけを隔離して走査は継続し、終了コードで異常を示す。
+5. **ADR-009 の (a) / (f) に暫定supersedeを注記した。** `docs/ai/policies/incident_capture_policy.md` §3.5 は**改訂不要**と判断した — IC-034〜042 は callback やキューを名指ししておらず機構非依存で、IC-037(被観測playへ影響しない)はむしろ構造的に強くなる(被観測play内で動くものが無くなる)。
 
-- **未調査の判定は `_investigations/semaphore-<id>.json` の不在**とする。状態を別ファイルへ二重に持たない(捕捉側で「消費済みidの記憶」を二重化しない判断をしたのと同じ理由。`docs/ai/status.md` Next 参照)。
-- **1回の実行で処理するのは最大1件**、かつ**一定期間より古いバンドルは対象外**とする。timerは毎分なので実質毎分1件で、初回に積み残しを一気にCodexへ投げない。
-- **可逆性を優先する。** 暫定判断であるため、callback plugin のファイルは残す。
+**引き受けた代償**(requirement §10 が正本): 調査が捕捉に依存するようになった(捕捉が止まれば調査も起動しない)。検出が最大5分遅れる。
 
 ## 確認方法
 
-未確定。修正後は「Semaphoreジョブが失敗したとき、`queue/` に要求ファイルが現れること」と「成功したときは現れないこと」の**両方**を観測して確認する。片方だけでは機構が効いた証明にならない。
+**配備前(2026-07-31に実施済み、すべてPASS)**: `/tmp` のfixtureで、未調査バンドルが拾われること・調査済みバンドルが再投入されないこと・閾値・1周期1件・選定順序・走査起点の異常が可視化されること。一次記録は `docs/ai/reviews/incident_investigate_trigger/2026-07-31_004_test_result.md`。**callback無効化は、同一コード・同一失敗play・同一環境変数で `ansible.cfg` の2行の有無だけを変えた対照実験で確認した。**
+
+**配備後にしか確かめられないもの(残る観測)**:
+
+1. **`semaphore-495` が最初の1件として拾われ、`reports/incidents/_investigations/semaphore-495.json` が現れること。** 現在このバンドルは未調査のまま滞留しており、切り替え後の最初の対象になる想定である。
+2. **調査済みになった後、再投入されないこと**(`investigated_at` が変化しないこと)。1と2は**両方**観測しないと機構が効いた証明にならない。
+3. quory上のキューディレクトリに、以後キューファイルが**新規に現れない**こと(callbackが本当に読み込まれていないこと)。
+
+配備には Yoshinobu の `git commit` / `push`、quory での `git pull --ff-only`、`playbooks/incident_investigate_setup.yml` の再実行が要る。
 
 ## 参照
 

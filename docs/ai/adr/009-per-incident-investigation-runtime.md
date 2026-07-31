@@ -2,6 +2,8 @@
 
 **Status:** **Accepted**(2026-07-31。前提だった2件 — Policy改訂の承認と調査専用ユーザーの `codex login` — はいずれも充足した。実装・独立レビュー・quoryへの配備・Tester実地検証(AC4/AC7/AC8/AC9 実測PASS)を経て `homelab-incident-investigate.timer` を有効化し、本番稼働に入った)
 
+> **(a) と (f) は 2026-07-31 に暫定でsupersedeされている(他の決定は有効)。** 本番のSemaphore実行で a-4 の callback が発火しないことが実測で確定したため、起動契機を「証拠バンドル(`reports/incidents/semaphore-<id>/summary.json`)の出現を走査で拾う」形へ切り替えた。**暫定であり、恒久の設計判断としてこのADRを書き換えてはいない** — 経緯と選択肢の比較は `docs/ai/memory/incidents/2026-07-31_incident-investigate-callback-did-not-enqueue.md`、実装契約は `docs/ai/reviews/incident_investigate_trigger/2026-07-31_001_requirement.md` が正本。該当箇所は下記 Decision の (a) / (f) に注記した。
+
 **経緯**: 当初 (c) は c-2(設定層でexecpolicyを絞る)としていたが、U0の実測で否定された — config.toml層のexecpolicyは `codex exec` + `approval_policy="never"` の経路でコマンド実行を阻止しない(allow-listに無い `id` が通った)。一次記録は `.../2026-07-31_002_u0_test_result.md`、**既存経路への影響**は `docs/ai/memory/incidents/2026-07-31_codex-execpolicy-allowlist-not-enforcing.md`。2026-07-31、Yoshinobuが c-3 を選択した。
 
 要求は `docs/ai/reviews/incident_auto_investigation/2026-07-31_001_requirement.md`。
@@ -74,11 +76,17 @@
 
 - **(a) a-4** を採る。callback pluginは「失敗を検出して1ファイル書く」だけに留め、判断・LLM・ネットワークを持たせない。キューが存在しない環境(ansy等)では即座に何もせず返る。例外は内部で握り潰し、被観測playへ伝播させない。
   - **キューを消費する側は systemd path unit ではなく短周期の timer とする**(2026-07-31、実装時の変更)。当初 a-4 は path unit を想定していたが、調査は「Semaphoreがステータスと出力を確定させ、かつ証拠バンドルが揃う」まで**待って再試行する**必要がある(R3)。path unitはファイルの変化で1度発火するだけで再試行を持たないため、待ちを表現できない。timerなら未処理のキューを毎周期見直せ、取りこぼしの回復も同じ機構で済む。**検出が即時・消費が周期という非対称は意図したものである。**
+  - **【2026-07-31 暫定supersede】a-4 の callback による検出は本番で発火しなかった。** Semaphoreが起動する `ansible-playbook` に `SEMAPHORE_TASK_DETAILS_*` が渡っておらず、callbackが「Semaphore以外の起動経路」とみなして早期returnしていた(quory実機で実測)。**callbackをやめ、捕捉が作る証拠バンドルの出現を起動契機にする**形へ切り替えた(`ansible.cfg` の2行を外して無効化、plugin本体は残す=可逆)。timerで周期的に走査する点は変わらない。**これは a-3(収集器から起動する)ではない** — 走査するのは別unit・別identity(`yoshi`)であり、捕捉の段は決定論的なまま(IC-006)である。引き受けた代償は「調査が捕捉に依存する」「検出が最大5分遅れる」の2点で、requirement §10 が正本。
 - **(b) b-2** を採る。Ansible は**配備**(role + setup playbook)と、将来のSlack報告(P2 R14)にだけ使う。
 - **(c) c-3** を採る(2026-07-31 Yoshinobu選択)。**c-1(既存wrapperの流用)・c-2(設定層で絞る)へは倒さない。** 詳細は下記。
 - **(d) d-2の変形**を採る。呼び出し側は `yoshi`、LLM呼び出しだけ**新設する調査専用ユーザー**(wrapper 1本に限定したsudoers)。`recovery-exec` は使わない。
 - **(e) e-2** を採る。
 - **(f) f-3** を採る。**U0 M3でジョブ番号の環境変数が `SEMAPHORE_TASK_DETAILS_ID` と確定した**(semaphore v2.18.4のソースで確認)ため f-1 が主経路になる。取れなかった場合の f-2 は残し、特定できなかった事実も成果物に残す(R4)。
+  - **【2026-07-31 暫定supersede】f-1 / f-2 はいずれも不要になった。** 起動契機がバンドル走査へ移り、走査対象のディレクトリ名 `semaphore-<id>` 自体がジョブ番号を持つため(捕捉側が既にSemaphoreのDBから得たidで命名している)、推定も突合も要らない。実装からは f-1 / f-2 の両経路を削除した。**ソースに環境変数が存在することと、この環境の実行時に注入されることは別である** — f-1 を主経路に選んだ判断は、後者を実測しないまま前者だけで行われていた。
+
+> **(f) の教訓**: ジョブ番号のような外部からの入力は、**取得元をその実行環境で実測してから設計へ組み込む**。ソースコードの確認は「存在しうる」ことしか示さない。
+
+
 
 ### (c) c-3 の内容 — 境界は「鍵とトークンの所有」で作る
 
@@ -117,6 +125,7 @@
 - **新ユーザーのACL追加先に `reports/incidents/` が含まれる。** このツリーは 2026-07-28 の ACL mask 障害の現場であり、**`setfacl` で named entry を足すことと、`chmod`(`ansible.builtin.file` の `mode:` を含む)を一切当てないことを両方守る必要がある**(`roles/incident_capture/tasks/main.yml` 冒頭の不変条件 C1)。
 - **quoryへの配備にYoshinobuの `git pull --ff-only` が要る。** quory作業ツリーの自動同期は2026-07-29に意図的に見送られている。
 - **`ansible.cfg` へ callback を有効化する行が入る場合、この変更は全ホスト・全実行に効く。** U0 M2 は**確定しなかった**(状況証拠は「効いている」方向だが、Semaphore自身のVault機構の使用有無を確認するDBクエリがharnessにブロックされ停止した)。**効くことを前提にせず、配備後に一度観測して確かめる**。効いていなければ Semaphore 側の環境設定(YoshinobuのUI操作)が別途要る。
+  - **【2026-07-31】観測した。** `ansible.cfg` 自体は効いていた(cwdがcheckout直下であることを実測)。効いていなかったのは callback の判定材料(`SEMAPHORE_TASK_DETAILS_*`)の方である。**この2つは症状が同じ**(callbackが痕跡を残さない)ため、ログからは区別できなかった。上記(a)の暫定supersedeにより2行は削除済みで、**現在この行は全実行に効いていない**。
 - **「リポジトリのソースを読めない」ことは制約ではなく設計どおりである。** 2026-07-31のYoshinobu表明(開発=Claude Code と運用=Codex の分離と牽制)により、**コードのどこが原因かを決めるのは開発側の工程**になった。上の(c)比較表で c-4 の Pro として挙げた「ソースを読めるので原因をファイル単位まで書ける」は、この観点では**利点ではない**。なお `incident-inspect` は技術的には公開リポジトリのファイルを読めてしまう(秘密は mode 0600 で別管理されており露出しない)。そこへ踏み込ませない線は prompt と成果物スキーマで引く — **構造ではなく規約で引く線であることを明示しておく。**
 - **月次評価の入力が増える**(P1 R13)。`_investigations/` を読ませる変更は `roles/knowledge_review/templates/incident-review-prompt.md.j2` の1節で済む。
 - 将来の自動修正(P2 R15)は、成果物の `.json` を入力にできる。**commitがYoshinobuという承認境界は本ADRでは動かさない。**

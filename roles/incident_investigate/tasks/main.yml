@@ -14,19 +14,18 @@
 # defaults/main.yml の「U1との結合値」コメントを参照)。
 
 # ---------------------------------------------------------------------------
-# キューディレクトリ(a-4)。callback pluginにとっての「配備済み」の合図。
-# reports/incidents/ の外にあるため、C1不変条件(ACL mask)の対象外。
+# キューディレクトリ(a-4)は、2026-07-31(方針C)以降このroleでは作らない
+# (T8。docs/ai/reviews/incident_investigate_trigger/2026-07-31_001_requirement.md)。
+# 起動契機がcallback plugin からバンドル走査へ切り替わり、キューを読む側
+# (incident-investigate.py)が無くなったため。callback plugin自身は
+# `/var/lib/homelab-recovery/incident-investigate/queue` の存在を「配備済み」
+# の合図として見ているが(callback_plugins/incident_investigate_trigger.py)、
+# このroleがディレクトリを作らなくなったことで、そのplugin単体としても
+# 常にno-opになる(ansible.cfgでの無効化と合わせた二重の無効化)。
+# quory上に既存のディレクトリが残っていても削除はしない(requirement §8 Q4
+# — 空のまま残しても無害で、callback経路へ戻す判断が出たときに再利用できる。
+# 削除はplaybook外の手作業になる)。
 # ---------------------------------------------------------------------------
-- name: Ensure incident-investigate queue directory exists (yoshi-owned)
-  ansible.builtin.file:
-    path: "{{ incident_investigate_queue_dir }}"
-    state: directory
-    owner: yoshi
-    group: yoshi
-    mode: "0750"
-  become: true
-  when: not ansible_check_mode
-  tags: [destructive]
 
 # ---------------------------------------------------------------------------
 # 成果物ディレクトリ(e-2: reports/incidents/_investigations/)。

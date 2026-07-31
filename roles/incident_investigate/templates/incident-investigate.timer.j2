@@ -3,10 +3,11 @@ Description=Homelab incident primary investigation (timer)
 
 [Timer]
 OnCalendar={{ incident_investigate_schedule }}
-# ここでの取りこぼしは次周期(1分後)に同じキューエントリを再度拾うことで
-# 解消される(incident-investigate.py はキューファイルを処理成功/諦め時
-# にしか消費しない)。knowledge-review(月次・取りこぼすと1ヶ月ずれる)と
-# 異なり Persistent は不要 — incident_capture.timer と同じ判断。
+# ここでの取りこぼしは次周期(1分後)に同じ候補バンドルを再度走査で拾う
+# ことで解消される(incident-investigate.py は成果物を書くまでバンドルを
+# 「消費」しない — 走査は毎回 reports/incidents/ を読み直す)。
+# knowledge-review(月次・取りこぼすと1ヶ月ずれる)と異なり Persistent は
+# 不要 — incident_capture.timer と同じ判断。
 Persistent=false
 AccuracySec=10s
 
