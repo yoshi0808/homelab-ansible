@@ -1,0 +1,42 @@
+---
+# prepare_ca_apply.yml - stages the CA cert/key onto tmpfs. Split out of the
+# former prepare_ca.yml (check_mode_semantics round2, playbooks/cert_renew.yml)
+# so this destructive part can be gated with `when: not ansible_check_mode`
+# at the playbooks/cert_renew.yml call site, while prepare_ca_check.yml
+# (diagnostics) stays ungated.
+#
+# Shared file: playbooks/cert_renew_quory.yml (out of scope for this batch)
+# imports this unconditionally too, via prepare_ca.yml -> here, under its
+# own `check_mode: false` at the import_role call site, so it keeps forcing
+# real execution regardless of --check exactly as before this split.
+#
+# TS-033: these 3 tasks form one contiguous dependent chain (the two copy
+# tasks require the directories the first task creates) and are gated as a
+# single unit at the playbooks/cert_renew.yml call site (one
+# `when: not ansible_check_mode` on the import_role task that pulls in this
+# whole file) rather than reordered or wrapped in an extra nested block —
+# they were already contiguous and in this order before the split, so no
+# reordering was needed to gate them together.
+- name: Create CA staging directories on tmpfs
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0700"
+  loop:
+    - "{{ cert_renew_ca_dir }}"
+    - "{{ cert_renew_ca_dir }}/certs"
+
+- name: Copy CA certificate to tmpfs
+  ansible.builtin.copy:
+    src: "{{ cert_renew_ca_src_crt }}"
+    dest: "{{ cert_renew_ca_dir }}/ca.crt"
+    mode: "0600"
+    remote_src: true
+
+- name: Copy CA private key to tmpfs
+  ansible.builtin.copy:
+    src: "{{ cert_renew_ca_src_key }}"
+    dest: "{{ cert_renew_ca_dir }}/ca.key"
+    mode: "0600"
+    remote_src: true
+  no_log: true

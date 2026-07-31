@@ -1,121 +1,15 @@
 ---
-- name: Set host cert config
-  ansible.builtin.set_fact:
-    cert_host_config: "{{ cert_renew_hosts_config[inventory_hostname] }}"
+# issue.yml - combined entry point, preserved for callers that want
+# "always run the whole thing" semantics (playbooks/cert_renew_quory.yml,
+# tasks/main.yml). Split into issue_check.yml (cert_needs_renewal
+# determination) and issue_apply.yml (destructive: keygen/CSR/sign) so
+# that playbooks/cert_renew.yml (check_mode_semantics round2) can gate
+# only the apply half under --check while still running the check half.
+# This file imports both unconditionally, in their original order, so
+# behavior for existing callers (cert_renew_quory.yml, main.yml) is
+# unchanged.
+- name: Run issue_check.yml
+  ansible.builtin.import_tasks: issue_check.yml
 
-- name: Check cert file exists on remote host
-  ansible.builtin.stat:
-    path: "{{ cert_host_config.cert_check_path }}"
-  register: cert_file_stat
-
-- name: Check cert days remaining
-  ansible.builtin.shell: |
-    EXPIRE_DATE=$(openssl x509 -enddate -noout -in "{{ cert_host_config.cert_check_path }}" | sed 's/notAfter=//')
-    EXPIRE_EPOCH=$(date -d "$EXPIRE_DATE" +%s)
-    NOW=$(date +%s)
-    echo $(( (EXPIRE_EPOCH - NOW) / 86400 ))
-  register: cert_days_left
-  changed_when: false
-  failed_when: false
-  when: cert_file_stat.stat.exists
-
-- name: Determine if cert renewal is needed
-  ansible.builtin.set_fact:
-    cert_needs_renewal: >-
-      {{ force_renew | bool
-         or not cert_file_stat.stat.exists
-         or (cert_days_left.stdout | default('0') | trim | int) <= cert_renew_renew_threshold }}
-
-- name: Log cert status
-  ansible.builtin.debug:
-    msg: >-
-      {{ inventory_hostname }}: exists={{ cert_file_stat.stat.exists }},
-      days_left={{ cert_days_left.stdout | default('N/A') | trim }},
-      needs_renewal={{ cert_needs_renewal }}
-
-- name: Resolve hostname IPv4 address from CA host
-  ansible.builtin.command:
-    cmd: getent ahostsv4 {{ cert_host_config.cn }}
-  register: cert_hostname_resolve
-  delegate_to: "{{ cert_renew_ca_host }}"
-  changed_when: false
-  when: cert_needs_renewal
-  failed_when: cert_hostname_resolve.rc != 0
-
-- name: Set resolved IPv4 fact
-  ansible.builtin.set_fact:
-    cert_resolved_san_ip: "{{ cert_hostname_resolve.stdout.split()[0] }}"
-  when: cert_needs_renewal
-
-- name: Template OpenSSL config on quory
-  ansible.builtin.template:
-    src: openssl-san.cnf.j2
-    dest: "{{ cert_renew_ca_dir }}/certs/{{ inventory_hostname }}.cnf"
-    mode: "0600"
-  delegate_to: "{{ cert_renew_ca_host }}"
-  when: cert_needs_renewal
-
-- name: Generate EC private key on quory
-  ansible.builtin.command:
-    cmd: >
-      openssl ecparam -genkey -name secp384r1 -noout
-      -out {{ cert_renew_ca_dir }}/certs/{{ inventory_hostname }}.key
-  delegate_to: "{{ cert_renew_ca_host }}"
-  no_log: true
-  when: cert_needs_renewal
-  changed_when: true
-
-- name: Set key file permissions
-  ansible.builtin.file:
-    path: "{{ cert_renew_ca_dir }}/certs/{{ inventory_hostname }}.key"
-    mode: "0600"
-  delegate_to: "{{ cert_renew_ca_host }}"
-  when: cert_needs_renewal
-
-- name: Generate CSR on quory
-  ansible.builtin.command:
-    cmd: >
-      openssl req -new
-      -key {{ cert_renew_ca_dir }}/certs/{{ inventory_hostname }}.key
-      -out {{ cert_renew_ca_dir }}/certs/{{ inventory_hostname }}.csr
-      -config {{ cert_renew_ca_dir }}/certs/{{ inventory_hostname }}.cnf
-  delegate_to: "{{ cert_renew_ca_host }}"
-  when: cert_needs_renewal
-  changed_when: true
-
-- name: Sign certificate with CA on quory
-  ansible.builtin.command:
-    cmd: >
-      openssl x509 -req
-      -in {{ cert_renew_ca_dir }}/certs/{{ inventory_hostname }}.csr
-      -CA {{ cert_renew_ca_dir }}/ca.crt
-      -CAkey {{ cert_renew_ca_dir }}/ca.key
-      -days {{ cert_renew_valid_days }}
-      -extensions v3_req
-      -extfile {{ cert_renew_ca_dir }}/certs/{{ inventory_hostname }}.cnf
-      -out {{ cert_renew_ca_dir }}/certs/{{ inventory_hostname }}.crt
-      -CAcreateserial
-  delegate_to: "{{ cert_renew_ca_host }}"
-  no_log: true
-  when: cert_needs_renewal
-  changed_when: true
-
-- name: Create fullchain certificate on quory
-  ansible.builtin.shell: |
-    cat "{{ cert_renew_ca_dir }}/certs/{{ inventory_hostname }}.crt" \
-        "{{ cert_renew_ca_dir }}/ca.crt" \
-        > "{{ cert_renew_ca_dir }}/certs/{{ inventory_hostname }}.fullchain.crt"
-  delegate_to: "{{ cert_renew_ca_host }}"
-  when: cert_needs_renewal
-  changed_when: true
-
-- name: Set fullchain file permissions
-  ansible.builtin.file:
-    path: "{{ cert_renew_ca_dir }}/certs/{{ inventory_hostname }}.fullchain.crt"
-    mode: "0600"
-  delegate_to: "{{ cert_renew_ca_host }}"
-  when: cert_needs_renewal
-
-- name: Record renewal status
-  ansible.builtin.set_fact:
-    cert_renewed: "{{ cert_needs_renewal }}"
+- name: Run issue_apply.yml
+  ansible.builtin.import_tasks: issue_apply.yml

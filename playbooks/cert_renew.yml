@@ -10,19 +10,29 @@
 # このPlaybookはquoryからのみ実行すること（Semaphoreから実行）。
 # serial: 1 により1ホストずつ処理する。CA署名処理の .srl 競合を防ぐため。
 #
-# tester-gate: risk-accepted — tester_mode/tester_gate を廃止。ansy / pve1 / pve2 /
-# monnie への issue・deploy はすべて --check の有無にかかわらず常に本実行する
-# (最悪ケースは各サービスの Web UI が一時的に見えなくなる程度で、本playbookの
-# 再実行で復旧できると判断)。ただし quory 自身の semaphore 証明書更新・再起動
-# (制御平面そのもの)は cert_renew_quory.yml 側で扱っており、そちらは
-# ansible_check_mode でゲートする(check-mode-native)。詳細は
-# docs/ai/policies/ansible_test_safety_policy.md。
+# tester-gate: check-mode-native — 2026-07-31 round2でrisk-acceptedから変換
+# (docs/ai/reviews/check_mode_semantics/2026-07-31_006_round2_requirement.md
+# バッチC)。TS-009の条件1(実害の軽さ)は満たすが、条件2(破壊的な本体操作を
+# 省いた検証には意味がない)は満たさない — issue役割は「更新要否チェック
+# (cert_needs_renewal、roles/homelab_cert_renew/tasks/issue_check.yml)」と
+# 「実際の鍵生成・署名(issue_apply.yml)」に分離可能で、前者は破壊的操作を
+# 一切伴わない有意な事前確認である(2026-07-31_004_classification_audit.md
+# §2.2、OQ2で再確認)。同じ理由でprepare_ca(CA鍵のtmpfs展開)も
+# prepare_ca_check.yml / prepare_ca_apply.yml に分離した。--check時は
+# issue_check / prepare_ca_check のみ実行し、鍵生成・証明書配布・サービス
+# 再起動(issue_apply / prepare_ca_apply / deploy_semaphore / deploy_proxmox
+# / deploy_grafana / cleanup)はすべて `when: not ansible_check_mode` +
+# `tags: [destructive]` でゲートする。
 #
-# check_mode: false のR5再点検(2026-07-31、
-# docs/ai/reviews/check_mode_semantics/2026-07-31_001_requirement.md):
-# prepare_ca/issue/deploy_*/cleanupに付いた check_mode: false は上記の
-# 「常に本実行する」設計そのものであり、notifyをcheck modeで実走させる目的
-# ではない(除去対象は末尾のnotifyブロックのみだった)。
+# roles/homelab_cert_renew の issue.yml / prepare_ca.yml は
+# cert_renew_quory.yml(check-mode-native、ただしissue/prepare_ca/cleanupは
+# --checkでも常に本実行する別設計)とも共有されている。両ファイルは分割後も
+# issue_check+issue_apply / prepare_ca_check+prepare_ca_apply を無条件で
+# importする薄いwrapperのままなので、cert_renew_quory.yml側の挙動
+# (check_mode: falseによる強制本実行)は本変換で変えていない。
+#
+# quory自身のsemaphore証明書更新・再起動(制御平面そのもの)は引き続き
+# cert_renew_quory.yml側で扱う。詳細はdocs/ai/policies/ansible_test_safety_policy.md。
 
 - name: cert_renew - verify execution host
   hosts: localhost
@@ -38,13 +48,14 @@
           (current host: {{ ansible_facts['hostname'] }}).
           CA private key must never be placed on {{ ansible_facts['hostname'] }}.
 
-    - name: "[migration] tester_mode is deprecated for this playbook — it always runs for real"
+    - name: "[migration] tester_mode is deprecated for this playbook — use --check instead"
       ansible.builtin.assert:
         that: not (tester_mode | default(false) | bool)
         fail_msg: >-
-          This playbook no longer supports -e tester_mode=true and has no
-          dry-run mode (--check included): issue/deploy for ansy, pve1, pve2,
-          monnie always run for real. See docs/ai/policies/ansible_test_safety_policy.md.
+          This playbook no longer supports -e tester_mode=true. Re-run with
+          --check instead — issue_check/prepare_ca_check run for real under
+          --check, and the destructive keygen/deploy/restart steps are
+          gated by ansible_check_mode. See docs/ai/policies/ansible_test_safety_policy.md.
         quiet: true
 
 - name: cert_renew - prepare CA key on quory
@@ -52,30 +63,18 @@
   gather_facts: false
   become: true
   connection: local
-  # skip_notifications: "{{ ansible_check_mode }}" removed from vars here
-  # 2026-07-31 (R2, docs/ai/reviews/check_mode_semantics/
-  # 2026-07-31_001_requirement.md) — R1 below now refuses --check outright,
-  # so this line's only effect (skip_notifications=true under --check) never
-  # had a chance to run.
-  pre_tasks:
-    - name: "[migration] --check has no dry-run here — refuse and stop before any changes"
-      ansible.builtin.assert:
-        that: not (ansible_check_mode | bool)
-        fail_msg: >-
-          This playbook (tester-gate: risk-accepted) has no --check dry-run:
-          every task always applies for real, so --check would look like a
-          simulation while actually making the change (see
-          docs/ai/memory/incidents/2026-07-31_subagent-unintended-deploy-risk-accepted-check.md).
-          Re-run without --check to apply for real. To suppress Slack
-          notifications during that real run, add -e skip_notifications=true.
-          See docs/ai/reviews/check_mode_semantics/2026-07-31_001_requirement.md.
-        quiet: true
   tasks:
-    - name: Run prepare_ca tasks
+    - name: Run prepare_ca check tasks (diagnostic; always runs, including under --check)
       ansible.builtin.import_role:
         name: homelab_cert_renew
-        tasks_from: prepare_ca
-      check_mode: false
+        tasks_from: prepare_ca_check
+
+    - name: Run prepare_ca apply tasks (destructive; stages CA cert/key onto tmpfs)
+      ansible.builtin.import_role:
+        name: homelab_cert_renew
+        tasks_from: prepare_ca_apply
+      when: not ansible_check_mode
+      tags: [destructive]
 
 - name: cert_renew - issue and deploy ansy cert
   hosts: ansy
@@ -83,33 +82,25 @@
   become: true
   vars:
     cert_renew_ca_host: localhost
-    # skip_notifications: "{{ ansible_check_mode }}" removed 2026-07-31 (R2,
-    # see the prepare-CA play above for the reason).
-  pre_tasks:
-    - name: "[migration] --check has no dry-run here — refuse and stop before any changes"
-      ansible.builtin.assert:
-        that: not (ansible_check_mode | bool)
-        fail_msg: >-
-          This playbook (tester-gate: risk-accepted) has no --check dry-run:
-          every task always applies for real, so --check would look like a
-          simulation while actually making the change (see
-          docs/ai/memory/incidents/2026-07-31_subagent-unintended-deploy-risk-accepted-check.md).
-          Re-run without --check to apply for real. To suppress Slack
-          notifications during that real run, add -e skip_notifications=true.
-          See docs/ai/reviews/check_mode_semantics/2026-07-31_001_requirement.md.
-        quiet: true
   tasks:
-    - name: Run issue tasks
+    - name: Run issue check tasks (diagnostic; determines cert_needs_renewal, always runs)
       ansible.builtin.import_role:
         name: homelab_cert_renew
-        tasks_from: issue
-      check_mode: false
+        tasks_from: issue_check
 
-    - name: Run deploy_semaphore tasks
-      ansible.builtin.import_role:
-        name: homelab_cert_renew
-        tasks_from: deploy_semaphore
-      check_mode: false
+    - name: Issue and deploy ansy certificate (destructive; TS-015 chain)
+      when: not ansible_check_mode
+      tags: [destructive]
+      block:
+        - name: Run issue apply tasks
+          ansible.builtin.import_role:
+            name: homelab_cert_renew
+            tasks_from: issue_apply
+
+        - name: Run deploy_semaphore tasks
+          ansible.builtin.import_role:
+            name: homelab_cert_renew
+            tasks_from: deploy_semaphore
 
 - name: cert_renew - issue and deploy proxmox certs
   hosts: proxmox
@@ -118,33 +109,25 @@
   serial: 1
   vars:
     cert_renew_ca_host: localhost
-    # skip_notifications: "{{ ansible_check_mode }}" removed 2026-07-31 (R2,
-    # see the prepare-CA play above for the reason).
-  pre_tasks:
-    - name: "[migration] --check has no dry-run here — refuse and stop before any changes"
-      ansible.builtin.assert:
-        that: not (ansible_check_mode | bool)
-        fail_msg: >-
-          This playbook (tester-gate: risk-accepted) has no --check dry-run:
-          every task always applies for real, so --check would look like a
-          simulation while actually making the change (see
-          docs/ai/memory/incidents/2026-07-31_subagent-unintended-deploy-risk-accepted-check.md).
-          Re-run without --check to apply for real. To suppress Slack
-          notifications during that real run, add -e skip_notifications=true.
-          See docs/ai/reviews/check_mode_semantics/2026-07-31_001_requirement.md.
-        quiet: true
   tasks:
-    - name: Run issue tasks
+    - name: Run issue check tasks (diagnostic; determines cert_needs_renewal, always runs)
       ansible.builtin.import_role:
         name: homelab_cert_renew
-        tasks_from: issue
-      check_mode: false
+        tasks_from: issue_check
 
-    - name: Run deploy_proxmox tasks
-      ansible.builtin.import_role:
-        name: homelab_cert_renew
-        tasks_from: deploy_proxmox
-      check_mode: false
+    - name: Issue and deploy proxmox certificate (destructive; TS-015 chain)
+      when: not ansible_check_mode
+      tags: [destructive]
+      block:
+        - name: Run issue apply tasks
+          ansible.builtin.import_role:
+            name: homelab_cert_renew
+            tasks_from: issue_apply
+
+        - name: Run deploy_proxmox tasks
+          ansible.builtin.import_role:
+            name: homelab_cert_renew
+            tasks_from: deploy_proxmox
 
 - name: cert_renew - issue and deploy monnie cert
   hosts: monnie
@@ -152,45 +135,35 @@
   become: true
   vars:
     cert_renew_ca_host: localhost
-    # skip_notifications: "{{ ansible_check_mode }}" removed 2026-07-31 (R2,
-    # see the prepare-CA play above for the reason).
-  pre_tasks:
-    - name: "[migration] --check has no dry-run here — refuse and stop before any changes"
-      ansible.builtin.assert:
-        that: not (ansible_check_mode | bool)
-        fail_msg: >-
-          This playbook (tester-gate: risk-accepted) has no --check dry-run:
-          every task always applies for real, so --check would look like a
-          simulation while actually making the change (see
-          docs/ai/memory/incidents/2026-07-31_subagent-unintended-deploy-risk-accepted-check.md).
-          Re-run without --check to apply for real. To suppress Slack
-          notifications during that real run, add -e skip_notifications=true.
-          See docs/ai/reviews/check_mode_semantics/2026-07-31_001_requirement.md.
-        quiet: true
   tasks:
-    - name: Run issue tasks
+    - name: Run issue check tasks (diagnostic; determines cert_needs_renewal, always runs)
       ansible.builtin.import_role:
         name: homelab_cert_renew
-        tasks_from: issue
-      check_mode: false
+        tasks_from: issue_check
 
-    - name: Pause monitoring before grafana-server restart
-      ansible.builtin.command: homelab-monitoring-pause
-      delegate_to: localhost
-      when: cert_needs_renewal | default(false) | bool
-      check_mode: false
+    - name: Issue and deploy monnie certificate (destructive; TS-015 chain)
+      when: not ansible_check_mode
+      tags: [destructive]
+      block:
+        - name: Run issue apply tasks
+          ansible.builtin.import_role:
+            name: homelab_cert_renew
+            tasks_from: issue_apply
 
-    - name: Run deploy_grafana tasks
-      ansible.builtin.import_role:
-        name: homelab_cert_renew
-        tasks_from: deploy_grafana
-      check_mode: false
+        - name: Pause monitoring before grafana-server restart
+          ansible.builtin.command: homelab-monitoring-pause
+          delegate_to: localhost
+          when: cert_needs_renewal | default(false) | bool
 
-    - name: Resume monitoring after grafana restart
-      ansible.builtin.command: homelab-monitoring-resume
-      delegate_to: localhost
-      when: cert_needs_renewal | default(false) | bool
-      check_mode: false
+        - name: Run deploy_grafana tasks
+          ansible.builtin.import_role:
+            name: homelab_cert_renew
+            tasks_from: deploy_grafana
+
+        - name: Resume monitoring after grafana restart
+          ansible.builtin.command: homelab-monitoring-resume
+          delegate_to: localhost
+          when: cert_needs_renewal | default(false) | bool
 
 - name: cert_renew - cleanup CA key from quory
   hosts: localhost
@@ -198,27 +171,13 @@
   become: false
   vars:
     cert_renew_ca_host: localhost
-    # skip_notifications: "{{ ansible_check_mode }}" removed 2026-07-31 (R2,
-    # see the prepare-CA play above for the reason).
-  pre_tasks:
-    - name: "[migration] --check has no dry-run here — refuse and stop before any changes"
-      ansible.builtin.assert:
-        that: not (ansible_check_mode | bool)
-        fail_msg: >-
-          This playbook (tester-gate: risk-accepted) has no --check dry-run:
-          every task always applies for real, so --check would look like a
-          simulation while actually making the change (see
-          docs/ai/memory/incidents/2026-07-31_subagent-unintended-deploy-risk-accepted-check.md).
-          Re-run without --check to apply for real. To suppress Slack
-          notifications during that real run, add -e skip_notifications=true.
-          See docs/ai/reviews/check_mode_semantics/2026-07-31_001_requirement.md.
-        quiet: true
   tasks:
     - name: Run cleanup tasks
       ansible.builtin.import_role:
         name: homelab_cert_renew
         tasks_from: cleanup
-      check_mode: false
+      when: not ansible_check_mode
+      tags: [destructive]
 
 - name: cert_renew - send completion notification
   hosts: localhost
@@ -239,6 +198,8 @@
           {% set deployed = hostvars[h].cert_deployed | default(false) | bool %}
           {% if not needs_renewal %}
           {{ h }}: skipped
+          {% elif ansible_check_mode %}
+          {{ h }}: would renew and deploy (check-mode preview; issue/deploy gated by ansible_check_mode)
           {% elif not renewed %}
           {{ h }}: issue FAILED
           {% elif deployed %}
@@ -248,24 +209,27 @@
           {% endif %}
           {% endif %}
           {% endfor %}
-          CA cleanup: {{ cert_cleanup_status | default('OK') }}
+          CA cleanup: {{ 'not applicable (check-mode preview)' if ansible_check_mode else (cert_cleanup_status | default('OK')) }}
           {% if hostvars['quory'].cert_intermediate_ca_warn | default(false) | bool %}
           WARNING: Intermediate CA expires in {{ hostvars['quory'].cert_intermediate_ca_days_left }} days!
           {% endif %}
+        # R1/AC1 note (check_mode_semantics round2): without the
+        # ansible_check_mode branch, a host with cert_needs_renewal=true
+        # under --check would show renewed=false (issue_apply gated,
+        # skipped) and fall into "issue FAILED" -- or, if cert_renewed had
+        # instead been left true by an ungated issue_apply, into "renewed
+        # but deploy FAILED" (deploy is also gated). Both are misleading
+        # for a dry run. Placed before the renewed/deployed checks so it
+        # short-circuits them; only ever true when --check is passed, so
+        # normal-run output (AC2) is unchanged. Same reasoning for the "CA
+        # cleanup" line below (cleanup is also gated under --check).
 
     - name: Send Slack notification
-      # check_mode: false was removed here 2026-07-31 (R5, see
-      # docs/ai/reviews/check_mode_semantics/2026-07-31_001_requirement.md):
-      # it existed only to force this notify.yml include to run for real
-      # under --check. notify.yml itself now refuses to send whenever
-      # ansible_check_mode is true (R3) and shows the full text via debug
-      # instead, so forcing this block to execute for real no longer changes
-      # anything. Note: this play is independent of the R1 guards added to
-      # every earlier play in this file (a host that failed a pre_tasks
-      # assert in one play still runs in later plays by default), so this
-      # notify play still executes under --check exactly as before — it is
-      # notify.yml's own R3 check, not this playbook's R1 guard, that stops
-      # a real Slack send here.
+      # This play always runs (hosts: localhost, independent of the
+      # earlier plays' pass/fail outcome). notify.yml itself refuses to
+      # send a real Slack message whenever ansible_check_mode is true
+      # (TS-031) and shows the full text via debug instead, so this block
+      # needs no check_mode handling of its own.
       block:
         - name: Include common_slack notify tasks
           ansible.builtin.include_tasks: "{{ playbook_dir }}/../roles/common_slack/tasks/notify.yml"

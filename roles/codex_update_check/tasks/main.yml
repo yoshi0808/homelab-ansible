@@ -17,6 +17,12 @@
   register: codex_update_check_current_raw
   changed_when: false
   failed_when: false
+  # R5 (check_mode_semantics round2): command is check_mode-unsupported and
+  # would otherwise auto-skip under --check. The next task reads
+  # codex_update_check_current_raw.rc directly (not through | default), so a
+  # skipped result here would break it. This task is read-only (npm list),
+  # so forcing real execution under --check is safe.
+  check_mode: false
 
 - name: Parse currently installed version
   ansible.builtin.set_fact:
@@ -34,6 +40,9 @@
   register: codex_update_check_latest_raw
   changed_when: false
   failed_when: false
+  # R5: same reason as "Get currently installed Codex CLI version" above —
+  # read-only registry lookup, consumed directly by .rc below.
+  check_mode: false
 
 - name: Parse latest version
   ansible.builtin.set_fact:
@@ -63,15 +72,29 @@
   register: codex_update_check_install_result
   changed_when: codex_update_check_install_result.rc == 0
   failed_when: false
-  when: codex_update_check_needs_update | default(false)
+  # R4: destructive (npm install -g). command auto-skips under --check even
+  # without this when, but it is added explicitly per TS-014 / R4.
+  when:
+    - codex_update_check_needs_update | default(false)
+    - not ansible_check_mode
+  tags: [destructive]
 
 - name: Record per-host update status
   ansible.builtin.set_fact:
     codex_update_check_status: >-
-      {{ 'update_failed' if (codex_update_check_needs_update | default(false)) and (codex_update_check_install_result.rc | default(1)) != 0
+      {{ 'would_update' if (codex_update_check_needs_update | default(false)) and (ansible_check_mode | bool)
+         else 'update_failed' if (codex_update_check_needs_update | default(false)) and (codex_update_check_install_result.rc | default(1)) != 0
          else 'updated' if (codex_update_check_needs_update | default(false)) and (codex_update_check_install_result.rc | default(1)) == 0
          else 'up_to_date' if (codex_update_check_collected | default(false))
          else 'collection_failed' }}
+    # R1/AC1 note: without the 'would_update' branch, a host that genuinely
+    # needs an update would be classified 'update_failed' under --check
+    # (the install task above is skipped, so .rc stays undefined -> default
+    # 1 -> "!= 0"), which then lands in codex_update_check_all_failed_hosts
+    # below and trips the final `fail:` task, breaking AC1 (exit 0 under
+    # --check). The ansible_check_mode branch is evaluated first and only
+    # ever true when --check is passed, so normal-run behavior (AC2) is
+    # unchanged.
 
 # ---------------------------------------------------------------------------
 # Phase 1n: npm本体 - 現在バージョン取得
@@ -82,6 +105,10 @@
   register: codex_update_check_npm_current_raw
   changed_when: false
   failed_when: false
+  # R5: read-only, consumed downstream (Parse currently installed npm
+  # version, Judge npm collection status). See the Codex CLI version tasks
+  # above for the same reasoning.
+  check_mode: false
 
 - name: Parse currently installed npm version
   ansible.builtin.set_fact:
@@ -97,6 +124,8 @@
   register: codex_update_check_npm_path_raw
   changed_when: false
   failed_when: false
+  # R5: read-only, gates the dpkg-ownership check below.
+  check_mode: false
 
 - name: Check whether npm binary is managed by dpkg (informational only; does not gate the update)
   ansible.builtin.command:
@@ -105,6 +134,9 @@
   changed_when: false
   failed_when: false
   when: (codex_update_check_npm_path_raw.rc == 0) and (codex_update_check_npm_path_raw.stdout | trim | length > 0)
+  # R5: read-only informational check; keep it real under --check now that
+  # its source (Locate npm binary path) is also forced real above.
+  check_mode: false
 
 - name: Record npm dpkg-managed fact (informational)
   ansible.builtin.set_fact:
@@ -119,6 +151,8 @@
   register: codex_update_check_npm_latest_raw
   changed_when: false
   failed_when: false
+  # R5: read-only registry lookup, consumed downstream.
+  check_mode: false
 
 - name: Parse latest npm version
   ansible.builtin.set_fact:
@@ -154,16 +188,25 @@
   register: codex_update_check_npm_install_result
   changed_when: codex_update_check_npm_install_result.rc == 0
   failed_when: false
-  when: codex_update_check_npm_needs_update | default(false)
+  # R4: destructive (npm install -g).
+  when:
+    - codex_update_check_npm_needs_update | default(false)
+    - not ansible_check_mode
+  tags: [destructive]
 
 - name: Record per-host npm update status
   ansible.builtin.set_fact:
     codex_update_check_npm_status: >-
-      {{ 'update_failed' if (codex_update_check_npm_needs_update | default(false)) and (codex_update_check_npm_install_result.rc | default(1)) != 0
+      {{ 'would_update' if (codex_update_check_npm_needs_update | default(false)) and (ansible_check_mode | bool)
+         else 'update_failed' if (codex_update_check_npm_needs_update | default(false)) and (codex_update_check_npm_install_result.rc | default(1)) != 0
          else 'updated' if (codex_update_check_npm_needs_update | default(false)) and (codex_update_check_npm_install_result.rc | default(1)) == 0
          else 'up_to_date' if (codex_update_check_npm_collected | default(false)) and (codex_update_check_npm_current_version == codex_update_check_npm_latest_version)
          else 'minor_patch_skip' if (codex_update_check_npm_collected | default(false))
          else 'collection_failed' }}
+    # R1/AC1 note: same reasoning as codex_update_check_status above — the
+    # ansible_check_mode branch prevents a genuinely-needed npm major bump
+    # from being misclassified as 'update_failed' under --check (which
+    # would otherwise trip the final `fail:` task and break AC1).
 
 # ---------------------------------------------------------------------------
 # Phase 5: 結果集約・Slack通知
