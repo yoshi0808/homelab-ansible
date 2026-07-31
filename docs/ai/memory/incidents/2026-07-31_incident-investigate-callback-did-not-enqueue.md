@@ -1,7 +1,7 @@
 # Incident: Semaphoreジョブ失敗時に一次調査のcallbackがenqueueしなかった
 
 日付: 2026-07-31
-状態: **調査中**(原因確定・修正実装/レビュー/検証まで完了。**本番配備と実発火の観測が未了**のため `解決済み` にはしない)
+状態: **解決済み**(2026-08-01。本番配備後の実発火を観測し、滞留していた `semaphore-495` を含む10件すべてが拾われて成果物が生成された。観測記録は `docs/ai/reviews/incident_investigate_trigger/2026-08-01_006_post_deploy_observation.md`)
 対象: `roles/incident_investigate/callback_plugins/incident_investigate_trigger.py`、quory上のSemaphore実行経路
 種別: 動作不具合
 原因分類: #テスト不足
@@ -109,13 +109,13 @@ PWD=/opt/semaphore/project_1/repository_1_template_11
 
 **配備前(2026-07-31に実施済み、すべてPASS)**: `/tmp` のfixtureで、未調査バンドルが拾われること・調査済みバンドルが再投入されないこと・閾値・1周期1件・選定順序・走査起点の異常が可視化されること。一次記録は `docs/ai/reviews/incident_investigate_trigger/2026-07-31_004_test_result.md`。**callback無効化は、同一コード・同一失敗play・同一環境変数で `ansible.cfg` の2行の有無だけを変えた対照実験で確認した。**
 
-**配備後にしか確かめられないもの(残る観測)**:
+**配備後の観測(2026-08-01、実施済み)**: 一次記録は `docs/ai/reviews/incident_investigate_trigger/2026-08-01_006_post_deploy_observation.md`。
 
-1. **`semaphore-495` が最初の1件として拾われ、`reports/incidents/_investigations/semaphore-495.json` が現れること。** 現在このバンドルは未調査のまま滞留しており、切り替え後の最初の対象になる想定である。
-2. **調査済みになった後、再投入されないこと**(`investigated_at` が変化しないこと)。1と2は**両方**観測しないと機構が効いた証明にならない。
-3. quory上のキューディレクトリに、以後キューファイルが**新規に現れない**こと(callbackが本当に読み込まれていないこと)。
+1. **通過側 — PASS。** `semaphore-495` は 2026-08-01 05:36:34 に拾われ、`status: new` / `llm_rc: 0` / confidence high の成果物が生成された。既知条件(pve1到達不能)も自力で `known_condition.suspected: true` として拾っている。滞留していた10件すべてが古い順に1分1件で処理され、AC4(1周期1件)・AC5(古い方優先)・AC3(72時間の閾値。`semaphore-469` は除外され `473` は含まれる)も本番で同時に確認された。成果物はスキーマに完全一致し、IC-040 / IC-042 の違反も無い。
+2. **非通過側 — PASS。** 約3分あけた2回の観測で `semaphore-495.json` の sha256 と mtime が完全に不変、成果物の重複も無い。
+3. **callbackが読み込まれていないこと — 直接証拠で確認。** キューディレクトリは `0750 yoshi:yoshi` で、Tester/Coordinatorの接続identity(`ann`)では `stat` すら拒否される(**権限昇格は試みていない**)。代わりに、**quoryのcheckout上の `ansible.cfg` に callback の2行が存在しないこと**(grep rc=1)を確認した。**これは「キューファイルが現れない」より上流の直接証拠**であり、当初のこの観測項目はこれで代替できる。
 
-配備には Yoshinobu の `git commit` / `push`、quory での `git pull --ff-only`、`playbooks/incident_investigate_setup.yml` の再実行が要る。
+**残る観測**(`docs/ai/status.md` のWatchが持つ): ①配備後に**自然発生した**新しい失敗で発火するか(今回処理したのは切り替え前から滞留していたバンドルであり、「捕捉がバンドルを作った直後に走査が拾う」経路はまだ通っていない)②`status: failed` の本番実測がまだ無く、IC-038(失敗の可視化)は配備前fixtureでの確認に留まる。
 
 ## 参照
 
