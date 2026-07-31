@@ -1,7 +1,7 @@
 # Incident: Codexのexecpolicy allowlistが境界として機能していない
 
 日付: 2026-07-31
-状態: 原因判明・対応中
+状態: クローズ(2026-07-31。境界の再建は `docs/ai/status.md` Next「Codexの調査面を広げ、SSH鍵配布を縮小する」へ引き継いだ)
 対象: `roles/recovery_exec`(`templates/codex-config.toml.j2`)、quory上のCodex実行経路(recovery-io → codex-exec-wrapper → codex exec)
 種別: セキュリティ事故
 原因分類: 設定機構の誤認 — 存在しない設定キーを安全境界として設計していた
@@ -71,7 +71,7 @@ allowlistが効いていないことは、この経路が無防備であるこ�
 
 - `roles/recovery_exec/templates/codex-config.toml.j2` — `[execpolicy]` テーブルを**削除**した。存在しないキーであることが確定し、「未評価だから残す」という保留理由が消えたため。意図と経緯は本Incidentが持つ。残した場合、次に設定を読む人がふたたび境界と誤認する。
 - `docs/ai/policies/autonomous_recovery_policy.md` — AR-069 / AR-071 / AR-073 を実態へ改訂した(下表)。
-- **配備は行っていない。** 変更が quory へ反映されるのは commit / push と quory での `git pull --ff-only` の後に `playbooks/recovery_exec_setup.yml` を実行した時点である(同roleに handler は無く、テンプレート更新で `recovery-io` が再起動されることはない)。設定の削除は挙動を変えない(元から読まれていない)ため、配備の緊急性は無い。
+- **配備済み(2026-07-31、commit `45a3b5e`)。** `playbooks/recovery_exec_setup.yml -l quory -e recovery_exec_setup_targets=false`(targetのauthorized_keys配布は今回の変更と無関係なので明示的に切った)と `playbooks/incident_inspect_setup.yml -l quory` をansyから実行。前者 `changed=2` / 後者 `changed=1`、再実行で**両方 `changed=0`**(冪等性を確認)。quory上の `/home/recovery-exec/.codex/config.toml` に `[execpolicy]` テーブルが無いことを直接確認した。同roleに handler は無く、`recovery-io` は再起動していない。
 
 | 条項 | 改訂前 | 改訂後の趣旨 |
 |---|---|---|
