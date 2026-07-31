@@ -22,10 +22,12 @@
 # a hardcoded host name — see
 # docs/ai/reviews/proxmox_exec_node_selection/2026-07-29_002_plan.md.
 #
-# tester-gate: risk-accepted — tester_mode/tester_gate を廃止。--check の有無に
-# かかわらず常に本実行する。理由: このplaybookの存在意義そのものが「バックアップ
-# が本当にリストアできるかの実地検証」であり、実際にqmrestoreしない検証には意味
-# がない。対象は常にVMID 999固定の使い捨てVM、本番VMは設定read-onlyのみ、NIC切断
+# tester-gate: risk-accepted — tester_mode/tester_gate を廃止。この playbook に
+# dry-run 区分はない。--check を渡すと、変更を行う各play(Play 2 / Play 3)の
+# pre_tasks に置かれた停止 assert(TS-030)により変更を一切行わずに停止する。
+# --check なしの通常実行では常に本実行する。
+# tester-gate-condition2: playbookの存在意義そのものが「バックアップが本当にリストアできるかの実地検証」であり、実際にqmrestoreしない検証には意味がない。
+# 理由: 対象は常にVMID 999固定の使い捨てVM、本番VMは設定read-onlyのみ、NIC切断
 # 起動で隔離、always:で確実に999を破棄(所有者トークンで二重チェック)されるため、
 # 本番サービスへの影響はゼロ。一時的な実ストレージI/O・実行時間を要するが、それは
 # このplaybook本来の動作でありYoshinobuが安全側と判断(2026-07-06)。詳細は
@@ -223,6 +225,26 @@
     verify_agent_expected: "{{ brv_agent_expected }}"
     verify_preferred_node: "{{ brv_preferred_node }}"
     verify_restore_fallback: "{{ brv_restore_fallback }}"
+  pre_tasks:
+    # Redundant with Play 2's stop assert by construction (Play 2 fails
+    # before the add_host task that populates brv_restore_targets, so this
+    # play normally has zero hosts under --check). TS-030 requires the
+    # assert on each play that makes changes regardless of whether another
+    # play already blocks reachability indirectly — an indirect guard goes
+    # silently missing if the play order or the add_host structure changes
+    # (2026-07-31, independent review finding).
+    - name: "[migration] --check has no dry-run here — refuse and stop before any changes"
+      ansible.builtin.assert:
+        that: not (ansible_check_mode | bool)
+        fail_msg: >-
+          This playbook (tester-gate: risk-accepted) has no --check dry-run:
+          every task always applies for real, so --check would look like a
+          simulation while actually making the change (see
+          docs/ai/memory/incidents/2026-07-31_subagent-unintended-deploy-risk-accepted-check.md).
+          Re-run without --check to apply for real. To suppress Slack
+          notifications during that real run, add -e skip_notifications=true.
+          See docs/ai/reviews/check_mode_semantics/2026-07-31_001_requirement.md.
+        quiet: true
   tasks:
     - name: Run proxmox_backup_restore_verify role (always for real)
       ansible.builtin.import_role:

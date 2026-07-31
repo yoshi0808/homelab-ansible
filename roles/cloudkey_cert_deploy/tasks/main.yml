@@ -9,11 +9,12 @@
 # The leaf private key only ever lives in a transient work directory that is
 # removed in `always`, and inside the API request body. It is never committed.
 #
-# tester-gate: risk-accepted — worst case of running this unconditionally (incl.
-# under --check) is a broken/unverified CloudKey Web UI TLS cert, i.e. an SSL
-# warning on the CloudKey UI only. Recoverable by re-running this playbook.
-# Yoshinobu accepted this risk, so the whole lifecycle (issue + deploy) always
-# runs for real; there is no dry-run distinction for this playbook.
+# Classification and --check behavior are decided by the caller
+# (playbooks/cloudkey_cert_deploy.yml); see that file's tester-gate header
+# for the current classification, condition2 rationale, and --check
+# behavior (TS-030). Do not duplicate the classification name or reasoning
+# here — a duplicate copy is outside scripts/check-tester-gate.sh's scope
+# (playbooks/ only) and goes stale silently (TS-036).
 
 - name: Initialize CloudKey deploy facts
   ansible.builtin.set_fact:

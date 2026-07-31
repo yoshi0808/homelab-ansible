@@ -16,11 +16,13 @@
 #
 # 通知: 結果を Slack へ通知する(取得・保存 OK = info/ok、失敗 = alerts/error)。
 #
-# tester-gate: risk-accepted — tester_mode/tester_gate を廃止。--check の有無に
-# かかわらず常に本実行する。理由: CloudKey側の設定変更は行わずバックアップ生成
+# tester-gate: risk-accepted — tester_mode/tester_gate を廃止。この playbook に
+# dry-run 区分はない。--check を渡すと pre_tasks の停止 assert(TS-030)により
+# 変更を一切行わずに停止する。--check なしの通常実行では常に本実行する。
+# tester-gate-condition2: バックアップ生成・ダウンロード・鮮度検証という一連の非冪等API操作そのものが検証対象であり、それを省いた検証には意味がない(proxmox_backup_restore_verifyと同じ理由)。
+# 理由: CloudKey側の設定変更は行わずバックアップ生成
 # API(UIの「バックアップ取得」ボタンと同等)を叩くのみで本番サービスへの影響は
-# ゼロ。バックアップ生成・ダウンロード・鮮度検証を省いた検証には意味がない
-# (proxmox_backup_restore_verifyと同じ理由)ためYoshinobuが安全側と判断
+# ゼロ。上記の通りYoshinobuが安全側と判断
 # (2026-07-06)。注意: 世代ローテーションは件数基準(既定8世代)のため、
 # 頻繁なテスト実行は本番バックアップの実質的な保持期間を縮める可能性がある。
 # 詳細は docs/ai/policies/ansible_test_safety_policy.md。

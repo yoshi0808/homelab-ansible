@@ -12,10 +12,12 @@
 # 認証情報は inventories/vars/cloudkey.yml (Vault) から読み込む。
 #
 # tester-gate: risk-accepted — tester_mode/tester_gate を廃止。この playbook に
-# dry-run 区分はなく、--check の有無にかかわらず常に本実行する(issue + deploy +
-# Slack 通知まで含めて全タスクに check_mode: false を効かせている。community.general.slack
-# は check_mode 対応モジュールで、素の --check だと送信せず changed だけ返して
-# 終わるため、通知だけ挙動が変わらないよう明示的に無効化している)。
+# dry-run 区分はない。--check を渡すと pre_tasks の停止 assert(TS-030)により
+# 変更を一切行わずに停止する。--check なしの通常実行では issue + deploy + Slack
+# 通知まで含めて全タスクに check_mode: false を効かせ、常に本実行する(Slack
+# 通知自体の check-mode 抑止判定は roles/common_slack/tasks/notify.yml 側が
+# 一元的に持つ。TS-031)。
+# tester-gate-condition2: issue.yml は更新要否チェックを持たず常に新規発行し、deploy.yml は各stepの正しさが直前の実API呼び出しが実際に起きたことに依存する非冪等な uri 連鎖であるため、本体操作を省いた検証には意味がない。
 # 理由: 最悪ケースは CloudKey Web UI の TLS 証明書が壊れて SSL 警告が出るだけで、
 # 本 playbook を再実行すれば復旧できる。Yoshinobu がこのリスクを許容し、常時
 # 本実行することに合意した(2026-07-06)。詳細は docs/ai/policies/ansible_test_safety_policy.md。

@@ -34,6 +34,9 @@ playbookごとに「`--check`の有無で挙動がどう変わるか」「本実
 <!-- TS-006 -->
 マーカーは`# tester-gate: <種別> — <理由>`の1行形式とする。`risk-accepted`の理由には、許容した最悪ケースを明記する。
 
+<!-- TS-034 -->
+`risk-accepted`は、TS-006のマーカー行に加えて独立した1行`# tester-gate-condition2: <理由>`をヘッダに持つ。ここには§4の条件2(破壊的な本体操作を省いた検証には意味がない、または省く価値が乏しい)がどう成立するかを書く。
+
 ## 3. 対応するPlaybook
 
 <!-- TS-007 -->
@@ -121,6 +124,9 @@ block化するかの判断は**依存するtaskがファイル上で連続して
 <!-- TS-019 -->
 「全playbookが5分類のいずれかに分類されている」ことと、「`risk-accepted`が停止assertを持つ」(TS-030)ことは規約ではなくlintで保証する。`scripts/check-tester-gate.sh`が`playbooks/`配下の全playbookを検査し、`scripts/git-pre-commit-check.sh`から自動実行される。**後者はassertの存在を見る床であり、TS-030が求めるplay単位の充足までは機械判定できない**(どのplayが変更を行うかをスクリプトから判定できないため)。play単位の充足はレビュー工程が見る。
 
+<!-- TS-035 -->
+`scripts/check-tester-gate.sh`は、`risk-accepted`のplaybookが独立した1行`# tester-gate-condition2: <理由>`(TS-034)を持ち、理由が空でないことも検査する。**この検査が確かめるのは「著者が条件2を述べたこと」であり、「その主張が正しいこと」ではない。** 理由文の内容が実際に§4の条件2を満たしているかはこのlintから判定できず、レビュー工程(または本Policyに基づく棚卸し)が判定する。マーカーの存在を条件2充足の証拠として扱わない。
+
 <!-- TS-020 -->
 マーカーを持たない新規playbookはcommitできない。この機械的停止条件を無効化・迂回しない。
 
@@ -149,6 +155,9 @@ wrapperは付け忘れ防止の補助であり、安全性の最終判断はplay
 <!-- TS-026 -->
 マーカーの分類名だけを安全の根拠に使わない。分類名、理由文、実際の抑止guard名、実行経路が一致しているかを照合する。過去に理由文が廃止済みの`tester_mode` guardを指しながら実guardは`skip_notifications`だった「marker drift」が複数playbookで実在した。
 
+<!-- TS-036 -->
+roleやtask fileへ`tester-gate`の分類名と理由を複製しない。**参照に留める**——「呼び出し元のplaybookヘッダを参照」といった1行の言及にとどめ、`# tester-gate: <種別> — <理由>`形式そのものやTS-009条件1/条件2の説明文を複製しない。`scripts/check-tester-gate.sh`は`playbooks/`配下しか検査しないため、複製された記述は機械チェックの外で陳腐化する(2026-07-31、`roles/cloudkey_cert_deploy/tasks/main.yml`がTS-030導入前の「`--check`込みで常に本実行する」という文言を複製したまま残っていた実例)。分類・理由の複製が既に無いか確認する方法は`grep -rn "^# tester-gate:" roles/`。
+
 <!-- TS-027 -->
 `safe-readonly`であっても、冪等なscript配置、localhostへのreport保存、条件付きSlack通知などの副作用を持つ場合がある。分類名から副作用ゼロを推定しない。
 
@@ -159,4 +168,6 @@ wrapperは付け忘れ防止の補助であり、安全性の最終判断はplay
 | 2026-07-06〜07 | `tester_mode` / `tester_gate` roleを廃止し、`--check`(`ansible_check_mode`)ベースの5分類へ移行。旧`docs/ai/prompts/core.md` §18として記述 |
 | 2026-07-26 | 旧core §18からPolicyへ移設し正本化(移行表C18-01/02/05/09/11/12/14)。実装上の落とし穴(C18-03/04/06/07/08/10)は`skills/ansible-implementation-style/SKILL.md`へ分離。C18-13(Codex承認prefix由来のwrapper運用)は、Codexが開発工程から外れたためprefix依存の記述を落とし、`--check`付け忘れ防止という本来の効能のみTS-024として保持 |
 | 2026-07-31 | `--check`の意味を一本化。`risk-accepted`は`--check`で**停止**する(TS-030新設)、check mode下でSlackへ送らない判定を`notify.yml`に集約(TS-031新設)、check-mode-safe化したら分類を`check-mode-native`へ変える昇格経路を明文化(TS-032新設)。TS-005 / TS-022 / TS-024の「`--check`を付けても挙動が変わらない」という記述を実態へ改訂。案件記録: `docs/ai/reviews/check_mode_semantics/` |
-| 2026-07-31 | TS-033を新設し、TS-015のblock化判断を「依存taskがファイル上で連続しているか」で分ける基準として明文化。同一案件のバッチ間で同型の連鎖が別の書き方になった実例に基づく。案件記録: `docs/ai/reviews/check_mode_semantics/`
+| 2026-07-31 | TS-033を新設し、TS-015のblock化判断を「依存taskがファイル上で連続しているか」で分ける基準として明文化。同一案件のバッチ間で同型の連鎖が別の書き方になった実例に基づく。案件記録: `docs/ai/reviews/check_mode_semantics/` |
+| 2026-07-31 | `risk-accepted`へ独立した1行`# tester-gate-condition2: <理由>`マーカーを新設(TS-034)。`scripts/check-tester-gate.sh`にマーカーの存在と理由の非空を検査させ、この検査が「著者が条件2を述べたこと」の確認であり「主張の正しさ」の確認ではないという限界を明記(TS-035)。棚卸し(`2026-07-31_004_classification_audit.md`)でrisk-accepted維持と判定された3本(`cloudkey_cert_deploy.yml` / `proxmox_backup_restore_verify.yml` / `unifi_backup_fetch.yml`)のヘッダへ適用し、TS-030導入後も残っていた「--checkの有無にかかわらず常に本実行する」というmarker driftも是正。案件記録: `docs/ai/reviews/check_mode_semantics/2026-07-31_020_round2_close_implement.md` |
+| 2026-07-31 | TS-036を新設し、roleやtask fileへ`tester-gate`の分類名と理由を複製せず、playbookヘッダへの参照に留めることを定めた。`scripts/check-tester-gate.sh`が`playbooks/`配下しか検査しないため、複製された記述は機械チェックの外で陳腐化する(`roles/cloudkey_cert_deploy/tasks/main.yml`がTS-030導入前の文言を複製したまま残っていた実例に基づく、独立レビューで指摘・是正)。案件記録: `docs/ai/reviews/check_mode_semantics/2026-07-31_020_round2_close_implement.md` |
