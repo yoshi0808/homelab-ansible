@@ -63,7 +63,7 @@
     mode: "0700"
   become: true
 
-- name: Deploy Codex config.toml (model + sandbox; execpolicy is documentation only)
+- name: Deploy Codex config.toml (model + sandbox)
   ansible.builtin.template:
     src: codex-config.toml.j2
     dest: "{{ incident_inspect_codex_dir }}/config.toml"

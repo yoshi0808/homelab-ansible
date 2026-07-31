@@ -1,10 +1,10 @@
 # Incident: Codexのexecpolicy allowlistが境界として機能していない
 
 日付: 2026-07-31
-状態: 調査中
+状態: 原因判明・対応中
 対象: `roles/recovery_exec`(`templates/codex-config.toml.j2`)、quory上のCodex実行経路(recovery-io → codex-exec-wrapper → codex exec)
 種別: セキュリティ事故
-原因分類: (判明後に記入)
+原因分類: 設定機構の誤認 — 存在しない設定キーを安全境界として設計していた
 
 ## 症状
 
@@ -34,60 +34,79 @@ allowlistが効いていないことは、この経路が無防備であるこ�
 
 **変わったのは「recovery-execとして実行できるローカルコマンドが `homelab-*` に限られている」という前提**である。実際には任意のローカルコマンドが実行できる。
 
-## 原因
+## 原因(2026-07-31、実測により確定)
 
-未判明。次のいずれかを切り分ける必要がある。
+**config.tomlの `[execpolicy]` はこの版に存在しないキーである。** execpolicyの実体は Starlark で書く `.rules` ファイルであり、`--rules` / user・project の探索 / `--ignore-rules` で扱う。TOMLテーブルは読まれず、`default_policy = "deny"` は最初から何も意味していなかった。
 
-1. この版(0.145.0)ではconfig.tomlの `[execpolicy]` が実装上参照されない(`.rules` ファイルが正)。
-2. execpolicyは承認の分類機構であり、`approval_policy="never"` では拒否として作用しない設計である。
-3. 設定は有効だが、`codex exec` の非対話経路だけが例外である。
+さらに、**`.rules` へ移しても当初意図した allowlist は作れない。** 実測した言語仕様:
 
-いずれであっても、**config.toml層のexecpolicyを安全境界の主として設計してはならない**という結論は変わらない。
+| 観測 | 内容 |
+|---|---|
+| ルール生成関数 | `prefix_rule(pattern=[...], decision=...)` のみ。`match` / `pattern` はグローバルに存在しない(`Variable ... not found`) |
+| decisionの値域 | `allow` / `prompt` / `forbidden` の3つだけ。`deny` は `error: invalid decision: deny` |
+| catch-all | **書けない。** 空patternは `pattern cannot be empty`、`"*"` はリテラル扱いで `id` に一致しない |
+| 未一致コマンド | `{"matchedRules":[]}` を返し **decisionが付かない**(unverified)。既定denyにはならない |
+| pattern の別形 | `[["id","whoami"]]` の選択肢形は機能する(いずれも具体名の列挙であり、任意コマンドは表現できない) |
+| `codex exec` の承認 | 承認系フラグが**1つも無い**。承認ベースの既定deny(`AskForApproval::UnlessTrusted`)は非対話経路では到達不能。U0で `approval_policy="untrusted"` が効かなかった観測と整合する |
+
+つまりexecpolicyは**列挙したコマンドを許可/禁止/承認要求へ分類する機構**であって、列挙外を既定で塞ぐ機構ではない。**この版で `homelab-*` だけを許す境界は、execpolicyでは原理的に構成できない。**
 
 ## 未確認のこと(この記録の限界)
 
 - **本番経路そのもの(recovery-io → `codex-exec-wrapper`)では試していない。** 観測は本番と同一内容の設定を複製した別 `CODEX_HOME` で行った。wrapperが注入するフラグ(`--sandbox workspace-write`、`approval_policy="never"`、`sandbox_workspace_write.network_access=true`)にexecpolicyを復活させるものは無いため同じ挙動と考えられるが、**推測である。**
-- OpenAI側の一次資料(ドキュメント・ソース)でconfig.tomlの `[execpolicy]` の意味を確認していない。
-- この状態がいつからかは不明。テンプレートのコメントは codex-cli **0.144.1** 時点で `sandbox_workspace_write.writable_roots` を `--strict-config doctor` で確認したと記しているが、**execpolicyの実効性を確認した記録はどこにも無い**。導入時から効いていなかった可能性がある。
+- `codex execpolicy check` は**ポリシーファイルの静的評価器**であり、runtimeのローダ(どのパスを探索するか、組込みルールが加わるか)まで測ったわけではない。上表の言語仕様は静的評価で確定した事実だが、「`prompt` / `forbidden` が `codex exec` で実際に拒否になるか」はモデル呼び出しを伴う実行でしか確かめられず、**未測定**である(方針上blocklistを採らないため測っていない)。
+- OpenAI側の公式ドキュメントは参照していない。根拠はすべてバイナリのCLIヘルプと実測である。
+- この状態がいつからかは不明。テンプレートのコメントは codex-cli **0.144.1** 時点で `sandbox_workspace_write.writable_roots` を `--strict-config doctor` で確認したと記しているが、**execpolicyの実効性を確認した記録はどこにも無い**。導入時から効いていなかった可能性が高い。
 
 ## 修正内容
 
-**一部のみ実施(2026-07-31、Yoshinobu指示「対応お願いします」)。境界そのものは未修正である。**
+段階的に実施した(2026-07-31、Yoshinobu「対応お願いします」→「順を追って対応」)。
 
-実施したのは**文書と実態の乖離の解消だけ**である。境界が復活したわけではない。
+**第1段 — 文書と実態の乖離の解消(同日)。**
 
 - `roles/recovery_exec/templates/AGENTS.md.j2` — 「The execpolicy allows ONLY these scripts.」という**強制の主張を削除**し、「列挙されたコマンドだけを呼べ、無ければ止まって報告せよ」という**指示**に置き換えた。Codexへ渡すpromptに「機構が止めてくれる」と書かないため。**逆に「実際には止まらない」とも書いていない** — promptは期待を述べる場所であり、実効性の記録は設定と一次記録が持つ。
-- `roles/recovery_exec/templates/codex-config.toml.j2` — 実測結果を配備先へ出力されるコメントとして明記した(ホスト上で設定を読む人が、そこで嘘を読まないようにするため)。`[execpolicy]` テーブル自体は**残した** — 本Incidentが未解決であり、`.rules` ファイル方式が未評価であるため。消すと意図の記録まで失われる。
-- **配備は行っていない。** 変更が quory へ反映されるのは `playbooks/recovery_exec_setup.yml` を実行した時点である(同roleに handler は無く、この2ファイルの更新で `recovery-io` が再起動されることはない)。
+- `roles/recovery_exec/templates/codex-config.toml.j2` — 実測結果を配備先へ出力されるコメントとして明記し、`[execpolicy]` テーブルは一旦**残した**(`.rules` 方式が未評価だったため)。
 
-**未実施 — `docs/ai/policies/autonomous_recovery_policy.md` にも同じ前提が残っている。** Policy本文の改訂はYoshinobuの領域のため触れていない。該当は3件:
+**第2段 — 原因の確定と、死んだ設定の除去(同日、上記「原因」節の実測後)。**
 
-| 条項 | 現行の文言 | 問題 |
+- `roles/recovery_exec/templates/codex-config.toml.j2` — `[execpolicy]` テーブルを**削除**した。存在しないキーであることが確定し、「未評価だから残す」という保留理由が消えたため。意図と経緯は本Incidentが持つ。残した場合、次に設定を読む人がふたたび境界と誤認する。
+- `docs/ai/policies/autonomous_recovery_policy.md` — AR-069 / AR-071 / AR-073 を実態へ改訂した(下表)。
+- **配備は行っていない。** 変更が quory へ反映されるのは commit / push と quory での `git pull --ff-only` の後に `playbooks/recovery_exec_setup.yml` を実行した時点である(同roleに handler は無く、テンプレート更新で `recovery-io` が再起動されることはない)。設定の削除は挙動を変えない(元から読まれていない)ため、配備の緊急性は無い。
+
+| 条項 | 改訂前 | 改訂後の趣旨 |
 |---|---|---|
-| AR-069 | execpolicyはdefault denyとし、限定wrapper群だけを許可する | 設定の要求としては満たされているが、**それが何かを制限している**という含意が実態と違う |
-| AR-071 | VM rebootとHA failoverはCodex execpolicyへ含めず、pull経路にだけ許可する | execpolicyがゲートである前提。**実際に両者を隔てているのはwrapperの不在**であり、execpolicyではない |
-| AR-073 | **sandboxとexecpolicyを別の防御層として扱い**、tokenとSSH keyはOS file権限と専用ownerで保護する | **防御層は現在2層でなく、sandbox側の1層である。** ここが最も直接的な乖離 |
+| AR-069 | execpolicyはdefault denyとし、限定wrapper群だけを許可する | **execpolicyを防御層として数えない。** 実行できるlocal commandの範囲は境界ではなく、wrapper群の列挙はCodexへの指示として `AGENTS.md` が持つ |
+| AR-071 | VM rebootとHA failoverはCodex execpolicyへ含めず、pull経路にだけ許可する | 両者を隔てているのは **push経路にwrapperが存在しないこと**(能力の不在)であると明記する |
+| AR-073 | sandboxとexecpolicyを別の防御層として扱う | 実在する層 — **sandbox / `no_new_privileges` / target側forced command / sudoers** — を列挙する形へ置き換える |
 
-### 残りの方針の候補
+## 採った方針(2026-07-31 Yoshinobu決定)
 
-境界そのものをどうするか。いずれもYoshinobuの判断を要する(2026-07-31、「順を追って対応」)。
+**境界の主を「能力の不在」へ一本化し、execpolicyの復活は追わない。**
 
-1. `.rules` ファイル方式が有効かを実測し、有効ならそちらへ移す。
-2. execpolicyに依存せず、**能力の不在**で境界を作る(実行ユーザーを分ける / systemdのmount namespaceで該当wrapperを見せない / SSH鍵を持たせない)。
-3. 現状を受け入れ、`AGENTS.md.j2` と関連文書から「execpolicyが唯一のwrapperだけを許可する」という記述を削る(**境界が無いことを正しく記録する**)。
-
-**3は単独では採らない。** 少なくとも文書の記述と実態の乖離は解消する必要がある。
+- 却下: `.rules` を blocklist として導入する案。allowlistにならず、**効かない検査が誤った安心を生む**(`docs/ai/memory/lessons/permission-boundaries-must-be-designed-not-prompted.md`、および pre-commit のパスgrep検査で同型の判断をした前例)。
+- 却下: quory側でmount namespaceを作り込み `/usr/local/bin` を絞る案。`/bin/sh` と `/usr/bin` は codex / node の動作に要るため残り、得られるのは「他のwrapperを見せない」までで、任意コマンド実行そのものは塞げない。コストに見合わない。
+- 採用: 失ったのは「任意のlocal commandが打てない」という性質だけであり、recover系wrapper自体は元からallow側にあって到達できた。**実害を縛っているのはtarget側のforced commandである。** したがって境界の再建は新規案件を立てず、既に `docs/ai/status.md` Next にある「**Codexの調査面を広げ、SSH鍵配布を縮小する**」を本体として扱う。
 
 ## 確認方法
 
-未確定。修正後は「allow-listに無いコマンド(例: `id`)が拒否されること」と「許可したコマンドが通ること」の**両方**を観測して確認する。片方だけでは機構が効いた証明にならない。
+`codex execpolicy check` がこの機構の**決定論的な評価器**である(モデル呼び出しを伴わない)。
+
+```
+codex execpolicy check --rules <FILE> --pretty <COMMAND> [ARGS...]
+```
+
+許可されたコマンドは `"decision": "allow"` を返し、どのルールにも一致しないコマンドは `{"matchedRules": []}` を返す(decisionが付かない = unverified)。**この「decisionが付かない」状態が拒否ではないことが、本Incidentの中核である。**
+
+将来この経路へ何らかのコマンド制限を再導入する場合は、「制限対象が拒否されること」と「許可対象が通ること」の**両方**を観測すること。片方だけでは機構が効いた証明にならない(2026-07-31のU0は通過側しか観測できず、それが「絞れていない」という結論の根拠になった)。
 
 ## 調べ直すときの足場(2026-07-31に踏んだ回り道)
 
 - **`/usr/bin/codex` は Node のラッパー**(`../lib/node_modules/@openai/codex/bin/codex.js` へのsymlink、46バイト)。ここに `strings` をかけても何も出ない。**この構造はNodeSourceのnodejsを入れてnpm globalでcodexを入れているため**(2026-07-31 Yoshinobu。導入経緯は `docs/ai/reviews/codex_update_check/` が持つ。週次の自動更新も同じ経路で、`roles/codex_update_check`)。したがって版が上がるとネイティブ実体のパスも入れ替わりうる — **パスを決め打ちで記録せず、都度 `find`/`grep -rl` で辿ること。**ネイティブ実体は
   `/usr/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/bin/codex` にあり、**`execpolicy` の文字列はこちらに実在する**(=キー名が廃止・改名されて無視されているわけではない)。
 - 同バイナリに埋め込まれたCLIヘルプが一次資料として使える。`--ignore-rules`(「Do not load user or project execpolicy `.rules` files」)と「proposed execpolicy amendment」の文言はここから得た。
-- 実効性の確認は**「拒否と通過の両方」を観測しないと証明にならない**。2026-07-31のU0では通過側しか観測できず、それが結論(=絞れていない)の根拠になった。
+- **`codex execpolicy` は `codex --help` のCommands一覧に現れない。** 直接 `codex execpolicy --help` を叩くと出る。同種の隠しサブコマンドがある前提で探すこと(`strings` に `ExecPolicyCheckCommand` として現れていた)。
+- `codex features list` が feature flag の状態を一覧する。`exec_permission_approvals` / `request_permissions_tool` は *under development* で false、`request_rule` は *removed*。**承認まわりの機構が版によって出入りしている**ことがここから読める。
+- 設定キーが有効かを `--strict-config` で確かめる手は、サブコマンドによっては使えない(`codex features` は `--strict-config is not supported` を返す)。**「弾かれなかった=認識されている」と読まないこと。** 本件で `[execpolicy]` が存在しないキーだと気づくのが遅れた一因である。
 
 ## 参照
 

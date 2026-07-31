@@ -89,7 +89,7 @@
 | ホスト状態の取得 | `homelab-investigate-*` の代わりに、**収集器がバンドルへ既に記録したスナップショット**(`summary.json` の `snapshot`)を読む。新しい到達経路を作らない |
 | 読取に要る権限 | `semaphore.db` の読み取りACLと、`reports/` への traverse ACL のみ(いずれも `recovery-exec` に対して既に存在するものと同型) |
 | Codexのsandbox | `network_access = **false**`。このユーザーがモデルに実行させるコマンドはすべてローカル完結であり、外へ出る必要が無い(`recovery-exec` 側が `true` なのはSSH wrapperのため) |
-| execpolicy | **安全境界として数えない。** 書いてもよいが、効いている前提で設計しない(U0の結果) |
+| execpolicy | **安全境界として数えない**(U0の結果)。2026-07-31の追測で、config.tomlに `[execpolicy]` というキーがそもそも存在せず、`.rules` へ移してもallowlistは表現できないことが確定したため、**書くこともやめて設定から削除した**(Incident参照) |
 | 認証 | `codex login` を**このユーザーとして1回**行う。`recovery-exec` の `auth.json` を**複製しない**(`docs/ai/core.md`: tokenの複製を行わない) |
 
 ## Trade-off Analysis
@@ -106,7 +106,7 @@
 **受け入れない代償**
 
 - 無人セッションが復旧アクションへ到達できる状態(c-1)。これは実装の手間の問題ではなく境界の問題であり、`docs/ai/memory/lessons/permission-boundaries-must-be-designed-not-prompted.md` が繰り返し扱ってきたクラスである。
-- **設定層のexecpolicyを安全境界として数えること(c-2)。** U0で否定された。書くこと自体は妨げないが、効いている前提の設計をしない。
+- **設定層のexecpolicyを安全境界として数えること(c-2)。** U0で否定され、追測でキー自体が存在しないことまで確定した(AR-102)。
 
 ## Consequences
 

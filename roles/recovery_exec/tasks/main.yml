@@ -87,7 +87,7 @@
     mode: "0700"
   become: true
 
-- name: Deploy Codex config.toml (model + execpolicy)
+- name: Deploy Codex config.toml (model + sandbox)
   ansible.builtin.template:
     src: codex-config.toml.j2
     dest: "{{ recovery_exec_codex_dir }}/config.toml"
@@ -191,9 +191,9 @@
   become: true
 
 # Per-target mute wrappers (Codex-facing). Separate command names from the
-# root-only human CLI (roles/recovery_mute/files/homelab-mute) so execpolicy can
-# allow the Codex path (sudo-less, ACL-backed) while the human sudo path stays
-# distinct. Write access is granted below via POSIX ACL, not sudo (§4.5 / §6).
+# root-only human CLI (roles/recovery_mute/files/homelab-mute) so the Codex path
+# (sudo-less, ACL-backed) stays distinct from the human sudo path. Write access
+# is granted below via POSIX ACL, not sudo (§4.5 / §6).
 - name: Deploy homelab-mute-{set,status,clear} wrapper scripts (Codex-facing, sudo-less)
   ansible.builtin.copy:
     src: "{{ item }}"

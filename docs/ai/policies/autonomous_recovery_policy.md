@@ -155,7 +155,7 @@ pushはtarget別muteを確認し、実行中lockを取得できない場合は�
 pushで起動されたCodexはinvestigate→判断→recover→再investigate→escalationの順に従い、VM reboot / HA failover手段を持たない。
 
 <!-- AR-071 -->
-VM rebootとHA failoverはCodex execpolicyへ含めず、pull経路のtarget固定・決定論的playbook呼出しにだけ許可する。
+VM rebootとHA failoverはpush経路にwrapperを置かないことで到達不能にし、pull経路のtarget固定・決定論的playbook呼出しにだけ許可する。
 
 ### Manual layerと終了
 
@@ -320,10 +320,10 @@ sudoersは固定checkを1:1列挙し、検証済みparameter位置だけの限�
 <!-- AR-051 -->
 追加checkの絶対path、unit実在、sudoers grammar、forced-command経路を配備前とtester工程で確認する。
 
-### Execpolicy、wrapper、file権限
+### wrapper、sandbox、file権限
 
 <!-- AR-069 -->
-execpolicyはdefault denyとし、target investigate、Proxmox investigate、report、Semaphore query、target recover、monitoring controlの限定wrapper群だけを許可する。wrapper名と引数grammarは`recovery_exec` roleのfiles / templatesを正本とする。
+Codexが呼べるwrapper群 — target investigate、Proxmox investigate、report、Semaphore query、target recover、monitoring control — は`AGENTS.md`が列挙する**指示**であり、実行を阻む境界ではない。wrapper名と引数grammarは`recovery_exec` roleのfiles / templatesを正本とする。
 
 <!-- AR-070 -->
 Proxmox nodeへrecover wrapperを用意せず、二段検証済みread-only named check以外を実行不能にする。
@@ -332,7 +332,7 @@ Proxmox nodeへrecover wrapperを用意せず、二段検証済みread-only name
 Codex wrapperは引数の個数・位置・値を厳密に固定し、sandbox、approval、execpolicy optionを呼出元から受け取らない。
 
 <!-- AR-073 -->
-sandboxとexecpolicyを別の防御層として扱い、tokenとSSH keyはOS file権限と専用ownerで保護する。
+この経路の防御層はCodex sandbox、`no_new_privileges`、target側forced command、sudoersの4つとし、tokenとSSH keyはOS file権限と専用ownerで保護する。設定層のコマンド制限を層として数えない。
 
 <!-- AR-074 -->
 Codex wrapperはsudo、setuid、file capabilityによる権限昇格を前提にせず、不足権限には直接ACLを使う。
@@ -355,6 +355,8 @@ Codex wrapperはsudo、setuid、file capabilityによる権限昇格を前提に
 - `pve1` / `pve2` / `ansy`を復旧action対象にしてはならない。
 <!-- AR-093 -->
 - `recovery-exec`に`ann`のkeyまたはSlack tokenを持たせてはならない。
+<!-- AR-102 -->
+- Codexの設定ファイルに書くコマンド制限(execpolicy等)を安全境界として設計してはならない。境界は能力の不在 — 鍵・wrapper・到達先が存在しないこと — で作る。
 
 ## 8. 変更履歴
 
@@ -362,3 +364,4 @@ Codex wrapperはsudo、setuid、file capabilityによる権限昇格を前提に
 |---|---|
 | 2026-07-24 | Git HEADの旧288行版を標準8節へ再編。Policy核を維持し、非規範の環境・Repository・Operations情報をContextへ分離。旧表の数値VM IDは転載せず、inventory / vars / codeを正本とした |
 | 2026-07-29 | Loki横断ログ調査(AR-095〜AR-101)を新設し、AR-026に検証済みparameter付き調査の例外を追加。案件記録: `docs/ai/reviews/slack_loki_investigation/` |
+| 2026-07-31 | execpolicyが安全境界として成立しないことが実測で確定したため、AR-069 / AR-071 / AR-073を実態(能力の不在で境界を作る)へ改訂し、AR-102を新設。§7の節名も`Execpolicy、wrapper、file権限`から改めた。根拠: `docs/ai/memory/incidents/2026-07-31_codex-execpolicy-allowlist-not-enforcing.md` |

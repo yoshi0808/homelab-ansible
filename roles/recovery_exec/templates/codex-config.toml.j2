@@ -14,76 +14,21 @@ approval_policy = "never"
 network_access = true
 writable_roots = ["/var/lib/homelab-recovery/mute"]
 
-# Execpolicy: intended as defense-in-depth (deny all, allow only the homelab-*
-# wrappers, §5.3).
+# There is deliberately NO command allow-list in this file.
 #
-# MEASURED 2026-07-31 (codex-cli 0.145.0): this table does NOT block command
-# execution. With this exact configuration, `id` — absent from the allow-list
-# below — ran successfully under `codex exec` with approval_policy="never".
-# DO NOT COUNT THIS AS A SECURITY BOUNDARY, and do not design a new capability
-# on the assumption that it narrows what the model can run.
+# An `[execpolicy]` table used to live here, listing the homelab-* wrappers as
+# the only permitted commands. It never did anything: config.toml has no such
+# key in codex-cli. Execpolicy is configured with Starlark `.rules` files
+# (`codex execpolicy check --rules ...`, `codex exec --ignore-rules`), and even
+# there an allow-list is not expressible — rules only classify commands they
+# name (allow / prompt / forbidden), no catch-all pattern exists, and an
+# unmatched command comes back with no decision at all, i.e. it runs. Measured
+# 2026-07-31 on codex-cli 0.145.0.
 #
-# The layers that do hold: the workspace-write sandbox, no_new_privileges
-# (blocks sudo unconditionally), the SSH forced commands on each target, and
-# the sudoers rule limiting who may invoke codex-exec-wrapper at all.
+# The boundaries that actually hold for this path: the workspace-write sandbox
+# above, no_new_privileges (blocks sudo unconditionally), the SSH forced
+# commands on each target, and the sudoers rule limiting who may invoke
+# codex-exec-wrapper. Do not design a new capability on the assumption that
+# anything here narrows the set of local commands the model can run.
 #
-# The table is kept rather than deleted because the incident is still open and
-# the `.rules` file mechanism this codex version documents (`--ignore-rules`)
-# has not been evaluated. Removing it now would lose the record of intent.
 # Incident: docs/ai/memory/incidents/2026-07-31_codex-execpolicy-allowlist-not-enforcing.md
-[execpolicy]
-default_policy = "deny"
-
-# --- Investigation (read-only) ---
-{% for target in recovery_exec_targets %}
-[[execpolicy.rules]]
-command = "homelab-investigate-{{ target.name }}"
-policy = "allow"
-
-{% endfor %}
-{% for target in recovery_exec_pve_targets %}
-[[execpolicy.rules]]
-command = "homelab-investigate-{{ target.name }}"
-policy = "allow"
-
-{% endfor %}
-[[execpolicy.rules]]
-command = "homelab-reports"
-policy = "allow"
-
-[[execpolicy.rules]]
-command = "homelab-semaphore-query"
-policy = "allow"
-
-# --- Recovery (service restart) ---
-{% for target in recovery_exec_targets %}
-[[execpolicy.rules]]
-command = "homelab-recover-{{ target.name }}"
-policy = "allow"
-
-{% endfor %}
-# --- Monitoring control ---
-[[execpolicy.rules]]
-command = "homelab-monitoring-pause"
-policy = "allow"
-
-[[execpolicy.rules]]
-command = "homelab-monitoring-resume"
-policy = "allow"
-
-[[execpolicy.rules]]
-command = "homelab-monitoring-status"
-policy = "allow"
-
-# --- Per-target mute (TTL付き, sudo無し; §7 / requirement 2026-07-14) ---
-[[execpolicy.rules]]
-command = "homelab-mute-set"
-policy = "allow"
-
-[[execpolicy.rules]]
-command = "homelab-mute-status"
-policy = "allow"
-
-[[execpolicy.rules]]
-command = "homelab-mute-clear"
-policy = "allow"

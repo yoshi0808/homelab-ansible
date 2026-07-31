@@ -14,23 +14,20 @@ approval_policy = "never"
 [sandbox_workspace_write]
 network_access = false
 
-# Execpolicy: NOT a security boundary (measured 2026-07-31, codex-cli 0.145.0 —
-# see docs/ai/memory/incidents/2026-07-31_codex-execpolicy-allowlist-not-enforcing.md
-# and docs/ai/reviews/incident_auto_investigation/2026-07-31_002_u0_test_result.md).
-# `codex exec` + `approval_policy="never"` does not honor this table; a command
-# absent from the allow-list below still runs. Kept for documentation of intent
-# only — do not design a new capability assuming this narrows what the model can
-# run. The layers that do hold for this account: no SSH keys exist at all (so
-# homelab-recover-*/homelab-investigate-* fail before any policy is consulted),
-# and POSIX ACL grants only cover semaphore.db + /home/yoshi traverse (no write
-# anywhere reachable by this UID).
-[execpolicy]
-default_policy = "deny"
-
-[[execpolicy.rules]]
-command = "homelab-semaphore-query"
-policy = "allow"
-
-[[execpolicy.rules]]
-command = "homelab-reports"
-policy = "allow"
+# There is deliberately NO command allow-list in this file.
+#
+# An `[execpolicy]` table used to live here, naming homelab-semaphore-query and
+# homelab-reports as the only permitted commands. config.toml has no such key in
+# codex-cli — execpolicy is configured with Starlark `.rules` files, and even
+# there an allow-list is not expressible (rules only classify commands they
+# name; an unmatched command comes back with no decision and runs). Measured
+# 2026-07-31 on codex-cli 0.145.0; the table was removed rather than kept as
+# "documentation of intent", because a non-existent key sitting in a config file
+# reads as a boundary to the next person.
+# See docs/ai/memory/incidents/2026-07-31_codex-execpolicy-allowlist-not-enforcing.md
+#
+# The layers that do hold for this account: no SSH keys exist at all (so
+# homelab-recover-*/homelab-investigate-* fail before anything is consulted),
+# the wrapper's hardcoded `--sandbox read-only`, and POSIX ACL grants covering
+# only semaphore.db + /home/yoshi traverse (no write anywhere reachable by this
+# UID).
