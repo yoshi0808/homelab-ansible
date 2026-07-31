@@ -21,6 +21,8 @@
     password: "!"
     comment: "Recovery Codex runner service account"
   become: true
+  when: not ansible_check_mode
+  tags: [destructive]
 
 # ---------------------------------------------------------------------------
 # SSH key directories
@@ -34,45 +36,67 @@
     group: "{{ recovery_exec_user }}"
     mode: "0700"
   become: true
+  when: not ansible_check_mode
+  tags: [destructive]
 
-- name: Generate investigation SSH key (shared, parameterized forced command)
-  ansible.builtin.command:
-    cmd: >-
-      ssh-keygen -t ed25519 -N ''
-      -C "recovery-investigate"
-      -f {{ recovery_exec_investigate_key }}
-    creates: "{{ recovery_exec_investigate_key }}"
-  become: true
+# check-mode-native (TS-015): the three ssh-keygen tasks and the chmod that
+# follows are one interdependent chain, not four independent destructive
+# tasks — they are also contiguous in this file (only comments separate
+# them), unlike the slurp -> authorized_keys dependency in target_setup.yml
+# (six independent tasks sit between them there; see the note on that file).
+# "Lock down SSH key permissions" only means something if the three
+# ssh-keygen tasks actually ran for real: on a fresh host under --check,
+# with each key-gen task gated individually, the .pub/private key files
+# this task chmods would not exist, and ansible.builtin.file's implicit
+# state=file fails outright when the path is absent (verified in the
+# batchB2 implement record's decoy tests). Gated once at the block level
+# instead of repeating `when: not ansible_check_mode` on each task — same
+# shape as roles/recovery_push/tasks/sender_setup.yml's
+# "Generate and read push SSH key" block, see
+# docs/ai/reviews/check_mode_semantics/2026-07-31_010_round2_batchB1_implement.md
+# §2.2 and docs/ai/reviews/check_mode_semantics/2026-07-31_013_round2_batchB2_implement.md.
+- name: Generate and lock down recovery-exec SSH keys (destructive; TS-015 chain)
+  when: not ansible_check_mode
+  tags: [destructive]
+  block:
+    - name: Generate investigation SSH key (shared, parameterized forced command)
+      ansible.builtin.command:
+        cmd: >-
+          ssh-keygen -t ed25519 -N ''
+          -C "recovery-investigate"
+          -f {{ recovery_exec_investigate_key }}
+        creates: "{{ recovery_exec_investigate_key }}"
+      become: true
 
-- name: Generate action SSH key (shared, fixed forced commands)
-  ansible.builtin.command:
-    cmd: >-
-      ssh-keygen -t ed25519 -N ''
-      -C "recovery-action"
-      -f {{ recovery_exec_action_key }}
-    creates: "{{ recovery_exec_action_key }}"
-  become: true
+    - name: Generate action SSH key (shared, fixed forced commands)
+      ansible.builtin.command:
+        cmd: >-
+          ssh-keygen -t ed25519 -N ''
+          -C "recovery-action"
+          -f {{ recovery_exec_action_key }}
+        creates: "{{ recovery_exec_action_key }}"
+      become: true
 
-- name: Generate PVE investigation SSH key (shared across pve1/pve2, read-only Proxmox investigation only)
-  ansible.builtin.command:
-    cmd: >-
-      ssh-keygen -t ed25519 -N ''
-      -C "recovery-investigate-pve"
-      -f {{ recovery_exec_investigate_pve_key }}
-    creates: "{{ recovery_exec_investigate_pve_key }}"
-  become: true
+    - name: Generate PVE investigation SSH key (shared across pve1/pve2, read-only Proxmox investigation only)
+      ansible.builtin.command:
+        cmd: >-
+          ssh-keygen -t ed25519 -N ''
+          -C "recovery-investigate-pve"
+          -f {{ recovery_exec_investigate_pve_key }}
+        creates: "{{ recovery_exec_investigate_pve_key }}"
+      become: true
 
-- name: Lock down SSH key permissions
-  ansible.builtin.file:
-    path: "{{ item }}"
-    owner: "{{ recovery_exec_user }}"
-    group: "{{ recovery_exec_user }}"
-    mode: "0600"
-  loop:
-    - "{{ recovery_exec_investigate_key }}"
-    - "{{ recovery_exec_action_key }}"
-    - "{{ recovery_exec_investigate_pve_key }}"
-  become: true
+    - name: Lock down SSH key permissions
+      ansible.builtin.file:
+        path: "{{ item }}"
+        owner: "{{ recovery_exec_user }}"
+        group: "{{ recovery_exec_user }}"
+        mode: "0600"
+      loop:
+        - "{{ recovery_exec_investigate_key }}"
+        - "{{ recovery_exec_action_key }}"
+        - "{{ recovery_exec_investigate_pve_key }}"
+      become: true
 
 # ---------------------------------------------------------------------------
 # Codex configuration directory (OAuth token stored here by Codex itself)
@@ -86,6 +110,8 @@
     group: "{{ recovery_exec_user }}"
     mode: "0700"
   become: true
+  when: not ansible_check_mode
+  tags: [destructive]
 
 - name: Deploy Codex config.toml (model + sandbox)
   ansible.builtin.template:
@@ -95,6 +121,8 @@
     group: "{{ recovery_exec_user }}"
     mode: "0600"
   become: true
+  when: not ansible_check_mode
+  tags: [destructive]
 
 # ---------------------------------------------------------------------------
 # Codex execution wrapper (restricts args to "exec" subcommand only)
@@ -108,6 +136,8 @@
     group: "{{ recovery_exec_user }}"
     mode: "0500"
   become: true
+  when: not ansible_check_mode
+  tags: [destructive]
 
 # ---------------------------------------------------------------------------
 # Workspace + AGENTS.md (Codex reads this for tool documentation)
@@ -121,6 +151,8 @@
     group: "{{ recovery_exec_user }}"
     mode: "0770"
   become: true
+  when: not ansible_check_mode
+  tags: [destructive]
 
 - name: Add group members to recovery-exec group (for workspace read/write)
   ansible.builtin.user:
@@ -129,6 +161,8 @@
     append: true
   loop: "{{ recovery_exec_group_members }}"
   become: true
+  when: not ansible_check_mode
+  tags: [destructive]
 
 - name: Deploy AGENTS.md (tool documentation for Codex)
   ansible.builtin.template:
@@ -138,6 +172,8 @@
     group: "{{ recovery_exec_user }}"
     mode: "0640"
   become: true
+  when: not ansible_check_mode
+  tags: [destructive]
 
 # ---------------------------------------------------------------------------
 # Local wrapper scripts: homelab-investigate-* and homelab-recover-*
@@ -154,6 +190,8 @@
   loop_control:
     loop_var: target
   become: true
+  when: not ansible_check_mode
+  tags: [destructive]
 
 - name: Deploy homelab-investigate-pve{1,2} wrapper scripts (read-only Proxmox investigation)
   ansible.builtin.template:
@@ -166,6 +204,8 @@
   loop_control:
     loop_var: target
   become: true
+  when: not ansible_check_mode
+  tags: [destructive]
 
 - name: Deploy homelab-recover-* wrapper scripts
   ansible.builtin.copy:
@@ -176,6 +216,8 @@
     mode: "0755"
   loop: "{{ recovery_exec_targets }}"
   become: true
+  when: not ansible_check_mode
+  tags: [destructive]
 
 - name: Deploy homelab-monitoring-{pause,resume,status} scripts
   ansible.builtin.copy:
@@ -189,6 +231,8 @@
     - homelab-monitoring-resume
     - homelab-monitoring-status
   become: true
+  when: not ansible_check_mode
+  tags: [destructive]
 
 # Per-target mute wrappers (Codex-facing). Separate command names from the
 # root-only human CLI (roles/recovery_mute/files/homelab-mute) so the Codex path
@@ -206,6 +250,8 @@
     - homelab-mute-status
     - homelab-mute-clear
   become: true
+  when: not ansible_check_mode
+  tags: [destructive]
 
 # ---------------------------------------------------------------------------
 # Investigation helpers: reports/ JSON lookup + Semaphore failure lookup
@@ -220,11 +266,23 @@
 # (no escalation happens), so no_new_privileges does not affect it.
 # ---------------------------------------------------------------------------
 
+# ansible.posix.acl invokes `setfacl` (and getfacl for its check-mode
+# assessment), which resolves entity: "{{ recovery_exec_user }}" to a real
+# UID via getpwnam — verified empirically (decoy test, see the implement
+# record) that this resolution FAILS even under --check ("setfacl: Option
+# -m: Invalid argument") when the user does not exist yet. That is fine here
+# because the ACL grants below are themselves destructive and thus gated
+# with the identical `when: not ansible_check_mode` as "Create recovery-exec
+# user" above — both skip together under --check, so the failing lookup is
+# never attempted. Do not remove this task's gate independently of the user
+# task's gate.
 - name: Install acl package (setfacl/getfacl, needed for ansible.posix.acl)
   ansible.builtin.apt:
     name: acl
     state: present
   become: true
+  when: not ansible_check_mode
+  tags: [destructive]
 
 - name: Grant recovery-exec ACL traverse on /home/yoshi (for reports/ read access, no sudo)
   ansible.posix.acl:
@@ -234,6 +292,8 @@
     permissions: x
     state: present
   become: true
+  when: not ansible_check_mode
+  tags: [destructive]
 
 - name: Grant recovery-exec ACL traverse on /var/lib/semaphore (no sudo)
   ansible.posix.acl:
@@ -243,6 +303,8 @@
     permissions: x
     state: present
   become: true
+  when: not ansible_check_mode
+  tags: [destructive]
 
 - name: Grant recovery-exec ACL read on semaphore.db (no sudo; journal_mode=delete, no -wal/-shm to also grant)
   ansible.posix.acl:
@@ -252,6 +314,8 @@
     permissions: r
     state: present
   become: true
+  when: not ansible_check_mode
+  tags: [destructive]
 
 # Per-target mute write access for the homelab-mute-{set,clear} wrappers.
 # Granted via POSIX ACL (recovery-exec's own uid gains rwx on the mute dir),
@@ -280,6 +344,8 @@
     cmd: mkdir -m 0755 -p /var/lib/homelab-recovery/mute
     creates: /var/lib/homelab-recovery/mute
   become: true
+  when: not ansible_check_mode
+  tags: [destructive]
 
 - name: Grant recovery-exec ACL rwx on mute dir (no sudo; mask becomes rwx, group/other stay r-x)
   ansible.posix.acl:
@@ -289,6 +355,8 @@
     permissions: rwx
     state: present
   become: true
+  when: not ansible_check_mode
+  tags: [destructive]
 
 # Shared per-target flock targets (review 2026-07-14_005 F2). All mute writers
 # (Codex wrappers, human CLI, Ansible auto-mute) take an exclusive flock on these
@@ -313,6 +381,8 @@
     - monnie
     - sophos-fw
   become: true
+  when: not ansible_check_mode
+  tags: [destructive]
 
 - name: Deploy homelab-reports wrapper (Codex-facing, validates then reads directly)
   ansible.builtin.copy:
@@ -322,6 +392,8 @@
     group: root
     mode: "0755"
   become: true
+  when: not ansible_check_mode
+  tags: [destructive]
 
 - name: Deploy recovery-reports-helper (privileged, re-validates independently)
   ansible.builtin.copy:
@@ -331,6 +403,8 @@
     group: root
     mode: "0755"
   become: true
+  when: not ansible_check_mode
+  tags: [destructive]
 
 - name: Deploy homelab-semaphore-query wrapper (fixed queries, reads semaphore.db directly)
   ansible.builtin.copy:
@@ -340,24 +414,32 @@
     group: root
     mode: "0755"
   become: true
+  when: not ansible_check_mode
+  tags: [destructive]
 
 - name: Remove legacy homelab-mute-exec wrapper
   ansible.builtin.file:
     path: /usr/local/bin/homelab-mute-exec
     state: absent
   become: true
+  when: not ansible_check_mode
+  tags: [destructive]
 
 - name: Remove legacy sudoers for mute-exec
   ansible.builtin.file:
     path: /etc/sudoers.d/recovery-exec-mute
     state: absent
   become: true
+  when: not ansible_check_mode
+  tags: [destructive]
 
 - name: Remove legacy sudoers for recovery-exec investigation helpers (replaced by ACL; sudo is blocked by Codex sandbox's no_new_privileges)
   ansible.builtin.file:
     path: /etc/sudoers.d/recovery-exec-investigate
     state: absent
   become: true
+  when: not ansible_check_mode
+  tags: [destructive]
 
 # ---------------------------------------------------------------------------
 # Target node setup (authy/monnie)

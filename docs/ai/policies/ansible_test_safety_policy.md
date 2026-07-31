@@ -95,6 +95,9 @@ read-onlyな診断taskには`check_mode: false`、破壊的task(またはそれ�
 <!-- TS-015 -->
 複数の破壊的taskが相互依存する場合(reboot→post-reboot検証→報告、migrate→maintenance mode→HA待機→強制停止など)は、個別taskへ`when`を付けるより、一連をまとめて1つのnamed blockにしblock単位でゲートする。
 
+<!-- TS-033 -->
+block化するかの判断は**依存するtaskがファイル上で連続しているか**で分ける。連続していてblockにまとめられるならblockにする。**間に独立したtaskが挟まっていて、blockにするには並べ替えが要る場合は、並べ替えない** — 既存の実行順序が別の前提(先にディレクトリが存在すること等)を満たしている可能性があり、それを崩すリスクの方が大きい。その場合は同一の`when:`を個別taskへ付け、**なぜblockにしなかったかをその場のコメントへ書く**。理由を書かずに個別ゲートを選ぶと、次の担当が同型の連鎖を別の書き方で扱う(2026-07-31、同一案件のバッチ間で実際に発生した)。
+
 ### dry-run-aware: ネイティブdry-runへ差し替え
 
 <!-- TS-016 -->
@@ -156,3 +159,4 @@ wrapperは付け忘れ防止の補助であり、安全性の最終判断はplay
 | 2026-07-06〜07 | `tester_mode` / `tester_gate` roleを廃止し、`--check`(`ansible_check_mode`)ベースの5分類へ移行。旧`docs/ai/prompts/core.md` §18として記述 |
 | 2026-07-26 | 旧core §18からPolicyへ移設し正本化(移行表C18-01/02/05/09/11/12/14)。実装上の落とし穴(C18-03/04/06/07/08/10)は`skills/ansible-implementation-style/SKILL.md`へ分離。C18-13(Codex承認prefix由来のwrapper運用)は、Codexが開発工程から外れたためprefix依存の記述を落とし、`--check`付け忘れ防止という本来の効能のみTS-024として保持 |
 | 2026-07-31 | `--check`の意味を一本化。`risk-accepted`は`--check`で**停止**する(TS-030新設)、check mode下でSlackへ送らない判定を`notify.yml`に集約(TS-031新設)、check-mode-safe化したら分類を`check-mode-native`へ変える昇格経路を明文化(TS-032新設)。TS-005 / TS-022 / TS-024の「`--check`を付けても挙動が変わらない」という記述を実態へ改訂。案件記録: `docs/ai/reviews/check_mode_semantics/` |
+| 2026-07-31 | TS-033を新設し、TS-015のblock化判断を「依存taskがファイル上で連続しているか」で分ける基準として明文化。同一案件のバッチ間で同型の連鎖が別の書き方になった実例に基づく。案件記録: `docs/ai/reviews/check_mode_semantics/`
