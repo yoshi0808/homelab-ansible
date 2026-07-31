@@ -24,9 +24,17 @@
 # assertion; it never falls through to automatic upgrade.
 # Design record: docs/ai/reviews/prometheus_update_check/2026-07-19_015_implement.md
 #
-# tester-gate: check-mode-native — read-only収集と成果物であるSlack通知は--checkでも
-# 実走する。destructive blockはdry_run=falseに加えnot ansible_check_modeも必須とし、
-# --check -e dry_run=falseで適用引数経路を無変更のまま検証できる。
+# tester-gate: check-mode-native — read-only収集(current/latest version取得・
+# 分類・rollback discovery)は--checkでも実走する。destructive blockはdry_run=false
+# に加えnot ansible_check_modeも必須とし、--check -e dry_run=falseで適用引数経路を
+# 無変更のまま検証できる。
+#
+# 2026-07-31撤回(R4、docs/ai/reviews/check_mode_semantics/2026-07-31_001_requirement.md):
+# 「成果物であるSlack通知は--checkでも実走する」という以前の設計(旧記録
+# docs/ai/reviews/prometheus_update_check/2026-07-19_015_implement.md)は撤回した。
+# 現在はroles/prometheus_update_check/tasks/main.ymlのnotify呼び出しから
+# check_mode: falseを除去済みで、他playbook同様notify.yml自身がansible_check_mode
+# を見て送信を止める(--checkでは常にdebug全文出力のみ)。
 
 - name: prometheus_update_check - verify execution host
   hosts: localhost

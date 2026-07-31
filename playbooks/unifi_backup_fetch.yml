@@ -54,6 +54,19 @@
   gather_facts: true
   vars_files:
     - "{{ playbook_dir }}/../inventories/vars/cloudkey.yml"
+  pre_tasks:
+    - name: "[migration] --check has no dry-run here — refuse and stop before any changes"
+      ansible.builtin.assert:
+        that: not (ansible_check_mode | bool)
+        fail_msg: >-
+          This playbook (tester-gate: risk-accepted) has no --check dry-run:
+          every task always applies for real, so --check would look like a
+          simulation while actually making the change (see
+          docs/ai/memory/incidents/2026-07-31_subagent-unintended-deploy-risk-accepted-check.md).
+          Re-run without --check to apply for real. To suppress Slack
+          notifications during that real run, add -e skip_notifications=true.
+          See docs/ai/reviews/check_mode_semantics/2026-07-31_001_requirement.md.
+        quiet: true
   tasks:
     - name: "[migration] tester_mode is deprecated for this playbook — it always runs for real"
       ansible.builtin.assert:

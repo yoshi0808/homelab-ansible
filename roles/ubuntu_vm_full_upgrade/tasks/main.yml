@@ -67,6 +67,16 @@
 
 - name: Common processing (healthcheck, simulation, classification)
   when: ubuntu_vm_full_upgrade_participates
+  # check_mode: false here is NOT for the "Send per-node report notification"
+  # task nested inside this block (R5 review, docs/ai/reviews/
+  # check_mode_semantics/2026-07-31_001_requirement.md) — it exists so the
+  # read-only healthcheck/apt-simulate/classify pipeline (see Phase 1-8
+  # comment above) always runs for real under --check, matching
+  # proxmox_patch_dryrun's semi-safe precedent. The nested notify.yml
+  # include no longer needs this block's check_mode: false to behave
+  # correctly: notify.yml decides for itself via ansible_check_mode (R3) and
+  # will show debug output instead of sending, regardless of this block's
+  # check_mode setting.
   check_mode: false
   block:
     - name: Run node healthcheck
@@ -299,13 +309,16 @@
 
 - name: Send check-mode "would apply" notification (destructive steps skipped under --check)
   when: ubuntu_vm_full_upgrade_is_apply_target and ansible_check_mode
-  check_mode: false
+  # check_mode: false was removed here 2026-07-31 (R5, see
+  # docs/ai/reviews/check_mode_semantics/2026-07-31_001_requirement.md): it
+  # existed only to force this notify.yml include to send for real under
+  # --check (this whole block only ever runs when ansible_check_mode is
+  # true). notify.yml itself now refuses to send whenever ansible_check_mode
+  # is true (R3) and shows the full text via debug instead, so this "would
+  # apply" notice degrades to a debug-only report — it no longer reaches
+  # Slack. This matches the requirement's Goal 3 (check mode never sends,
+  # regardless of classification).
   block:
-    # include_tasks (dynamic include) cannot take check_mode: directly
-    # ("'check_mode' is not a valid attribute for a TaskInclude") — wrapping
-    # in a block and setting check_mode: false at the block level is the
-    # documented workaround (docs/ai/policies/ansible_test_safety_policy.md TS-013) and cascades to the included
-    # tasks.
     # Channel patches (2026-07-12_019 §実施2): this is the --check stand-in
     # for the apply summary, i.e. a normal patch-cycle report.
     - name: Send notification

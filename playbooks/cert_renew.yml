@@ -17,6 +17,12 @@
 # (制御平面そのもの)は cert_renew_quory.yml 側で扱っており、そちらは
 # ansible_check_mode でゲートする(check-mode-native)。詳細は
 # docs/ai/policies/ansible_test_safety_policy.md。
+#
+# check_mode: false のR5再点検(2026-07-31、
+# docs/ai/reviews/check_mode_semantics/2026-07-31_001_requirement.md):
+# prepare_ca/issue/deploy_*/cleanupに付いた check_mode: false は上記の
+# 「常に本実行する」設計そのものであり、notifyをcheck modeで実走させる目的
+# ではない(除去対象は末尾のnotifyブロックのみだった)。
 
 - name: cert_renew - verify execution host
   hosts: localhost
@@ -46,8 +52,24 @@
   gather_facts: false
   become: true
   connection: local
-  vars:
-    skip_notifications: "{{ ansible_check_mode }}"
+  # skip_notifications: "{{ ansible_check_mode }}" removed from vars here
+  # 2026-07-31 (R2, docs/ai/reviews/check_mode_semantics/
+  # 2026-07-31_001_requirement.md) — R1 below now refuses --check outright,
+  # so this line's only effect (skip_notifications=true under --check) never
+  # had a chance to run.
+  pre_tasks:
+    - name: "[migration] --check has no dry-run here — refuse and stop before any changes"
+      ansible.builtin.assert:
+        that: not (ansible_check_mode | bool)
+        fail_msg: >-
+          This playbook (tester-gate: risk-accepted) has no --check dry-run:
+          every task always applies for real, so --check would look like a
+          simulation while actually making the change (see
+          docs/ai/memory/incidents/2026-07-31_subagent-unintended-deploy-risk-accepted-check.md).
+          Re-run without --check to apply for real. To suppress Slack
+          notifications during that real run, add -e skip_notifications=true.
+          See docs/ai/reviews/check_mode_semantics/2026-07-31_001_requirement.md.
+        quiet: true
   tasks:
     - name: Run prepare_ca tasks
       ansible.builtin.import_role:
@@ -61,7 +83,21 @@
   become: true
   vars:
     cert_renew_ca_host: localhost
-    skip_notifications: "{{ ansible_check_mode }}"
+    # skip_notifications: "{{ ansible_check_mode }}" removed 2026-07-31 (R2,
+    # see the prepare-CA play above for the reason).
+  pre_tasks:
+    - name: "[migration] --check has no dry-run here — refuse and stop before any changes"
+      ansible.builtin.assert:
+        that: not (ansible_check_mode | bool)
+        fail_msg: >-
+          This playbook (tester-gate: risk-accepted) has no --check dry-run:
+          every task always applies for real, so --check would look like a
+          simulation while actually making the change (see
+          docs/ai/memory/incidents/2026-07-31_subagent-unintended-deploy-risk-accepted-check.md).
+          Re-run without --check to apply for real. To suppress Slack
+          notifications during that real run, add -e skip_notifications=true.
+          See docs/ai/reviews/check_mode_semantics/2026-07-31_001_requirement.md.
+        quiet: true
   tasks:
     - name: Run issue tasks
       ansible.builtin.import_role:
@@ -82,7 +118,21 @@
   serial: 1
   vars:
     cert_renew_ca_host: localhost
-    skip_notifications: "{{ ansible_check_mode }}"
+    # skip_notifications: "{{ ansible_check_mode }}" removed 2026-07-31 (R2,
+    # see the prepare-CA play above for the reason).
+  pre_tasks:
+    - name: "[migration] --check has no dry-run here — refuse and stop before any changes"
+      ansible.builtin.assert:
+        that: not (ansible_check_mode | bool)
+        fail_msg: >-
+          This playbook (tester-gate: risk-accepted) has no --check dry-run:
+          every task always applies for real, so --check would look like a
+          simulation while actually making the change (see
+          docs/ai/memory/incidents/2026-07-31_subagent-unintended-deploy-risk-accepted-check.md).
+          Re-run without --check to apply for real. To suppress Slack
+          notifications during that real run, add -e skip_notifications=true.
+          See docs/ai/reviews/check_mode_semantics/2026-07-31_001_requirement.md.
+        quiet: true
   tasks:
     - name: Run issue tasks
       ansible.builtin.import_role:
@@ -102,7 +152,21 @@
   become: true
   vars:
     cert_renew_ca_host: localhost
-    skip_notifications: "{{ ansible_check_mode }}"
+    # skip_notifications: "{{ ansible_check_mode }}" removed 2026-07-31 (R2,
+    # see the prepare-CA play above for the reason).
+  pre_tasks:
+    - name: "[migration] --check has no dry-run here — refuse and stop before any changes"
+      ansible.builtin.assert:
+        that: not (ansible_check_mode | bool)
+        fail_msg: >-
+          This playbook (tester-gate: risk-accepted) has no --check dry-run:
+          every task always applies for real, so --check would look like a
+          simulation while actually making the change (see
+          docs/ai/memory/incidents/2026-07-31_subagent-unintended-deploy-risk-accepted-check.md).
+          Re-run without --check to apply for real. To suppress Slack
+          notifications during that real run, add -e skip_notifications=true.
+          See docs/ai/reviews/check_mode_semantics/2026-07-31_001_requirement.md.
+        quiet: true
   tasks:
     - name: Run issue tasks
       ansible.builtin.import_role:
@@ -134,7 +198,21 @@
   become: false
   vars:
     cert_renew_ca_host: localhost
-    skip_notifications: "{{ ansible_check_mode }}"
+    # skip_notifications: "{{ ansible_check_mode }}" removed 2026-07-31 (R2,
+    # see the prepare-CA play above for the reason).
+  pre_tasks:
+    - name: "[migration] --check has no dry-run here — refuse and stop before any changes"
+      ansible.builtin.assert:
+        that: not (ansible_check_mode | bool)
+        fail_msg: >-
+          This playbook (tester-gate: risk-accepted) has no --check dry-run:
+          every task always applies for real, so --check would look like a
+          simulation while actually making the change (see
+          docs/ai/memory/incidents/2026-07-31_subagent-unintended-deploy-risk-accepted-check.md).
+          Re-run without --check to apply for real. To suppress Slack
+          notifications during that real run, add -e skip_notifications=true.
+          See docs/ai/reviews/check_mode_semantics/2026-07-31_001_requirement.md.
+        quiet: true
   tasks:
     - name: Run cleanup tasks
       ansible.builtin.import_role:
@@ -176,7 +254,18 @@
           {% endif %}
 
     - name: Send Slack notification
-      check_mode: false
+      # check_mode: false was removed here 2026-07-31 (R5, see
+      # docs/ai/reviews/check_mode_semantics/2026-07-31_001_requirement.md):
+      # it existed only to force this notify.yml include to run for real
+      # under --check. notify.yml itself now refuses to send whenever
+      # ansible_check_mode is true (R3) and shows the full text via debug
+      # instead, so forcing this block to execute for real no longer changes
+      # anything. Note: this play is independent of the R1 guards added to
+      # every earlier play in this file (a host that failed a pre_tasks
+      # assert in one play still runs in later plays by default), so this
+      # notify play still executes under --check exactly as before — it is
+      # notify.yml's own R3 check, not this playbook's R1 guard, that stops
+      # a real Slack send here.
       block:
         - name: Include common_slack notify tasks
           ansible.builtin.include_tasks: "{{ playbook_dir }}/../roles/common_slack/tasks/notify.yml"

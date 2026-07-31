@@ -9,6 +9,14 @@
 # 経由で読み、fact が無ければ(play1が一度も走らなかった/quoryが到達不能だった)
 # 到達不能として扱う — 特定のbool変数の有無ではなく「facts一式が存在するか」を
 # 見る(査読F-2、I-7)。
+#
+# check_mode: false のR5再点検(2026-07-31、docs/ai/reviews/check_mode_semantics/
+# 2026-07-31_001_requirement.md): このファイル内のほぼ全task(set_fact/file/
+# copy/find/command)が check_mode: false を持つのは、I-2「成否によらず必ず
+# last-sync.jsonを書く」を --check 下でも守るためであり、notifyをcheck mode
+# で実走させる目的ではない。末尾の「Notify Slack」2taskはこのファイル内で
+# check_mode: false を持たない唯一のtaskで、`not ansible_check_mode` を
+# whenに含めており、意図的にこの一括方針から外している。
 
 - name: Record finalize timestamp (JST)
   ansible.builtin.set_fact:

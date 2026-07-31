@@ -49,6 +49,11 @@
   vars:
     skip_notifications: "{{ ansible_check_mode }}"
   tasks:
+    # check_mode: false below is this playbook's core check-mode-native
+    # design (see header): prepare_ca/issue/cleanup always run for real
+    # regardless of --check; only deploy_semaphore (further down) is gated
+    # by ansible_check_mode. Not notify-related (R5 review,
+    # docs/ai/reviews/check_mode_semantics/2026-07-31_001_requirement.md).
     - name: Run prepare_ca tasks
       ansible.builtin.import_role:
         name: homelab_cert_renew
@@ -126,7 +131,15 @@
           {% endif %}
 
     - name: Send Slack notification
-      check_mode: false
+      # check_mode: false was removed here 2026-07-31 (R5, see
+      # docs/ai/reviews/check_mode_semantics/2026-07-31_001_requirement.md):
+      # it existed only to force this notify.yml include to run for real
+      # under --check. notify.yml itself now refuses to send whenever
+      # ansible_check_mode is true (R3) and shows the full text via debug
+      # instead, so forcing this block to execute for real no longer changes
+      # anything. This play still runs under --check regardless (it targets
+      # localhost, independent of the earlier quory plays' outcome); it is
+      # notify.yml's own R3 check that now stops a real Slack send here.
       block:
         - name: Include common_slack notify tasks
           ansible.builtin.include_tasks: "{{ playbook_dir }}/../roles/common_slack/tasks/notify.yml"

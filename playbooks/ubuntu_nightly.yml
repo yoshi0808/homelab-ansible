@@ -34,6 +34,11 @@
         path: /usr/sbin/needrestart
       register: needrestart_bin
 
+    # check_mode: false below is unrelated to notify (R5 review,
+    # docs/ai/reviews/check_mode_semantics/2026-07-31_001_requirement.md):
+    # `command` has no native check_mode support and would auto-skip under
+    # --check, but reboot-required detection must run for real under --check
+    # per this playbook's tester-gate classification (header above).
     - name: Run needrestart in batch mode
       ansible.builtin.command:
         cmd: /usr/sbin/needrestart -b
@@ -92,6 +97,12 @@
           result: "CHECK_MODE_WOULD_REBOOT"
       when: ansible_check_mode
 
+    # check_mode: false below is for the local report file (`copy`), not for
+    # the "Send check-mode notification" task right after it — that task has
+    # no check_mode setting of its own and is unaffected by this one. Kept
+    # so the CHECK_MODE_WOULD_REBOOT report is actually written under
+    # --check (R5 review, docs/ai/reviews/check_mode_semantics/
+    # 2026-07-31_001_requirement.md).
     - name: Save check-mode report
       ansible.builtin.copy:
         content: "{{ nightly_report | to_nice_json }}"
@@ -319,6 +330,11 @@
         path: /usr/sbin/needrestart
       register: needrestart_bin
 
+    # check_mode: false below is unrelated to notify (R5 review,
+    # docs/ai/reviews/check_mode_semantics/2026-07-31_001_requirement.md):
+    # `command` has no native check_mode support and would auto-skip under
+    # --check, but reboot-required detection must run for real under --check
+    # per this playbook's tester-gate classification (header above).
     - name: Run needrestart in batch mode
       ansible.builtin.command:
         cmd: /usr/sbin/needrestart -b
@@ -377,6 +393,12 @@
           result: "CHECK_MODE_WOULD_REBOOT"
       when: ansible_check_mode
 
+    # check_mode: false below is for the local report file (`copy`), not for
+    # the "Send check-mode notification" task right after it — that task has
+    # no check_mode setting of its own and is unaffected by this one. Kept
+    # so the CHECK_MODE_WOULD_REBOOT report is actually written under
+    # --check (R5 review, docs/ai/reviews/check_mode_semantics/
+    # 2026-07-31_001_requirement.md).
     - name: Save check-mode report
       ansible.builtin.copy:
         content: "{{ nightly_report | to_nice_json }}"

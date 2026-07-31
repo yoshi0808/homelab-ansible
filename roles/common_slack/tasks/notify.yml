@@ -4,6 +4,17 @@
 #   slack_status:  ok / warning / critical / error / info
 #   slack_title:   Notification title
 #   slack_message: Notification body
+#
+# 2026-07-31 (R3, docs/ai/reviews/check_mode_semantics/
+# 2026-07-31_001_requirement.md): ansible_check_mode is now a third,
+# unconditional suppression trigger alongside tester_mode/skip_notifications.
+# Whenever --check is in effect, this file never sends to Slack — it shows
+# the full text via the debug task below instead — regardless of playbook
+# classification (check-mode-native or risk-accepted) and regardless of
+# whether the caller wraps this include in check_mode: false. This closes
+# the gap where a caller's check_mode: false on the surrounding block used
+# to force a real send under --check; that decision now belongs to this
+# file alone.
 
 - name: Capture notification evidence (best-effort, never fails the play)
   block:
@@ -17,17 +28,23 @@
 - name: "[tester_mode] Show notification instead of sending"
   ansible.builtin.debug:
     msg:
-      - "[tester_mode] 通知スキップ（tester_mode/skip_notifications=true）"
+      - "[tester_mode] 通知スキップ（tester_mode/skip_notifications/ansible_check_modeのいずれかがtrue）"
       - "channel : {{ slack_channel }}"
       - "status  : {{ slack_status }}"
       - "title   : {{ slack_title }}"
       - "message : {{ slack_message }}"
   delegate_to: localhost
   become: false
-  when: tester_mode | default(false) | bool or skip_notifications | default(false) | bool
+  when: >-
+    tester_mode | default(false) | bool
+    or skip_notifications | default(false) | bool
+    or ansible_check_mode | bool
 
 - name: Send Slack notification (best-effort)
-  when: not (tester_mode | default(false) | bool or skip_notifications | default(false) | bool)
+  when: >-
+    not (tester_mode | default(false) | bool
+         or skip_notifications | default(false) | bool
+         or ansible_check_mode | bool)
   block:
     - name: Load Slack variables
       ansible.builtin.include_vars:

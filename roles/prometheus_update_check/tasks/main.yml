@@ -1,7 +1,18 @@
 ---
 # prometheus_update_check always collects current/latest versions. dry_run is
 # the primary mode selector; ansible_check_mode remains a second destructive
-# gate. Slack remains an explicit check-mode notification exception.
+# gate.
+#
+# 2026-07-31 retraction (R4, docs/ai/reviews/check_mode_semantics/
+# 2026-07-31_001_requirement.md): "Slack is an explicit check-mode
+# notification exception" is no longer this role's design. That exception
+# was implemented by wrapping the notify.yml include in a check_mode: false
+# block (Phase 4, below); the block has been removed. notify.yml itself now
+# refuses to send whenever ansible_check_mode is true (R3) and shows the
+# full text via debug instead, for every caller uniformly — this role no
+# longer opts out of that. The original design record is
+# docs/ai/reviews/prometheus_update_check/2026-07-19_015_implement.md; that
+# record is now superseded on this one point.
 
 - name: Require an explicit Prometheus dry-run mode
   ansible.builtin.assert:
@@ -48,6 +59,11 @@
 # ---------------------------------------------------------------------------
 # Phase 1: collect the currently installed version
 # ---------------------------------------------------------------------------
+# check_mode: false below is unrelated to notify (R5 review,
+# docs/ai/reviews/check_mode_semantics/2026-07-31_001_requirement.md):
+# `command` has no native check_mode support and would auto-skip under
+# --check, but this read-only version read must run for real so Status
+# classification below is accurate under --check too.
 - name: Collect installed Prometheus version
   ansible.builtin.command:
     argv:
@@ -68,6 +84,8 @@
 # ---------------------------------------------------------------------------
 # Phase 2: collect the latest stable GitHub release
 # ---------------------------------------------------------------------------
+# check_mode: false below is unrelated to notify, same reason as the
+# version read above: `uri` would auto-skip under --check without it.
 - name: Collect latest stable Prometheus release
   ansible.builtin.uri:
     url: "{{ prometheus_update_check_api_url }}"
@@ -208,12 +226,17 @@
       error: "{{ prometheus_update_check_error | default('') }}"
 
 # ---------------------------------------------------------------------------
-# Phase 4: Slack is the intentional check-mode exception. A block is used
-# because include_tasks cannot receive check_mode directly; check_mode:false
-# cascades into common_slack while skip_notifications remains effective.
+# Phase 4: notification. 2026-07-31 retraction (R4/R5, see header and
+# docs/ai/reviews/check_mode_semantics/2026-07-31_001_requirement.md): this
+# block previously carried check_mode: false specifically to force the
+# notify.yml include to send for real under --check ("Slack is the
+# intentional check-mode exception"). That check_mode: false has been
+# removed — it existed only for that purpose, nothing else in this block
+# needs real execution. notify.yml now decides uniformly via
+# ansible_check_mode (R3): it shows the full text via debug under --check
+# instead of sending.
 # ---------------------------------------------------------------------------
 - name: Send Prometheus update operation notification
-  check_mode: false
   when: prometheus_update_check_status in [
           'update_available', 'collection_failed', 'upgraded', 'upgrade_failed',
           'rollback_available', 'rolled_back', 'rollback_failed',

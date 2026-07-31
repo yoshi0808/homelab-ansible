@@ -27,7 +27,7 @@ playbookごとに「`--check`の有無で挙動がどう変わるか」「本実
 |---|---|
 | `safe-readonly` | 完全read-only(収集・観測のみ)。ゲート不要、常に本実行してよい |
 | `role-guarded` | 副作用がSlack通知のみで、`roles/common_slack/tasks/notify.yml`の抑止guardで止まる |
-| `risk-accepted` | 破壊性はあるが、§4の2条件を満たすため常に本実行してよいと人間が判断したもの。`--check`の有無で挙動は変わらない |
+| `risk-accepted` | 破壊性はあるが、§4の2条件を満たすため常に本実行してよいと人間が判断したもの。**dry-runを持たず、`--check`を渡された場合は適用せずに停止する**(TS-030) |
 | `check-mode-native` | read-onlyな診断・検証部分は`--check`でも常に本実行し、実際の破壊的操作(またはそれに依存する後続処理)だけを`ansible_check_mode`でゲートする |
 | `dry-run-aware` | 破壊的コマンド自体を、`ansible_check_mode`下でネイティブのdry-run引数に差し替えて実行する(スキップではなく安全な引数での実行) |
 
@@ -81,6 +81,12 @@ tasks:
     check_mode: false
 ```
 
+<!-- TS-030 -->
+`risk-accepted`は`--check`を安全な実行手段として提供しない。**実際に変更を行う各playの`pre_tasks`に、`ansible_check_mode`が真なら停止するassertを置く。** `check_mode: false`は「`--check`を無視して適用する」意味であり、停止条件が無ければdry-runのつもりの実行がそのまま本番適用になる(2026-07-31 Incident: subagentが`--check`付きで実配備した)。**停止の有無はplay単位で確認する** — 複数playを持つplaybookでは、変更を行うplayすべてに要る。
+
+<!-- TS-032 -->
+`risk-accepted`のplaybookをcheck-mode-safeにした場合は、**分類そのものを`check-mode-native`へ変え**、TS-030の停止assertと`check_mode: false`を外す。「`risk-accepted`のまま`--check`でも安全」という第3の状態を作らない。`--check`が何を意味するかはヘッダのマーカーが単独で決める。
+
 ### check-mode-native: 破壊的操作だけゲート
 
 <!-- TS-014 -->
@@ -102,12 +108,15 @@ read-onlyな診断taskには`check_mode: false`、破壊的task(またはそれ�
 <!-- TS-018 -->
 2値分岐(`ok` / `error`等)の通知・レポートには、plan-only / check-modeの分岐を必ず含める。これを忘れると、dry-runの成功が`error`(最悪`critical`)として誤通知される。`--check`実行時は結果分岐にもcheck_modeを考慮する。
 
+<!-- TS-031 -->
+`ansible_check_mode`が真のとき、`roles/common_slack/tasks/notify.yml`はSlackへ送信せず通知本文を出力に示す。**この判定はnotify.yml側だけが持ち、呼び出し側が`check_mode: false`で覆さない。** 分類によらず一貫させ、check mode下で送信する例外を作らない — 例外を1つ作れば、それが唯一の抜け道になる(TS-029と同じ理由)。抑止を明示したい場合の`skip_notifications`は従来どおり有効で、`--check`を付けずに本適用しつつ通知だけ止める手段はこちらである。
+
 ## 7. 制約・禁止事項
 
 ### 機械チェック
 
 <!-- TS-019 -->
-「全playbookが5分類のいずれかに分類されている」ことは規約ではなくlintで保証する。`scripts/check-tester-gate.sh`が`playbooks/`配下の全playbookを検査し、`scripts/git-pre-commit-check.sh`から自動実行される。
+「全playbookが5分類のいずれかに分類されている」ことと、「`risk-accepted`が停止assertを持つ」(TS-030)ことは規約ではなくlintで保証する。`scripts/check-tester-gate.sh`が`playbooks/`配下の全playbookを検査し、`scripts/git-pre-commit-check.sh`から自動実行される。**後者はassertの存在を見る床であり、TS-030が求めるplay単位の充足までは機械判定できない**(どのplayが変更を行うかをスクリプトから判定できないため)。play単位の充足はレビュー工程が見る。
 
 <!-- TS-020 -->
 マーカーを持たない新規playbookはcommitできない。この機械的停止条件を無効化・迂回しない。
@@ -118,13 +127,13 @@ read-onlyな診断taskには`check_mode: false`、破壊的task(またはそれ�
 実行者は渡されたコマンドをそのまま実行せず、対象playbookのヘッダマーカーを必ず確認する。
 
 <!-- TS-022 -->
-マーカーが`safe-readonly` / `role-guarded` / `risk-accepted`の場合は通常実行でよい(`--check`は不要。付けても`risk-accepted`は挙動が変わらない)。
+マーカーが`safe-readonly` / `role-guarded` / `risk-accepted`の場合は通常実行でよい(`--check`は不要)。**`risk-accepted`に`--check`を付けてはならない** — dry-runにはならず、playbook自身が停止する(TS-030)。
 
 <!-- TS-023 -->
 マーカーが`check-mode-native` / `dry-run-aware`の場合は**必ず`--check`を付ける**(`--check --diff`を重ねてもよい)。`--check`なしの実行はAPPLY(本番適用)であり、Tester役は行わない。
 
 <!-- TS-024 -->
-`check-mode-native` / `dry-run-aware`の検証実行には`scripts/safe-ansible-check.sh <playbook> ... --check`を使う。このwrapperはargvに`--check`が含まれない場合は即終了し、含まれる場合のみ`ansible-playbook "$@"`へ委譲するため、`--check`の付け忘れを機械的に防ぐ。`risk-accepted`は常時本実行が前提でありwrapperの対象外である。
+`check-mode-native` / `dry-run-aware`の検証実行には`scripts/safe-ansible-check.sh <playbook> ... --check`を使う。このwrapperはargvに`--check`が含まれない場合は即終了し、含まれる場合のみ`ansible-playbook "$@"`へ委譲するため、`--check`の付け忘れを機械的に防ぐ。`risk-accepted`はdry-runを持たないためwrapperの対象外である(`--check`を渡すとplaybook自身が停止する。TS-030)。
 
 <!-- TS-025 -->
 wrapperは付け忘れ防止の補助であり、安全性の最終判断はplaybook headerのマーカーと承認済みtest_planに基づいて行う。wrapperを通したことを安全の根拠にしない。
@@ -146,3 +155,4 @@ wrapperは付け忘れ防止の補助であり、安全性の最終判断はplay
 |---|---|
 | 2026-07-06〜07 | `tester_mode` / `tester_gate` roleを廃止し、`--check`(`ansible_check_mode`)ベースの5分類へ移行。旧`docs/ai/prompts/core.md` §18として記述 |
 | 2026-07-26 | 旧core §18からPolicyへ移設し正本化(移行表C18-01/02/05/09/11/12/14)。実装上の落とし穴(C18-03/04/06/07/08/10)は`skills/ansible-implementation-style/SKILL.md`へ分離。C18-13(Codex承認prefix由来のwrapper運用)は、Codexが開発工程から外れたためprefix依存の記述を落とし、`--check`付け忘れ防止という本来の効能のみTS-024として保持 |
+| 2026-07-31 | `--check`の意味を一本化。`risk-accepted`は`--check`で**停止**する(TS-030新設)、check mode下でSlackへ送らない判定を`notify.yml`に集約(TS-031新設)、check-mode-safe化したら分類を`check-mode-native`へ変える昇格経路を明文化(TS-032新設)。TS-005 / TS-022 / TS-024の「`--check`を付けても挙動が変わらない」という記述を実態へ改訂。案件記録: `docs/ai/reviews/check_mode_semantics/` |

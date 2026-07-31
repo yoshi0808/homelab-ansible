@@ -50,6 +50,13 @@
     proxmox_patch_weekly_full_allowed_controllers:
       - quory
   tasks:
+    # check_mode: false here is unrelated to notify (R5 review,
+    # docs/ai/reviews/check_mode_semantics/2026-07-31_001_requirement.md):
+    # `command` has no native check_mode support and would auto-skip under
+    # --check, but this read-only preflight query must run for real so the
+    # controller-identity abort checks below have data to evaluate under
+    # --check too (this playbook's tester-gate classification depends on
+    # preflight/healthcheck/dry-run staying real regardless of --check).
     - name: Get cluster resources
       ansible.builtin.command:
         cmd: pvesh get /cluster/resources --output-format json
@@ -365,7 +372,15 @@
       when: _weekly_full_skip | default(false)
 
     - name: Send Slack notification
-      check_mode: false
+      # check_mode: false was removed here 2026-07-31 (R5, see
+      # docs/ai/reviews/check_mode_semantics/2026-07-31_001_requirement.md):
+      # it existed only to force this notify.yml include (including the
+      # dedicated "check-mode: weekly full patch plan-only" message below)
+      # to send for real under --check. notify.yml itself now refuses to
+      # send whenever ansible_check_mode is true (R3) and shows the full
+      # text via debug instead — the check-mode-flavored title/message
+      # below are still built and still shown via that debug output, they
+      # just no longer reach Slack.
       block:
         - name: Include common_slack notify tasks
           ansible.builtin.include_tasks: "{{ playbook_dir }}/../roles/common_slack/tasks/notify.yml"

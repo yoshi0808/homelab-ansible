@@ -40,9 +40,24 @@
   hosts: dev_nodes:control_nodes
   gather_facts: true
   become: true
-  vars:
-    skip_notifications: "{{ ansible_check_mode }}"
+  # vars: { skip_notifications: "{{ ansible_check_mode }}" } removed
+  # 2026-07-31 (R2, docs/ai/reviews/check_mode_semantics/
+  # 2026-07-31_001_requirement.md) — R1 below now refuses --check outright,
+  # so this line's only effect (skip_notifications=true under --check) never
+  # had a chance to run.
   pre_tasks:
+    - name: "[migration] --check has no dry-run here — refuse and stop before any changes"
+      ansible.builtin.assert:
+        that: not (ansible_check_mode | bool)
+        fail_msg: >-
+          This playbook (tester-gate: risk-accepted) has no --check dry-run:
+          every task always applies for real, so --check would look like a
+          simulation while actually making the change (see
+          docs/ai/memory/incidents/2026-07-31_subagent-unintended-deploy-risk-accepted-check.md).
+          Re-run without --check to apply for real.
+          See docs/ai/reviews/check_mode_semantics/2026-07-31_001_requirement.md.
+        quiet: true
+
     - name: "[migration] tester_mode is deprecated for this playbook — it always runs for real"
       ansible.builtin.assert:
         that: not (tester_mode | default(false) | bool)
