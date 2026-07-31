@@ -125,3 +125,60 @@ incident_investigate_timeout_start_sec: 420
 # true にすると systemd timer を enable + start する(本番quory)。
 # recovery_probe_service_enabled 等と同じ流儀 — ansyでは配置のみで起動しない。
 incident_investigate_service_enabled: false
+
+# ---------------------------------------------------------------------------
+# N5/N7/N8/N9(2026-08-01): 成果物を書いた直後の quory→ansy 即時同期起動。
+# 設計の正本: docs/ai/reviews/incident_investigation_notify/
+# 2026-08-01_001_requirement.md。IC-013(quoryにansyへの書込権を与えない)を
+# 保つため、書込ではなく「固定の1アクション(ansible-incident-sync.service
+# の起動)だけを行う、引数を取らないSSH forced command」を使う
+# (roles/recovery_exec/templates/authorized_keys.j2 のforced command実例と
+# 同型)。
+#
+# 鍵は yoshi 自身のホームディレクトリに生成する(roles/incident_investigate/
+# tasks/sync_trigger.yml)。recovery-exec は別UID・別グループであり、
+# /home/yoshi 配下への到達には明示的なACL付与が要る(recovery_exec/
+# incident_inspect の両方が既にそのACLを持つが、いずれも `/home/yoshi` への
+# traverse(x)のみで `.ssh` の中までは辿れない)。したがって0600
+# owner=yoshi という通常のパーミッションだけで、recovery-execからは読めない
+# (AC9)。ACLを新規に追加しない/既存ACLの範囲を広げないことが、この鍵を
+# 守る唯一の根拠であるため、将来 /home/yoshi 配下のACLを変更する場合は
+# この前提を崩していないか確認すること。
+incident_investigate_sync_trigger_key: /home/yoshi/.ssh/id_incident_sync_trigger
+incident_investigate_sync_trigger_known_hosts: /home/yoshi/.ssh/known_hosts_incident_sync_trigger
+incident_investigate_sync_trigger_ssh_bin: /usr/bin/ssh
+
+# 接続先(ansy)。IPアドレスではなくDNS名(inventories/homelab/hosts.ymlの
+# ansible_hostと同じ値)。
+incident_investigate_sync_trigger_host: ansy.internal
+
+# ansy側の受け口ユーザー名。roles/incident_sync/defaults/main.yml の
+# incident_sync_trigger_user と**文字どおり一致していなければならない**
+# (incident_investigate_inspect_user と同型の結合値 — 片方だけ変更すると
+# SSH接続がUnknown userで失敗し、AC7が期待する「失敗してもjournalに残るだけ」
+# の形で表面化する。復旧アクションへの到達可能性は生じない)。
+incident_investigate_sync_trigger_remote_user: incident-sync-trigger
+
+incident_investigate_sync_trigger_connect_timeout_s: 10
+# SSH接続+forced command(systemctl start --no-block、即座に返る)の
+# 全体に対する上限。incident_investigate_timeout_start_sec(420)に対して
+# 十分小さい。
+incident_investigate_sync_trigger_timeout_s: 20
+
+# ---------------------------------------------------------------------------
+# N1〜N3・N7・N11: 一次調査完了後のSlack通知(#alerts、プレーンテキスト)。
+# playbooks/incident_investigate_notify.yml を
+# `ansible-playbook <playbook> -e @<file>` の形で起動する
+# (roles/recovery_probe/files/recovery-probe.py の run_playbook と同じ流儀)。
+# ---------------------------------------------------------------------------
+incident_investigate_ansible_playbook_bin: /usr/bin/ansible-playbook
+incident_investigate_notify_playbook: incident_investigate_notify.yml
+incident_investigate_notify_timeout_s: 30
+
+# N11: 通知本文に載せるレポートパスは、quoryのローカル絶対パス
+# (incident_investigate_artifact_dir)ではなく、ansy側の同期先ミラーの
+# 相対パスにする。接尾辞 "/incidents/quory" は
+# roles/incident_sync/defaults/main.yml の incident_sync_mirror_dir が使う
+# ものと**同じ値**であること(transfer.ymlのコメントにある「変更する場合は
+# 両方揃えること」という既存の注意と同じ結合)。
+incident_investigate_ansy_report_path_prefix: reports/incidents/quory/_investigations

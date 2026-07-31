@@ -152,3 +152,36 @@ incident_sync_outer_lock_path: /run/lock/ansible-knowledge-review.lock
 # 余裕が無いため、roles/incident_capture の TimeoutStartSec=180(同種の余裕
 # 確保)より広めに300秒とした。計画I-5はこの値を固定していない実装判断。
 incident_sync_timeout_start_sec: 300
+
+# ---------------------------------------------------------------------------
+# trigger配置用(tasks/install_trigger.yml が使う。
+# playbooks/incident_sync_trigger_setup.yml から起動される。2026-08-01、
+# N5/N8/N9: docs/ai/reviews/incident_investigation_notify/
+# 2026-08-01_001_requirement.md)
+#
+# quory側(incident-investigate.py)が「ansible-incident-sync.serviceを
+# 定刻でないタイミングで起動する」ためだけに使う専用のSSH受け口。この
+# ユーザーが持つ能力は authorized_keys の forced command 1本と、それが
+# 実行する sudoers の1コマンドだけ(N8: 他のことができない)。IC-013
+# (quoryにansyへの書込権を与えない)は、この受け口が「ファイルを一切
+# 書かず、既存unitの起動だけを行う」ことで保たれる — 実転送は従来どおり
+# ansy起点のpull(tasks/transfer.yml)のまま変わらない。
+# ---------------------------------------------------------------------------
+
+incident_sync_trigger_user: incident-sync-trigger
+incident_sync_trigger_home: "/home/{{ incident_sync_trigger_user }}"
+
+# quory側(roles/incident_investigate/defaults/main.ymlの
+# incident_investigate_sync_trigger_remote_user)と**文字どおり一致して
+# いなければならない** — incident_investigate_inspect_user と同型の結合値。
+# 片方だけ変更すると、SSH接続はUnknown user扱いで失敗し
+# (AC7が期待するとおりjournalにだけ残る失敗になる。復旧アクションへの
+# 到達可能性は生じない)、成功はしない。
+
+# forced commandが呼ぶ、引数を一切取らない固定スクリプト(N8)。
+incident_sync_trigger_wrapper_path: /usr/local/bin/incident-sync-trigger
+
+# このユーザーが sudoers 経由で起動できる唯一のunit。ansible-incident-sync.
+# service/timer自体のExecStart/OnCalendarは変更しない(Coordinator指示) —
+# ここはあくまで「既存unitを起動するという1アクション」を許可するだけの値。
+incident_sync_trigger_unit: ansible-incident-sync.service

@@ -1,0 +1,93 @@
+---
+# incident_investigate: quory→ansy 即時同期起動(N5/N8/N9)のための
+# SSH鍵生成 + known_hosts の準備。
+#
+# main.yml から import_tasks され、通常のU2配備(incident_investigate_setup.yml)
+# の一部として毎回実行される。playbooks/incident_sync_trigger_setup.yml の
+# play1(hosts: quory)からも import_role: tasks_from: sync_trigger の形で
+# 単独importされる — このファイル自身が role defaults を可視化させるため
+# (roles/incident_sync/tasks/transfer.yml のコメントにある「role defaultは
+# そのroleがそのホストに一度importされて初めてhostvarsへmergeされる」制約を
+# 避ける目的。この2箇所の呼び出しは同じタスク列を指しており、内容の重複は
+# 無い)。
+#
+# ssh-keygenはAnsibleが `ann`(control_nodes.ymlのansible_user)として接続
+# する前提のため become: true(root)で書き込み、直後にowner/modeをyoshiへ
+# 明示的に付け直す(roles/recovery_exec/tasks/main.ymlの同型タスクと同じ
+# 「rootで生成→chownで絞る」の2段構成)。
+
+- name: Ensure yoshi's .ssh directory exists (idempotent; does not touch existing contents)
+  ansible.builtin.file:
+    path: "{{ incident_investigate_sync_trigger_key | dirname }}"
+    state: directory
+    owner: "{{ incident_investigate_run_user }}"
+    group: "{{ incident_investigate_run_user }}"
+    mode: "0700"
+  become: true
+  when: not ansible_check_mode
+  tags: [destructive]
+
+- name: Generate sync-trigger SSH key (idempotent via creates:)
+  ansible.builtin.command:
+    cmd: >-
+      ssh-keygen -t ed25519 -N ''
+      -C "incident-sync-trigger"
+      -f {{ incident_investigate_sync_trigger_key }}
+    creates: "{{ incident_investigate_sync_trigger_key }}"
+  become: true
+  when: not ansible_check_mode
+  tags: [destructive]
+
+# AC9の根拠: 秘密鍵をyoshi専有(0600)にする。.pubは既定のまま
+# (world-readableで問題ない — 公開鍵は秘密ではない)。
+- name: Lock down sync-trigger private key ownership/mode (yoshi-only — AC9)
+  ansible.builtin.file:
+    path: "{{ incident_investigate_sync_trigger_key }}"
+    owner: "{{ incident_investigate_run_user }}"
+    group: "{{ incident_investigate_run_user }}"
+    mode: "0600"
+  become: true
+  when: not ansible_check_mode
+  tags: [destructive]
+
+- name: Set sync-trigger public key ownership
+  ansible.builtin.file:
+    path: "{{ incident_investigate_sync_trigger_key }}.pub"
+    owner: "{{ incident_investigate_run_user }}"
+    group: "{{ incident_investigate_run_user }}"
+    mode: "0644"
+  become: true
+  when: not ansible_check_mode
+  tags: [destructive]
+
+# ansyのホスト鍵を、yoshiの通常のknown_hostsではなく専用ファイルへ登録する
+# (yoshi個人のSSH設定に触れない — recovery_exec target_setup.ymlの
+# known_hostsタスクと同じ理由づけ)。incident-investigate.pyはSSH接続時に
+# `-o UserKnownHostsFile=` でこのファイルを明示的に指定する
+# (StrictHostKeyChecking=yes と組み合わせて使う)。
+#
+# 2026-08-01独立レビューS1差し戻し: 変数をshellコマンド文字列へ連結する
+# `lookup('pipe', ...)` は `| quote` でクォートする
+# (roles/incident_sync/tasks/finalize.yml:174 の既存パターンと同じ形。
+# root権限下で動くtaskのため、値が固定default値であっても習慣として
+# 徹底する — skills/ansible-security-review/SKILL.md「lookup()プラグイン
+# 経由での信頼境界超え」)。
+- name: Add ansy host key to dedicated sync-trigger known_hosts
+  ansible.builtin.known_hosts:
+    name: "{{ incident_investigate_sync_trigger_host }}"
+    key: "{{ lookup('pipe', 'ssh-keyscan -H ' + (incident_investigate_sync_trigger_host | quote)) }}"
+    path: "{{ incident_investigate_sync_trigger_known_hosts }}"
+    state: present
+  become: true
+  when: not ansible_check_mode
+  tags: [destructive]
+
+- name: Set sync-trigger known_hosts ownership
+  ansible.builtin.file:
+    path: "{{ incident_investigate_sync_trigger_known_hosts }}"
+    owner: "{{ incident_investigate_run_user }}"
+    group: "{{ incident_investigate_run_user }}"
+    mode: "0644"
+  become: true
+  when: not ansible_check_mode
+  tags: [destructive]

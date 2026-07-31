@@ -39,8 +39,8 @@ playbook の入口を置く。処理本体は原則として `roles/` に実装�
 
 | Playbook | 対象 | 用途 | `tester-gate` | 主な role / 実装 |
 | --- | --- | --- | --- | --- |
-| [`ca_trust_deploy.yml`](ca_trust_deploy.yml) | `control_nodes:dev_nodes:monitoring_servers:radius_servers:proxmox` | homelab CA証明書を管理対象ノードへ配布 | `risk-accepted` | `homelab_cert_renew` |
-| [`cert_renew.yml`](cert_renew.yml) | `localhost`, `quory`, `ansy`, `proxmox`, `monnie` | CA鍵準備、証明書発行、各サービスへの配備、後片付け | `risk-accepted` | `homelab_cert_renew` |
+| [`ca_trust_deploy.yml`](ca_trust_deploy.yml) | `control_nodes:dev_nodes:monitoring_servers:radius_servers:proxmox` | homelab CA証明書を管理対象ノードへ配布 | `check-mode-native` | `homelab_cert_renew` |
+| [`cert_renew.yml`](cert_renew.yml) | `localhost`, `quory`, `ansy`, `proxmox`, `monnie` | CA鍵準備、証明書発行、各サービスへの配備、後片付け | `check-mode-native` | `homelab_cert_renew` |
 | [`cert_renew_quory.yml`](cert_renew_quory.yml) | `localhost`, `quory` | quory向け証明書の発行・配備 | `check-mode-native` | `homelab_cert_renew` |
 | [`cloudkey_cert_deploy.yml`](cloudkey_cert_deploy.yml) | `localhost`（CloudKeyへ接続） | CloudKey向け証明書の発行・配備 | `risk-accepted` | `cloudkey_cert_deploy` |
 
@@ -62,13 +62,13 @@ playbook の入口を置く。処理本体は原則として `roles/` に実装�
 
 | Playbook | 対象 | 用途 | `tester-gate` | 主な role / 実装 |
 | --- | --- | --- | --- | --- |
-| [`recovery_exec_setup.yml`](recovery_exec_setup.yml) | `dev_nodes:control_nodes` | recovery-exec、Codex runner、SSH鍵生成経路を配備 | `risk-accepted` | `recovery_exec` |
+| [`recovery_exec_setup.yml`](recovery_exec_setup.yml) | `dev_nodes:control_nodes` | recovery-exec、Codex runner、SSH鍵生成経路を配備 | `check-mode-native` | `recovery_exec` |
 | [`recovery_ha_failover.yml`](recovery_ha_failover.yml) | `pve1` | 承認された対象のHA failover | `check-mode-native` | `recovery_ha_failover` |
-| [`recovery_io_setup.yml`](recovery_io_setup.yml) | `dev_nodes:control_nodes` | Slack I/O bridgeを配備 | `risk-accepted` | `recovery_io` |
+| [`recovery_io_setup.yml`](recovery_io_setup.yml) | `dev_nodes:control_nodes` | Slack I/O bridgeを配備 | `check-mode-native` | `recovery_io` |
 | [`recovery_probe_notify.yml`](recovery_probe_notify.yml) | `localhost` | recovery probeのSlack通知 | `role-guarded` | `common_slack` notify tasks |
-| [`recovery_probe_setup.yml`](recovery_probe_setup.yml) | `dev_nodes:control_nodes` | recovery probeとmute CLIを配備 | `risk-accepted` | `recovery_probe`, `recovery_mute` |
-| [`recovery_push_drill_setup.yml`](recovery_push_drill_setup.yml) | `quory` | recovery push drill用unitを配備 | `risk-accepted` | `recovery_push` drill tasks |
-| [`recovery_push_setup.yml`](recovery_push_setup.yml) | `quory` | recovery push triggerを配備 | `risk-accepted` | `recovery_push` |
+| [`recovery_probe_setup.yml`](recovery_probe_setup.yml) | `dev_nodes:control_nodes` | recovery probeとmute CLIを配備 | `check-mode-native` | `recovery_probe`, `recovery_mute` |
+| [`recovery_push_drill_setup.yml`](recovery_push_drill_setup.yml) | `quory` | recovery push drill用unitを配備 | `check-mode-native` | `recovery_push` drill tasks |
+| [`recovery_push_setup.yml`](recovery_push_setup.yml) | `quory` | recovery push triggerを配備 | `check-mode-native` | `recovery_push` |
 | [`recovery_service_restart.yml`](recovery_service_restart.yml) | `pve1` | 承認された対象サービスの復旧restart | `check-mode-native` | `recovery_service_restart` |
 | [`recovery_vm_reboot.yml`](recovery_vm_reboot.yml) | `pve1` | 承認された対象VMの復旧reboot | `check-mode-native` | `recovery_vm_reboot` |
 
@@ -76,9 +76,13 @@ playbook の入口を置く。処理本体は原則として `roles/` に実装�
 
 | Playbook | 対象 | 用途 | `tester-gate` | 主な role / 実装 |
 | --- | --- | --- | --- | --- |
-| [`incident_capture_setup.yml`](incident_capture_setup.yml) | `quory` | 障害証拠バンドル収集器(collector)を配備。有効化オプション時のみtimerをenable+start | `risk-accepted` | `incident_capture` |
+| [`incident_capture_setup.yml`](incident_capture_setup.yml) | `quory` | 障害証拠バンドル収集器(collector)を配備。有効化オプション時のみtimerをenable+start | `check-mode-native` | `incident_capture` |
+| [`incident_inspect_setup.yml`](incident_inspect_setup.yml) | `dev_nodes:control_nodes` | 一次調査専用ユーザー(incident-inspect)とCodex起動口(wrapper)のみを配備。検出・調査本体・成果物書き出しは持たない | `check-mode-native` | `incident_inspect` |
+| [`incident_investigate_setup.yml`](incident_investigate_setup.yml) | `quory` | 一次調査本体(バンドル走査・LLM呼び出し・成果物書き出し・同期起動鍵生成)のsystemd timer/oneshotを配備。有効化オプション時のみtimerをenable+start | `check-mode-native` | `incident_investigate` |
+| [`incident_investigate_notify.yml`](incident_investigate_notify.yml) | `localhost` | 一次調査1件完了ごとに`#alerts`へプレーンテキストで通知(incident-investigate.pyから起動される) | `check-mode-native` | playbook内tasks(`community.general.slack`直接呼び出し) |
 | [`incident_sync.yml`](incident_sync.yml) | `control_nodes`, `localhost` | quory→ansy証拠バンドルの定期ミラー同期(pull-only) | `check-mode-native` | `incident_sync` |
-| [`incident_sync_timer.yml`](incident_sync_timer.yml) | `dev_nodes` | `incident_sync`同期用systemd timerを配置 | `risk-accepted` | `incident_sync` timer tasks |
+| [`incident_sync_timer.yml`](incident_sync_timer.yml) | `dev_nodes` | `incident_sync`同期用systemd timerを配置 | `check-mode-native` | `incident_sync` timer tasks |
+| [`incident_sync_trigger_setup.yml`](incident_sync_trigger_setup.yml) | `quory`, `dev_nodes` | quory→ansy即時同期起動の受け口(専用SSHユーザー・forced command・sudoers 1コマンド限定)を配備。quoryには鍵生成のみ、ansyへの書込権は持たせない | `check-mode-native` | `incident_investigate`(鍵生成), `incident_sync`(受け口配備) |
 | [`incident_evaluation.yml`](incident_evaluation.yml) | `localhost` | 障害の自動評価工程だけを`knowledge_review.yml`本体を経由せず手動で個別に実行(検証・対話セッション用。timerには載せない) | `check-mode-native` | `knowledge_review` incident evaluation tasks |
 | [`knowledge_review.yml`](knowledge_review.yml) | `localhost`（ansy専用） | 月次Knowledge振り返りを`claude -p`で無人実行し、続けて障害の自動評価を行う | `check-mode-native` | `knowledge_review` |
 | [`knowledge_review_timer.yml`](knowledge_review_timer.yml) | `dev_nodes` | 月次Knowledge振り返り用systemd timerを配置 | `check-mode-native` | `knowledge_review` timer tasks |
@@ -87,12 +91,12 @@ playbook の入口を置く。処理本体は原則として `roles/` に実装�
 
 | Playbook | 対象 | 用途 | `tester-gate` | 主な role / 実装 |
 | --- | --- | --- | --- | --- |
-| [`codex_update_check.yml`](codex_update_check.yml) | `localhost`, `ansy:quory` | Codex CLIの更新確認・更新 | `risk-accepted` | `codex_update_check` |
+| [`codex_update_check.yml`](codex_update_check.yml) | `localhost`, `ansy:quory` | Codex CLIの更新確認・更新 | `check-mode-native` | `codex_update_check` |
 | [`radius_healthcheck.yml`](radius_healthcheck.yml) | `radius_servers` | FreeRADIUS/RADIUS基盤のhealthcheck | `safe-readonly` | `radius_healthcheck` |
 | [`serial_getty_mask.yml`](serial_getty_mask.yml) | `ansy:monnie:quory:authy` | 未使用`serial-getty@ttyS0`の停止・mask | `check-mode-native` | playbook内tasks |
 | [`sophos_trim.yml`](sophos_trim.yml) | `sophos` | Sophos Firewall SSDのtrim | `dry-run-aware` | `sophos_trim` |
 | [`time_sync_check.yml`](time_sync_check.yml) | `quory:pve1:pve2:ansy:monnie:authy:sophos` | 各ホストのNTP同期状態を確認 | `safe-readonly` | `time_sync_check` |
-| [`time_sync_ntp_reference.yml`](time_sync_ntp_reference.yml) | `pve1:pve2:ansy:monnie:authy` | quoryを追加NTP参照先として設定 | `risk-accepted` | `time_sync_ntp_reference` |
+| [`time_sync_ntp_reference.yml`](time_sync_ntp_reference.yml) | `pve1:pve2:ansy:monnie:authy` | quoryを追加NTP参照先として設定 | `check-mode-native` | `time_sync_ntp_reference` |
 | [`ubuntu_nightly.yml`](ubuntu_nightly.yml) | `radius_servers`, `monitoring_servers` | reboot-required判定、条件付き再起動、サービス確認 | `check-mode-native` | playbook内tasks、`monitoring_healthcheck` tasks |
 | [`ubuntu_vm_full_upgrade.yml`](ubuntu_vm_full_upgrade.yml) | `dev_nodes:control_nodes:radius_servers:monitoring_servers` | Ubuntu VMの更新判定と手動full-upgrade | `check-mode-native` | `ubuntu_vm_full_upgrade` |
 
@@ -100,7 +104,7 @@ playbook の入口を置く。処理本体は原則として `roles/` に実装�
 
 | Playbook | 対象 | 用途 | `tester-gate` | 主な role / 実装 |
 | --- | --- | --- | --- | --- |
-| [`systemd_timers.yml`](systemd_timers.yml) | `target_hosts`（既定`control_nodes`） | Ansible定期実行用systemd timerを管理 | `risk-accepted` | `systemd_timers` |
+| [`systemd_timers.yml`](systemd_timers.yml) | `target_hosts`（既定`control_nodes`） | Ansible定期実行用systemd timerを管理 | `check-mode-native` | `systemd_timers` |
 | [`unifi_backup_fetch.yml`](unifi_backup_fetch.yml) | `pve1`（CloudKeyへ接続） | CloudKeyのUniFiバックアップを取得・保存 | `risk-accepted` | `unifi_backup_fetch` |
 | [`test_ca_env.yml`](test_ca_env.yml) | `localhost` | CA関連環境変数のローカル表示テスト | `safe-readonly` | playbook内tasks |
 

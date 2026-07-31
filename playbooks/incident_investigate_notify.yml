@@ -1,0 +1,123 @@
+---
+# tester-gate: check-mode-native — 唯一の副作用(Slack送信)を持つ最終task
+# だけが実際の外部作用であり、それ以外(assert/include_vars/set_fact)は
+# read-onlyで`--check`下でも常時本実行される。
+#
+# 2026-08-01独立レビューM1差し戻し: 当初`role-guarded`としていたが、Policy
+# (`docs/ai/policies/ansible_test_safety_policy.md` TS-005)の定義は
+# 「副作用がSlack通知のみで、roles/common_slack/tasks/notify.ymlの抑止guard
+# (tester_mode/skip_notifications/ansible_check_mode)で止まる」ことを要件に
+# するが、本playbookはそのnotify.ymlを一切includeしていない(N2充足のため
+# `community.general.slack`を直接呼ぶ、§3.1参照)。`role-guarded`は
+# TS-022により`--check`なしの通常実行が許される分類のため、抑止guardが
+# 存在しないまま`role-guarded`を名乗ると、Testerが検証のため実行するたびに
+# 無条件で実送信される — TS-026が警告する「marker drift」そのものだった。
+# `check-mode-native`へ再分類し、下の送信taskへ`when: not ansible_check_mode`
+# + `tags: [destructive]`を明示した(`community.general.slack`は
+# `check_mode: support full`でモジュール自身も`--check`下で実送信しない実装
+# だが、この明示ゲートにより将来モジュールの実装が変わってもこのリポジトリの
+# 慣行どおり安全側で止まる — TS-014と同じ形)。
+#
+# incident-investigate.py(quory、roles/incident_investigate/files/
+# incident-investigate.py の send_investigation_notification())が、一次調査
+# 1件の完了後に呼ぶ:
+#   ansible-playbook playbooks/incident_investigate_notify.yml -e @<queue-file.json>
+#
+# N1〜N3: `#alerts` へプレーンテキストで1本、ステータス・重要度・色分けを
+# 持たない。roles/common_slack/tasks/notify.yml は常にcolor/iconを付ける
+# ため意図的に再利用しない(このplaybookはroles/common_slackを変更しない
+# scope — N2を満たすには送信そのものを別経路にする必要があった)。
+# community.general.slack を `msg:` のみ・`color:` 省略(既定 'normal') で
+# 直接呼ぶと、attachmentsではなくプレーンな `text` ペイロードになる
+# (community.general.slackモジュール実装: color=='normal'かつtext!=Noneの
+# 分岐)。
+#
+# N7: 呼び出し元(incident-investigate.py)がsync起動→この通知、の順で
+# 呼ぶ。ここではその順序を検査しない(呼び出し元の責務)。
+#
+# N11: iv_report_path はansy側から読めるパス
+# (reports/incidents/quory/_investigations/semaphore-<id>.md 形式)を渡す
+# 前提。quory上の絶対パスをそのまま渡さない。
+#
+# AC8の注記: この通知が届いた時点でansy側に現物が揃っているとは限らない
+# (月次評価と競合してsync起動がexit 0で静かにskipされることがある、IC-012)。
+# 契約が求めるのは「断定しない書き方」であって注意書きの掲載そのものでは
+# ない(requirement §6 AC8注)。本文は「レポート: <path>」と場所を示す
+# だけで「現物がここにあります」等の断定を一切していないため、これ自体で
+# 満たしている。2026-08-01 Coordinator指摘(差し戻しR3。独立レビューのfindingsではない): 以前はここに加えて
+# 「この通知が届いた時点で…」という3行の注意書きを毎回付けていたが、
+# 契約が求めていない冗長な定型文だったため削除した(短縮のみで、断定しない
+# という性質そのものは変えていない)。
+#
+# Required extra vars:
+#   iv_semaphore_task_id
+#   iv_report_path
+# Optional (未定義時は本文中に「(unknown)」「(取得できなかった)」等で
+# 明示する):
+#   iv_template / iv_playbook / iv_verdict / iv_confidence
+#   iv_known_condition_suspected / iv_known_condition_reason
+#   iv_codex_error (非空ならAC2のCodex呼び出し失敗経路として本文へそのまま
+#     載せる — Codexを実際に呼び出して失敗した場合のみ)
+#   iv_wait_error (非空なら、Semaphoreの終了確定を待ちきれずCodexを一度も
+#     呼ばずに諦めた場合の理由をそのまま載せる。2026-08-01独立レビューR2
+#     差し戻し: 以前はiv_codex_errorと同じ見出しを共有しており、Codexを
+#     呼んでいない場合でも「Codex呼び出しエラー:」という見出しが出ていた
+#     ため、別フィールド・別見出しに分離した)
+
+- name: Send incident investigation result notification
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Assert required vars are defined
+      ansible.builtin.assert:
+        that:
+          - iv_semaphore_task_id is defined
+          - iv_report_path is defined
+        quiet: true
+
+    # roles/common_slack/tasks/notify.yml の「Load Slack variables」と同じ
+    # 読み込み先だが、このplaybookはそのファイルを再利用しない(上記の理由)
+    # ため、webhookのロードだけをここで直接行う。
+    - name: Load Slack webhook variables
+      ansible.builtin.include_vars:
+        file: "{{ inventory_dir }}/../vars/slack.yml"
+      no_log: true
+
+    - name: "Extract token from #alerts webhook URL"
+      ansible.builtin.set_fact:
+        _iv_slack_token: "{{ slack_webhook_alerts | replace('https://hooks.slack.com/services/', '') }}"
+      no_log: true
+
+    - name: "Build notification body (N1 fields: job number, template, playbook, verdict, confidence, known_condition, report path)"
+      ansible.builtin.set_fact:
+        _iv_body: |-
+          [incident_investigate] semaphore-{{ iv_semaphore_task_id }} の一次調査が完了しました
+
+          ジョブ番号  : {{ iv_semaphore_task_id }}
+          テンプレート: {{ iv_template | default('(unknown)', true) }}
+          playbook    : {{ iv_playbook | default('(unknown)', true) }}
+          所見        : {{ iv_verdict | default('(取得できなかった)', true) }}
+          確信度      : {{ iv_confidence | default('(unknown)', true) }}
+          既知条件    : {{ '疑いあり' if (iv_known_condition_suspected | default(false)) else '疑いなし' }}（{{ iv_known_condition_reason | default('', true) }}）
+          レポート    : {{ iv_report_path }}
+          {% if iv_codex_error | default('', true) | trim | length > 0 %}
+
+          Codex呼び出しエラー:
+          {{ iv_codex_error }}
+          {% endif %}
+          {% if iv_wait_error | default('', true) | trim | length > 0 %}
+
+          調査未実施の理由(Semaphoreジョブの終了確定を待ちきれなかったためCodexは呼んでいません):
+          {{ iv_wait_error }}
+          {% endif %}
+
+    # N2充足のためcommon_slack/tasks/notify.ymlを経由しない(ヘッダ参照)。
+    # 唯一の破壊的task(TS-014と同じ形でゲート — 上のヘッダコメント参照)。
+    - name: "Send plain-text Slack notification to #alerts (N2 — no status/severity/color)"
+      community.general.slack:
+        token: "{{ _iv_slack_token }}"
+        msg: "{{ _iv_body }}"
+      no_log: true
+      when: not ansible_check_mode
+      tags: [destructive]

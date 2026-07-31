@@ -47,12 +47,22 @@ R3の扱い(「被観測ジョブがSemaphore上で終了しステータスと�
 max_s を超えてなお確定しない場合だけ、諦めた事実を成果物へ残して失敗
 扱いにする)。「deferしたら次の候補へ進む」は、1件が待ち続けて他の未調査
 バンドルを塞ぐ経路を作らないための実装判断(requirement §8 Q3)。
+
+成果物を書いた直後(2026-08-01、
+docs/ai/reviews/incident_investigation_notify/2026-08-01_001_requirement.md):
+post_artifact_actions() が quory→ansy の同期を即時起動し(N5・N8・N9)、続けて
+`#alerts` へプレーンテキストで完了通知を送る(N1〜N3・N7・N11)。この2つは
+どちらも成果物が既に書かれた**後**の処理であり、失敗しても本スクリプトの
+終了コード・成果物の内容に一切影響しない(N4・N6) — 例外は
+post_artifact_actions() 内部で必ず捕捉し、journalへstderr出力として残す
+だけに留める。
 """
 import json
 import os
 import re
 import subprocess
 import sys
+import tempfile
 import time
 import traceback
 from datetime import datetime, timedelta, timezone
@@ -608,6 +618,149 @@ def artifact_already_exists(artifact_dir, task_id):
 
 
 # ---------------------------------------------------------------------------
+# 成果物を書いた後段(N4〜N9・N11、requirement.md)。
+#
+# 不変条件(N4・N6・AC3・AC7): このセクションの関数はどれも例外を投げてよい
+# (呼び出し側の post_artifact_actions が必ず捕捉する)。write_artifact() が
+# 既に成功した後にのみ呼ばれるため、ここでの失敗は「成果物が書かれた事実」
+# にも「process_bundle の戻り値(exit code の材料)」にも一切影響しない。
+# 失敗はジャーナルへの stderr 出力としてのみ残す(IC-038の精神をこの後段にも
+# 適用する — 握りつぶすのではなく、可視化した上で無害化する)。
+# ---------------------------------------------------------------------------
+def trigger_ansy_sync(cfg):
+    """N5/N8/N9: quory→ansyの即時同期起動。
+
+    引数を一切取らない固定のSSH forced command(roles/incident_sync/files/
+    incident-sync-trigger.sh)を、専用の受け側ユーザーへBatchModeで叩くだけ。
+    このプロセス自身はansyへ一切書き込まない(IC-013はansy側の受け口が
+    `systemctl start --no-block ansible-incident-sync.service` という
+    単一のsudoers許可コマンドだけを実行することで保たれる — 実際の転送は
+    従来どおりansy起点のpullのまま)。
+
+    失敗(接続不可・認証失敗・timeout・受け側の非ゼロ終了)はすべて
+    RuntimeError/subprocess.TimeoutExpiredとして呼び出し元へ伝播させる —
+    ここでは何も揉み消さない。握りつぶし(non-fatal化)は呼び出し元の
+    post_artifact_actions の役目であり、この関数自身の役目ではない。
+    """
+    argv = [
+        cfg["sync_trigger_ssh_bin"],
+        "-i", cfg["sync_trigger_key"],
+        "-T",  # forced command側はptyを要求しない(no-pty)。クライアント側も要求しない。
+        "-o", "BatchMode=yes",
+        "-o", "StrictHostKeyChecking=yes",
+        "-o", f"UserKnownHostsFile={cfg['sync_trigger_known_hosts']}",
+        "-o", f"ConnectTimeout={cfg['sync_trigger_connect_timeout_s']}",
+        f"{cfg['sync_trigger_remote_user']}@{cfg['sync_trigger_host']}",
+        # N8: このコマンド文字列に何を書いても実行されない — 受け側の
+        # authorized_keysが `command=` で固定しており、$SSH_ORIGINAL_COMMAND
+        # は読まれない(roles/incident_sync/files/incident-sync-trigger.sh)。
+        # 空文字列や省略ではなく無害な明示のプレースホルダにしている。
+        "true",
+    ]
+    result = subprocess.run(argv, capture_output=True, text=True, timeout=cfg["sync_trigger_timeout_s"])
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"sync trigger ssh failed rc={result.returncode} stderr={result.stderr.strip()!r}"
+        )
+
+
+def build_notify_payload(cfg, task_id, artifact, codex_error, wait_error):
+    """N1〜N3・N11: playbooks/incident_investigate_notify.yml へ渡す
+    extra-varsを組み立てる。
+
+    2026-08-01独立レビューR2差し戻し: codex_error(Codexを実際に呼び出して
+    失敗した場合の生文字列)とwait_error(Semaphoreの終了確定を待ちきれず
+    Codexを一度も呼ばずに諦めた場合の生文字列)を**別々の引数**として受け取り、
+    別々の本文フィールド(iv_codex_error / iv_wait_error)へ渡す。以前は
+    両者を同じ`llm_error`という1個の引数へ畳んでおり、notify.yml側が常に
+    「Codex呼び出しエラー:」という見出しを使っていたため、Codexを一度も
+    呼んでいないgive-up経路(process_bundleの`if not finalized:`分岐)でも
+    読み手が「Codexが落ちた」と誤読しうる状態だった。呼び出し元
+    (process_bundle)が2つの経路を判別できる唯一の場所であるため、ここで
+    後から判別し直すのではなく、呼び出し元にどちらか一方だけを渡させる形に
+    した(常に片方は空文字列になる)。
+
+    いずれもartifact["notes"]から再抽出せず、process_bundleが既に持っている
+    生の文字列(またはNone)をそのまま受け取る — assemble_artifact()がnotesへ
+    書く際のプレフィックス文言と二重管理にしないため。
+    """
+    kc = artifact.get("known_condition") or {}
+    return {
+        "iv_semaphore_task_id": task_id,
+        "iv_template": artifact.get("template"),
+        "iv_playbook": artifact.get("playbook"),
+        "iv_verdict": artifact.get("verdict"),
+        "iv_confidence": artifact.get("confidence"),
+        "iv_known_condition_suspected": kc.get("suspected"),
+        "iv_known_condition_reason": kc.get("reason"),
+        "iv_codex_error": codex_error or "",
+        "iv_wait_error": wait_error or "",
+        "iv_report_path": f"{cfg['ansy_report_path_prefix']}/semaphore-{task_id}.md",
+    }
+
+
+def send_investigation_notification(cfg, task_id, artifact, codex_error, wait_error):
+    """N1〜N3・N7・N11: 一次調査1件の完了をSlack `#alerts` へプレーンテキストで
+    通知する(playbooks/incident_investigate_notify.yml、community.general.slack
+    を`msg:`のみ・color省略で直接呼ぶ — N2「ステータス・重要度・色分けを
+    持たない」)。recovery-probe.pyのrun_playbook/queue_notifyと同じ
+    「payloadを一時ファイルへ書き、`-e @<file>`でansible-playbookを起動する」
+    流儀(空白を含む日本語文字列を `-e key=value` の連結で渡さない —
+    skills/ansible-implementation-style/SKILL.md)。
+    """
+    payload = build_notify_payload(cfg, task_id, artifact, codex_error, wait_error)
+    fd, tmp_path = tempfile.mkstemp(prefix="incident-investigate-notify-", suffix=".json")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False)
+        argv = [
+            cfg["ansible_playbook_bin"],
+            f"playbooks/{cfg['notify_playbook']}",
+            "-e", f"@{tmp_path}",
+        ]
+        result = subprocess.run(
+            argv, cwd=cfg["repo_dir"], capture_output=True, text=True, timeout=cfg["notify_timeout_s"]
+        )
+        if result.returncode != 0:
+            raise RuntimeError(
+                f"notify playbook rc={result.returncode} stderr={result.stderr.strip()!r}"
+            )
+    finally:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+
+
+def post_artifact_actions(cfg, task_id, artifact, codex_error=None, wait_error=None):
+    """N4・N6・N7・AC3・AC7: 成果物を書いた直後だけ呼ぶ。同期起動→通知の順
+    (N7)。どちらかが失敗しても他方は試みる(N4とN6は独立の不変条件であり、
+    片方の失敗がもう片方の実行を妨げてはならない)。例外はここで必ず握り
+    つぶし、stderr(systemdジャーナルに残る)へ書くだけに留める — process_bundle
+    の戻り値・exit codeには一切影響させない。
+
+    codex_error / wait_error は排他利用を想定する(R2): Codexを実際に
+    呼び出して失敗した経路は codex_error だけを渡し、Codexを一度も呼ばずに
+    諦めた経路(give-up-waiting)は wait_error だけを渡す。両方Noneなら
+    調査は正常完了しており、どちらの見出しも本文に出ない。
+    """
+    try:
+        trigger_ansy_sync(cfg)
+    except Exception as e:
+        sys.stderr.write(
+            f"incident-investigate: sync trigger failed for semaphore-{task_id} "
+            f"(non-fatal — next hourly ansible-incident-sync.timer run will catch up, IC-012): {e}\n"
+        )
+
+    try:
+        send_investigation_notification(cfg, task_id, artifact, codex_error, wait_error)
+    except Exception as e:
+        sys.stderr.write(
+            f"incident-investigate: Slack notification failed for semaphore-{task_id} (non-fatal): {e}\n"
+        )
+
+
+# ---------------------------------------------------------------------------
 # メイン
 # ---------------------------------------------------------------------------
 def process_bundle(cfg, task_id, bundle_dir):
@@ -644,14 +797,18 @@ def process_bundle(cfg, task_id, bundle_dir):
         if query_problem:
             reasons.append(query_problem)
         reasons.append("Semaphore has not recorded a finalized end time for this task yet")
+        give_up_reason = "gave up waiting for job to finalize: " + "; ".join(reasons)
         artifact = assemble_artifact(
             task_id=task_id,
             semaphore_meta=semaphore_meta,
             bundle_dir=bundle_dir,
-            llm_outcome=(None, None, "gave up waiting for job to finalize: " + "; ".join(reasons)),
+            llm_outcome=(None, None, give_up_reason),
             notes_extra=[],
         )
         write_artifact(cfg["artifact_dir"], task_id, artifact)
+        # R2: この経路はCodexを一度も呼んでいないため wait_error として渡す
+        # (codex_errorではない — 通知本文の見出しを実態と一致させる)。
+        post_artifact_actions(cfg, task_id, artifact, wait_error=give_up_reason)
         return "processed_failed"
 
     prompt = build_prompt(task_id, bundle_dir)
@@ -674,6 +831,10 @@ def process_bundle(cfg, task_id, bundle_dir):
         notes_extra=[],
     )
     write_artifact(cfg["artifact_dir"], task_id, artifact)
+    # R2: この経路は必ずinvoke_llm()でCodexを呼び出そうとした後なので
+    # codex_errorとして渡す(呼び出し自体が成功していればllm_errorはNoneで
+    # あり、通知本文には何も出ない)。
+    post_artifact_actions(cfg, task_id, artifact, codex_error=llm_error)
     return "processed_ok" if artifact["status"] == "new" else "processed_failed"
 
 

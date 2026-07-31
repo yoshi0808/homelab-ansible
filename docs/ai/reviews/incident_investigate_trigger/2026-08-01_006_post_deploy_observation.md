@@ -155,3 +155,21 @@ ExecMainStatus=0
 ## 後片付け
 
 fetchしたファイルはすべて `/tmp/claude-1000/-home-yoshi-homelab-ansible/ee439bc9-7197-4dc5-8586-8b431421f8e4/scratchpad/post_deploy_obs/` 配下(scratch)に閉じている。quoryへは読み取り専用コマンド(`ls`/`cat`/`stat`/`sha256sum`/`systemctl show`/`git status`/`git log`/`grep`)のみ実行し、状態変更・権限昇格・`sudo`は行っていない。quoryの `git status --porcelain` は空(作業ツリー無変更)。リポジトリ(このファイル)への追加以外、作業ツリーへの変更は無い。`git add`/`commit`/`push`は行っていない。
+
+---
+
+## 追記(2026-08-01 06:0x、Coordinator観測): 自然発生した失敗での初発火
+
+本文が「残存リスク」として挙げていた「配備後に自然発生した新規失敗での実発火はまだ観測できていない」は、**同日中に観測できた**。
+
+| 項目 | 値 |
+|---|---|
+| 対象 | `semaphore-507`(`UN-SAFE:Proxmox Weekly Full Patch`、`job_status: error`) |
+| バンドル生成(`summary.json` mtime) | 2026-08-01 06:05:11 JST |
+| 調査完了(`investigated_at`) | 2026-08-01 06:06:45 JST |
+| 所要 | **94秒** |
+| 成果物 | `status: new` / `confidence: high` / `known_condition.suspected: true` |
+
+**これは切り替え前から滞留していたバンドルではなく、配備(同日05:27頃)より後に発生した失敗である。** 「捕捉が5分周期でバンドルを作る → 毎分の走査が拾う」経路が、`task-time` の確定との競合を含めて本番で成立した。`docs/ai/status.md` の該当Watch行は削除した。
+
+**残るのは `status: failed` の本番実測のみ**である(2026-08-01時点で本番の成果物11件はすべて `status: new`)。

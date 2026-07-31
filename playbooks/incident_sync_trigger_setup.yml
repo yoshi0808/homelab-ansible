@@ -1,0 +1,83 @@
+---
+# Cross-host setup for the quory→ansy immediate incident-sync trigger
+# (N5/N8/N9). Two plays, same shape as playbooks/incident_sync.yml's
+# slurp-on-source / render-on-destination pattern:
+#
+#   play1 (hosts: quory): ensures the sync-trigger SSH keypair exists
+#     (roles/incident_investigate/tasks/sync_trigger.yml, imported via
+#     tasks_from — this also makes that role's defaults visible via
+#     hostvars['quory'] for play2, see roles/incident_sync/tasks/
+#     transfer.yml's comment on why role defaults require an import within
+#     THIS run to be hostvars-visible across plays), then slurps the public
+#     key.
+#   play2 (hosts: dev_nodes = ansy): creates the dedicated
+#     incident-sync-trigger landing account and deploys its forced-command
+#     authorized_keys, wrapper script, and sudoers
+#     (roles/incident_sync/tasks/install_trigger.yml).
+#
+# This playbook does NOT touch roles/recovery_exec, does NOT touch
+# ansible-incident-sync.service/.timer's content or schedule, and does NOT
+# give quory any filesystem write access to ansy — the only capability
+# granted is "start this one already-existing systemd unit" (N8/N9).
+#
+# Prerequisite: none beyond what this playbook itself deploys (play1's
+# keygen is idempotent via creates:, so re-running this playbook alone is
+# safe even before playbooks/incident_investigate_setup.yml has run).
+#
+# Run:
+#   ansible-playbook playbooks/incident_sync_trigger_setup.yml
+#
+# Design authority: docs/ai/reviews/incident_investigation_notify/
+# 2026-08-01_001_requirement.md (N5, N7, N8, N9, AC4-AC9).
+# Policy: docs/ai/policies/incident_capture_policy.md IC-013.
+#
+# tester-gate: check-mode-native — TS-009 condition 1 holds (no restart of
+# any already-running production service; this deploys a brand-new,
+# narrowly-scoped landing account that did not exist before, and the only
+# capability it grants — starting ansible-incident-sync.service — is itself
+# check-mode-native per playbooks/incident_sync_timer.yml). Condition 2 does
+# not hold: every task here (user/file/template/copy — ssh-keygen is gated
+# with `creates:`, ansible.builtin.slurp and ansible.builtin.known_hosts are
+# read-only/idempotent) is exactly the kind of change Ansible's native
+# check_mode can preview. All destructive tasks in
+# roles/incident_investigate/tasks/sync_trigger.yml and
+# roles/incident_sync/tasks/install_trigger.yml are gated with
+# `when: not ansible_check_mode`. See
+# docs/ai/policies/ansible_test_safety_policy.md.
+
+- name: Ensure quory-side sync-trigger key exists and read its public half
+  hosts: quory
+  gather_facts: false
+  become: false
+  pre_tasks:
+    - name: "[migration] tester_mode is deprecated for this playbook — use --check instead"
+      ansible.builtin.assert:
+        that: not (tester_mode | default(false) | bool)
+        fail_msg: >-
+          This playbook no longer supports -e tester_mode=true. Re-run with
+          --check (add --check --diff for more detail) instead. See
+          docs/ai/policies/ansible_test_safety_policy.md.
+        quiet: true
+  tasks:
+    - name: Ensure sync-trigger SSH key exists (also makes incident_investigate defaults hostvars-visible)
+      ansible.builtin.import_role:
+        name: incident_investigate
+        tasks_from: sync_trigger
+
+    - name: Slurp sync-trigger public key
+      ansible.builtin.slurp:
+        src: "{{ incident_investigate_sync_trigger_key }}.pub"
+      register: incident_sync_trigger_pubkey
+      become: true
+      when: not ansible_check_mode
+      tags: [destructive]
+
+- name: Deploy incident-sync-trigger landing account on ansy
+  hosts: dev_nodes
+  gather_facts: false
+  become: false
+  tasks:
+    - name: Install incident_sync trigger receiver
+      ansible.builtin.import_role:
+        name: incident_sync
+        tasks_from: install_trigger
