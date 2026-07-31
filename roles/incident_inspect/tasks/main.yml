@@ -19,6 +19,23 @@
 # 境界(契約3)は、このタスクブロックにssh-keygen相当のtaskが存在しないことで
 # 成立する。recovery_exec グループへの追加も行わない(そちらのユーザー created
 # ACL/鍵を一切引き継がない)。
+#
+# この境界が閉じていることの根拠(2026-07-31、quory実機で観測。AC5):
+#   1. roles/recovery_exec/files/homelab-recover-authy と -monnie は、どちらも
+#      KEY=/home/recovery-exec/.ssh/id_recovery_action を**直書き**している
+#      (変数でも引数でもないため、呼び出し側から差し替えられない)。
+#   2. その鍵は 0600 recovery-exec:recovery-exec。
+#   3. 親の /home/recovery-exec は 0750 recovery-exec:recovery-exec。
+#   4. incident-inspect は自分の同名グループにしか属さない(下のuser taskが
+#      groupsを付けない)。したがって親ディレクトリへ traverse すらできない。
+# 1〜4により、このユーザーからは鍵を読む経路が存在しない。**実行して確かめる
+# までもなく構造的に決まる**ため、負経路の実行検証は行っていない
+# (docs/ai/reviews/incident_auto_investigation/2026-07-31_007_test_result.md、
+#  同 _008_audit.md)。
+#
+# **この4点のいずれかを崩す変更は、境界そのものを壊す。** 特に、下のuser task
+# へ groups を足すこと、recover系wrapperの鍵パスを変数化することの2つは、
+# ここを読まずに行われうる。変更するなら AC5 を再検証すること。
 # ---------------------------------------------------------------------------
 
 - name: Create incident-inspect user (no SSH keys, no group overlap with recovery-exec)

@@ -1,9 +1,6 @@
 # ADR-009: 障害の一次調査(事象ごと)の実行形態
 
-**Status:** **Proposed**(2026-07-31。決定は確定済みで、実装着手に2つの前提がある)
-
-1. `docs/ai/policies/incident_capture_policy.md` の改訂承認(提案は `docs/ai/reviews/incident_auto_investigation/2026-07-31_003_policy_amendment_proposal.md`)。
-2. 調査専用ユーザーのOAuth認証(`codex login`)。**ブラウザ操作を伴うためYoshinobu本人しか実行できない。**
+**Status:** **Accepted**(2026-07-31。前提だった2件 — Policy改訂の承認と調査専用ユーザーの `codex login` — はいずれも充足した。実装・独立レビュー・quoryへの配備・Tester実地検証(AC4/AC7/AC8/AC9 実測PASS)を経て `homelab-incident-investigate.timer` を有効化し、本番稼働に入った)
 
 **経緯**: 当初 (c) は c-2(設定層でexecpolicyを絞る)としていたが、U0の実測で否定された — config.toml層のexecpolicyは `codex exec` + `approval_policy="never"` の経路でコマンド実行を阻止しない(allow-listに無い `id` が通った)。一次記録は `.../2026-07-31_002_u0_test_result.md`、**既存経路への影響**は `docs/ai/memory/incidents/2026-07-31_codex-execpolicy-allowlist-not-enforcing.md`。2026-07-31、Yoshinobuが c-3 を選択した。
 
