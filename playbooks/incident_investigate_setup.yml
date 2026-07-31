@@ -1,0 +1,65 @@
+---
+# Deploy the primary incident investigation picker (U2) to quory.
+#
+# Design authority: docs/ai/adr/009-per-incident-investigation-runtime.md
+# Requirement: docs/ai/reviews/incident_auto_investigation/2026-07-31_001_requirement.md
+#
+# This playbook deploys the QUEUE side of the pipeline (a-4 pickup:
+# roles/incident_investigate) — it does NOT deploy the callback plugin
+# itself (that file lives at roles/incident_investigate/callback_plugins/
+# and is active on every host as soon as ansible.cfg is checked out there;
+# see that file's docstring and this repo's ansible.cfg for the two lines
+# that enable it) and it does NOT deploy the investigation identity/Codex
+# entry point (roles/incident_inspect — U1's playbook).
+#
+# Prerequisites (this playbook does not create any of these):
+#   - playbooks/recovery_exec_setup.yml already run (homelab-semaphore-query
+#     must already exist at /usr/local/bin/).
+#   - playbooks/incident_inspect_setup.yml already run (U1: incident-inspect
+#     user, Codex investigation wrapper, and the sudoers grant letting
+#     `yoshi` invoke that wrapper as incident-inspect). Until that
+#     prerequisite is satisfied, the timer this playbook enables will run
+#     but every investigation attempt will fail visibly (non-zero exit,
+#     systemctl is-failed, and a status:"failed" artifact per job) rather
+#     than silently — see roles/incident_investigate/defaults/main.yml
+#     "U1との結合値" for why this fails safe rather than reaching any
+#     recovery action.
+#
+# Run (deploy only, timer stays disabled):
+#   ansible-playbook playbooks/incident_investigate_setup.yml -l quory
+#
+# Production enable (starts the timer):
+#   ansible-playbook playbooks/incident_investigate_setup.yml -l quory \
+#     -e incident_investigate_service_enabled=true
+#
+# tester-gate: risk-accepted — no destructive operation on any host other
+# than quory itself, and no restart of any already-running production
+# service (this is a brand-new timer/oneshot pair that did not exist
+# before). The changes are: directory creation (idempotent, no ACL/chmod
+# touched — see roles/incident_investigate/tasks/main.yml comments),
+# script/config/unit file deployment, and (only when
+# incident_investigate_service_enabled=true) enabling + starting the new
+# timer. Repeated runs are idempotent (template/copy/file all report
+# changed only on an actual diff). See
+# docs/ai/policies/ansible_test_safety_policy.md for the risk-accepted
+# criteria this satisfies.
+
+- name: Deploy primary incident investigation picker (U2)
+  hosts: quory
+  gather_facts: true
+  become: false
+  pre_tasks:
+    - name: "[migration] tester_mode is deprecated for this playbook — it always runs for real"
+      ansible.builtin.assert:
+        that: not (tester_mode | default(false) | bool)
+        fail_msg: >-
+          This playbook does not support -e tester_mode=true and has no
+          dry-run mode (--check included): investigate picker deployment
+          always runs for real. See
+          docs/ai/policies/ansible_test_safety_policy.md.
+        quiet: true
+  tasks:
+    - name: Run incident_investigate role
+      ansible.builtin.import_role:
+        name: incident_investigate
+      check_mode: false

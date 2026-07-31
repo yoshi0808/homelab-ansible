@@ -1,0 +1,115 @@
+---
+# incident_investigate: 障害の一次調査(quory、U2)。
+# 設計の正本: docs/ai/adr/009-per-incident-investigation-runtime.md
+# Policy: docs/ai/policies/incident_capture_policy.md §3.5(IC-034〜IC-042)
+# 要求: docs/ai/reviews/incident_auto_investigation/2026-07-31_001_requirement.md
+
+# ---------------------------------------------------------------------------
+# 実行identity(呼び出し側)。ADR-009 (d) d-2の変形: 呼び出し側はyoshi、
+# LLMが動くのはincident-inspect側(下の「U1との結合値」参照)。
+# ---------------------------------------------------------------------------
+incident_investigate_run_user: yoshi
+incident_investigate_repo_dir: /home/yoshi/homelab-ansible
+
+# ---------------------------------------------------------------------------
+# U1(roles/incident_inspect)との結合値 — **一致が必須**。
+#
+# roles/incident_sync/defaults/main.yml の incident_sync_outer_lock_path と
+# 同型の注意: 下の3つの値は、U1が実際に作る調査専用ユーザー名・Codex
+# 実行口(wrapper)のパス・そのwrapperが要求するworkspace引数と、
+# 文字どおり一致していなければならない。片方だけ変更すると、この roleの
+# LLM呼び出しは「存在しないユーザー/バイナリを叩くだけ」になり無言では
+# 壊れない(sudo/execが失敗しrc!=0で返るため、AC6が期待する「調査失敗が
+# 可視化される」形で表面化する — 復旧アクションへ到達する余地は無い)が、
+# 一致していない限り一次調査は常に失敗し続ける。
+#
+# 2026-07-31、U1の成果物(roles/incident_inspect/defaults/main.yml、
+# docs/ai/reviews/incident_auto_investigation/2026-07-31_004_u1_implement.md
+# §2)と突き合わせて確認済み — 以下の3値は一致している(着手時点では
+# U1が並行作業中で未確認だったため、実装当初は推測で書いていた):
+#   - incident_inspect_user          = incident-inspect
+#   - incident_inspect_codex_wrapper = /usr/local/bin/codex-investigate-wrapper
+#   - incident_inspect_workspace     = /var/lib/incident-inspect/workspace
+# 呼び出し規約(sudo -H -u incident-inspect <wrapper> exec --cd <workspace>
+# "<message>"、ちょうど4引数)もU1の実装記録§2の記載と一致する。
+incident_investigate_inspect_user: incident-inspect
+incident_investigate_inspect_wrapper: /usr/local/bin/codex-investigate-wrapper
+incident_investigate_inspect_workspace: /var/lib/incident-inspect/workspace
+
+# sudoers(yoshi → incident-inspect、wrapper 1本に限定)は**このroleでは
+# 配備しない**。U1の成果物を確認した結果、roles/incident_inspect/templates/
+# sudoers-incident-inspect.j2 が既に
+# `yoshi ALL = (incident-inspect) NOPASSWD: /usr/local/bin/codex-investigate-wrapper`
+# を1行だけ持つ形で配備している(2026-07-31_004_u1_implement.md §3-4)。
+# recovery_io/recovery_exec の前例(呼び出し側roleがsudoers-recovery-io.j2を
+# 持つ)とは異なり、本件はU1(識別+wrapper提供側)がsudoersも併せて持つ設計
+# であり、U2側で重複したsudoersファイルを作る必要は無い(作ると内容が
+# 同一でも二重管理になる)。
+
+incident_investigate_llm_timeout_s: 300
+
+# ---------------------------------------------------------------------------
+# 既存の読み取り口(ADR-003 (c) c-1と同じ流儀: 新規SQLを増やさず、既存の
+# homelab-semaphore-query を引数付きで呼ぶだけ)。recovery_exec_setup.yml が
+# 事前にこのroleを配備し、かつ yoshi がSemaphore(User=yoshi)と同じ所有者
+# としてsemaphore.dbを直接読める前提(ACLを新規に要求しない — ADR-009
+# Consequences「新しいACL 2件」はいずれもincident-inspect側のもので、
+# yoshiへの新規権限はここでは不要)。
+# ---------------------------------------------------------------------------
+incident_investigate_semaphore_query_bin: /usr/local/bin/homelab-semaphore-query
+incident_investigate_semaphore_query_timeout_s: 15
+
+# f-2フォールバック(ADR-009 (f) f-3)でのrecent-failed取得件数上限。
+# incident_capture_recent_failed_batch と同じ値・同じ理由(取りこぼしの
+# 可能性はnotesへ記録される — resolve_task_idが候補ゼロ/複数のときは
+# 諦める側に倒す。取り違えを黙って採用しない)。
+incident_investigate_f2_recent_failed_batch: 50
+
+# ---------------------------------------------------------------------------
+# R3の扱い: 被観測ジョブの終了(Semaphore DBの確定)・証拠バンドルの生成
+# (incident_captureの5分周期)のいずれかが未確定な間は、キューエントリを
+# 消費せず次周期(timerは1分毎)へ持ち越す。この秒数を超えてなお確定しない
+# 場合だけ諦め、諦めた事実を成果物へ残す(IC-038)。
+# incident_capture_schedule(5分)の6倍 = 30分。1周期の遅延・タイムアウトの
+# 積み重ねを吸収しつつ、無限に待ち続けない値として選んだ(実装判断)。
+# ---------------------------------------------------------------------------
+incident_investigate_bundle_wait_max_s: 1800
+
+# ---------------------------------------------------------------------------
+# 出力先(e-2: reports/incidents/_investigations/)。
+# ACLに一切触れない(証拠バンドルのACL付きツリーの外)。RSK-06/IC-030同様、
+# reports/ 直下ではなく reports/incidents/ 配下にのみ書く。
+# ---------------------------------------------------------------------------
+incident_investigate_bundle_dir: "{{ reports_base_dir }}/incidents"
+incident_investigate_artifact_dir: "{{ incident_investigate_bundle_dir }}/_investigations"
+
+# キューディレクトリ(a-4)。reports/incidents/ の外(ACL関連のC1不変条件を
+# 完全に回避するため)。**このディレクトリの存在自体が callback plugin に
+# とっての「配備済み」の合図である**(callback pluginはAnsible変数を
+# 参照できないため、パスは
+# roles/incident_investigate/callback_plugins/incident_investigate_trigger.py
+# 内にリテラルで重複している — 変更する場合は両方を揃えること。
+# incident_sync_outer_lock_path と同型の注意)。
+incident_investigate_queue_dir: /var/lib/homelab-recovery/incident-investigate/queue
+
+# 配備先のスクリプト・設定・unitパス(incident_capture と同じ命名規則)。
+incident_investigate_script_path: /usr/local/sbin/incident-investigate.py
+incident_investigate_config_dir: /etc/homelab-recovery
+incident_investigate_config_path: "{{ incident_investigate_config_dir }}/incident-investigate.json"
+incident_investigate_lock_path: /run/lock/homelab-incident-investigate.lock
+
+# systemd timer間隔。OQ4(待機時間の実値は実装時に測る)への回答:
+# 即時性ではなく非同期性を優先し(R3の扱いは上記参照)、1分毎の短い周期で
+# 「準備できていればすぐ拾う、できていなければ何もせず戻る」を繰り返す形に
+# した。1回の起動が空振り(キュー空)のときのコストはディレクトリ一覧の
+# 取得1回のみで無視できる。
+incident_investigate_schedule: minutely
+
+# 1回のLLM呼び出し(llm_timeout_s、既定300)に対して十分な余裕を持たせる。
+# 1回の起動で処理するキューエントリは最大1件(処理件数を1件に絞った理由は
+# 2026-07-31_005_u2_implement.md を参照)。
+incident_investigate_timeout_start_sec: 420
+
+# true にすると systemd timer を enable + start する(本番quory)。
+# recovery_probe_service_enabled 等と同じ流儀 — ansyでは配置のみで起動しない。
+incident_investigate_service_enabled: false

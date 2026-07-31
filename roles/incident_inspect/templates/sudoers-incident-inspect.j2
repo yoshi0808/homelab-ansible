@@ -1,0 +1,5 @@
+# {{ incident_inspect_caller_user }} may invoke Codex as {{ incident_inspect_user }}
+# via wrapper only (ADR-009 (c) c-3 / (d)). Wrapper validates args and hardcodes
+# sandbox/approval flags -- {{ incident_inspect_caller_user }} never reads
+# {{ incident_inspect_user }}'s config or OAuth token directly.
+{{ incident_inspect_caller_user }} ALL = ({{ incident_inspect_user }}) NOPASSWD: {{ incident_inspect_codex_wrapper }}

@@ -1,0 +1,36 @@
+model = "{{ incident_inspect_codex_model }}"
+approval_policy = "never"
+
+# Sandbox (ADR-009 (c) c-3): this account only ever runs local, read-only
+# lookups (homelab-semaphore-query, homelab-reports) — it has no SSH keys and
+# no reason to reach a network. The actual enforcement point is
+# codex-investigate-wrapper's hardcoded `--sandbox read-only` flag, which the
+# caller cannot override (same non-negotiable-flags design as
+# roles/recovery_exec/templates/codex-exec-wrapper.j2). The
+# [sandbox_workspace_write] table below is kept only so this file states the
+# same network_access=false decision literally, in case anything ever invokes
+# codex without going through the wrapper; it does not by itself constitute
+# the boundary.
+[sandbox_workspace_write]
+network_access = false
+
+# Execpolicy: NOT a security boundary (measured 2026-07-31, codex-cli 0.145.0 —
+# see docs/ai/memory/incidents/2026-07-31_codex-execpolicy-allowlist-not-enforcing.md
+# and docs/ai/reviews/incident_auto_investigation/2026-07-31_002_u0_test_result.md).
+# `codex exec` + `approval_policy="never"` does not honor this table; a command
+# absent from the allow-list below still runs. Kept for documentation of intent
+# only — do not design a new capability assuming this narrows what the model can
+# run. The layers that do hold for this account: no SSH keys exist at all (so
+# homelab-recover-*/homelab-investigate-* fail before any policy is consulted),
+# and POSIX ACL grants only cover semaphore.db + /home/yoshi traverse (no write
+# anywhere reachable by this UID).
+[execpolicy]
+default_policy = "deny"
+
+[[execpolicy.rules]]
+command = "homelab-semaphore-query"
+policy = "allow"
+
+[[execpolicy.rules]]
+command = "homelab-reports"
+policy = "allow"

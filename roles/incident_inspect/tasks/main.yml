@@ -1,0 +1,152 @@
+---
+# incident_inspect: 一次調査専用ユーザー(SSH鍵ゼロ)とCodex起動口の配備。
+# quory/ansy双方に配備可能(recovery_exec_setup.ymlと同じ dev_nodes:control_nodes
+# パターン)。ターゲットノード(authy/monnie/pve1/pve2等)へは一切触れない
+# — 本roleにtarget_setup相当のincludeは存在しない。
+#
+# 前提: roles/recovery_exec が既に配備済みであること(homelab-semaphore-query /
+# homelab-reports の実行ファイルが /usr/local/bin に存在すること)。本roleは
+# それらを再配備しない(触れてよいのは roles/incident_inspect/ 配下のみ、と
+# いうU1のscopeにより、recovery_exec の成果物を複製・変更しない)。前提が
+# 満たされていない環境では、後段のACL付与タスクは対象パスが無くても
+# ansible.posix.acl 自体は自己完結して失敗しない(pathが存在しない場合は
+# 通常のfileタスクと同様に失敗する点に注意 — quory本番では recovery_exec が
+# 先に走っている前提を崩さないこと)。
+
+# ---------------------------------------------------------------------------
+# 調査専用ユーザー: SSH鍵を1本も生成しない・.sshディレクトリも作らない。
+# 「鍵が無いので homelab-recover-* / homelab-investigate-* が失敗する」という
+# 境界(契約3)は、このタスクブロックにssh-keygen相当のtaskが存在しないことで
+# 成立する。recovery_exec グループへの追加も行わない(そちらのユーザー created
+# ACL/鍵を一切引き継がない)。
+# ---------------------------------------------------------------------------
+
+- name: Create incident-inspect user (no SSH keys, no group overlap with recovery-exec)
+  ansible.builtin.user:
+    name: "{{ incident_inspect_user }}"
+    shell: /bin/sh
+    create_home: true
+    home: "{{ incident_inspect_home }}"
+    password: "!"
+    comment: "Incident primary-investigation Codex runner (read-only, no host reach)"
+  become: true
+
+# ---------------------------------------------------------------------------
+# Codex設定ディレクトリ(OAuthトークンはCodex自身がここへ書く。
+# recovery-exec の auth.json はコピーしない — 認証はユーザー作成後に
+# Yoshinobuが `codex login --device-auth` を1回行う、OQ7実証済み)。
+# ---------------------------------------------------------------------------
+
+- name: Create .codex directory (OAuth token stored by Codex itself)
+  ansible.builtin.file:
+    path: "{{ incident_inspect_codex_dir }}"
+    state: directory
+    owner: "{{ incident_inspect_user }}"
+    group: "{{ incident_inspect_user }}"
+    mode: "0700"
+  become: true
+
+- name: Deploy Codex config.toml (model + sandbox; execpolicy is documentation only)
+  ansible.builtin.template:
+    src: codex-config.toml.j2
+    dest: "{{ incident_inspect_codex_dir }}/config.toml"
+    owner: "{{ incident_inspect_user }}"
+    group: "{{ incident_inspect_user }}"
+    mode: "0600"
+  become: true
+
+# ---------------------------------------------------------------------------
+# 起動口(codex-investigate-wrapper): 引数を厳密固定し、sandbox/approvalフラグを
+# 呼出元(yoshi、将来のroles/incident_investigate)から受け取らない
+# (codex-exec-wrapper.j2 と同型)。
+# ---------------------------------------------------------------------------
+
+- name: Deploy codex-investigate-wrapper (fixed args, hardcoded sandbox/approval flags)
+  ansible.builtin.template:
+    src: codex-investigate-wrapper.j2
+    dest: "{{ incident_inspect_codex_wrapper }}"
+    owner: "{{ incident_inspect_user }}"
+    group: "{{ incident_inspect_user }}"
+    mode: "0500"
+  become: true
+
+# ---------------------------------------------------------------------------
+# Workspace + AGENTS.md(Codexがtool documentationとして読む)。
+# ---------------------------------------------------------------------------
+
+- name: Create Codex workspace directory (incident-inspect only; no group write)
+  ansible.builtin.file:
+    path: "{{ incident_inspect_workspace }}"
+    state: directory
+    owner: "{{ incident_inspect_user }}"
+    group: "{{ incident_inspect_user }}"
+    mode: "0750"
+  become: true
+
+- name: Deploy AGENTS.md (what this session may call / what it outputs)
+  ansible.builtin.template:
+    src: AGENTS.md.j2
+    dest: "{{ incident_inspect_workspace }}/AGENTS.md"
+    owner: "{{ incident_inspect_user }}"
+    group: "{{ incident_inspect_user }}"
+    mode: "0640"
+  become: true
+
+# ---------------------------------------------------------------------------
+# 読み取り専用ACL: 既存のhomelab-semaphore-query / homelab-reports を
+# incident-inspect自身のUIDで通すためのtraverse/read権限のみ。recovery-exec
+# に対する既存付与(roles/recovery_exec/tasks/main.yml)と同型・同一パス。
+# reports/incidents/ 自体には一切触れない — reports_base_dir配下は
+# owner=yoshi, mode 0755(other:r-x)で元々world-readableであり
+# (roles/incident_capture/tasks/main.yml 冒頭の不変条件C1参照)、
+# incident-inspectが読めない区間は /home/yoshi 直下(通常0750)だけなので、
+# そこへのtraverse ACLのみで足りる。chmod相当の操作(mode:を持つfileタスク)は
+# reports/incidents/配下は元よりrepo全体でも行わない。
+# ---------------------------------------------------------------------------
+
+- name: Install acl package (setfacl/getfacl; self-contained, idempotent even if recovery_exec already installed it)
+  ansible.builtin.apt:
+    name: acl
+    state: present
+  become: true
+
+- name: Grant incident-inspect ACL traverse on /home/yoshi (for reports/ read access, no sudo)
+  ansible.posix.acl:
+    path: "{{ incident_inspect_yoshi_home }}"
+    entity: "{{ incident_inspect_user }}"
+    etype: user
+    permissions: x
+    state: present
+  become: true
+
+- name: Grant incident-inspect ACL traverse on /var/lib/semaphore (no sudo)
+  ansible.posix.acl:
+    path: "{{ incident_inspect_semaphore_dir }}"
+    entity: "{{ incident_inspect_user }}"
+    etype: user
+    permissions: x
+    state: present
+  become: true
+
+- name: Grant incident-inspect ACL read on semaphore.db (no sudo; journal_mode=delete, no -wal/-shm to also grant)
+  ansible.posix.acl:
+    path: "{{ incident_inspect_semaphore_db }}"
+    entity: "{{ incident_inspect_user }}"
+    etype: user
+    permissions: r
+    state: present
+  become: true
+
+# ---------------------------------------------------------------------------
+# 起動口の唯一の入り口: yoshi → incident-inspect、wrapper 1本に限定したsudoers。
+# ---------------------------------------------------------------------------
+
+- name: Deploy sudoers rule for yoshi -> incident-inspect (wrapper only)
+  ansible.builtin.template:
+    src: sudoers-incident-inspect.j2
+    dest: /etc/sudoers.d/incident-inspect
+    owner: root
+    group: root
+    mode: "0440"
+    validate: /usr/sbin/visudo -cf %s
+  become: true

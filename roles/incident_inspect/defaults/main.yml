@@ -1,0 +1,43 @@
+---
+# incident_inspect: 一次調査専用のUnixユーザーと、そこからCodexを起動する口
+# (identity + wrapperのみ)。検出・調査本体・成果物の書き出しは
+# roles/incident_investigate が担う(別実装単位 U2)。
+# 設計の正本: docs/ai/adr/009-per-incident-investigation-runtime.md (c) c-3。
+
+# ---------------------------------------------------------------------------
+# U2連携契約(重要): 以下の2値はroles/incident_investigateのdefaultsが持つ
+# 同名の値と一致していなければならない。値そのものは変数名で一意に特定できる
+# ようにここへ書く。値を変更する場合は変更した側からもう一方を必ず確認すること。
+#   - incident_inspect_user            = "incident-inspect"
+#   - incident_inspect_codex_wrapper   = "/usr/local/bin/codex-investigate-wrapper"
+# ---------------------------------------------------------------------------
+
+# ユーザー名は "recovery-*" を名乗らない(ADR-009 (c) c-3: 名前自体が復旧能力を
+# 持たないことを示す)。
+incident_inspect_user: incident-inspect
+incident_inspect_home: /home/incident-inspect
+# `.ssh` のパス変数は**意図的に持たない。** このユーザーは鍵を1本も持たず
+# `.ssh` ディレクトリも作らないことが境界そのものである(ADR-009 (c) c-3)。
+# パスを定義しておくと「鍵置き場が想定されている」と誤読され、後から鍵を足す
+# 変更の敷居を下げる。2026-07-31、未参照の `incident_inspect_ssh_dir` を削除した。
+incident_inspect_codex_dir: "{{ incident_inspect_home }}/.codex"
+incident_inspect_workspace: /var/lib/incident-inspect/workspace
+
+incident_inspect_codex_bin: /usr/bin/codex
+incident_inspect_codex_wrapper: /usr/local/bin/codex-investigate-wrapper
+# recovery_exec_codex_model (roles/recovery_exec/defaults/main.yml) と同じ既定値。
+# 独立した変数として持つ(recovery_exec側の変更にこの値を追随させない)。
+incident_inspect_codex_model: gpt-5.5
+
+# yoshi(Semaphoreタスクプロセスと同じidentity、ADR-009 (d))だけが、
+# incident_inspect_codex_wrapper 1本に限定したsudoersでこのユーザーへ切り替えられる。
+incident_inspect_caller_user: yoshi
+
+# incident-inspectが自分のUIDで読む必要がある既存の読み取り口(recovery_exec が
+# 既に配備している前提。roles/recovery_exec を dependency にはしない —
+# incident_capture_user の踏襲と同じ理由で、実行するたびに無関係なroleが
+# 再実行経路に乗ることを避ける。前提条件はplaybooks/incident_inspect_setup.yml
+# のコメントで明示する)。
+incident_inspect_semaphore_db: /var/lib/semaphore/semaphore.db
+incident_inspect_semaphore_dir: /var/lib/semaphore
+incident_inspect_yoshi_home: /home/yoshi

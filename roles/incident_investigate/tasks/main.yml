@@ -1,0 +1,113 @@
+---
+# incident_investigate: 障害の一次調査(quory)。U2。
+# 設計の正本: docs/ai/adr/009-per-incident-investigation-runtime.md
+# 前提: playbooks/recovery_exec_setup.yml が既に実行済みであること
+# (homelab-semaphore-query を配備するのは recovery_exec 側であり、この
+# roleは呼ぶだけで新規に配備しない — ADR-009 (c) c-3 / ADR-003 (c) と同じ
+# 「既存の読み取り口を呼ぶだけ」の流儀)。
+#
+# 前提2: roles/incident_inspect(U1)が調査専用ユーザー incident-inspect と
+# Codex実行口(wrapper)、および yoshi からそのwrapperへのsudoersを
+# 用意していること。本roleはこの前提が満たされているかを検査しない
+# (満たされていなければLLM呼び出しがsudo/execの失敗として可視化される
+# 形で失敗するだけであり、復旧アクションへの到達可能性は生じない —
+# defaults/main.yml の「U1との結合値」コメントを参照)。
+
+# ---------------------------------------------------------------------------
+# キューディレクトリ(a-4)。callback pluginにとっての「配備済み」の合図。
+# reports/incidents/ の外にあるため、C1不変条件(ACL mask)の対象外。
+# ---------------------------------------------------------------------------
+- name: Ensure incident-investigate queue directory exists (yoshi-owned)
+  ansible.builtin.file:
+    path: "{{ incident_investigate_queue_dir }}"
+    state: directory
+    owner: yoshi
+    group: yoshi
+    mode: "0750"
+  become: true
+
+# ---------------------------------------------------------------------------
+# 成果物ディレクトリ(e-2: reports/incidents/_investigations/)。
+#
+# **mode: を持たせない**(2026-07-28 ACL mask障害の教訓、
+# roles/incident_capture/tasks/main.yml 冒頭の不変条件C1と同じ理由)。
+# ここは reports/incidents/ 本体でも _spool/ でもなく新規のサブディレクトリ
+# であり、chmod は親ディレクトリのACL maskへ波及しない(chmod/chownは
+# 対象パス自身にしか作用せず、親ディレクトリのACL maskは対象外)。それでも
+# Coordinatorの指示(このディレクトリツリー配下でのchmod相当の操作を
+# 一切禁じる)に文字どおり従い、mode: を一切持たせない設計とした
+# (存在確認だけが目的であり、特定のmode値を強制する必要が無いため
+# 実利上の損失も無い)。owner設定はchown相当でありACL maskに影響しない
+# ため安全に使う(incident_capture の reports/incidents/ 本体タスクと同じ
+# 理由づけ)。
+- name: Ensure reports/incidents/_investigations/ exists (owner yoshi, no mode:)
+  ansible.builtin.file:
+    path: "{{ incident_investigate_artifact_dir }}"
+    state: directory
+    owner: yoshi
+  become: true
+
+# ---------------------------------------------------------------------------
+# ローカル実行状態置き場(incident_capture と同じ /etc/homelab-recovery)。
+# ---------------------------------------------------------------------------
+- name: Ensure config directory exists
+  ansible.builtin.file:
+    path: "{{ incident_investigate_config_dir }}"
+    state: directory
+    mode: "0755"
+  become: true
+
+# ---------------------------------------------------------------------------
+# スクリプト・設定・systemd unit
+# ---------------------------------------------------------------------------
+- name: Deploy incident-investigate.py
+  ansible.builtin.copy:
+    src: incident-investigate.py
+    dest: "{{ incident_investigate_script_path }}"
+    owner: root
+    group: root
+    mode: "0755"
+  become: true
+
+- name: Deploy incident-investigate config
+  ansible.builtin.template:
+    src: incident-investigate.json.j2
+    dest: "{{ incident_investigate_config_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+  become: true
+
+- name: Deploy incident-investigate service unit
+  ansible.builtin.template:
+    src: incident-investigate.service.j2
+    dest: /etc/systemd/system/homelab-incident-investigate.service
+    owner: root
+    group: root
+    mode: "0644"
+  become: true
+  notify: Reload systemd for incident investigate
+
+- name: Deploy incident-investigate timer unit
+  ansible.builtin.template:
+    src: incident-investigate.timer.j2
+    dest: /etc/systemd/system/homelab-incident-investigate.timer
+    owner: root
+    group: root
+    mode: "0644"
+  become: true
+  notify: Reload systemd for incident investigate
+
+- name: Flush handlers so units are reloaded before enabling
+  ansible.builtin.meta: flush_handlers
+
+- name: Enable and start incident-investigate timer (production only)
+  ansible.builtin.systemd:
+    name: homelab-incident-investigate.timer
+    daemon_reload: true
+    enabled: true
+    state: started
+  become: true
+  when:
+    - not ansible_check_mode
+    - incident_investigate_service_enabled | bool

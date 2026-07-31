@@ -76,6 +76,7 @@
 ## Decision
 
 - **(a) a-4** を採る。callback pluginは「失敗を検出して1ファイル書く」だけに留め、判断・LLM・ネットワークを持たせない。キューが存在しない環境(ansy等)では即座に何もせず返る。例外は内部で握り潰し、被観測playへ伝播させない。
+  - **キューを消費する側は systemd path unit ではなく短周期の timer とする**(2026-07-31、実装時の変更)。当初 a-4 は path unit を想定していたが、調査は「Semaphoreがステータスと出力を確定させ、かつ証拠バンドルが揃う」まで**待って再試行する**必要がある(R3)。path unitはファイルの変化で1度発火するだけで再試行を持たないため、待ちを表現できない。timerなら未処理のキューを毎周期見直せ、取りこぼしの回復も同じ機構で済む。**検出が即時・消費が周期という非対称は意図したものである。**
 - **(b) b-2** を採る。Ansible は**配備**(role + setup playbook)と、将来のSlack報告(P2 R14)にだけ使う。
 - **(c) c-3** を採る(2026-07-31 Yoshinobu選択)。**c-1(既存wrapperの流用)・c-2(設定層で絞る)へは倒さない。** 詳細は下記。
 - **(d) d-2の変形**を採る。呼び出し側は `yoshi`、LLM呼び出しだけ**新設する調査専用ユーザー**(wrapper 1本に限定したsudoers)。`recovery-exec` は使わない。
@@ -112,8 +113,10 @@
 
 ## Consequences
 
-- **Policy改訂が前提。** 承認前に実装へ入らない。
-- **新しい常時稼働プロセスは増えない。** 増えるのは callback plugin(実行のたびにロードされる)、systemd path unit + oneshot service、新ユーザー `incident-inspect` とその Codex 設定、sudoers 1行、ACL 2件。
+- **Policy改訂が前提。** 承認前に実装へ入らない(2026-07-31に適用・commit済み)。
+- **roleは2つに分ける。** `incident_inspect`(調査専用identityとCodexの実行口)と `incident_investigate`(検出・調査本体・配備)。**`roles/recovery_exec` へは足さない** — 同roleのsetup playbookはターゲットへSSH公開鍵を配布する経路を持ち、そこへ無関係な変更を混ぜると影響範囲が横へ広がる(`docs/ai/memory/lessons/` のsetup playbook横方向クロバーの教訓)。既存の `recovery_exec`(identity + wrapper)と `recovery_io`(ブリッジ)の分け方と同型である。
+- **認証は `CODEX_HOME` 単位でユーザーをまたがない**(codex-cli の `--ignore-user-config` の説明が明記、2026-07-31実測)。ユーザー作成後に、そのユーザーとして `codex login --device-auth` を1回行う。**headlessなquoryでdevice-authが成立することは実証済み。**
+- **新しい常時稼働プロセスは増えない。** 増えるのは callback plugin(実行のたびにロードされる)、systemd timer + oneshot service、新ユーザー `incident-inspect` とその Codex 設定、sudoers 1行、**ACL 3件**(`/home/yoshi` traverse / `/var/lib/semaphore` traverse / `semaphore.db` read。`recovery_exec` の既存実装と同じ3点構成である。**2026-07-31、当初「2件」と書いていたのを実装の現物に合わせて訂正した**)。
 - **新ユーザーのACL追加先に `reports/incidents/` が含まれる。** このツリーは 2026-07-28 の ACL mask 障害の現場であり、**`setfacl` で named entry を足すことと、`chmod`(`ansible.builtin.file` の `mode:` を含む)を一切当てないことを両方守る必要がある**(`roles/incident_capture/tasks/main.yml` 冒頭の不変条件 C1)。
 - **quoryへの配備にYoshinobuの `git pull --ff-only` が要る。** quory作業ツリーの自動同期は2026-07-29に意図的に見送られている。
 - **`ansible.cfg` へ callback を有効化する行が入る場合、この変更は全ホスト・全実行に効く。** U0 M2 は**確定しなかった**(状況証拠は「効いている」方向だが、Semaphore自身のVault機構の使用有無を確認するDBクエリがharnessにブロックされ停止した)。**効くことを前提にせず、配備後に一度観測して確かめる**。効いていなければ Semaphore 側の環境設定(YoshinobuのUI操作)が別途要る。

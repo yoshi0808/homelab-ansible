@@ -1,0 +1,59 @@
+---
+# Deploy incident-inspect (primary-investigation Codex runner: identity +
+# launch wrapper only) to ansy or quory.
+#
+# Scope (U1 of "障害の一次調査の自動化"): this playbook creates the
+# investigation-only Unix user, its Codex config, its launch wrapper, and the
+# sudoers entry that lets yoshi switch into it. It does NOT deploy detection,
+# the investigation body, or the artifact writer — those belong to
+# roles/incident_investigate (U2, a separate implementation unit) and are out
+# of scope here. This playbook never touches roles/recovery_exec,
+# roles/recovery_io, roles/incident_capture, or roles/incident_sync.
+#
+# Prerequisite: roles/recovery_exec must already be deployed on this host
+# (playbooks/recovery_exec_setup.yml) — homelab-semaphore-query and
+# homelab-reports must already exist at /usr/local/bin/. This role only adds
+# POSIX ACL grants for incident-inspect's own UID on the same paths
+# recovery-exec already reads (semaphore.db, /home/yoshi traverse); it does
+# not redeploy those wrapper scripts.
+#
+# Development (ansy):
+#   ansible-playbook playbooks/incident_inspect_setup.yml -l ansy
+#
+# Production (quory):
+#   ansible-playbook playbooks/incident_inspect_setup.yml -l quory
+#
+# Authentication (manual, out of scope for this playbook): after the first
+# run, Yoshinobu runs `codex login --device-auth` as incident-inspect once
+# (OQ7, headless device-auth confirmed working 2026-07-31). recovery-exec's
+# auth.json is never copied to this user.
+#
+# tester-gate: risk-accepted —破壊性はあるがサービス再起動を一切伴わない
+# (incident-inspectはデーモンではない)。行う変更はユーザー作成・Codex設定配置・
+# wrapper配置・sudoers・既存パスへのACL付与のみで、いずれも自ホスト内に閉じる
+# (recovery_exec_setup.ymlのtarget distribution相当の横方向配布ロジックが
+# 本roleには存在しない — target_setup.yml相当のincludeが無いため、
+# 2026-07-08のようなauthorized_keys排他上書き事故のクラスがそもそも起こり得ない)。
+# 最悪ケースはincident-inspectユーザーの設定不備で一次調査が起動できない
+# (AC6が拾う)ことであり、被観測playbookやSemaphore本体には影響しない。
+- name: Deploy incident-inspect (primary-investigation Codex runner)
+  hosts: dev_nodes:control_nodes
+  gather_facts: true
+  become: true
+  vars:
+    skip_notifications: "{{ ansible_check_mode }}"
+  pre_tasks:
+    - name: "[migration] tester_mode is deprecated for this playbook — it always runs for real"
+      ansible.builtin.assert:
+        that: not (tester_mode | default(false) | bool)
+        fail_msg: >-
+          This playbook no longer supports -e tester_mode=true and has no
+          dry-run mode (--check included): incident-inspect setup always
+          runs for real. See docs/ai/policies/ansible_test_safety_policy.md.
+        quiet: true
+
+  tasks:
+    - name: Run incident_inspect role
+      ansible.builtin.import_role:
+        name: incident_inspect
+      check_mode: false
