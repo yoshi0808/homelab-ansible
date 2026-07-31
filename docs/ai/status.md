@@ -20,6 +20,8 @@
 
 | # | 項目 | 現在地 | 次にやること |
 |---|---|---|---|
+| 1 | **障害の一次調査の自動化**(Semaphoreジョブの失敗ごとにCodexが原因を調べ、incident report群へ残す) | 2026-07-31着手。requirement / ADR-009 / Policy改訂案 / Step 0実測まで完了。**実装は未着手** | **Yoshinobu待ちが2件。** ①Policy改訂案(`docs/ai/reviews/incident_auto_investigation/2026-07-31_003_policy_amendment_proposal.md`)の承認 ②調査専用ユーザー `incident-inspect` の `codex login`(ブラウザ操作)。両方が揃ってからStep 2(実装)へ |
+| 2 | **Codexのexecpolicy allowlistが境界として機能していない**(Incident、状態: 調査中) | 2026-07-31にU0で発覚。`roles/recovery_exec` が配る `[execpolicy]` は `codex exec` でコマンド実行を阻止しない(allow-listに無い `id` が通った)。**本番経路そのものでは未確認**(同一内容の設定を複製した別CODEX_HOMEでの観測) | 一次調査案件とは**別に**方針を決める。候補は①`.rules`方式の実測②能力の不在で境界を作り直す③`AGENTS.md.j2`等の記述を実態へ合わせる。**③は単独では採らない。** 正本は `docs/ai/memory/incidents/2026-07-31_codex-execpolicy-allowlist-not-enforcing.md` |
 
 **「Grafanaダッシュボード/アラートのrepo正本化」は2026-07-30にクローズした。** Step 1・2・3すべて配備・検証済み、Auditor条件付き受入の2件も反映済み。規範の正本は `docs/ai/policies/log_observability_policy.md` **v4.0**(LOG-078〜LOG-089)、設計判断は `docs/ai/adr/007-grafana-provisioning-as-code.md`(**Accepted**)、調整手順は `docs/ai/context/operations/grafana-alerting-tuning.md`、案件記録は `docs/ai/reviews/grafana_provisioning/`(001〜018)。**Watchへ回していたAC4(実発火時の通知本文)は2026-07-31に観測してPASS**、Watch行は削除した — 観測の一次記録は `docs/ai/reviews/grafana_provisioning/2026-07-31_018_ac4_observation.md`。**この案件は残件なしで完全にクローズした。**
 
