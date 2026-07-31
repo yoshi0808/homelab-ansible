@@ -3,14 +3,13 @@
 # quoryへは配布しない(D-1: 転送はansy起点のpullであり、quory側には何も置かない
 # — IC-013)。playbooks/incident_sync_timer.yml から include_role tasks_from で呼ぶ。
 #
-# 呼び出し元は本role(incident_sync)を risk-accepted として起動する
-# (playbooks/incident_sync_timer.ymlのtester-gateマーカーとコメントを参照)。
-# `check_mode: false` を呼び出し元のimport箇所に置くことで、配下の本ファイルの
-# 全task(ネストされたcommand/debugを含む)は --check の有無に関わらず常に本実行
-# される(TS-013)。そのため本ファイル内では ansible_check_mode による when 分岐
-# を一切使わない — 使うと呼び出し元のcascadeと矛盾し、--check時にだけ一部が
-# 意図せずskipされる(その場合 when: not ansible_check_mode は常にFalseになる
-# ため、cascadeで実行されるはずのtaskが動かなくなる)。
+# 呼び出し元は本role(incident_sync)を check-mode-native として起動する
+# (playbooks/incident_sync_timer.ymlのtester-gateマーカーとコメントを参照、
+# 2026-07-31 round2でrisk-acceptedから変換)。unit配置・enable/startの各taskは
+# when: not ansible_check_mode で個別にゲートする(TS-014、相互依存する検証・
+# 報告taskが後続しないため block化は不要)。末尾の `systemctl list-timers`
+# 読み取り診断は破壊的ではなく、--check下でも意味のある情報(次回実行予定)を
+# 示すため check_mode: false で本実行を維持する(TS-017)。
 #
 # timer専用の変数(schedule・run_user・playbook_bin・lock path・timeout)は
 # roles/incident_sync/defaults/main.yml の「timer配置用」節にある(2026-07-28
@@ -38,6 +37,8 @@
     mode: "0644"
   become: true
   notify: Reload systemd for incident sync
+  when: not ansible_check_mode
+  tags: [destructive]
 
 - name: Deploy incident sync timer unit
   ansible.builtin.template:
@@ -48,6 +49,8 @@
     mode: "0644"
   become: true
   notify: Reload systemd for incident sync
+  when: not ansible_check_mode
+  tags: [destructive]
 
 - name: Flush handlers so units are reloaded before enabling
   ansible.builtin.meta: flush_handlers
@@ -58,12 +61,21 @@
     enabled: true
     state: started
   become: true
+  when: not ansible_check_mode
+  tags: [destructive]
 
 - name: Query next scheduled run
   ansible.builtin.command:
     cmd: systemctl list-timers ansible-incident-sync.timer --all --no-pager
   register: incident_sync_timer_status
   changed_when: false
+  # check-mode-native (TS-017): command has no native check_mode support and
+  # would auto-skip under --check by default. Forced to always run for real
+  # because it is read-only (systemctl list-timers, no state change) and
+  # still shows meaningful information under --check (whether a timer from a
+  # prior real run is scheduled) — unlike the deploy/enable tasks above,
+  # skipping it would not make it safer, only less informative.
+  check_mode: false
 
 - name: Report next scheduled run
   ansible.builtin.debug:

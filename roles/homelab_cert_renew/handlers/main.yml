@@ -12,6 +12,16 @@
   become: true
 
 - name: update-ca-certificates
+  # This handler is notified only by
+  # roles/homelab_cert_renew/tasks/deploy_ca_trust.yml (grep-confirmed
+  # 2026-07-31), which is itself invoked only by
+  # playbooks/ca_trust_deploy.yml (check-mode-native as of round 2). Its two
+  # notifying tasks are gated with `when: not ansible_check_mode` and so
+  # never report changed under --check, but the gate is added here too
+  # rather than relying only on that (a notifying task's gate is not
+  # inherited by its handler). Not paired with check_mode: false — once
+  # `when:` gates the task, that line would never be reached and would be
+  # misleading dead code.
   ansible.builtin.command: update-ca-certificates
   changed_when: true
-  check_mode: false
+  when: not ansible_check_mode

@@ -8,35 +8,31 @@
 #   ansible authy -b -m ansible.builtin.systemd -a "name=recovery-drill-authy.service state=started"
 #   (unit fails → OnFailure → push → Codex investigates → finds services healthy → no recover called)
 #
-# tester-gate: risk-accepted — tester_mode/tester_gate を廃止。--check の有無に
-# かかわらず常に本実行する。理由: 静的なunitファイルを配置してdaemon_reloadする
-# だけで、ユニット自体の起動/enableは別コマンドで手動実施のため本playbookの
-# 範囲外。サービス再起動・実際のdrill発火を一切伴わないためYoshinobuが安全側と
-# 判断(2026-07-06)。詳細は docs/ai/policies/ansible_test_safety_policy.md。
+# tester-gate: check-mode-native — TS-009 条件1(静的なunitファイルを配置して
+# daemon_reloadするだけで、ユニット自体の起動/enableは別コマンドで手動実施の
+# ため本playbookの範囲外。サービス再起動・実際のdrill発火を一切伴わない)は
+# 満たすが、条件2(本体操作を省いた検証には価値がない)は満たさない。unit配置
+# (`copy`)・daemon_reload(`systemd`)はいずれもAnsible標準のcheck_modeで
+# 安全にプレビューできる。roles/recovery_push/tasks/drill_setup.yml の各taskを
+# when: not ansible_check_mode でゲートする(`loop:`付きincludeのため
+# block化はできない — skills/ansible-implementation-style/SKILL.md「check_mode
+# の実装上の落とし穴」項目3)。TS-010に照らし risk-accepted ではなく
+# check-mode-native が正しい分類(2026-07-06当時は条件1のみで判断していた)。
+# 詳細は docs/ai/policies/ansible_test_safety_policy.md。
 
 - name: Deploy recovery push drill units (E-3)
   hosts: quory
   gather_facts: false
   pre_tasks:
-    - name: "[migration] --check has no dry-run here — refuse and stop before any changes"
-      ansible.builtin.assert:
-        that: not (ansible_check_mode | bool)
-        fail_msg: >-
-          This playbook (tester-gate: risk-accepted) has no --check dry-run:
-          every task always applies for real, so --check would look like a
-          simulation while actually making the change (see
-          docs/ai/memory/incidents/2026-07-31_subagent-unintended-deploy-risk-accepted-check.md).
-          Re-run without --check to apply for real.
-          See docs/ai/reviews/check_mode_semantics/2026-07-31_001_requirement.md.
-        quiet: true
-
-    - name: "[migration] tester_mode is deprecated for this playbook — it always runs for real"
+    - name: "[migration] tester_mode is deprecated for this playbook — use --check instead"
       ansible.builtin.assert:
         that: not (tester_mode | default(false) | bool)
         fail_msg: >-
-          This playbook no longer supports -e tester_mode=true and has no
-          dry-run mode (--check included): drill unit deployment always runs
-          for real. See docs/ai/policies/ansible_test_safety_policy.md.
+          This playbook no longer supports -e tester_mode=true. Re-run with
+          --check (add --check --diff for more detail) instead — read-only
+          checks now run for real under --check, and the destructive
+          deployment tasks are gated by ansible_check_mode. See
+          docs/ai/policies/ansible_test_safety_policy.md.
         quiet: true
   tasks:
     - name: Setup drill units per target

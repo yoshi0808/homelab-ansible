@@ -14,43 +14,33 @@
 #   vault_slack_authorized_user_id must be set in inventories/vars/slack.yml
 # - recovery_exec role must be deployed first (codex-exec-wrapper must exist)
 #
-# tester-gate: risk-accepted — tester_mode/tester_gate を廃止。--check の有無に
-# かかわらず常に本実行する。理由: 内容が変わった場合のみ recovery-io サービスの
-# 再起動が発生するが(Slack I/O bridge。他playbookのquory-semaphoreのような
-# 制御平面そのものではなく、単一機能の周辺ブリッジ)、最悪ケースはSlack経由の
-# 復旧コマンド受付が再起動中の数秒だけ止まる程度で、他の自動化(Semaphore経由の
-# playbook実行、systemdタイマー)には影響しないためYoshinobuが安全側と判断
-# (2026-07-06)。詳細は docs/ai/policies/ansible_test_safety_policy.md。
+# tester-gate: check-mode-native — TS-009 条件1(recovery-ioはSlack I/Oの
+# 周辺ブリッジであり、内容変更時の再起動が数秒他のSlack経由コマンド受付を
+# 止める程度で、Semaphore経由のplaybook実行やsystemdタイマー等の他の自動化
+# 系統には波及しない)は満たすが、条件2(本体操作を省いた検証には価値が
+# ない)は満たさない。ユーザー作成・venv構築・pip install・script/env/
+# sudoers/systemd unit配置(`user`/`file`/`apt`/`command`+`creates:`/`pip`/
+# `template`)はいずれもAnsible標準のcheck_modeで安全にプレビューできる。
+# 実際に本番へ作用するのはsystemd unitのenable/start、および変更検知に
+# 伴うhandler経由の再起動のみであり、roles/recovery_io/tasks/main.yml と
+# handlers/main.yml をあわせて when: not ansible_check_mode でゲートする。
+# TS-010に照らし risk-accepted ではなく check-mode-native が正しい分類
+# (2026-07-06当時は条件1のみで判断していた)。詳細は
+# docs/ai/policies/ansible_test_safety_policy.md。
 
 - name: Deploy recovery-io (Slack I/O bridge)
   hosts: dev_nodes:control_nodes
   gather_facts: true
   become: true
-  # vars: { skip_notifications: "{{ ansible_check_mode }}" } removed
-  # 2026-07-31 (R2, docs/ai/reviews/check_mode_semantics/
-  # 2026-07-31_001_requirement.md) — R1 below now refuses --check outright,
-  # so this line's only effect (skip_notifications=true under --check) never
-  # had a chance to run.
   pre_tasks:
-    - name: "[migration] --check has no dry-run here — refuse and stop before any changes"
-      ansible.builtin.assert:
-        that: not (ansible_check_mode | bool)
-        fail_msg: >-
-          This playbook (tester-gate: risk-accepted) has no --check dry-run:
-          every task always applies for real, so --check would look like a
-          simulation while actually making the change (see
-          docs/ai/memory/incidents/2026-07-31_subagent-unintended-deploy-risk-accepted-check.md).
-          Re-run without --check to apply for real.
-          See docs/ai/reviews/check_mode_semantics/2026-07-31_001_requirement.md.
-        quiet: true
-
-    - name: "[migration] tester_mode is deprecated for this playbook — it always runs for real"
+    - name: "[migration] tester_mode is deprecated for this playbook — use --check instead"
       ansible.builtin.assert:
         that: not (tester_mode | default(false) | bool)
         fail_msg: >-
-          This playbook no longer supports -e tester_mode=true and has no
-          dry-run mode (--check included): recovery-io setup (incl. any
-          resulting service restart) always runs for real. See
+          This playbook no longer supports -e tester_mode=true. Re-run with
+          --check (add --check --diff for more detail) instead — read-only
+          checks now run for real under --check, and the destructive
+          deployment tasks are gated by ansible_check_mode. See
           docs/ai/policies/ansible_test_safety_policy.md.
         quiet: true
 
@@ -58,4 +48,3 @@
     - name: Run recovery_io role
       ansible.builtin.import_role:
         name: recovery_io
-      check_mode: false

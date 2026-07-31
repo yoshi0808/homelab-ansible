@@ -11,37 +11,56 @@
     mode: "0755"
   become: true
   delegate_to: "{{ push_target.name }}"
+  when: not ansible_check_mode
+  tags: [destructive]
 
-- name: Generate push SSH key on {{ push_target.name }}
-  ansible.builtin.command:
-    cmd: >-
-      ssh-keygen -t ed25519 -N ''
-      -C "recovery-push-{{ push_target.name }}"
-      -f {{ recovery_push_key_path }}
-    creates: "{{ recovery_push_key_path }}"
-  become: true
-  delegate_to: "{{ push_target.name }}"
+# check-mode-native (TS-015): keygen -> chmod -> slurp -> store-in-dict is one
+# interdependent operation, not independent destructive tasks. "Slurp push
+# public key" only means something if "Generate push SSH key" actually ran
+# for real (on a fresh host, slurp would fail outright reading a .pub file
+# that was never created); "Store ... in dict" then only means something if
+# the slurp actually read real key content. Per TS-015 this whole sequence
+# is gated once, at the block level, rather than repeating
+# `when: not ansible_check_mode` on each task (same shape as
+# roles/recovery_probe/tasks/main.yml's deploy/activate/verify block, see
+# docs/ai/reviews/check_mode_semantics/2026-07-31_007_round2_batchA_implement.md
+# §6.1). "Create recovery config dir" above is a standalone idempotent
+# prerequisite (directory creation shared by nothing that reads its content),
+# so it keeps its own individual `when: not ansible_check_mode` (TS-014).
+- name: Generate and read push SSH key (destructive; TS-015 chain) on {{ push_target.name }}
+  when: not ansible_check_mode
+  tags: [destructive]
+  block:
+    - name: Generate push SSH key on {{ push_target.name }}
+      ansible.builtin.command:
+        cmd: >-
+          ssh-keygen -t ed25519 -N ''
+          -C "recovery-push-{{ push_target.name }}"
+          -f {{ recovery_push_key_path }}
+        creates: "{{ recovery_push_key_path }}"
+      become: true
+      delegate_to: "{{ push_target.name }}"
 
-- name: Lock down push key on {{ push_target.name }}
-  ansible.builtin.file:
-    path: "{{ recovery_push_key_path }}"
-    owner: root
-    group: root
-    mode: "0600"
-  become: true
-  delegate_to: "{{ push_target.name }}"
+    - name: Lock down push key on {{ push_target.name }}
+      ansible.builtin.file:
+        path: "{{ recovery_push_key_path }}"
+        owner: root
+        group: root
+        mode: "0600"
+      become: true
+      delegate_to: "{{ push_target.name }}"
 
-- name: Slurp push public key from {{ push_target.name }}
-  ansible.builtin.slurp:
-    src: "{{ recovery_push_key_path }}.pub"
-  register: _push_pubkey_raw
-  become: true
-  delegate_to: "{{ push_target.name }}"
+    - name: Slurp push public key from {{ push_target.name }}
+      ansible.builtin.slurp:
+        src: "{{ recovery_push_key_path }}.pub"
+      register: _push_pubkey_raw
+      become: true
+      delegate_to: "{{ push_target.name }}"
 
-- name: Store {{ push_target.name }} pubkey in dict
-  ansible.builtin.set_fact:
-    _push_pubkeys: >-
-      {{ _push_pubkeys | combine({push_target.name: _push_pubkey_raw.content | b64decode | trim}) }}
+    - name: Store {{ push_target.name }} pubkey in dict
+      ansible.builtin.set_fact:
+        _push_pubkeys: >-
+          {{ _push_pubkeys | combine({push_target.name: _push_pubkey_raw.content | b64decode | trim}) }}
 
 - name: Deploy recovery-push.sh on {{ push_target.name }}
   ansible.builtin.copy:
@@ -52,6 +71,8 @@
     mode: "0755"
   become: true
   delegate_to: "{{ push_target.name }}"
+  when: not ansible_check_mode
+  tags: [destructive]
 
 - name: Deploy recovery-trigger@.service on {{ push_target.name }}
   ansible.builtin.copy:
@@ -62,6 +83,8 @@
     mode: "0644"
   become: true
   delegate_to: "{{ push_target.name }}"
+  when: not ansible_check_mode
+  tags: [destructive]
 
 - name: Create drop-in directories on {{ push_target.name }}
   ansible.builtin.file:
@@ -76,6 +99,8 @@
   loop_control:
     loop_var: svc
     label: "{{ svc }}"
+  when: not ansible_check_mode
+  tags: [destructive]
 
 - name: Deploy recovery-trigger drop-ins on {{ push_target.name }}
   ansible.builtin.template:
@@ -90,7 +115,26 @@
   loop_control:
     loop_var: svc
     label: "{{ svc }}"
+  when: not ansible_check_mode
+  tags: [destructive]
 
+# Read-only (ssh-keyscan, changed_when: false): left ungated. Its only
+# consumer, "Deploy push known_hosts" below, is itself gated to skip under
+# --check, so leaving this on command's default check_mode auto-skip (no
+# creates:/removes:) causes no partial-execution risk either way — see the
+# scratch decoy verification in this batch's implement record.
+# この task をゲートしない安全性は、`_quory_hostkeys` を読む task が下の
+# 「Deploy push known_hosts」1つだけであることに依存している。
+#
+# --check では `command` が auto-skip されるため、`_quory_hostkeys` は
+# `{'skipped': true, 'changed': false}` として登録され、**`stdout` キーを持たない**。
+# これを参照すれば `has no attribute 'stdout'` で失敗する。今それが起きないのは、
+# 唯一の読み手である「Deploy push known_hosts」も `when: not ansible_check_mode`
+# で skip されるからである。
+#
+# **`_quory_hostkeys` を読む task を増やすときは、その task も --check で
+# skip されることを確かめること。** --check でも実行される task から読むなら、
+# この task 側に `check_mode: false` を付ける必要がある(TS-017)。
 - name: Scan quory host key for push known_hosts on {{ push_target.name }}
   ansible.builtin.command:
     cmd: ssh-keyscan -H quory.internal
@@ -108,9 +152,13 @@
     mode: "0644"
   become: true
   delegate_to: "{{ push_target.name }}"
+  when: not ansible_check_mode
+  tags: [destructive]
 
 - name: Reload systemd on {{ push_target.name }}
   ansible.builtin.systemd:
     daemon_reload: true
   become: true
   delegate_to: "{{ push_target.name }}"
+  when: not ansible_check_mode
+  tags: [destructive]

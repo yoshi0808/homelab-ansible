@@ -30,6 +30,8 @@
     password: "!"
     comment: "Recovery Slack I/O service account"
   become: true
+  when: not ansible_check_mode
+  tags: [destructive]
 
 # ---------------------------------------------------------------------------
 # Env directory (holds Slack tokens — no SSH keys)
@@ -43,6 +45,8 @@
     group: "{{ recovery_io_user }}"
     mode: "0750"
   become: true
+  when: not ansible_check_mode
+  tags: [destructive]
 
 # ---------------------------------------------------------------------------
 # Python venv + slack-bolt
@@ -54,12 +58,19 @@
     state: present
     update_cache: false
   become: true
+  when: not ansible_check_mode
+  tags: [destructive]
 
 - name: Create virtualenv
   ansible.builtin.command:
     cmd: python3 -m venv {{ recovery_io_install_dir }}/venv
     creates: "{{ recovery_io_install_dir }}/venv/bin/python"
   become: true
+  # check-mode-native (TS-014): skipped under --check rather than relying on
+  # command's partial creates:-based check_mode support, so it appears as
+  # `skipped` (AC1) instead of a predicted `changed`.
+  when: not ansible_check_mode
+  tags: [destructive]
 
 - name: Install slack-bolt into venv
   ansible.builtin.pip:
@@ -67,6 +78,8 @@
     virtualenv: "{{ recovery_io_install_dir }}/venv"
     state: present
   become: true
+  when: not ansible_check_mode
+  tags: [destructive]
 
 - name: Set venv ownership
   ansible.builtin.file:
@@ -76,6 +89,8 @@
     mode: "0755"
     recurse: false
   become: true
+  when: not ansible_check_mode
+  tags: [destructive]
 
 # ---------------------------------------------------------------------------
 # Listener script
@@ -90,6 +105,8 @@
     mode: "0755"
   become: true
   notify: Restart recovery-io
+  when: not ansible_check_mode
+  tags: [destructive]
 
 # ---------------------------------------------------------------------------
 # Env file (Slack tokens)
@@ -105,6 +122,8 @@
   become: true
   no_log: true
   notify: Restart recovery-io
+  when: not ansible_check_mode
+  tags: [destructive]
 
 # ---------------------------------------------------------------------------
 # sudoers: recovery-io → recovery-exec (codex-exec-wrapper only)
@@ -119,6 +138,8 @@
     mode: "0440"
     validate: /usr/sbin/visudo -cf %s
   become: true
+  when: not ansible_check_mode
+  tags: [destructive]
 
 # ---------------------------------------------------------------------------
 # systemd service
@@ -135,11 +156,15 @@
   notify:
     - Reload systemd
     - Restart recovery-io
+  when: not ansible_check_mode
+  tags: [destructive]
 
 - name: Reload systemd daemon
   ansible.builtin.systemd:
     daemon_reload: true
   become: true
+  when: not ansible_check_mode
+  tags: [destructive]
 
 - name: Enable recovery-io service (quory only)
   ansible.builtin.systemd:
@@ -147,3 +172,5 @@
     enabled: "{{ recovery_io_service_enabled }}"
     state: "{{ 'started' if recovery_io_service_enabled | bool else omit }}"
   become: true
+  when: not ansible_check_mode
+  tags: [destructive]

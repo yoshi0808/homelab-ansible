@@ -7,39 +7,35 @@
 #   quory: ansible-playbook playbooks/systemd_timers.yml
 #   ansy:  ansible-playbook playbooks/systemd_timers.yml -e "target_hosts=dev_nodes"
 #
-# tester-gate: risk-accepted — tester_mode/tester_gate を廃止。--check の有無に
-# かかわらず常に本実行する。理由: timer/serviceユニット配置+enable/startのみで、
-# .timerをstartしてもsystemdの仕様上スケジュールがarmedになるだけで紐づく
-# .service(Type=oneshot)は次回のOnCalendar時刻まで実行されない(即座の実行なし)。
-# Yoshinobuが安全側と判断(2026-07-06)。詳細は docs/ai/policies/ansible_test_safety_policy.md。
+# tester-gate: check-mode-native — TS-009 条件1(timer/serviceユニット配置+
+# enable/startのみで、.timerをstartしてもsystemdの仕様上スケジュールが
+# armedになるだけで紐づく.service(Type=oneshot)は次回のOnCalendar時刻まで
+# 実行されない)は満たすが、条件2(本体操作を省いた検証には価値がない)は
+# 満たさない。unit配置(`template`)・enable/start(`systemd`)はいずれも
+# Ansible標準のcheck_modeで安全にプレビューできる。
+# roles/systemd_timers/tasks/main.yml の全taskを
+# when: not ansible_check_mode でゲートする(相互依存する検証・報告taskが
+# 後続しない単純な配置+enable/startのみのため、TS-014の個別task単位で足りる
+# — roles/incident_capture・roles/incident_investigateと同型)。TS-010に照らし
+# risk-accepted ではなく check-mode-native が正しい分類(2026-07-06当時は
+# 条件1のみで判断していた)。詳細は docs/ai/policies/ansible_test_safety_policy.md。
 - name: Configure Ansible systemd timers
   hosts: "{{ target_hosts | default('control_nodes') }}"
   gather_facts: false
   become: true
   connection: local
   pre_tasks:
-    - name: "[migration] --check has no dry-run here — refuse and stop before any changes"
-      ansible.builtin.assert:
-        that: not (ansible_check_mode | bool)
-        fail_msg: >-
-          This playbook (tester-gate: risk-accepted) has no --check dry-run:
-          every task always applies for real, so --check would look like a
-          simulation while actually making the change (see
-          docs/ai/memory/incidents/2026-07-31_subagent-unintended-deploy-risk-accepted-check.md).
-          Re-run without --check to apply for real.
-          See docs/ai/reviews/check_mode_semantics/2026-07-31_001_requirement.md.
-        quiet: true
-  tasks:
-    - name: "[migration] tester_mode is deprecated for this playbook — it always runs for real"
+    - name: "[migration] tester_mode is deprecated for this playbook — use --check instead"
       ansible.builtin.assert:
         that: not (tester_mode | default(false) | bool)
         fail_msg: >-
-          This playbook no longer supports -e tester_mode=true and has no
-          dry-run mode (--check included): timer configuration always runs
-          for real. See docs/ai/policies/ansible_test_safety_policy.md.
+          This playbook no longer supports -e tester_mode=true. Re-run with
+          --check (add --check --diff for more detail) instead — read-only
+          checks now run for real under --check, and the destructive
+          deployment tasks are gated by ansible_check_mode. See
+          docs/ai/policies/ansible_test_safety_policy.md.
         quiet: true
-
-    - name: Run systemd_timers role (always for real)
+  tasks:
+    - name: Run systemd_timers role
       ansible.builtin.import_role:
         name: systemd_timers
-      check_mode: false

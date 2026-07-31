@@ -29,6 +29,10 @@ Round 1でこの14本には `--check` 停止assertが入り、黙って適用す
 | **B** | `recovery_io_setup` / `recovery_push_setup` / `recovery_push_drill_setup` / `systemd_timers` / `incident_sync_timer` / `time_sync_ntp_reference` / `ca_trust_deploy` / `incident_inspect_setup` / `recovery_exec_setup` | 素直な配置系。`command`/`shell`/`uri` の auto-skip を1本ずつ見る。**`recovery_exec_setup` は最後**(2026-07-08にquoryで3日間のSSH障害を起こした `authorized_keys` 配布taskを含み、横方向の影響を持つ) |
 | **C** | `cert_renew` / `codex_update_check` | multi-play・quory限定ガード・版判定ロジックがあり最も重い。`cert_renew` と `cloudkey_cert_deploy` の線引きもここで決める |
 
+> **バッチBの内訳(2026-07-31)**: Bは2つの実装単位に分ける。**B-1 = 8本**(`recovery_io_setup` / `recovery_push_setup` / `recovery_push_drill_setup` / `systemd_timers` / `incident_sync_timer` / `time_sync_ntp_reference` / `ca_trust_deploy` / `incident_inspect_setup`)、**B-2 = `recovery_exec_setup` 単独**。B-2を分けるのは、同playbookが2026-07-08にquoryで3日間のSSH障害を起こした `authorized_keys` 配布taskを持ち、`-l` で絞っても横方向へ影響しうるためで、独立したレビューと検証を与える。
+>
+> role依存の実測(2026-07-31): B-1の8本のうち **`recovery_push_setup` と `recovery_push_drill_setup` は同じ `roles/recovery_push/` を触る**(後者は `tasks/drill_setup.yml` を `include_tasks` する)。実装単位を分けるならこの2本は同じ単位に置く。他の6本のroleは互いに独立している。`ca_trust_deploy` は `homelab_cert_renew` role も使うため、**バッチCの `cert_renew` と競合しうる** — B完了後にCへ入ること。
+
 > **バッチ分割の訂正(2026-07-31)**: 当初の分割はA=3 / B=8 / C=2 の計13本で、非ゴールの3本と足しても16本にしかならず、母集団17本と合っていなかった。`incident_inspect_setup` が**どのバッチにも割り当てられていなかった**ためで、バッチBへ追加した(B=9、合計14本)。バッチAのレビューがこの算数の不一致を検出した。**分割を変えるときは、非ゴール3 + A + B + C = 17 が成り立つことを毎回確かめること。**
 
 ## 5. 要件(バッチ共通)
@@ -75,7 +79,7 @@ Then 変換した本数だけ減っており、最終的に3本になる
 
 | # | 内容 | 誰が決めるか |
 |---|---|---|
-| OQ1 | `systemd_timers` / `recovery_push_drill_setup` は変換後ほぼゲート不要になる(破壊的本体がほぼ無い)。`check-mode-native` というラベルが妥当か、`safe-readonly` 寄りの別の扱いが要るか | バッチBで現物を見てCoordinatorが判断 |
+| ~~OQ1~~ **決着(2026-07-31)** | `systemd_timers` / `recovery_push_drill_setup` は変換後、全taskが破壊的でゲート対象になり、`--check` は「全部skip」になる。構文と変数解決以外の診断的価値は増えない。**それでも `check-mode-native` が正しい。** 分類が保証するのは「`--check` が書き込みを行わないこと」であって「`--check` が追加の診断情報を生むこと」ではない。両playbookはread-onlyではないため `safe-readonly` は誤りであり(TS-005)、`risk-accepted` は条件2を満たさないため選べない(TS-009)。**残る5分類の中で唯一該当するのが `check-mode-native` である。** 診断的価値が薄いことは分類の誤りではなく、そのplaybookの性質である | Coordinator決定 |
 | OQ2 | `cert_renew`(分離可能な更新要否チェックを持つ)と `cloudkey_cert_deploy`(分離不能な `uri` 連鎖)の線引き | バッチCで決める |
 | OQ3 | 条件2言及の機械検査をどの粒度で書くか(文字列一致では抜ける) | 全バッチ完了後 |
 

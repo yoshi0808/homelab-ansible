@@ -5,12 +5,24 @@
 # なることを実測確認したうえで配布を廃止した(CERT-022、2026-07-25の実測)。
 # 既に配布済みの home-tls-ca.crt は下の absent タスクで回収する。
 
+# This tasks_from is invoked only by playbooks/ca_trust_deploy.yml
+# (playbooks/cert_renew.yml and cert_renew_quory.yml use tasks_from:
+# prepare_ca/issue/deploy_semaphore/deploy_proxmox/deploy_grafana/cleanup —
+# never deploy_ca_trust, grep-confirmed 2026-07-31), so the
+# ansible_check_mode gating below is scoped entirely to this batch and
+# cannot affect batch C's (still risk-accepted) cert_renew playbooks.
 - name: Remove previously deployed intermediate CA from system trust store
   ansible.builtin.file:
     path: /usr/local/share/ca-certificates/home-tls-ca.crt
     state: absent
   notify: update-ca-certificates
+  when: not ansible_check_mode
+  tags: [destructive]
 
+# Read-only (ansible.builtin.slurp; ansible-doc reports check_mode
+# support: full). Left ungated so --check still exercises a real read of
+# the source CA cert on cert_renew_ca_host, rather than being skipped along
+# with the destructive tasks around it.
 - name: Slurp ROOT CA certificate from source host
   ansible.builtin.slurp:
     src: "{{ cert_renew_root_ca_src_crt }}"
@@ -26,3 +38,5 @@
     group: root
     mode: "0644"
   notify: update-ca-certificates
+  when: not ansible_check_mode
+  tags: [destructive]

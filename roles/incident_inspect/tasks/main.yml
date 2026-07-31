@@ -47,6 +47,8 @@
     password: "!"
     comment: "Incident primary-investigation Codex runner (read-only, no host reach)"
   become: true
+  when: not ansible_check_mode
+  tags: [destructive]
 
 # ---------------------------------------------------------------------------
 # Codex設定ディレクトリ(OAuthトークンはCodex自身がここへ書く。
@@ -62,6 +64,8 @@
     group: "{{ incident_inspect_user }}"
     mode: "0700"
   become: true
+  when: not ansible_check_mode
+  tags: [destructive]
 
 - name: Deploy Codex config.toml (model + sandbox)
   ansible.builtin.template:
@@ -71,6 +75,8 @@
     group: "{{ incident_inspect_user }}"
     mode: "0600"
   become: true
+  when: not ansible_check_mode
+  tags: [destructive]
 
 # ---------------------------------------------------------------------------
 # 起動口(codex-investigate-wrapper): 引数を厳密固定し、sandbox/approvalフラグを
@@ -86,6 +92,8 @@
     group: "{{ incident_inspect_user }}"
     mode: "0500"
   become: true
+  when: not ansible_check_mode
+  tags: [destructive]
 
 # ---------------------------------------------------------------------------
 # Workspace + AGENTS.md(Codexがtool documentationとして読む)。
@@ -99,6 +107,8 @@
     group: "{{ incident_inspect_user }}"
     mode: "0750"
   become: true
+  when: not ansible_check_mode
+  tags: [destructive]
 
 - name: Deploy AGENTS.md (what this session may call / what it outputs)
   ansible.builtin.template:
@@ -108,6 +118,8 @@
     group: "{{ incident_inspect_user }}"
     mode: "0640"
   become: true
+  when: not ansible_check_mode
+  tags: [destructive]
 
 # ---------------------------------------------------------------------------
 # 読み取り専用ACL: 既存のhomelab-semaphore-query / homelab-reports を
@@ -126,6 +138,8 @@
     name: acl
     state: present
   become: true
+  when: not ansible_check_mode
+  tags: [destructive]
 
 - name: Grant incident-inspect ACL traverse on /home/yoshi (for reports/ read access, no sudo)
   ansible.posix.acl:
@@ -135,6 +149,8 @@
     permissions: x
     state: present
   become: true
+  when: not ansible_check_mode
+  tags: [destructive]
 
 - name: Grant incident-inspect ACL traverse on /var/lib/semaphore (no sudo)
   ansible.posix.acl:
@@ -144,6 +160,8 @@
     permissions: x
     state: present
   become: true
+  when: not ansible_check_mode
+  tags: [destructive]
 
 - name: Grant incident-inspect ACL read on semaphore.db (no sudo; journal_mode=delete, no -wal/-shm to also grant)
   ansible.posix.acl:
@@ -153,6 +171,8 @@
     permissions: r
     state: present
   become: true
+  when: not ansible_check_mode
+  tags: [destructive]
 
 # ---------------------------------------------------------------------------
 # 起動口の唯一の入り口: yoshi → incident-inspect、wrapper 1本に限定したsudoers。
@@ -167,3 +187,5 @@
     mode: "0440"
     validate: /usr/sbin/visudo -cf %s
   become: true
+  when: not ansible_check_mode
+  tags: [destructive]

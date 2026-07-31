@@ -11,43 +11,35 @@
 # Run:
 #   ansible-playbook playbooks/recovery_push_setup.yml -l quory
 #
-# tester-gate: risk-accepted — tester_mode/tester_gate を廃止。--check の有無に
-# かかわらず常に本実行する。理由: SSH鍵生成(creates:ガード)・スクリプト配置・
+# tester-gate: check-mode-native — TS-009 条件1(SSH鍵生成・スクリプト配置・
 # systemd drop-in配置(中身はOnFailure=recovery-trigger@%p.serviceの1行)+
 # daemon_reloadのみで、対象サービス(freeradius/grafana-server/prometheus/loki/
-# unpoller)自体の再起動・reloadは一切発生しない(daemon_reloadはsystemdに
-# ユニット定義の変更を認識させるだけ)。デプロイした結果として将来的に
-# OnFailureフックが有効になる(=対象サービスが実際に落ちた時だけpush発火)が、
-# デプロイ自体に稼働中サービスへの影響はないためYoshinobuが安全側と判断
-# (2026-07-06、Setup系は実施しないと運用が始まらないため割り切る、との方針)。
-# 詳細は docs/ai/policies/ansible_test_safety_policy.md。
+# unpoller)自体の再起動・reloadは一切発生しない)は満たすが、条件2(本体操作を
+# 省いた検証には価値がない)は満たさない。ディレクトリ・鍵・スクリプト・
+# systemd unit/drop-in/known_hosts配置(`file`/`command`+`creates:`/`copy`/
+# `template`)はいずれもAnsible標準のcheck_modeで安全にプレビューできる。
+# roles/recovery_push/tasks/main.yml と tasks/sender_setup.yml をあわせて
+# when: not ansible_check_mode でゲートする(SSH鍵生成→読み取りの一連は
+# TS-015に従い1つのnamed blockでゲートする — sender_setup.yml参照)。
+# TS-010に照らし risk-accepted ではなく check-mode-native が正しい分類
+# (2026-07-06当時は条件1のみで判断していた)。詳細は
+# docs/ai/policies/ansible_test_safety_policy.md。
 
 - name: Deploy recovery push trigger (E-2)
   hosts: quory
   gather_facts: false
   pre_tasks:
-    - name: "[migration] --check has no dry-run here — refuse and stop before any changes"
-      ansible.builtin.assert:
-        that: not (ansible_check_mode | bool)
-        fail_msg: >-
-          This playbook (tester-gate: risk-accepted) has no --check dry-run:
-          every task always applies for real, so --check would look like a
-          simulation while actually making the change (see
-          docs/ai/memory/incidents/2026-07-31_subagent-unintended-deploy-risk-accepted-check.md).
-          Re-run without --check to apply for real.
-          See docs/ai/reviews/check_mode_semantics/2026-07-31_001_requirement.md.
-        quiet: true
-
-    - name: "[migration] tester_mode is deprecated for this playbook — it always runs for real"
+    - name: "[migration] tester_mode is deprecated for this playbook — use --check instead"
       ansible.builtin.assert:
         that: not (tester_mode | default(false) | bool)
         fail_msg: >-
-          This playbook no longer supports -e tester_mode=true and has no
-          dry-run mode (--check included): push trigger setup always runs
-          for real. See docs/ai/policies/ansible_test_safety_policy.md.
+          This playbook no longer supports -e tester_mode=true. Re-run with
+          --check (add --check --diff for more detail) instead — read-only
+          checks now run for real under --check, and the destructive
+          deployment tasks are gated by ansible_check_mode. See
+          docs/ai/policies/ansible_test_safety_policy.md.
         quiet: true
   tasks:
     - name: Run recovery_push role
       ansible.builtin.import_role:
         name: recovery_push
-      check_mode: false

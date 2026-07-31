@@ -10,6 +10,8 @@
   loop_control:
     loop_var: timer
     label: "{{ timer.name }}"
+  when: not ansible_check_mode
+  tags: [destructive]
 
 - name: Deploy systemd timer units
   ansible.builtin.template:
@@ -22,10 +24,14 @@
   loop_control:
     loop_var: timer
     label: "{{ timer.name }}"
+  when: not ansible_check_mode
+  tags: [destructive]
 
 - name: Reload systemd daemon
   ansible.builtin.systemd:
     daemon_reload: true
+  when: not ansible_check_mode
+  tags: [destructive]
 
 - name: Enable and start timers
   ansible.builtin.systemd:
@@ -36,3 +42,5 @@
   loop_control:
     loop_var: timer
     label: "{{ timer.name }}"
+  when: not ansible_check_mode
+  tags: [destructive]

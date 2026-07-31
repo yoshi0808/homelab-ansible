@@ -8,9 +8,19 @@
     group: root
     mode: "0644"
   register: time_sync_ntp_reference_chrony_dropin
+  when: not ansible_check_mode
+  tags: [destructive]
 
+# When the task above is skipped under --check, its registered result still
+# has `.changed == false` (Ansible sets this for skipped tasks; verified in
+# this batch's implement record's scratch decoy), so this condition already
+# evaluates to False under --check without needing anything extra. The
+# explicit `not ansible_check_mode` is added anyway per R4 (every destructive
+# task gets the gate stated directly, not only inherited through another
+# task's registered result).
 - name: Restart chrony to pick up the new source
   ansible.builtin.systemd:
     name: chrony
     state: restarted
-  when: time_sync_ntp_reference_chrony_dropin.changed
+  when: not ansible_check_mode and time_sync_ntp_reference_chrony_dropin.changed
+  tags: [destructive]

@@ -1,13 +1,22 @@
 ---
+# check-mode-native: the notifying tasks in tasks/main.yml are all gated on
+# `when: not ansible_check_mode` and therefore never report changed under
+# --check, so these handlers are never notified during --check in the
+# current design. The `when:` below closes the gap explicitly rather than
+# depending only on that upstream gating not being able to fire a handler
+# while ansible_check_mode is true (audit
+# docs/ai/reviews/check_mode_semantics/2026-07-31_007_round2_batchA_implement.md
+# §2.4 — do not pair this with a redundant `check_mode: false`, which would
+# never be reached once `when:` gates the task).
 - name: Reload systemd
   ansible.builtin.systemd:
     daemon_reload: true
   become: true
-  check_mode: false
+  when: not ansible_check_mode
 
 - name: Restart recovery-io
   ansible.builtin.systemd:
     name: recovery-io
     state: restarted
   become: true
-  check_mode: false
+  when: not ansible_check_mode

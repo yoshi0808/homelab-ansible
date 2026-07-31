@@ -9,18 +9,16 @@
 # または将来unitの内容を変えたとき)だけ発火する — roles/knowledge_review/
 # handlers/main.yml と同じ形。
 #
-# `check_mode: false` を明示するのは knowledge_review のhandlerとは異なる点
-# である。knowledge_review側のplaybook(check-mode-native)は「--checkでは
-# 破壊的操作を行わない」ことが設計意図であり、handlerに何も指定しなくても
-# 既定どおり--check下では発火・実行されない(それでよい)。一方このroleの
-# 配備playbook(playbooks/incident_sync_timer.yml)は risk-accepted であり、
-# 「--checkの有無に関わらず常に本実行する」ことが設計意図(呼び出し元の
-# `check_mode: false` によるcascade、TS-013)。handlerはtaskの通常のtask木
-# ではなく別系統のqueueであり、呼び出し元のcascadeが自動的に及ぶかどうかは
-# 保証されないため、本ファイル側でも明示的に check_mode: false を置き、
-# risk-acceptedの意図(常に本実行)をhandler側でも独立に担保する。
+# check-mode-native (2026-07-31 round2でrisk-acceptedから変換): 通知元の
+# template taskはいずれも when: not ansible_check_mode でゲート済みのため
+# --check下ではchangedを報告せずこのhandlerは通知されないが、それだけに
+# 依存せず handler自身にも when: not ansible_check_mode を置いて独立に閉じる
+# (通知元のゲートはhandlerに継承されない。
+# docs/ai/reviews/check_mode_semantics/2026-07-31_007_round2_batchA_implement.md
+# §2.4)。`check_mode: false` と併用しない — when: が先に評価されfalseなら
+# task自体に到達しないため、その行は効かない。
 - name: Reload systemd for incident sync
   ansible.builtin.systemd:
     daemon_reload: true
   become: true
-  check_mode: false
+  when: not ansible_check_mode

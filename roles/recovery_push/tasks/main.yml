@@ -14,6 +14,8 @@
     group: "{{ recovery_push_user }}"
     mode: "0750"
   become: true
+  when: not ansible_check_mode
+  tags: [destructive]
 
 # ── quory: dispatch script ───────────────────────────────────────────────────
 
@@ -25,6 +27,8 @@
     group: root
     mode: "0755"
   become: true
+  when: not ansible_check_mode
+  tags: [destructive]
 
 # ── per-target sender setup (delegates to authy/monnie) ────────────────────
 
@@ -48,6 +52,8 @@
     group: "{{ recovery_push_user }}"
     mode: "0700"
   become: true
+  when: not ansible_check_mode
+  tags: [destructive]
 
 - name: Deploy push authorized_keys for recovery-exec on quory
   ansible.builtin.template:
@@ -57,3 +63,5 @@
     group: "{{ recovery_push_user }}"
     mode: "0600"
   become: true
+  when: not ansible_check_mode
+  tags: [destructive]

@@ -28,47 +28,35 @@
 # (OQ7, headless device-auth confirmed working 2026-07-31). recovery-exec's
 # auth.json is never copied to this user.
 #
-# tester-gate: risk-accepted —破壊性はあるがサービス再起動を一切伴わない
-# (incident-inspectはデーモンではない)。行う変更はユーザー作成・Codex設定配置・
-# wrapper配置・sudoers・既存パスへのACL付与のみで、いずれも自ホスト内に閉じる
-# (recovery_exec_setup.ymlのtarget distribution相当の横方向配布ロジックが
-# 本roleには存在しない — target_setup.yml相当のincludeが無いため、
-# 2026-07-08のようなauthorized_keys排他上書き事故のクラスがそもそも起こり得ない)。
-# 最悪ケースはincident-inspectユーザーの設定不備で一次調査が起動できない
-# (AC6が拾う)ことであり、被観測playbookやSemaphore本体には影響しない。
+# tester-gate: check-mode-native — TS-009 条件1(破壊性はあるがサービス
+# 再起動を一切伴わない(incident-inspectはデーモンではない)。行う変更は
+# ユーザー作成・Codex設定配置・wrapper配置・sudoers・既存パスへのACL付与のみで、
+# いずれも自ホスト内に閉じる)は満たすが、条件2(本体操作を省いた検証には
+# 価値がない)は満たさない。ユーザー作成・ディレクトリ/設定/wrapper配置・
+# ACL付与・sudoers配置(`user`/`file`/`template`/`apt`/`ansible.posix.acl`)は
+# いずれもAnsible標準のcheck_modeで安全にプレビューできる。
+# roles/incident_inspect/tasks/main.yml の全taskを when: not ansible_check_mode
+# でゲートする(相互依存する検証・報告taskが後続しない一連の独立した配置の
+# ため、TS-014の個別task単位で足りる)。TS-010に照らし risk-accepted ではなく
+# check-mode-native が正しい分類(2026-07-31当時のU1実装時は条件1のみで
+# 判断していた)。詳細は docs/ai/policies/ansible_test_safety_policy.md。
 - name: Deploy incident-inspect (primary-investigation Codex runner)
   hosts: dev_nodes:control_nodes
   gather_facts: true
   become: true
-  # vars: { skip_notifications: "{{ ansible_check_mode }}" } removed
-  # 2026-07-31 (R2, docs/ai/reviews/check_mode_semantics/
-  # 2026-07-31_001_requirement.md) — R1 below now refuses --check outright,
-  # so this line's only effect (skip_notifications=true under --check) never
-  # had a chance to run.
   pre_tasks:
-    - name: "[migration] --check has no dry-run here — refuse and stop before any changes"
-      ansible.builtin.assert:
-        that: not (ansible_check_mode | bool)
-        fail_msg: >-
-          This playbook (tester-gate: risk-accepted) has no --check dry-run:
-          every task always applies for real, so --check would look like a
-          simulation while actually making the change (see
-          docs/ai/memory/incidents/2026-07-31_subagent-unintended-deploy-risk-accepted-check.md).
-          Re-run without --check to apply for real.
-          See docs/ai/reviews/check_mode_semantics/2026-07-31_001_requirement.md.
-        quiet: true
-
-    - name: "[migration] tester_mode is deprecated for this playbook — it always runs for real"
+    - name: "[migration] tester_mode is deprecated for this playbook — use --check instead"
       ansible.builtin.assert:
         that: not (tester_mode | default(false) | bool)
         fail_msg: >-
-          This playbook no longer supports -e tester_mode=true and has no
-          dry-run mode (--check included): incident-inspect setup always
-          runs for real. See docs/ai/policies/ansible_test_safety_policy.md.
+          This playbook no longer supports -e tester_mode=true. Re-run with
+          --check (add --check --diff for more detail) instead — read-only
+          checks now run for real under --check, and the destructive
+          deployment tasks are gated by ansible_check_mode. See
+          docs/ai/policies/ansible_test_safety_policy.md.
         quiet: true
 
   tasks:
     - name: Run incident_inspect role
       ansible.builtin.import_role:
         name: incident_inspect
-      check_mode: false

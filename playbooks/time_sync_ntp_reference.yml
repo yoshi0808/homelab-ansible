@@ -34,40 +34,36 @@
 #
 # 参照: docs/ai/reviews/time_sync_check/2026-06-25_002_implement.md
 #
-# tester-gate: risk-accepted — tester_mode/tester_gate を廃止。--check の有無に
-# かかわらず常に本実行する。理由: copyモジュールのcontent差分比較による本来の
-# 意味での冪等(ca_trust_deployと同型)。chrony再起動は設定ファイルが実際に
-# 変わった時(主に初回配置時)のみ発生し、以降は真のno-op。再起動してもchrony
-# デーモンが一瞬再起動するだけで他サービス・接続には影響しないためYoshinobuが
-# 安全側と判断(2026-07-06)。詳細は docs/ai/policies/ansible_test_safety_policy.md。
+# tester-gate: check-mode-native — TS-009 条件1(再起動してもchronyデーモンが
+# 一瞬再起動するだけで他サービス・接続には影響しない)は満たすが、条件2
+# (本体操作を省いた検証には価値がない)は満たさない。copyモジュールのcontent
+# 差分比較・chrony再起動(`copy`/`systemd`)はいずれもAnsible標準のcheck_modeで
+# 安全にプレビューできる。roles/time_sync_ntp_reference/tasks/chrony_hosts.yml
+# の2taskを when: not ansible_check_mode でゲートする(dropin配置task が
+# --check下でskipされるとregisterされる結果は `changed: false` になり
+# (実測確認済み)、restart taskの既存の `when: ...changed` 条件が自然に
+# Falseへ倒れて安全に連動する。TS-014の個別task単位で足りる — restart側にも
+# 明示の not ansible_check_mode を重ねて意図を自己文書化する)。TS-010に照らし
+# risk-accepted ではなく check-mode-native が正しい分類(2026-07-06当時は
+# 条件1のみで判断していた)。詳細は docs/ai/policies/ansible_test_safety_policy.md。
 
 - name: Add quory as an additional NTP reference on homelab nodes
   hosts: pve1:pve2:ansy:monnie:authy
   gather_facts: false
   become: true
   pre_tasks:
-    - name: "[migration] --check has no dry-run here — refuse and stop before any changes"
-      ansible.builtin.assert:
-        that: not (ansible_check_mode | bool)
-        fail_msg: >-
-          This playbook (tester-gate: risk-accepted) has no --check dry-run:
-          every task always applies for real, so --check would look like a
-          simulation while actually making the change (see
-          docs/ai/memory/incidents/2026-07-31_subagent-unintended-deploy-risk-accepted-check.md).
-          Re-run without --check to apply for real.
-          See docs/ai/reviews/check_mode_semantics/2026-07-31_001_requirement.md.
-        quiet: true
-  tasks:
-    - name: "[migration] tester_mode is deprecated for this playbook — it always runs for real"
+    - name: "[migration] tester_mode is deprecated for this playbook — use --check instead"
       ansible.builtin.assert:
         that: not (tester_mode | default(false) | bool)
         fail_msg: >-
-          This playbook no longer supports -e tester_mode=true and has no
-          dry-run mode (--check included): NTP reference config always runs
-          for real. See docs/ai/policies/ansible_test_safety_policy.md.
+          This playbook no longer supports -e tester_mode=true. Re-run with
+          --check (add --check --diff for more detail) instead — read-only
+          checks now run for real under --check, and the destructive
+          deployment tasks are gated by ansible_check_mode. See
+          docs/ai/policies/ansible_test_safety_policy.md.
         quiet: true
 
-    - name: Run time_sync_ntp_reference role (always for real)
+  tasks:
+    - name: Run time_sync_ntp_reference role
       ansible.builtin.import_role:
         name: time_sync_ntp_reference
-      check_mode: false
