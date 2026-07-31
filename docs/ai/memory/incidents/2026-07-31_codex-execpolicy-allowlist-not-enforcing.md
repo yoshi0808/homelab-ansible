@@ -82,6 +82,13 @@ allowlistが効いていないことは、この経路が無防備であるこ�
 
 未確定。修正後は「allow-listに無いコマンド(例: `id`)が拒否されること」と「許可したコマンドが通ること」の**両方**を観測して確認する。片方だけでは機構が効いた証明にならない。
 
+## 調べ直すときの足場(2026-07-31に踏んだ回り道)
+
+- **`/usr/bin/codex` は Node のラッパー**(`../lib/node_modules/@openai/codex/bin/codex.js` へのsymlink、46バイト)。ここに `strings` をかけても何も出ない。**この構造はNodeSourceのnodejsを入れてnpm globalでcodexを入れているため**(2026-07-31 Yoshinobu。導入経緯は `docs/ai/reviews/codex_update_check/` が持つ。週次の自動更新も同じ経路で、`roles/codex_update_check`)。したがって版が上がるとネイティブ実体のパスも入れ替わりうる — **パスを決め打ちで記録せず、都度 `find`/`grep -rl` で辿ること。**ネイティブ実体は
+  `/usr/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/bin/codex` にあり、**`execpolicy` の文字列はこちらに実在する**(=キー名が廃止・改名されて無視されているわけではない)。
+- 同バイナリに埋め込まれたCLIヘルプが一次資料として使える。`--ignore-rules`(「Do not load user or project execpolicy `.rules` files」)と「proposed execpolicy amendment」の文言はここから得た。
+- 実効性の確認は**「拒否と通過の両方」を観測しないと証明にならない**。2026-07-31のU0では通過側しか観測できず、それが結論(=絞れていない)の根拠になった。
+
 ## 参照
 
 - `docs/ai/reviews/incident_auto_investigation/2026-07-31_002_u0_test_result.md`(一次記録)
