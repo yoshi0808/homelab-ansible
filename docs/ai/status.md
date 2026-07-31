@@ -18,7 +18,11 @@
 
 ## Now(進行中)
 
-**進行中の案件は無い。**
+| # | 項目 | 現在地 | 次にやること |
+|---|---|---|---|
+| 1 | **一次調査の起動経路をcallbackからバンドル起点へ切り替える**(Incident対応、**暫定**) | 2026-07-31夜、Semaphoreタスク#495(`cert_renew`)の失敗で発覚。**捕捉は動きバンドルは生成されたが、調査が起動しなかった。** 原因は確定 — Semaphoreが起動する `ansible-playbook` に `SEMAPHORE_TASK_DETAILS_*` が渡っておらず、callbackが「Semaphore以外の起動経路」とみなして黙ってreturnしていた(quory実機で観測)。**方針はC(callbackをやめ、捕捉側の成果物を起点にする)で暫定決定**(Yoshinobu) | **計画は合意済みで、Incidentの「修正内容」節に手順と設計点を書いてある。** 要点は①トリガをキュー読みから未調査バンドル走査へ②`ansible.cfg` の2行を外してcallback無効化(pluginファイルは残す=可逆)③検証は `semaphore-495` が拾われることと調査済みが再投入されないことの**両方**④ADR-009へ暫定supersessionを注記。正本は `docs/ai/memory/incidents/2026-07-31_incident-investigate-callback-did-not-enqueue.md` |
+
+**この変更が入るまで、Semaphoreジョブが失敗してもバンドルは作られるが調査は起動しない。** `semaphore-495` がその状態で残っており、Cが入れば最初の1件として拾われる想定である。
 
 **「`--check` の意味の一本化」は2026-07-31にクローズした(Auditor条件付き受入、指摘2件は反映済み)。** `--check` が `check-mode-native` では「シミュレート」、`risk-accepted` では `check_mode: false` により「本適用」を意味していた多重定義を解消した。Round 1で `risk-accepted` を `--check` で**停止**させ、通知抑止の判定を `notify.yml` へ集約。Round 2で分類棚卸しを行い、**TS-009の条件2を満たすのは3本だけ**と判明したため残り14本を `check-mode-native` へ変換した(A/B-1/B-2/Cの4バッチ、各バッチで独立レビューとTester検証)。規範の正本は `docs/ai/policies/ansible_test_safety_policy.md` **TS-030〜TS-036**、案件記録は `docs/ai/reviews/check_mode_semantics/`(001〜022)。**未検証のまま残した項目はすべて下のWatchが持つ。**
 

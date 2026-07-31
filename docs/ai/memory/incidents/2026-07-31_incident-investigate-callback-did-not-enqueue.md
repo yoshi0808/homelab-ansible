@@ -1,7 +1,7 @@
 # Incident: Semaphoreジョブ失敗時に一次調査のcallbackがenqueueしなかった
 
 日付: 2026-07-31
-状態: 原因判明・対応方針未定
+状態: 原因判明・対応方針決定(暫定)・実装未着手
 対象: `roles/incident_investigate/callback_plugins/incident_investigate_trigger.py`、quory上のSemaphore実行経路
 種別: 動作不具合
 原因分類: (判明後に記入)
@@ -62,7 +62,7 @@ PWD=/opt/semaphore/project_1/repository_1_template_11
 
 **候補1と2は、どちらも「callbackが痕跡を残さない」点で症状が同じ**であり、ログからは区別できない。
 
-## 対応の選択肢(未決。Yoshinobuの判断を要する)
+## 対応の選択肢と決定
 
 | 案 | 内容 | 評価 |
 |---|---|---|
@@ -70,7 +70,11 @@ PWD=/opt/semaphore/project_1/repository_1_template_11
 | B | callbackの判定を別の信号へ変える(cwdが `/opt/semaphore/...` 配下である等) | 判定は代替できるが、**投入レコードに必要な task_id が得られない。** 捕捉側が作るバンドル `semaphore-<id>` と突き合わせられなくなる |
 | C | **callbackをやめ、捕捉側の成果物を起点に調査を起動する** | 捕捉は既にSemaphoreのDBを5分毎にポーリングして task_id を持ち、バンドルを作っている。**「新しいバンドルが現れたら調査する」形にすれば、今回壊れた経路そのものが不要になる。** 代償は即時性(最大5分の遅延)と、Semaphore以外の実行経路を拾えないこと |
 
-**Cを推す理由**: 今回の事象は「捕捉は動き、調査だけが動かなかった」である。捕捉はDBポーリングという独立経路を持ち、調査はcallback 1本に依存していた。**冗長性の非対称がそのまま出た。** ADR-009 が callback を選んだ理由は「載せない限り『どこで落ちても拾う』が成立しない」だったが、**Semaphoreジョブの失敗に限れば捕捉側が既に拾えている**。ADR-009の前提の見直しを含むため、ADRの改訂または新規ADRを伴う。
+### 決定: **C を採る(暫定)**(2026-07-31 Yoshinobu)
+
+**「暫定」と明示されている。** 恒久の設計判断としてADRを書き切るのではなく、**戻せる形で先に動かす**。具体的には callback plugin のファイルは削除せず残し、`ansible.cfg` の2行(`callback_plugins` / `callbacks_enabled`)を外すことで無効化する — 戻し方は同ファイルのコメントが既に持っている。
+
+**Cを推した理由**: 今回の事象は「捕捉は動き、調査だけが動かなかった」である。捕捉はDBポーリングという独立経路を持ち、調査はcallback 1本に依存していた。**冗長性の非対称がそのまま出た。** ADR-009 が callback を選んだ理由は「載せない限り『どこで落ちても拾う』が成立しない」だったが、**Semaphoreジョブの失敗に限れば捕捉側が既に拾えている**。ADR-009の前提の見直しを含むため、ADRの改訂または新規ADRを伴う。
 
 ## 未確認のこと(この記録の限界)
 
@@ -87,7 +91,19 @@ PWD=/opt/semaphore/project_1/repository_1_template_11
 
 ## 修正内容
 
-未実施。**原因は確定したが、対応方針(上記A/B/C)が未決のため。**
+**未実施。方針(C)は決まっており、実装はこれから。** 着手時の計画は次のとおり(2026-07-31にCoordinatorが提示、Yoshinobu合意済み)。
+
+1. requirement を `docs/ai/reviews/incident_investigate_trigger/` に書く。
+2. `incident-investigate.py` のトリガを**キュー読みから「未調査バンドルの走査」へ**変える。`ansible.cfg` の2行を外して callback を無効化(pluginファイルは残す)。
+3. 独立レビュー。
+4. Tester — **`semaphore-495` が実際に拾われて `_investigations/` に成果物が出ること**(通過側)と、**調査済みバンドルが再投入されないこと**(非通過側)の両方を観測する。片方だけでは機構が効いた証明にならない。
+5. **ADR-009 にトリガ機構の暫定supersessionを注記**し、`docs/ai/policies/incident_capture_policy.md` IC-034〜042 の該当箇所を確認する。
+
+**Coordinatorが決めた設計点**(実装時に覆すなら理由を記録すること):
+
+- **未調査の判定は `_investigations/semaphore-<id>.json` の不在**とする。状態を別ファイルへ二重に持たない(捕捉側で「消費済みidの記憶」を二重化しない判断をしたのと同じ理由。`docs/ai/status.md` Next 参照)。
+- **1回の実行で処理するのは最大1件**、かつ**一定期間より古いバンドルは対象外**とする。timerは毎分なので実質毎分1件で、初回に積み残しを一気にCodexへ投げない。
+- **可逆性を優先する。** 暫定判断であるため、callback plugin のファイルは残す。
 
 ## 確認方法
 
