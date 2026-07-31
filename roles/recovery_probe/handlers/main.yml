@@ -16,7 +16,17 @@
     daemon_reload: true
     state: restarted
   become: true
+  # check-mode-native: `check_mode: false` alone would force a real restart
+  # if this handler were ever notified while ansible_check_mode is true.
+  # In the current design it never is (the notifying tasks in tasks/main.yml
+  # are themselves gated on `when: not ansible_check_mode` and therefore
+  # never report changed under --check), but the `when:` below closes the
+  # gap explicitly rather than depending only on that upstream gating
+  # (audit 2026-07-31_004_classification_audit.md §2.12).
   when: >-
-    recovery_probe_service_enabled | bool
-    or recovery_probe_running_before | default(false) | bool
+    not ansible_check_mode
+    and (
+      recovery_probe_service_enabled | bool
+      or recovery_probe_running_before | default(false) | bool
+    )
   check_mode: false

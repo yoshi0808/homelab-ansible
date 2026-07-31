@@ -34,6 +34,11 @@
     cmd: mkdir -m 0755 -p "{{ incident_capture_bundle_dir }}"
     creates: "{{ incident_capture_bundle_dir }}"
   become: true
+  # check-mode-native (TS-014): this creates real host state, so it is
+  # skipped under --check rather than relying on command's partial
+  # creates:-based check_mode support.
+  when: not ansible_check_mode
+  tags: [destructive]
 
 - name: "Enforce reports/incidents/ owner (no mode: here — see create-only task above)"
   ansible.builtin.file:
@@ -48,6 +53,8 @@
     # set_mode_if_different() は mode is None のとき即returnする)。
     owner: yoshi
   become: true
+  when: not ansible_check_mode
+  tags: [destructive]
 
 # T1(roles/common_slack/tasks/capture.yml)がこのroleより先に一度でも実行
 # されていれば、_spool/ は既にコントローラ実行ユーザ(yoshi)所有・0755で
@@ -80,6 +87,8 @@
     cmd: mkdir -m 0755 -p "{{ incident_capture_spool_dir }}"
     creates: "{{ incident_capture_spool_dir }}"
   become: true
+  when: not ansible_check_mode
+  tags: [destructive]
 
 - name: "Enforce reports/incidents/_spool/ owner/group (no mode: here — see create-only task above)"
   ansible.builtin.file:
@@ -88,6 +97,8 @@
     owner: yoshi
     group: homelab-ansible
   become: true
+  when: not ansible_check_mode
+  tags: [destructive]
 
 # 収集器(recovery-exec)がバンドルディレクトリを作成できるようにする。
 # 新規に与える権限は reports/incidents/ 配下(このタスク一式)だけ
@@ -101,6 +112,8 @@
     permissions: rwx
     state: present
   become: true
+  when: not ansible_check_mode
+  tags: [destructive]
 
 - name: Grant recovery-exec ACL rwx on reports/incidents/ (default, for future subdirs)
   ansible.posix.acl:
@@ -111,6 +124,8 @@
     default: true
     state: present
   become: true
+  when: not ansible_check_mode
+  tags: [destructive]
 
 # _spool/ は reports/incidents/ の「サブディレクトリ」であり、上のdefault ACL
 # は今後新規作成されるエントリにしか継承されない。T1がこのroleより先に
@@ -129,6 +144,8 @@
     permissions: rwx
     state: present
   become: true
+  when: not ansible_check_mode
+  tags: [destructive]
 
 - name: Grant recovery-exec ACL rwx on reports/incidents/_spool/ (default, for new spool files)
   ansible.posix.acl:
@@ -139,6 +156,8 @@
     default: true
     state: present
   become: true
+  when: not ansible_check_mode
+  tags: [destructive]
 
 # 期待値(2026-07-28、review 2026-07-28_018_acl_mask_plan.md §1.6・§4 U5 T3):
 # create-only化により、上のディレクトリ作成2箇所はもはや毎回chmodしない
@@ -164,6 +183,8 @@
     group: "{{ incident_capture_user }}"
     mode: "0750"
   become: true
+  when: not ansible_check_mode
+  tags: [destructive]
 
 - name: Ensure config directory exists
   ansible.builtin.file:
@@ -171,6 +192,8 @@
     state: directory
     mode: "0755"
   become: true
+  when: not ansible_check_mode
+  tags: [destructive]
 
 # ---------------------------------------------------------------------------
 # スクリプト・設定・systemd unit
@@ -185,6 +208,8 @@
     mode: "0755"
   become: true
   notify: Reload systemd for incident capture
+  when: not ansible_check_mode
+  tags: [destructive]
 
 - name: Deploy incident-capture config
   ansible.builtin.template:
@@ -194,6 +219,8 @@
     group: root
     mode: "0644"
   become: true
+  when: not ansible_check_mode
+  tags: [destructive]
 
 - name: Deploy incident-capture service unit
   ansible.builtin.template:
@@ -204,6 +231,8 @@
     mode: "0644"
   become: true
   notify: Reload systemd for incident capture
+  when: not ansible_check_mode
+  tags: [destructive]
 
 - name: Deploy incident-capture timer unit
   ansible.builtin.template:
@@ -214,6 +243,8 @@
     mode: "0644"
   become: true
   notify: Reload systemd for incident capture
+  when: not ansible_check_mode
+  tags: [destructive]
 
 - name: Flush handlers so units are reloaded before enabling
   ansible.builtin.meta: flush_handlers
@@ -228,3 +259,4 @@
   when:
     - not ansible_check_mode
     - incident_capture_service_enabled | bool
+  tags: [destructive]

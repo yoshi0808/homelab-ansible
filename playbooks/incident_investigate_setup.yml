@@ -32,46 +32,41 @@
 #   ansible-playbook playbooks/incident_investigate_setup.yml -l quory \
 #     -e incident_investigate_service_enabled=true
 #
-# tester-gate: risk-accepted — no destructive operation on any host other
-# than quory itself, and no restart of any already-running production
-# service (this is a brand-new timer/oneshot pair that did not exist
-# before). The changes are: directory creation (idempotent, no ACL/chmod
-# touched — see roles/incident_investigate/tasks/main.yml comments),
-# script/config/unit file deployment, and (only when
-# incident_investigate_service_enabled=true) enabling + starting the new
-# timer. Repeated runs are idempotent (template/copy/file all report
-# changed only on an actual diff). See
-# docs/ai/policies/ansible_test_safety_policy.md for the risk-accepted
-# criteria this satisfies.
+# tester-gate: check-mode-native — TS-009 condition 1 (no destructive
+# operation on any host other than quory itself, no restart of any
+# already-running production service — this is a brand-new timer/oneshot
+# pair that did not exist before) holds, but condition 2 (skipping the
+# destructive body leaves nothing worth verifying) does not: every change
+# here — directory creation (`file`, no ACL/chmod touched — see
+# roles/incident_investigate/tasks/main.yml comments) and script/config/unit
+# deployment (`copy` / `template`) — is exactly the kind of change Ansible's
+# native check_mode can preview without applying. The only real production
+# action is enabling + starting the timer (only when
+# incident_investigate_service_enabled=true), which
+# roles/incident_investigate/tasks/main.yml already gates with
+# `when: not ansible_check_mode`. Per TS-010 this belongs in
+# check-mode-native, not risk-accepted (the 2026-07-06 original
+# classification only evaluated condition 1). See
+# docs/ai/policies/ansible_test_safety_policy.md and
+# docs/ai/reviews/check_mode_semantics/2026-07-31_004_classification_audit.md
+# §2.7.
 
 - name: Deploy primary incident investigation picker (U2)
   hosts: quory
   gather_facts: true
   become: false
   pre_tasks:
-    - name: "[migration] --check has no dry-run here — refuse and stop before any changes"
-      ansible.builtin.assert:
-        that: not (ansible_check_mode | bool)
-        fail_msg: >-
-          This playbook (tester-gate: risk-accepted) has no --check dry-run:
-          every task always applies for real, so --check would look like a
-          simulation while actually making the change (see
-          docs/ai/memory/incidents/2026-07-31_subagent-unintended-deploy-risk-accepted-check.md).
-          Re-run without --check to apply for real.
-          See docs/ai/reviews/check_mode_semantics/2026-07-31_001_requirement.md.
-        quiet: true
-
-    - name: "[migration] tester_mode is deprecated for this playbook — it always runs for real"
+    - name: "[migration] tester_mode is deprecated for this playbook — use --check instead"
       ansible.builtin.assert:
         that: not (tester_mode | default(false) | bool)
         fail_msg: >-
-          This playbook does not support -e tester_mode=true and has no
-          dry-run mode (--check included): investigate picker deployment
-          always runs for real. See
+          This playbook no longer supports -e tester_mode=true. Re-run with
+          --check (add --check --diff for more detail) instead — read-only
+          checks now run for real under --check, and the destructive
+          deployment tasks are gated by ansible_check_mode. See
           docs/ai/policies/ansible_test_safety_policy.md.
         quiet: true
   tasks:
     - name: Run incident_investigate role
       ansible.builtin.import_role:
         name: incident_investigate
-      check_mode: false

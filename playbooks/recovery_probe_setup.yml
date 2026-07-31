@@ -13,49 +13,50 @@
 #
 # 設計: docs/ai/reviews/autonomous_recovery/2026-07-02_001_requirement.md
 #
-# tester-gate: risk-accepted — tester_mode/tester_gate を廃止。--check の有無に
-# かかわらず常に本実行する。理由: homelab-mute CLIはただのスクリプト配置。
-# recovery-probeはdaemon本体のため内容変更時に自身のみ再起動されるが、他の
-# 本番サービス(freeradius/grafana等)には触れない。Setup自体が失敗しても
-# recovery-probeが正しく動かないだけで、直接他サービスに影響しないため
-# Yoshinobuが安全側と判断(2026-07-06、recovery_push_setupと同じ割り切り)。
-# 詳細は docs/ai/policies/ansible_test_safety_policy.md。
+# tester-gate: check-mode-native — TS-009の条件1(quory/ansy以外への実害なし、
+# recovery-probe以外の既存本番サービスへ波及しない)は満たすが、条件2
+# (本体操作を省いた検証には価値がない)は満たさない。homelab-mute CLI配置
+# (`command` + `creates:`/`copy`)、recovery-probeのディレクトリ作成・設定・
+# daemon本体・unit配置(`file`/`template`/`copy`)はいずれもAnsible標準の
+# check_modeで安全にプレビューできる。実際に本番へ作用するのはdaemonの
+# enable+start/restartのみであり、roles/recovery_probe/tasks/main.yml と
+# handlers/main.yml をあわせて when: not ansible_check_mode でゲートする
+# (homelab-mute CLI側はreports/incidentsのような読み取り専用診断を持たない
+# ため、playbook側でinclude_role自体をゲートする)。TS-010に照らし
+# risk-accepted ではなく check-mode-native が正しい分類(2026-07-06当時は
+# 条件1のみで判断していた)。詳細は
+# docs/ai/policies/ansible_test_safety_policy.md、
+# docs/ai/reviews/check_mode_semantics/2026-07-31_004_classification_audit.md
+# §2.12。
 
 - name: Deploy recovery-probe and homelab-mute CLI
   hosts: dev_nodes:control_nodes
   gather_facts: true
   become: true
   pre_tasks:
-    - name: "[migration] --check has no dry-run here — refuse and stop before any changes"
-      ansible.builtin.assert:
-        that: not (ansible_check_mode | bool)
-        fail_msg: >-
-          This playbook (tester-gate: risk-accepted) has no --check dry-run:
-          every task always applies for real, so --check would look like a
-          simulation while actually making the change (see
-          docs/ai/memory/incidents/2026-07-31_subagent-unintended-deploy-risk-accepted-check.md).
-          Re-run without --check to apply for real.
-          See docs/ai/reviews/check_mode_semantics/2026-07-31_001_requirement.md.
-        quiet: true
-
-    - name: "[migration] tester_mode is deprecated for this playbook — it always runs for real"
+    - name: "[migration] tester_mode is deprecated for this playbook — use --check instead"
       ansible.builtin.assert:
         that: not (tester_mode | default(false) | bool)
         fail_msg: >-
-          This playbook no longer supports -e tester_mode=true and has no
-          dry-run mode (--check included): probe setup always runs for real.
-          See docs/ai/policies/ansible_test_safety_policy.md.
+          This playbook no longer supports -e tester_mode=true. Re-run with
+          --check (add --check --diff for more detail) instead — read-only
+          checks now run for real under --check, and the destructive
+          deployment tasks are gated by ansible_check_mode. See
+          docs/ai/policies/ansible_test_safety_policy.md.
         quiet: true
 
   tasks:
-    - name: Deploy recovery-probe and homelab-mute CLI (always for real)
-      check_mode: false
-      block:
-        - name: Deploy homelab-mute CLI
-          ansible.builtin.include_role:
-            name: recovery_mute
-            tasks_from: deploy_cli
+    # roles/recovery_mute is out of scope for this batch's role changes, and
+    # deploy_cli.yml has no read-only diagnostics worth preserving under
+    # --check (just a create-only mkdir + a binary copy), so the whole
+    # inclusion is gated here at the call site instead of inside that role.
+    - name: Deploy homelab-mute CLI
+      ansible.builtin.include_role:
+        name: recovery_mute
+        tasks_from: deploy_cli
+      when: not ansible_check_mode
+      tags: [destructive]
 
-        - name: Deploy recovery-probe
-          ansible.builtin.include_role:
-            name: recovery_probe
+    - name: Deploy recovery-probe
+      ansible.builtin.include_role:
+        name: recovery_probe

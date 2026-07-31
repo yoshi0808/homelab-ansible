@@ -25,6 +25,8 @@
     group: yoshi
     mode: "0750"
   become: true
+  when: not ansible_check_mode
+  tags: [destructive]
 
 # ---------------------------------------------------------------------------
 # 成果物ディレクトリ(e-2: reports/incidents/_investigations/)。
@@ -46,6 +48,8 @@
     state: directory
     owner: yoshi
   become: true
+  when: not ansible_check_mode
+  tags: [destructive]
 
 # ---------------------------------------------------------------------------
 # ローカル実行状態置き場(incident_capture と同じ /etc/homelab-recovery)。
@@ -56,6 +60,8 @@
     state: directory
     mode: "0755"
   become: true
+  when: not ansible_check_mode
+  tags: [destructive]
 
 # ---------------------------------------------------------------------------
 # スクリプト・設定・systemd unit
@@ -68,6 +74,8 @@
     group: root
     mode: "0755"
   become: true
+  when: not ansible_check_mode
+  tags: [destructive]
 
 - name: Deploy incident-investigate config
   ansible.builtin.template:
@@ -77,6 +85,8 @@
     group: root
     mode: "0644"
   become: true
+  when: not ansible_check_mode
+  tags: [destructive]
 
 - name: Deploy incident-investigate service unit
   ansible.builtin.template:
@@ -87,6 +97,8 @@
     mode: "0644"
   become: true
   notify: Reload systemd for incident investigate
+  when: not ansible_check_mode
+  tags: [destructive]
 
 - name: Deploy incident-investigate timer unit
   ansible.builtin.template:
@@ -97,6 +109,8 @@
     mode: "0644"
   become: true
   notify: Reload systemd for incident investigate
+  when: not ansible_check_mode
+  tags: [destructive]
 
 - name: Flush handlers so units are reloaded before enabling
   ansible.builtin.meta: flush_handlers
@@ -111,3 +125,4 @@
   when:
     - not ansible_check_mode
     - incident_investigate_service_enabled | bool
+  tags: [destructive]
