@@ -14,7 +14,23 @@ approval_policy = "never"
 network_access = true
 writable_roots = ["/var/lib/homelab-recovery/mute"]
 
-# Execpolicy: deny all by default; allow only homelab-* wrapper scripts (§5.3).
+# Execpolicy: intended as defense-in-depth (deny all, allow only the homelab-*
+# wrappers, §5.3).
+#
+# MEASURED 2026-07-31 (codex-cli 0.145.0): this table does NOT block command
+# execution. With this exact configuration, `id` — absent from the allow-list
+# below — ran successfully under `codex exec` with approval_policy="never".
+# DO NOT COUNT THIS AS A SECURITY BOUNDARY, and do not design a new capability
+# on the assumption that it narrows what the model can run.
+#
+# The layers that do hold: the workspace-write sandbox, no_new_privileges
+# (blocks sudo unconditionally), the SSH forced commands on each target, and
+# the sudoers rule limiting who may invoke codex-exec-wrapper at all.
+#
+# The table is kept rather than deleted because the incident is still open and
+# the `.rules` file mechanism this codex version documents (`--ignore-rules`)
+# has not been evaluated. Removing it now would lose the record of intent.
+# Incident: docs/ai/memory/incidents/2026-07-31_codex-execpolicy-allowlist-not-enforcing.md
 [execpolicy]
 default_policy = "deny"
 

@@ -52,7 +52,25 @@ allowlistが効いていないことは、この経路が無防備であるこ�
 
 ## 修正内容
 
-未着手。方針の候補は次の3つで、いずれもYoshinobuの判断を要する。
+**一部のみ実施(2026-07-31、Yoshinobu指示「対応お願いします」)。境界そのものは未修正である。**
+
+実施したのは**文書と実態の乖離の解消だけ**である。境界が復活したわけではない。
+
+- `roles/recovery_exec/templates/AGENTS.md.j2` — 「The execpolicy allows ONLY these scripts.」という**強制の主張を削除**し、「列挙されたコマンドだけを呼べ、無ければ止まって報告せよ」という**指示**に置き換えた。Codexへ渡すpromptに「機構が止めてくれる」と書かないため。**逆に「実際には止まらない」とも書いていない** — promptは期待を述べる場所であり、実効性の記録は設定と一次記録が持つ。
+- `roles/recovery_exec/templates/codex-config.toml.j2` — 実測結果を配備先へ出力されるコメントとして明記した(ホスト上で設定を読む人が、そこで嘘を読まないようにするため)。`[execpolicy]` テーブル自体は**残した** — 本Incidentが未解決であり、`.rules` ファイル方式が未評価であるため。消すと意図の記録まで失われる。
+- **配備は行っていない。** 変更が quory へ反映されるのは `playbooks/recovery_exec_setup.yml` を実行した時点である(同roleに handler は無く、この2ファイルの更新で `recovery-io` が再起動されることはない)。
+
+**未実施 — `docs/ai/policies/autonomous_recovery_policy.md` にも同じ前提が残っている。** Policy本文の改訂はYoshinobuの領域のため触れていない。該当は3件:
+
+| 条項 | 現行の文言 | 問題 |
+|---|---|---|
+| AR-069 | execpolicyはdefault denyとし、限定wrapper群だけを許可する | 設定の要求としては満たされているが、**それが何かを制限している**という含意が実態と違う |
+| AR-071 | VM rebootとHA failoverはCodex execpolicyへ含めず、pull経路にだけ許可する | execpolicyがゲートである前提。**実際に両者を隔てているのはwrapperの不在**であり、execpolicyではない |
+| AR-073 | **sandboxとexecpolicyを別の防御層として扱い**、tokenとSSH keyはOS file権限と専用ownerで保護する | **防御層は現在2層でなく、sandbox側の1層である。** ここが最も直接的な乖離 |
+
+### 残りの方針の候補
+
+境界そのものをどうするか。いずれもYoshinobuの判断を要する(2026-07-31、「順を追って対応」)。
 
 1. `.rules` ファイル方式が有効かを実測し、有効ならそちらへ移す。
 2. execpolicyに依存せず、**能力の不在**で境界を作る(実行ユーザーを分ける / systemdのmount namespaceで該当wrapperを見せない / SSH鍵を持たせない)。
