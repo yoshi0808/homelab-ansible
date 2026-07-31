@@ -1,6 +1,6 @@
 # `incident_capture_policy.md` 改訂案 — 一次調査の段を新設する
 
-状態: **提案**(2026-07-31 Coordinator起草。**Yoshinobuの承認を得るまで `docs/ai/policies/incident_capture_policy.md` 本体へは反映しない。** 承認後に本文書の §3 をそのまま適用する)
+状態: **適用済み**(2026-07-31。Coordinator起草 → Yoshinobu承認 → §3 を `docs/ai/policies/incident_capture_policy.md` へ、§5 を `docs/ai/core.md` へ適用した。**規範の正本は適用先の2ファイルであり、本文書ではない。** 以後この文書は起草の経緯として読む)
 
 Policy本文の改訂はYoshinobuの領域である(`docs/ai/roles/coordinator.md`)。本文書は「何を、なぜ変えるか」と「適用する確定文」を分けて置き、承認後の反映が機械的に済む形にしている。
 
