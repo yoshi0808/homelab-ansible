@@ -20,7 +20,7 @@
 
 | # | 項目 | 現在地 | 次にやること |
 |---|---|---|---|
-| 1 | **weekly full patchの自動適用範囲の拡大**(`MAINTENANCE_REQUIRED`のremoveなしを自動適用、単一node適用、fixed-pair gate撤廃) | 実装・独立レビュー・Tester検証すべて完了(AC1〜AC10 PASS)。Auditorは条件付き受入。**作業ツリーに未commitで残っている** | **Yoshinobuのcommit。Policy本文の改訂18箇所(SB-001の必須目的の撤回を含む)の最終承認を含む。** 案件記録は `docs/ai/reviews/proxmox_auto_apply_widening/`(001〜005) |
+**進行中の案件は無い。**
 
 ## Watch(観測待ち)
 
