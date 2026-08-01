@@ -99,12 +99,41 @@
               {% for item in ubuntu_vm_full_upgrade_healthcheck_criticals %}
               - {{ item }}
               {% endfor %}
+              {% if ubuntu_vm_full_upgrade_healthcheck_warnings | default([]) | length > 0 %}
+
+              Warnings(停止の理由ではありません):
+              {% for item in ubuntu_vm_full_upgrade_healthcheck_warnings %}
+              - {{ item }}
+              {% endfor %}
+              {% endif %}
 
         - name: Fail this host
           ansible.builtin.fail:
             msg: >-
               ubuntu_vm_full_upgrade: healthcheck failed on {{ inventory_hostname }},
               aborting before touching apt: {{ ubuntu_vm_full_upgrade_healthcheck_criticals | join(', ') }}
+
+    # 2026-08-01(requirement U2・U3): warningsは処理を止めない。ただし
+    # 黙って進めない — 直るまで毎回鳴らすことで放置しにくい形にする。
+    # criticalsがある場合は上のblockが先にこのホストをfailさせるため、
+    # ここへは到達しない(U5: criticalが優先)。
+    - name: Notify healthcheck warnings without aborting
+      when: ubuntu_vm_full_upgrade_healthcheck_warnings | default([]) | length > 0
+      ansible.builtin.include_tasks: "{{ playbook_dir }}/../roles/common_slack/tasks/notify.yml"
+      vars:
+        slack_channel: "alerts"
+        slack_status: "warning"
+        slack_title: "[ubuntu_vm_full_upgrade] healthcheck warning - {{ inventory_hostname }}"
+        slack_message: |
+          Host: {{ inventory_hostname }}
+          full-upgrade判定は**継続します**(パッチを止める条件ではありません)。
+
+          Warnings:
+          {% for item in ubuntu_vm_full_upgrade_healthcheck_warnings %}
+          - {{ item }}
+          {% endfor %}
+
+          これらはパッチの安全性とは独立した既存の不具合です。直るまで毎回通知します。
 
     - name: Deploy full-upgrade simulation script
       ansible.builtin.copy:

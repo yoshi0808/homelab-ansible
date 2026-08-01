@@ -53,16 +53,44 @@
       changed_when: false
       failed_when: false
 
+    # 2026-08-01(docs/ai/reviews/ubuntu_upgrade_healthcheck_scope/
+    # 2026-08-01_001_requirement.md U1・U4): systemd の失敗unitを criticals
+    # から外し warnings へ移した。**このゲートの目的は「このホストをパッチ
+    # して安全か」であり、失敗unitはその代理指標として粗すぎる。**
+    #
+    # 実際に踏んだ形: ansyの grub2-common.service(GRUBの起動成功記録)が
+    # 2026-07-25から6日間 failed のまま残り、パッチとまったく無関係な理由で
+    # ansyのupgradeが apt に触れる前に中断する状態になっていた。翌日の月次
+    # 自動発火でも同じ理由で止まっていた。
+    #
+    # ディスク使用率は criticals のまま残す — こちらは apt を実際に壊す。
+    #
+    # **警告は消さない。** warnings は main.yml が Slack へ通知し、直るまで
+    # 毎回鳴る(放置しにくい形にする、U3)。
+    #
+    # 次に同種の検査を足す人へ: パッケージ系が壊れているかを見たいなら
+    # `dpkg --audit` や dpkg lock を直接見ること。「失敗unitがあるか」では
+    # 代理指標として粗い(requirement §6)。
     - name: Build generic healthcheck report
       ansible.builtin.set_fact:
         ubuntu_vm_full_upgrade_generic_health:
           disk_used_percent: "{{ ubuntu_vm_full_upgrade_disk_used_percent }}"
           systemd_failed_units: "{{ ubuntu_vm_full_upgrade_systemd_failed_raw.stdout_lines | default([]) }}"
           criticals: >-
-            {{ ([] if ubuntu_vm_full_upgrade_disk_used_percent | int < 90
-                   else ['root filesystem usage is ' + (ubuntu_vm_full_upgrade_disk_used_percent | string) + '%'])
-               + (ubuntu_vm_full_upgrade_systemd_failed_raw.stdout_lines | default([])
-                  | map('regex_replace', '^(.*)$', 'systemd failed unit: \\1') | list) }}
+            {{ [] if ubuntu_vm_full_upgrade_disk_used_percent | int < 90
+                  else ['root filesystem usage is ' + (ubuntu_vm_full_upgrade_disk_used_percent | string) + '%'] }}
+          # 後方参照は `\1` と書く。**`\\1` では効かない** — YAMLの折り畳み
+          # スカラ(`>-`)はバックスラッシュをエスケープとして扱わないため、
+          # Jinjaの文字列リテラルへ `\\1` がそのまま渡り、re.sub の置換文字列
+          # としては「リテラルのバックスラッシュ+1」になる。2026-08-01に
+          # 実測(`\\1` → `unit: \1` / `\1` → 実際のunit名)。
+          # **変更前の criticals 側は `\\1` のままだった** — 停止条件は
+          # 「リストが空でないこと」なので停止自体は動いており、通知本文だけが
+          # `systemd failed unit: \1` という無意味な文字列になっていた。
+          # 独立レビューが実行して検出した(2026-08-01_002_review.md #1)。
+          warnings: >-
+            {{ ubuntu_vm_full_upgrade_systemd_failed_raw.stdout_lines | default([])
+               | map('regex_replace', '^(.*)$', 'systemd failed unit: \1') | list }}
 
 - name: Consolidate healthcheck criticals across all node types
   ansible.builtin.set_fact:
@@ -70,3 +98,11 @@
       {{ (radius_criticals | default([]))
          + (monitoring_criticals | default([]))
          + (ubuntu_vm_full_upgrade_generic_health.criticals | default([])) }}
+
+# radius / monitoring の各roleは warnings を返さない(criticalsのみ)。
+# したがってこの一覧は現状ansy/quoryの汎用checkだけが埋める(U5: 他の
+# ノード種別の扱いを変えない)。
+- name: Consolidate healthcheck warnings across all node types
+  ansible.builtin.set_fact:
+    ubuntu_vm_full_upgrade_healthcheck_warnings: >-
+      {{ ubuntu_vm_full_upgrade_generic_health.warnings | default([]) }}
