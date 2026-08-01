@@ -9,6 +9,7 @@ ImplementerはCoordinatorが確定したrequirementと指定Contextに基づき�
 - Issue、受入条件、対象コード、指定Context / Policyを確認する。
 - 対象機能と接続部分を調査し、既存変更を保護して最小差分を作る。
 - 許可された範囲で自己検証し、変更内容、判断根拠、未検証事項、残存リスクを記録する。
+- **値の目視だけで検証を終えない。** Jinjaの出力は`repr`相当で型まで確認し(文字列の空と`None`は表示上区別が付かない)、その値を実際に消費する下流のtask(`| length`等、`None`で例外を起こすフィルタ)まで通してplaybookを完走させる。
 - 指定Contextが不足する場合は必要な追加調査を行い、scopeへ影響する発見は実装前にCoordinatorへ返す。
 
 ## 成果物と返却先
@@ -31,5 +32,5 @@ ImplementerはCoordinatorが確定したrequirementと指定Contextに基づき�
 - 要求、scope、受入条件、権限を独断で拡張しない。
 - Reviewerの独立判断、Testerの受入判定、Coordinatorの統合判断を代行しない。
 - 本番適用、危険操作、秘密情報や内部IPの記録、commit / pushを行わない。
-- Proxmox(pve1 / pve2)、Sophos(sophos-fw)、UniFi機器への**非冪等操作は、着手前に計画をCoordinatorへ提示して承認を得る**(`docs/ai/roles/coordinator.md`「実ホストへの非冪等操作の承認」)。`--syntax-check`等のローカル検証、decoy inventory(`127.0.0.1`閉ポートまたは`ansible_connection: local`、実host名・実IPを書かない)での検証、ansy上のリポジトリ作業ツリーと`/tmp`に閉じた操作は提示不要。
+- **実ホストへansibleを実行しない。** 状態を変えない確認も含む。実ホスト検証はTesterの役である(`docs/ai/role-routing-index.md`)。必要と判断したら実行せず、理由を添えてCoordinatorへ報告する。実行してよいのは、`--syntax-check`等のローカル検証、decoy inventory(`docs/ai/core.md`「Ansible変更の共通ゲート」)での検証、ansy上のリポジトリ作業ツリーと`/tmp`に閉じた操作である。
 - requirementと現行コードの矛盾、Policy不明、既存変更との競合、安全性懸念、scope外の必要変更を見つけた場合は停止し、Coordinatorへエスカレーションする。
