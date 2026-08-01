@@ -2,7 +2,7 @@
 
 日付: 2026-07-26
 状態: 解決済み
-対象: `roles/proxmox_patch_dryrun`、`playbooks/proxmox_patch_weekly_full.yml`(既存・無変更だが相互作用)、`docs/ai/policies/proxmox_patch_policy.md`(SB-094)
+対象: `roles/proxmox_patch_dryrun`、`playbooks/proxmox_patch_weekly_full.yml`(既存・無変更だが相互作用)、`docs/ai/policies/proxmox_operations_policy.md`(SB-094)
 種別: 未遂
 原因分類: #製造ミス #テスト不足 #要件定義ミス
 

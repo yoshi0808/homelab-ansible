@@ -41,7 +41,7 @@
 | `cert_renew_policy.md` | 対応: 「1. 目的」L19-22 | 対応: 「2. 対象サービス」L26-35 | 対応: 「対応するPlaybook」L49-56 | 対応（概念相当）: 「7. 中間CA有効期限監視」L149-165、「8. 失敗検知」L169-179、「9. 証明書仕様」L182-189 | 対応: 「5. CA証明書の一時展開とcleanup」L116-126、「6. フルチェーン配布」L130-145、「10. CA復旧・移行手順」L193-243 | 対応: 「8. 失敗検知」L169-179 | 対応: 「4. CA構成」L60-113、「11. 除外対象」L246-253 | 対応: 「変更履歴」L10-15 |
 | `log_observability_policy.md` | 対応: 「1. 位置づけ」L13-15 | 対応: 「2. アーキテクチャ」L17-34、「3. 現状構成」L36-68 | 対応: 「対応するPlaybook」L70-72 | 対応（概念相当）: 「4. Alloy運用方針」L74-83の検証・cutover・人間ゲート | 対応: 「4. Alloy運用方針」L74-83、「5. Phaseロードマップ」L85-90 | 未整備: 「5. Phaseロードマップ」L90に将来のSlack構想のみあり、現行通知方針なし | 対応: 「6. 制約・禁止事項」L92-105、「7. 不採用の代替案と管理境界」L107-112 | 対応: 「変更履歴」L7-11 |
 | `proxmox_backup_restore_verify_policy.md` | 対応: 「1. 目的」L14-20 | 対応: 「2. 対象と実行」L24-41 | 対応: 「対応するPlaybook」L43-47 | 対応（概念相当）: 「5. 正常性判定」L104-116、「6. ロック方針」L120-153、「7. cleanupと終了判定」L157-163 | 対応: 「4. ライフサイクル」L81-100、「7. cleanupと終了判定」L157-163 | 対応: 「8. 通知」L167-178 | 対応: 「9. 制約」L182-189、「10. スコープ」L193-204 | 未整備: 変更履歴見出しなし |
-| `proxmox_patch_policy.md` | 対応: 「1. 目的」L9-22 | 対応: 「4. ノードの役割」L145-159、「5. VM配置・退避・復帰方針」L162-320、「11. 土曜朝の自動パッチ運用」L1127-1336 | 対応（別名見出し／標準名未統一）: 「6. Playbook分離方針」L324-850 | 対応（明示）: 「3. 判断軸」L71-141、「7. 重要コンポーネント」L852-887、「8. Status判定ルール」L891-1015、「9. removeの扱い」L1019-1045、「10. Urgency判定」L1049-1123 | 対応: 「5. VM配置・退避・復帰方針」L162-320、「11. 土曜朝の自動パッチ運用」L1127-1336、「17. 実適用時の標準手順」L1805-1884、「18. 復旧方針」L1886-1930 | 対応: 「15. メール通知ルール」L1545-1614 | 対応: 「2. 基本方針」L26-67、「11.6 停止する条件」L1304-1319、「12. 保留方針」L1340-1352、「13. BLOCKED時のContingency Plan」L1356-1412、「16.8.3 apply停止条件」L1785-1789、「20. Sophos移行後の追加ルール」L1950-1960 | 未整備: 変更履歴見出しなし |
+| `proxmox_operations_policy.md` | 対応: 「1. 目的」L9-22 | 対応: 「4. ノードの役割」L145-159、「5. VM配置・退避・復帰方針」L162-320、「11. 土曜朝の自動パッチ運用」L1127-1336 | 対応（別名見出し／標準名未統一）: 「6. Playbook分離方針」L324-850 | 対応（明示）: 「3. 判断軸」L71-141、「7. 重要コンポーネント」L852-887、「8. Status判定ルール」L891-1015、「9. removeの扱い」L1019-1045、「10. Urgency判定」L1049-1123 | 対応: 「5. VM配置・退避・復帰方針」L162-320、「11. 土曜朝の自動パッチ運用」L1127-1336、「17. 実適用時の標準手順」L1805-1884、「18. 復旧方針」L1886-1930 | 対応: 「15. メール通知ルール」L1545-1614 | 対応: 「2. 基本方針」L26-67、「11.6 停止する条件」L1304-1319、「12. 保留方針」L1340-1352、「13. BLOCKED時のContingency Plan」L1356-1412、「16.8.3 apply停止条件」L1785-1789、「20. Sophos移行後の追加ルール」L1950-1960 | 未整備: 変更履歴見出しなし |
 | `time_sync_check_policy.md` | 対応: 「1. 目的」L26-37 | 対応: 「2. 対象と実行」L41-52、「3. 対象と取得方式」L63-96 | 対応: 「対応するPlaybook」L54-59 | 対応（概念相当）: 「3. 対象と取得方式」L76-81の閾値、「4. ライフサイクル」L100-115の基準ノードゲート | 対応: 「4. ライフサイクル」L100-115 | 対応: 「5. 通知方針」L119-129 | 対応: 「6. 制約・禁止事項」L132-145、「8. スコープ」L163-176 | 対応: 「変更履歴」L18-22 |
 | `ubuntu_vm_patch_policy.md` | 対応: 「1. 目的」L10-21 | 対応: 「2. 対象ノードと特性」L25-43 | 対応（別名見出し／標準名未統一）: 「5. Playbook構成」L133-173 | 対応（概念相当）: 「3.3 月次full-upgrade判定」L71-77、「3.4 非apt管理プロダクト」L79-91、「4.3 reboot判定」L124-129 | 対応: 「3. パッチ適用方針」L47-91、「4. reboot方針」L95-129、「5. Playbook構成」L133-173 | 対応: 「6. 通知方針」L177-235 | 未整備: 独立した制約見出しなし。規範は「3. パッチ適用方針」L47-91と「4. reboot方針」L95-129に散在 | 未整備: 変更履歴見出しなし |
 | `unifi_backup_fetch_policy.md` | 対応: 「2. 目的」L40-49 | 対応: 「3. 対象と実行」L53-64 | 対応: 「対応するPlaybook」L66-72 | 対応（概念相当）: 「4. ライフサイクル」L76-87の取得・確定・cleanup・再fail条件、「7. 鮮度ガード」L129-137 | 対応: 「4. ライフサイクル」L76-87 | 対応: 「8. 通知方針」L140-150 | 対応: 「10. 制約・禁止事項」L167-176 | 対応: 「変更履歴」L15-19 |
@@ -62,7 +62,7 @@
 | `cert_renew_policy.md` | 概念相当 | 証明書更新閾値、中間CA残存日数、cleanup成否を判断軸としてまとめる |
 | `log_observability_policy.md` | 概念相当 | cutover前検証、人間ゲート、rollback条件を判断軸としてまとめる。ログseverity契約自体はデータ分類であり運用判断軸とは分ける |
 | `proxmox_backup_restore_verify_policy.md` | 概念相当 | 正常性合格基準、残骸・所有判定、cleanupと終了コードを判断軸としてまとめる |
-| `proxmox_patch_policy.md` | 明示的に実在 | Status/Urgencyを標準節へそのまま移す |
+| `proxmox_operations_policy.md` | 明示的に実在 | Status/Urgencyを標準節へそのまま移す |
 | `time_sync_check_policy.md` | 概念相当 | 基準ノードの同期可否、方式別offset閾値、収集失敗を判断軸としてまとめる |
 | `ubuntu_vm_patch_policy.md` | 概念相当 | 月次判定のStatus昇格、reboot要否、healthcheck結果を判断軸としてまとめる |
 | `unifi_backup_fetch_policy.md` | 概念相当 | 鮮度ガード、取得・確定・cleanup成否を判断軸としてまとめる |
@@ -99,7 +99,7 @@
 | autonomous recovery | `autonomous_recovery_policy.md`; recovery系playbook群 | 検知からrestart/reboot/failoverへ進む権限・ラダーが独立 |
 | time sync | `time_sync_check_policy.md`; `time_sync_check.yml`、`time_sync_ntp_reference.yml` | 異種NTP取得方式と基準ノードゲートが独立 |
 
-## `proxmox_patch_policy.md` のPolicy範囲超過候補
+## `proxmox_operations_policy.md` のPolicy範囲超過候補
 
 判定基準は `docs/ai/context-classification.md` L31-48の「Policyは何をしてよいかという規範」「単一ファイルの実装詳細はコードを正本」とする。安全条件・許可・禁止・停止条件はPolicyへ残し、現状値はContext、手順はOperations Context/Skill、案件順序はIssue/レビュー記録へ移す。
 
@@ -127,7 +127,7 @@
 
 ## 個別書換の優先順位案
 
-1. `proxmox_patch_policy.md`: 範囲超過と重複が最大で、変更履歴が未整備、Playbook見出しも標準名未統一。Policy核を残してContext/Skill/runbook/Issueへ分離する。
+1. `proxmox_operations_policy.md`: 範囲超過と重複が最大で、変更履歴が未整備、Playbook見出しも標準名未統一。Policy核を残してContext/Skill/runbook/Issueへ分離する。
 2. `autonomous_recovery_policy.md`: 実装・アカウント・鍵・wrapper詳細が大きく、標準Playbook見出しと変更履歴がない。権限・禁止・ラダーだけをPolicy核にする。
 3. `ubuntu_vm_patch_policy.md`: apt/非apt/reboot/healthcheckが混在し、標準Playbook・制約・変更履歴を整える必要がある。目的別groupとの境界も同時に明示する。
 4. `proxmox_backup_restore_verify_policy.md`: lifecycleと安全装置は明確だが変更履歴がなく、実装詳細をRepository Contextへ寄せる余地がある。

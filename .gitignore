@@ -40,8 +40,10 @@ homelab_vault_pass
 # 実際の /home/yoshi/.cert はリポジトリ外であり、ファイル権限(0600)で保護する
 .cert/
 
-# ヘルパーシェル
-scripts/tests
+# ヘルパーシェル(ローカル専用の使い捨てスクリプト置き場。scripts/tests/fixtures/ は
+# scripts/check-doc-consistency.py の回帰fixtureであり、リポジトリに残す成果物なので除外しない)
+scripts/tests/*
+!scripts/tests/fixtures/
 new-session.sh*
 kick.sh
 prep-agent.sh*

@@ -5,7 +5,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-POLICY_FILE="$REPO_ROOT/docs/ai/policies/proxmox_patch_policy.md"
+POLICY_FILE="$REPO_ROOT/docs/ai/policies/proxmox_operations_policy.md"
 
 # --- 1. 引数チェック ---
 if [ "$#" -ne 2 ]; then

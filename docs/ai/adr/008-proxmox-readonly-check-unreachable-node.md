@@ -68,6 +68,6 @@ c-1は赤を完全に消さない。変更系playbookがpve1停止中に走れ�
 - 新roleの呼び出し規約は「playの`hosts:`が候補groupの**部分集合**であること」である。**厳密一致にしない** — SB-021が許可する`--limit <node>`単一node実行が壊れるため(2026-07-30の差分レビューCritical #1)。`roles/proxmox_exec_node`のT1は厳密一致のままであり、そちらで`--limit`が許容されるべきかは本ADRの対象外で、申し送りとして残す。
 - 3 roleのsummaryに`Unchecked=`が条件付きで入る。`prn_unreachable_nodes | default([])`により、`proxmox_patch_dryrun.yml`が`include_role`で`proxmox_healthcheck`を呼ぶ経路の出力は変わらない。
 - `playbooks/proxmox_patch_weekly_full.yml`のStep 1bに、候補ノードが全て到達可能であることの明示ゲートが入る。**停止条件は変えず、停止理由が読めるようにするだけ**である(healthcheckが片肺で完走するようになった帰結として、未定義変数エラーで落ちるのを防ぐ)。
-- `docs/ai/policies/proxmox_patch_policy.md` §3.2 にSB-095を新設する(Yoshinobu承認事項)。`proxmox_snapshot_check`はpatch domain外でPolicyの置き場が無く、その挙動の根拠は本ADRと当該playbookの冒頭コメントが持つ。
+- `docs/ai/policies/proxmox_operations_policy.md` §3.2 にSB-095を新設する(Yoshinobu承認事項)。当時`proxmox_snapshot_check`はpatch domain外でPolicyの置き場が無く、その挙動の根拠は本ADRと当該playbookの冒頭コメントが持つ、という判断だった(2026-08-01のPolicy改名・scope拡張でこの前提は解消し、当該playbookはSB-020の安全度表にも載る。本ADRの記述は決定当時の記録として残す)。
 - `playbooks/proxmox_patch_dryrun.yml`のinline実装は今回そのまま残す。将来これを本roleへ寄せ替えると、`docs/ai/status.md` Watchの「Semaphoreでfact cachingが有効だとdryrunが停止ノードを到達可能と誤判定する」がrepo側で塞がる(P1-1)。**寄せ替えるまでの間、同一機構が2つ並存する**ことは既知の負債として残る。
 - 変更系playbook(`cert_renew.yml`、`ca_trust_deploy.yml`、`time_sync_ntp_reference.yml`)は対象外であり、pve1停止中に実行すれば失敗する。これは仕様である。

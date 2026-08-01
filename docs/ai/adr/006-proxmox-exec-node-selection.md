@@ -47,5 +47,5 @@ Yoshinobuの方向性(2026-07-29):
 - `recovery_probe_pve_host`(単数)を廃止し `recovery_probe_pve_hosts`(候補リスト)にした。**pve1を平日常時起動へ戻す際に変数を書き換える作業が不要になった** — 決め打ちを消したことで、申し送り自体が消滅した。
 - **ADR-001はSupersedeしない。** 本ADRはADR-001の決定(pve1優先・pve2フォールバック)を一般化したものであり、`unifi_backup_fetch` の選定方針そのものは変えていない。ADR-001は当該playbookの選定方針の根拠として有効なまま残る。
 - **Operations Context化(ADR-001が予告していた選択肢)は行わなかった。** 機構がroleとして実在し、呼び出し規約がrole先頭のassertとコメントに書かれている以上、同じ内容を文書へ複製すると正本が二重化する。ADRを判断の記録として残すに留めた。
-- `proxmox_patch_weekly_full.yml` の per-node 固定(`hosts: pve1` / `hosts: pve2`)は**対象外とした**。各ノードを順にパッチする意図的な固定であり、片系だけで適用すると版数driftを作る(`docs/ai/policies/proxmox_patch_policy.md` SB-027 / SB-028)。ここは決め打ちのままが正しい。
+- `proxmox_patch_weekly_full.yml` の per-node 固定(`hosts: pve1` / `hosts: pve2`)は**対象外とした**。各ノードを順にパッチする意図的な固定であり、片系だけで適用すると版数driftを作る(`docs/ai/policies/proxmox_operations_policy.md` SB-027 / SB-028)。ここは決め打ちのままが正しい。
 - 既存の `proxmox_patch_dryrun` は引き続き `ansible_facts | length > 0` 方式のままである。**本ADRの判断(明示probe)とは異なる方式が1箇所残る。** 統一するかはSemaphore側のfact caching設定の確認結果次第であり、`docs/ai/status.md` のWatchが持つ。

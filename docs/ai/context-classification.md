@@ -32,7 +32,7 @@
 
 **対象**: 「何をしてよいか・してはいけないかの判断基準」— Context(事実)と違い、Policyは規範(ルール)。
 
-**例(将来作成予定)**: `proxmox_patch_policy.md`、`ubuntu_vm_patch_policy.md`(いずれも計画書の推奨構成に記載済みだが未作成)。
+**例(将来作成予定)**: `proxmox_operations_policy.md`、`ubuntu_vm_patch_policy.md`(いずれも計画書の推奨構成に記載済みだが未作成)。
 
 **Context/Policyの区別の原則**: 「これは何か」を答える文書はContext、「これをしてよいか」を答える文書はPolicy。例: 「proxmox-patch-dryrunは実patchを行わない」はContext(事実)、「dry-run結果でmust-fixが出た場合は本適用を止める」はPolicy(規範)。
 

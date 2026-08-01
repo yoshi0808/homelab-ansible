@@ -1,11 +1,11 @@
-# Proxmox Patch Policy
+# Proxmox Operations Policy
 
-本書はProxmox VE hostのpatchに関する許可、禁止、停止条件の正本である。playbook / roleは`playbooks/*.yml`・`roles/*`を直接参照する(`docs/ai/context/ansible/repository-overview.md`)、運用手順は[Operations Context](../context/operations/proxmox-patch.md)、環境事実は[System Context](../context/system/proxmox.md)を参照する。実装詳細はコードを正本とする。Contextは非規範であり、本書と競合する場合は本書を優先する。
+本書はProxmox VE hostの運用操作(patchの判断・適用、healthcheck、VM/CT退避・復帰、read-only点検を含む。対象入口は§3.1 SB-020が定める)に関する許可、禁止、停止条件の正本である。`proxmox_backup_restore_verify.yml`はSB-020の安全度表に自動実行tierの索引としてのみ含み、その許可、禁止、停止条件の詳細は[proxmox_backup_restore_verify_policy.md](proxmox_backup_restore_verify_policy.md)を正本とする(競合する二重の正本を作らないため)。playbook / roleは`playbooks/*.yml`・`roles/*`を直接参照する(`docs/ai/context/ansible/repository-overview.md`)、運用手順は[Operations Context](../context/operations/proxmox-operations.md)、環境事実は[System Context](../context/system/proxmox.md)を参照する。実装詳細はコードを正本とする。Contextは非規範であり、本書と競合する場合は本書を優先する。
 
 ## 1. 目的
 
 <!-- SB-001 -->
-本Policyは、Proxmox VE hostへのpatchを安全に判断、適用、停止するため、次を必須目的とする。
+本Policyは、Proxmox VE hostへのpatch適用と、これに付随する運用操作(healthcheck、VM/CT退避・復帰、read-only点検)を安全に判断、実行、停止するため、次を必須目的とする。
 
 - 判断を人間の気分や記憶へ依存させない。
 - 軽微な通常patchを自動化し、対応忘れを防ぐ。
@@ -78,13 +78,14 @@ Ansible実行端末はansyまたはquoryに限定する。管理対象host自身
 ### 3.1 安全度と入口
 
 <!-- SB-020 -->
-入口は次の4安全度に固定し、自動実行範囲を分類どおりに制限する。
+入口は次の4安全度に固定し、自動実行範囲を分類どおりに制限する。本表が定めるのは各入口の安全度と自動実行範囲であり、**行に別Policyへの委譲が明記されている入口については、許可・禁止・停止条件の詳細はその委譲先が正本である**(本表はその入口を安全度の索引として載せるに留まる)。
 
 | 安全度 | Playbook / 作業 | 許可範囲 |
 |---|---|---|
-| safe | `proxmox_healthcheck.yml` | read-only状態収集。自動可 |
+| safe | `proxmox_healthcheck.yml`、`proxmox_hw_check.yml`、`proxmox_snapshot_check.yml` | read-only状態収集。自動可 |
 | semi-safe | `proxmox_patch_dryrun.yml` | package metadata更新、simulation、分類。実patchなし。自動可 |
 | controlled apply | `proxmox_evacuate_node.yml`、`proxmox_restore_vm_placement.yml` | guest配置変更。条件付き可 |
+| controlled apply | `proxmox_backup_restore_verify.yml` | backup restore検証。許可、禁止、停止条件の詳細は[proxmox_backup_restore_verify_policy.md](proxmox_backup_restore_verify_policy.md)が正本(本表は自動実行tierの索引のみ)。条件付き可 |
 | unsafe | `proxmox_patch_apply_node.yml`、`proxmox_patch_weekly_full.yml`、major / maintenance apply | OS patchを含む。明記された条件下だけ可。major / maintenanceは自動禁止 |
 
 ### 3.2 healthcheckとdry-run
@@ -278,7 +279,7 @@ dry-run時の`reboot_expected`は推定、apply後の`reboot_required`は事実�
 6. pve2の全gateがOKの場合だけpve1を同じ順序で処理する。
 7. 結果を通知する。
 
-control node条件別の詳細手順は[Operations Context](../context/operations/proxmox-patch.md)を参照する。
+control node条件別の詳細手順は[Operations Context](../context/operations/proxmox-operations.md)を参照する。
 
 <!-- SB-014 -->
 guestはtagにより分類する。`prefer<node名>`があり`hacritical`がないguestはnon-HAとして明示migrationする。`hacritical`があるguestはHA管理としてmaintenance modeで退避し、復帰時は明示relocateする。tagなしguestは明示migration対象にしない。
@@ -333,10 +334,10 @@ cluster外control nodeからのfull flow、Proxmox上control nodeからの単一
 Proxmox host OSのrollbackは原則行わない。壊れた場合は再インストールする。
 
 <!-- SB-082 -->
-node別の復旧手順と再構築に必要な情報を準備し、host設定はfile rollbackでなく再構築する。具体的な再構築情報は[Operations Context](../context/operations/proxmox-patch.md)を参照する。
+node別の復旧手順と再構築に必要な情報を準備し、host設定はfile rollbackでなく再構築する。具体的な再構築情報は[Operations Context](../context/operations/proxmox-operations.md)を参照する。
 
 <!-- SB-085 -->
-Sophos停止によるnetwork影響を許容できる時間帯だけpatchし、必要なnetwork interface / segment割当を確認し、Sophos VM移動後に通信を確認する。手順は[Operations Context](../context/operations/proxmox-patch.md)を参照する。
+Sophos停止によるnetwork影響を許容できる時間帯だけpatchし、必要なnetwork interface / segment割当を確認し、Sophos VM移動後に通信を確認する。手順は[Operations Context](../context/operations/proxmox-operations.md)を参照する。
 
 ## 6. 通知方針
 
@@ -405,6 +406,7 @@ Sophos Firewall VMのHA relocateはstop → migrate → startであり、VM再�
 
 | 日付 | 変更 |
 |---|---|
+| 2026-08-01 | `proxmox_patch_policy.md`を`proxmox_operations_policy.md`へ、Operations Contextの`proxmox-patch.md`を`proxmox-operations.md`へ改名。文書名がpatchに限定されていた一方、本Policyは既にhealthcheck、退避・復帰、read-only点検を規定しており、SB-020の安全度表もそれらを含む前提で作られていたため、名前を実態に合わせた。タイトル・冒頭リード・SB-001の冒頭節をpatchのみの記述から現行SB-020対応のplaybook群(healthcheck、VM/CT退避・復帰、read-only点検を含む)へ拡張。SB-020の安全度表に、既存のSB-095が既にread-only点検として名指ししていた`proxmox_hw_check.yml`(safe)と、2026-07-30時点で「patch domain外」と位置づけていた`proxmox_snapshot_check.yml`(safe)を追加。`proxmox_backup_restore_verify.yml`(controlled apply)もSB-020の索引へ追加したが、同playbookは`proxmox_backup_restore_verify_policy.md`が既に許可・禁止・停止条件の正本として存在するため、本書はSB-020の自動実行tier索引としてのみ扱い、詳細規範の正本を二重化しない(冒頭リード・SB-020該当行に明記)。既存の許可・禁止・停止条件そのものの内容、SB番号は変更していない |
 | 2026-07-30 | 夏季pve1平日シャットダウン運用でread-only点検3本(`proxmox_healthcheck.yml`、`proxmox_hw_check.yml`、木曜の`proxmox_snapshot_check.yml`)がSemaphoreで毎回`error`表示になっていた問題を受け、SB-095を新設。到達可能nodeが1node以上あれば継続し、除外nodeをsummaryへ明示、全node到達不能時は明確なエラーで停止する。除外による`OK`はapplyの両node要求(SB-027、SB-028、SB-032)を緩めない。`proxmox_snapshot_check`はpatch domain外のためADR-008と当該playbookのheader comment側で同一挙動を規定する |
 | 2026-07-26 | 夏季pve1平日シャットダウン運用でdry-runが機能しない問題を受け、SB-023(pve1 / pve2固定pair限定、単一node実行禁止)を廃止し、到達・healthcheck OKなnodeが1node以上あれば開始する条件分岐へ改めたSB-094へ置き換え。両node到達不能時は明確なエラーで停止すること、単一node dry-runの`PATCH_READY`がapply側fixed-pair gate条件(SB-027、SB-028、SB-032)を満たさないことをSB-094内に明記。apply側(SB-027、SB-028、SB-032)の両node要求(drift回避)は変更していない。退番: SB-023(再利用しない) |
 | 2026-07-25 | 移行完了済みのSophos前提(SB-083、SB-001の1 bullet、SB-060 / SB-085の条件節)を削除し、退避の一般規則で足りるSB-084とUrgency判断境界のないSB-086を廃止。代わりにHA relocateによるVM再起動・internet断とautonomous_recovery_policyのmute契約への依拠をSB-092 / SB-093として明記。定義が存在しない`Mode A` / `Mode B`参照および汎用形の「Mode別」表記を条件記述へ統一(Operations Contextの該当見出しも同時に改称)。冗長かつ曜日が事実誤りのSB-049を削除。SB-014を分類規則と終端不変条件(SB-091)へ分離。退番: SB-049 / SB-083 / SB-084 / SB-086(再利用しない) |

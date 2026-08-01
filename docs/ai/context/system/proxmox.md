@@ -1,6 +1,6 @@
 # System Context: Proxmox
 
-本書は環境事実を記録する非規範Contextである。patchの許可、禁止、停止条件は [`proxmox_patch_policy.md`](../../policies/proxmox_patch_policy.md)、backup restore verificationの許可、禁止、停止条件は [`proxmox_backup_restore_verify_policy.md`](../../policies/proxmox_backup_restore_verify_policy.md) を正本とし、競合時は該当Policyを優先する。
+本書は環境事実を記録する非規範Contextである。patch、healthcheck、VM/CT退避・復帰、read-only点検の許可、禁止、停止条件は [`proxmox_operations_policy.md`](../../policies/proxmox_operations_policy.md)、backup restore verificationの許可、禁止、停止条件は [`proxmox_backup_restore_verify_policy.md`](../../policies/proxmox_backup_restore_verify_policy.md) を正本とし、競合時は該当Policyを優先する。両Policyの対象は排他的であり、`proxmox_backup_restore_verify.yml`の許可・禁止・停止条件の正本は常に後者だけとする(前者のSB-020は同playbookを自動実行tierの索引として載せるのみで、詳細規範を重複させない)。
 
 ## 領域の役割
 

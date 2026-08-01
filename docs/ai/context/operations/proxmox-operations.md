@@ -1,6 +1,6 @@
-# Operations Context: Proxmox patch
+# Operations Context: Proxmox operations
 
-本書は複数roleにまたがるpatch運用の順序と復旧情報を示す非規範Contextである。実行の許可、禁止、停止条件は [`proxmox_patch_policy.md`](../../policies/proxmox_patch_policy.md) が正本であり、競合時はPolicyを優先する。実行前に必ずPolicyを読み、本書だけを根拠にapplyしない。
+本書は複数roleにまたがるpatch運用の順序と復旧情報を示す非規範Contextである。実行の許可、禁止、停止条件は [`proxmox_operations_policy.md`](../../policies/proxmox_operations_policy.md) が正本であり、競合時はPolicyを優先する。実行前に必ずPolicyを読み、本書だけを根拠にapplyしない。
 
 ## control node条件別の処理順
 
@@ -91,6 +91,6 @@ Sophos VMは他のguestと同じく退避対象である。退避時は必要な
 
 ## 関連
 
-- [Policy](../../policies/proxmox_patch_policy.md)
+- [Policy](../../policies/proxmox_operations_policy.md)
 - [System Context](../system/proxmox.md)
 - [Repository Overview](../ansible/repository-overview.md)(playbook・roleは `playbooks/*.yml`・`roles/*` を直接参照)

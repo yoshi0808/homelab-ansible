@@ -115,4 +115,18 @@ fi
 
 "$(dirname "${BASH_SOURCE[0]}")/check-tester-gate.sh"
 
+# Cross-file transcription drift (playbook tester-gate vs playbooks/README.md,
+# agent frontmatter model/effort vs docs/ai/role-routing-index.md, and
+# Markdown internal links repo-wide). Runs on every commit regardless of
+# which files are staged, since it reads the whole repo's index state, not
+# just the files this commit happens to touch.
+if ! command -v python3 >/dev/null 2>&1; then
+  echo "ERROR: python3 not found; cannot run doc consistency check"
+  exit 1
+fi
+if ! python3 "$(dirname "${BASH_SOURCE[0]}")/check-doc-consistency.py"; then
+  echo "ERROR: doc consistency check failed (see above)"
+  exit 1
+fi
+
 echo "[pre-commit] OK"

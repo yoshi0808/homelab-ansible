@@ -1,0 +1,5 @@
+# tester-gate: safe-readonly
+---
+- hosts: localhost
+  gather_facts: false
+  tasks: []

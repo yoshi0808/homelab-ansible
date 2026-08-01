@@ -8,7 +8,7 @@ homelabでは夏季の室温対策として`pve1`を平日日中シャットダ�
 
 1. `playbooks/proxmox_patch_dryrun.yml:13`の`any_errors_fatal: true`により、pve1がUNREACHABLEになるとpve2側の処理まで中断される。
 2. `roles/proxmox_patch_dryrun/tasks/main.yml`が複数箇所(`:58-64`のmerge入力生成、`:89-107`のpre-status判定、`:216-230`の最終レポート生成)で`hostvars['pve1']`/`hostvars['pve2']`を固定参照しており、`--limit pve2`のような単独指定でも未定義変数エラーになる。通知文面(`:291`, `:296`, `:298`, `:311`)も`groups['proxmox']`固定参照で「pve1/pve2 ともに」という事実と異なる表示をする。
-3. `docs/ai/policies/proxmox_patch_policy.md:99`のSB-023が単一ノードdry-run実行を明示的に禁止しており、実装だけ直してもPolicy違反状態になる。
+3. `docs/ai/policies/proxmox_operations_policy.md:99`のSB-023が単一ノードdry-run実行を明示的に禁止しており、実装だけ直してもPolicy違反状態になる。
 
 2026-07-26、Yoshinobuから「SB-023の制約対象が誤っていた。本来の目的はpve1/pve2間の版数差分(drift)を作らないことであり、これはapply(実パッチ適用、SB-027/SB-028)側の懸念。dry-runはpackage metadata更新+simulationのみでpackage状態を変更しない情報収集であり、drift発生源ではない。パッチ情報は可能な限り入手したい」という方針確定があった(詳細は`docs/ai/reviews/proxmox_patch_dryrun/2026-07-26_001_single_node_dryrun_investigation.md`§4)。
 
@@ -67,7 +67,7 @@ homelabでは夏季の室温対策として`pve1`を平日日中シャットダ�
 - `roles/proxmox_patch_dryrun/tasks/main.yml`の`hostvars['pve1']`/`hostvars['pve2']`直接参照(`:58-64`, `:92-97`, `:226-227`)をすべて`ansible_play_hosts`または`unified_dryrun.node_summaries`のキー集合ベースのループに置き換える。
 - `playbooks/proxmox_patch_dryrun.yml`の`any_errors_fatal: true`(`:13`)を削除し、Phase 2冒頭に到達ノード0件の明示failガードタスクを追加する。
 - 通知文面(`roles/proxmox_patch_dryrun/tasks/main.yml:291,296,298,311`付近)の`groups['proxmox']`固定参照を、実際に処理したノード集合ベースの動的表現に置き換え、`--limit`明示ケースと通信断ケースを区別する文言を追加する。
-- `docs/ai/policies/proxmox_patch_policy.md`のSB-023(`:99`)を、apply側のdrift回避要求とdry-run側の許可を分離する条件文へ改訂する。新規SB番号を採番し、廃止番号非再利用の既存慣行(§8変更履歴)に倣う。
+- `docs/ai/policies/proxmox_operations_policy.md`のSB-023(`:99`)を、apply側のdrift回避要求とdry-run側の許可を分離する条件文へ改訂する。新規SB番号を採番し、廃止番号非再利用の既存慣行(§8変更履歴)に倣う。
 - apply/weekly full側(SB-027/SB-028/SB-032)は本ADRの対象外であり変更しない。単一ノードdry-runの`PATCH_READY`がfixed-pair gate条件を満たさないことをPolicy本文(§7制約、`:354`以降)に明記する。
-- `docs/ai/context/operations/proxmox-patch.md:30`の「dry-runまたはre-dry-run」という一文は、Policy改訂後の反映としてContext側も後追いで更新が必要(Policyが正本、Contextは非規範であるためPolicy改訂が先)。
+- `docs/ai/context/operations/proxmox-operations.md:30`の「dry-runまたはre-dry-run」という一文は、Policy改訂後の反映としてContext側も後追いで更新が必要(Policyが正本、Contextは非規範であるためPolicy改訂が先)。
 - 既存fixed-pair運用時の出力(Status/Urgency/report/通知文言)が変更前と一致することをTesterが回帰確認する(requirement.md AC2)。
