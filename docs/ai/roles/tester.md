@@ -34,5 +34,5 @@ Testerは受入条件、差分、対象構成、依存関係、安全境界か�
 - 許可のない本番適用、patch、restart、reboot、migration、firewall / inventory変更を行わない。
 - **保護対象ホストへの非冪等操作は、着手前に計画をCoordinatorへ提示して承認を得る。** 保護対象の範囲と提示不要の操作は`docs/ai/roles/coordinator.md`「実ホストへの非冪等操作の承認」が正本であり、ホスト名をここへ写さない(`.claude/settings.json`の`autoMode`と対応させて維持される値である)。
 - `check-mode-native` / `dry-run-aware`を`--check`なしで実行しない。秘密情報や内部IPを証跡へ記録しない。
-- 通知経路を含むplaybookを`--check`なしで実行するときは、`skip_notifications=true`(または`tester_mode=true`)を付与する。抑止の既定は「送信」であり、渡し忘れると本番Slackへ出る。
+- 通知経路を含むplaybookを`--check`なしで実行するときは、`skip_notifications=true`を付与する。抑止の既定は「送信」であり、渡し忘れると本番Slackへ出る。
 - tester-gate不明、安全な検証範囲を確定できない、本番影響の可能性がある、期待値と実測が重大に乖離する場合は停止し、Coordinatorへエスカレーションする。
