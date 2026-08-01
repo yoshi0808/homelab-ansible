@@ -49,6 +49,7 @@
 - **(a) a-2を採用**: 共通role `roles/proxmox_reachable_nodes`を新設する。`meta: end_host`のrole内動作は**実装の最初にdecoyで確認**し、機能しない場合はa-1へfallbackする(判断はCoordinatorへ差し戻す)。a-3を採らないのは、recovery系を含む5 playbookが依存する実証済みroleへ、出力の意味が変わる分岐を足すリスクを避けるため。probe 2タスク分の重複は受け入れ、**probeの消費者が3つ目に増えた時点で共通化を再検討する**。
 - **(b) b-2を採用**: `ping` probeで判定する。ADR-006と同じ理由・同じ式(`roles/proxmox_exec_node/tasks/main.yml:49-59`)を使う。
 - **(c) c-1を採用**: 対象はread-only点検3本に限る。変更系playbookは到達不能で失敗させたままにする。**「点検は片肺でも成立するが、配布は片肺では未達である」**という区別を明示的な線引きとして残す。
+  - **2026-08-01追記: `cert_renew.yml`についてはこの決定を見直した。** 当時の前提は「変更系は到達不能で赤くなるだけ」だったが、実測により、`serial: 1` を持つ同playbookでは到達不能nodeがplaybook全体を打ち切り、**CA秘密鍵をtmpfsから削除するcleanup playまで実行されなくなる**ことが判明したため。見直し後も「配布は片肺では未達である」という区別自体は維持しており、未達をSlackのWARNINGとして残す形に置き換えただけである(赤を消す代わりに未達を隠さない)。`ca_trust_deploy.yml`・`time_sync_ntp_reference.yml`についてはc-1のままである。正本は`docs/ai/policies/cert_renew_policy.md` CERT-023、経緯は`docs/ai/reviews/cert_renew_unreachable_node/`。
 - **(d) d-1を採用**: summary 1行へ、到達不能ノードがあるときだけ`Unchecked=<node,...>`を足す。無いときは表記自体を出さない(両ノード正常時の出力を変えない)。
 
 ## Trade-off Analysis
@@ -70,4 +71,4 @@ c-1は赤を完全に消さない。変更系playbookがpve1停止中に走れ�
 - `playbooks/proxmox_patch_weekly_full.yml`のStep 1bに、候補ノードが全て到達可能であることの明示ゲートが入る。**停止条件は変えず、停止理由が読めるようにするだけ**である(healthcheckが片肺で完走するようになった帰結として、未定義変数エラーで落ちるのを防ぐ)。
 - `docs/ai/policies/proxmox_operations_policy.md` §3.2 にSB-095を新設する(Yoshinobu承認事項)。当時`proxmox_snapshot_check`はpatch domain外でPolicyの置き場が無く、その挙動の根拠は本ADRと当該playbookの冒頭コメントが持つ、という判断だった(2026-08-01のPolicy改名・scope拡張でこの前提は解消し、当該playbookはSB-020の安全度表にも載る。本ADRの記述は決定当時の記録として残す)。
 - `playbooks/proxmox_patch_dryrun.yml`のinline実装は今回そのまま残す。将来これを本roleへ寄せ替えると、`docs/ai/status.md` Watchの「Semaphoreでfact cachingが有効だとdryrunが停止ノードを到達可能と誤判定する」がrepo側で塞がる(P1-1)。**寄せ替えるまでの間、同一機構が2つ並存する**ことは既知の負債として残る。
-- 変更系playbook(`cert_renew.yml`、`ca_trust_deploy.yml`、`time_sync_ntp_reference.yml`)は対象外であり、pve1停止中に実行すれば失敗する。これは仕様である。
+- 変更系playbook(`cert_renew.yml`、`ca_trust_deploy.yml`、`time_sync_ntp_reference.yml`)は対象外であり、pve1停止中に実行すれば失敗する。これは仕様である。**ただし`cert_renew.yml`は2026-08-01に対象外の扱いを見直した(上記Decision (c)の追記を参照)。残る2本については本項のままである。**

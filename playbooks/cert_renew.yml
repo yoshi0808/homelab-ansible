@@ -10,6 +10,12 @@
 # このPlaybookはquoryからのみ実行すること（Semaphoreから実行）。
 # serial: 1 により1ホストずつ処理する。CA署名処理の .srl 競合を防ぐため。
 #
+# pve1 / pve2 が到達不能な場合（夏季の片ノード運用など）は、当該nodeを
+# スキップし、Slack通知にWARNINGを出したうえでrc=0で完走する（2026-08-01）。
+# 適用範囲はProxmox 2 nodeに限り、ansy / monnieの到達不能は従来どおり失敗と
+# して扱う。規範の正本は docs/ai/policies/cert_renew_policy.md CERT-023、
+# 経緯は docs/ai/reviews/cert_renew_unreachable_node/ 。
+#
 # tester-gate: check-mode-native — 2026-07-31 round2でrisk-acceptedから変換
 # (docs/ai/reviews/check_mode_semantics/2026-07-31_006_round2_requirement.md
 # バッチC)。TS-009の条件1(実害の軽さ)は満たすが、条件2(破壊的な本体操作を
@@ -110,6 +116,40 @@
   vars:
     cert_renew_ca_host: localhost
   tasks:
+    # 夏季のpve1平日シャットダウン運用への対応(2026-08-01)。
+    # probeを置かずに到達不能nodeへ進むと、`serial: 1` のバッチ内で全hostが
+    # unreachableになった時点でAnsibleがplaybook全体を打ち切る。その結果、
+    # 残るnodeとmonnieの更新だけでなく cleanup play(CA秘密鍵をtmpfsから削除)
+    # と通知playまで実行されなくなる(decoyで実測、rc=4)。
+    # roles/proxmox_reachable_nodes を使わない理由: 同roleは到達可能nodeが
+    # 0件のときfailする設計であり「両node到達不能でもWARNINGで正常終了」と
+    # いう本playbookの要求と矛盾する。加えて `serial: 1` では同roleのT4/T5が
+    # 未probeのnodeを到達不能とみなして誤発火する。詳細は
+    # docs/ai/reviews/cert_renew_unreachable_node/2026-08-01_001_requirement.md §5。
+    - name: Probe SSH reachability of this node
+      ansible.builtin.ping:
+      register: cert_node_ping
+      ignore_unreachable: true
+      ignore_errors: true
+      become: false
+
+    - name: Record node reachability
+      ansible.builtin.set_fact:
+        cert_host_unreachable: >-
+          {{ (cert_node_ping.unreachable | default(false) | bool)
+             or (cert_node_ping is failed) }}
+
+    - name: Warn that an unreachable node is skipped
+      ansible.builtin.debug:
+        msg: >-
+          WARNING: {{ inventory_hostname }} is unreachable; skipping certificate
+          renewal for this node. Its certificate will not be renewed by this run.
+      when: cert_host_unreachable | bool
+
+    - name: Drop the unreachable node from this play
+      ansible.builtin.meta: end_host
+      when: cert_host_unreachable | bool
+
     - name: Run issue check tasks (diagnostic; determines cert_needs_renewal, always runs)
       ansible.builtin.import_role:
         name: homelab_cert_renew
@@ -190,7 +230,9 @@
       ansible.builtin.set_fact:
         cert_renew_summary: |
           {% for h in ['ansy', 'pve1', 'pve2', 'monnie'] %}
-          {% if hostvars[h].cert_needs_renewal is not defined %}
+          {% if hostvars[h].cert_host_unreachable | default(false) | bool %}
+          {{ h }}: skipped (host unreachable)
+          {% elif hostvars[h].cert_needs_renewal is not defined %}
           {{ h }}: check FAILED
           {% else %}
           {% set needs_renewal = hostvars[h].cert_needs_renewal | bool %}
@@ -208,6 +250,9 @@
           {{ h }}: renewed but deploy FAILED
           {% endif %}
           {% endif %}
+          {% endfor %}
+          {% for h in ['ansy', 'pve1', 'pve2', 'monnie'] if hostvars[h].cert_host_unreachable | default(false) | bool %}
+          WARNING: {{ h }} was unreachable and its certificate was not renewed.
           {% endfor %}
           CA cleanup: {{ 'not applicable (check-mode preview)' if ansible_check_mode else (cert_cleanup_status | default('OK')) }}
           {% if hostvars['quory'].cert_intermediate_ca_warn | default(false) | bool %}

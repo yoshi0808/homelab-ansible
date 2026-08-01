@@ -156,6 +156,23 @@ WARNING: Intermediate CA expires in N days!
 | 鍵アルゴリズム | EC secp384r1 |
 | SAN | DNS + IPv4（発行時に CA ホストで `getent ahostsv4` により動的取得） |
 
+
+<!-- CERT-023 -->
+### 到達不能ホストの扱い
+
+`cert_renew.yml` の実行時に対象ホストへSSHで到達できない場合の扱いは、ホストによって異なる。
+
+| 対象 | 到達不能時の扱い |
+|---|---|
+| `pve1` / `pve2` | 当該nodeをスキップして残りの処理（他nodeの更新、CA cleanup、完了通知）を完走し、**playbookは正常終了する（終了コード0）**。スキップした事実はSlack通知にWARNINGとして出力する |
+| `ansy` / `monnie` | 従来どおり失敗として扱う。両ホストは常時稼働が前提であり、到達不能は本物の異常である |
+
+pve1 / pve2 を例外とする理由は、夏季にpve1を平日シャットダウンする運用があり、計画的な停止を毎回ジョブの赤で受け取ると本物の失敗と区別できなくなるためである。同種の判断はProxmoxのread-only点検3本でも採られている（`proxmox_operations_policy.md` SB-095）。
+
+この例外は**通知と終了コードの扱いだけを変える**ものであり、スキップされたnodeの証明書が更新されたことにはしない。到達不能だったnodeは証明書が更新されないまま残り、有効期間45日・月次強制再発行という運用の下では、復帰時に失効済みの証明書で稼働している可能性がある。復帰後の追いかけ更新は自動化していないため、WARNINGを受け取った運用者が判断する。
+
+技術的背景（`serial: 1` のバッチ内で全hostが到達不能になるとplaybook全体が打ち切られ、CA秘密鍵のtmpfsからの削除まで実行されなくなる）は `docs/ai/reviews/cert_renew_unreachable_node/2026-08-01_001_requirement.md` §1 を正本とする。
+
 ## 5. ライフサイクル・処理フロー
 
 
@@ -279,6 +296,8 @@ Semaphore から実行する場合は Task Template の Extra Variables に `for
 - `alerts`: FAILED または WARNING を含む場合
 - `info`: 正常完了の場合
 
+到達不能なpve1 / pve2をスキップした実行はWARNINGを含むため`alerts`へ送るが、playbook自体は正常終了する（CERT-023）。通知チャンネルと終了コードは独立であり、`alerts`への通知をジョブの失敗と読み替えない。
+
 ## 7. 制約・禁止事項
 
 
@@ -311,3 +330,4 @@ CA資材の配置、mode、offline root、runtime staging、owner非固定の制
 | v2.1 | 2026-07-25 | 標準8見出しへ再編し、安全境界の意味を維持。 |
 | v2.2 | 2026-07-26 | CERT-009がサーバー配布物とクライアント側トラストストアを1文に混在させていた点を分離。トラストストアに必要なのはルートCAのみである規範をCERT-021として明記し、中間CA配布廃止時の実測確認要件をCERT-022として追加。 |
 | v2.3 | 2026-07-26 | CERT-022の実測要件を6/6エンドポイントで充足したうえで、`deploy_ca_trust.yml`からの中間CA配布を廃止しルートCA単独配布へ移行。配布済み`home-tls-ca.crt`は`state: absent`で回収する。実測記録は`docs/ai/reviews/cert_renew/2026-07-25_006_test_result.md`。 |
+| v2.4 | 2026-08-01 | CERT-023を新設。夏季のpve1平日シャットダウン運用を受け、`cert_renew.yml`でpve1 / pve2が到達不能な場合は当該nodeをスキップしWARNING通知のうえ正常終了する（`ansy` / `monnie`は従来どおり失敗）。§6の通知チャンネル選択に、`alerts`通知と終了コードが独立である旨を追記。実装と検証は`docs/ai/reviews/cert_renew_unreachable_node/`。 |
