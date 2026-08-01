@@ -9,7 +9,7 @@
 ```text
 control node確認
 -> pve1 / pve2 healthcheck
--> fixed pair dry-run
+-> dry-run
 -> pve2 evacuate
 -> pve2 apply / 必要時reboot / post-healthcheck
 -> pve2 restore / post-restore healthcheck
@@ -20,6 +20,8 @@ control node確認
 ```
 
 各矢印の続行gateはPolicyに従う。時刻は運用scheduler側の設定であり、本Contextへ固定しない。
+
+**両nodeが揃わなくても実行される**(2026-08-01改訂)。到達できたnodeだけを対象に進み、片方が到達不能でも開始しない理由にはならない。ただし単一node運転では退避先が無いため、対象nodeにrunning guestがあれば適用を見送る。全nodeが到達不能なときだけ停止する。条件の正本はPolicyのSB-094・SB-012・SB-088。
 
 ### Proxmox上のcontrol nodeによる単一node flow
 
@@ -35,9 +37,26 @@ control node所在確認
 
 もう一方のnodeは同じ実行で続けない。control nodeの所在変更は別作業である。
 
-### MAINTENANCE_REQUIRED手動flow
+### 手動applyが要る局面と、確認文字列
 
-通知とchangelog要約を確認し、必要な公式情報を読み、maintenance枠を確保する。対象healthcheckとguest退避を確認し、手動apply modeと明示確認を指定する。apply、必要時reboot、post-healthcheckを完了し、pve1はpve2成功後に別途判断する。
+**2026-08-01の改訂で、手動applyが要る範囲は狭まった。** `MAINTENANCE_REQUIRED` でも**removeを伴わなければ自動適用される**ため、毎週の手作業は不要になった。
+
+手動applyと明示確認が要るのは次の2つだけである。判定は実装側の `_redryrun_requires_confirmation` に集約されており、条件の正本はPolicy(SB-027・SB-028・SB-031)。
+
+| 局面 | `proxmox_patch_apply_manual_confirm` に渡す値 |
+|---|---|
+| `MAINTENANCE_REQUIRED` かつ **removeあり** | `MAINTENANCE_REQUIRED` |
+| `MAJOR_UPGRADE_DETECTED` | `MAJOR_UPGRADE_DETECTED` |
+
+**確認文字列は、検出されたStatusと一致していなければならない。** 一致しなければ停止する(不一致時のエラーメッセージには渡すべき値が埋め込まれて出る)。確認が不要な局面で値を渡しても比較自体が評価されないため無害である。
+
+`proxmox_patch_apply_mode=manual` と併せて指定する。Semaphoreのテンプレートでは確認文字列を上表の2値のENUMとして持たせている(**Semaphoreの設定はリポジトリ外にあり、ここからは確認できない**)。
+
+手順そのものは従来どおり。通知とchangelog要約を確認し、必要な公式情報を読み、maintenance枠を確保する。対象healthcheckとguest退避を確認してからapply、必要時reboot、post-healthcheckを完了し、pve1はpve2成功後に別途判断する。
+
+> **`MAJOR_UPGRADE_DETECTED` は、確認文字列を渡せば通る種類の作業ではない。** Policy SB-041は「通常patchから除外し、**別project化**する。Roadmap / Release Notesを参照してpve2検証計画を作り、pve1を最後にする」と定めている。確認文字列はゲートの一部にすぎず、本体はこの計画のほうである。ENUMで選べる形にした分、この要求が形骸化しやすいことに注意する。
+>
+> **この経路は2026-08-01の新設で、実運用でまだ一度も通っていない。** 現状の根拠はdecoyでの一致・不一致の検証のみ。
 
 ## post-healthcheck retry
 
