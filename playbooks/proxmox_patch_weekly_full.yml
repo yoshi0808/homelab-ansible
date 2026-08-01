@@ -7,21 +7,59 @@
 #   ansible-playbook -i inventories/homelab/hosts.yml \
 #     playbooks/proxmox_patch_weekly_full.yml
 #
-# Flow:
-#   0.  preflight: control node not on cluster
-#   1.  healthcheck pve1 + pve2  (stop if not both OK)
-#   2.  dry-run                  (PATCH_READY → continue; clean-skip rc=0 on
-#                                 NO_UPDATES/MAINTENANCE_REQUIRED/MAJOR_UPGRADE_DETECTED;
-#                                 fail on BLOCKED/UNKNOWN)
-#   3.  evacuate pve2
-#   4.  patch apply pve2
-#   5.  post-patch healthcheck pve2
-#   6.  restore pve2
-#   7.  evacuate pve1
-#   8.  patch apply pve1
-#   9.  post-patch healthcheck pve1
-#   10. restore pve1
-#   11. summary mail
+# Flow (requirement.md 2026-08-01 proxmox_auto_apply_widening §2.1/§2.2 —
+# the fixed-pair requirement is retired; a node that is unreachable or
+# unhealthy is excluded from this run rather than aborting the whole job):
+#   0a. select a query node for the preflight (any reachable proxmox node,
+#       not a hardcoded pve1 — AC9, Incident #507)
+#   0b. preflight: control node not on cluster (runs on the node Step 0a
+#       selected)
+#   0c. fail closed if 0a/0b never ran at all (e.g. the query-node group
+#       ended up empty) — do not silently proceed without this confirmation
+#       (Coordinator review finding, 2026-08-01)
+#   1.  healthcheck pve1 + pve2  (stop only if NEITHER node is reachable and
+#                                 healthy; an excluded node is simply not
+#                                 patched this run)
+#   2.  dry-run                  (covers whichever node(s) are eligible —
+#                                 possibly a single node, SB-094)
+#   2b. proceed on PATCH_READY or MAINTENANCE_REQUIRED without package
+#       removes; clean-skip rc=0 on NO_UPDATES / MAJOR_UPGRADE_DETECTED /
+#       MAINTENANCE_REQUIRED with removes; fail on BLOCKED/UNKNOWN/no node
+#       covered
+#   2d. single-node only (§2.2 B案, AC10): if the sole target still has a
+#       running guest, do not apply - end green and notify instead (there is
+#       no reachable destination to evacuate it to, and stopping guests
+#       unattended is explicitly rejected). Two-node runs are unaffected.
+#   3.  evacuate pve2   (only if pve2 was part of this run's dry-run coverage
+#                        AND pve1 is also part of it - see 2d, single-node
+#                        mode skips evacuate entirely and applies directly)
+#   4.  patch apply pve2  (only if pve2 was part of this run's coverage)
+#   5.  post-patch healthcheck pve2  (only if pve2 was part of this run's coverage)
+#   6.  restore pve2  (only if pve2 was part of this run's coverage; runs
+#       even in single-node mode as a no-op safety net — see Step 6's comment)
+#   7.  evacuate pve1   (only if pve1 was part of this run's coverage AND
+#                        pve2 is also part of it, see 3; if pve2 was not part
+#                        of this run at all, this step is skipped and Step 8
+#                        applies directly - proceeding without pve2 having
+#                        been validated/patched first. SB-001's "pve2 first"
+#                        is a sequencing rule for when both nodes are
+#                        available, not a precondition for patching pve1 alone)
+#   8.  patch apply pve1  (only if pve1 was part of this run's coverage)
+#   9.  post-patch healthcheck pve1  (only if pve1 was part of this run's coverage)
+#   10. restore pve1  (only if pve1 was part of this run's coverage; same
+#       no-op safety net note as Step 6)
+#   11. summary mail  (discloses single-node apply and, when applicable,
+#                      that pve2's precedence validation was skipped — AC4)
+#
+# Known limitation NOT addressed by this widening (out of scope per
+# requirement.md §4 — the guest evacuation/restore flow itself is
+# unchanged): single-node apply only proceeds when the sole surviving node
+# already has zero running guests (Step 2d). If a node fails while carrying
+# guests (e.g. HA guests failed over onto it), those guests are never force-
+# stopped by this playbook to unblock the apply — Yoshinobu explicitly
+# rejected that. Automatic weekly patching then stays off until either the
+# down node returns or a human intervenes; see implement record for this
+# requirement.
 #
 # unsafe: applies OS patches
 #
@@ -35,15 +73,45 @@
 # =============================================================================
 
 # ---------------------------------------------------------------------------
-# Step 0: Preflight - Verify control node is not on the Proxmox cluster
+# Step 0a: Select a query node for the control-node-separation preflight
+#
+# requirement.md (2026-08-01 proxmox_auto_apply_widening) §4/AC9: the
+# *requirement* to confirm the controller is not on the Proxmox cluster is
+# unchanged, but pinning that confirmation to a single literal host
+# (groups['proxmox'][0], currently pve1) is not part of that requirement —
+# it was an implementation choice that made the whole job abort with
+# UNREACHABLE whenever that one node happened to be down (Incident #507).
+# `pvesh get /cluster/resources` is a cluster-wide API and returns the same
+# data from either node (same reasoning already used by
+# playbooks/proxmox_backup_restore_verify.yml Play 1), so any reachable
+# 'proxmox' group member is equally valid as the query node. Reused here via
+# the existing roles/proxmox_exec_node (ADR-006), not a new selection
+# mechanism.
+# ---------------------------------------------------------------------------
+- name: Select query node for control-node-separation preflight
+  hosts: proxmox
+  gather_facts: false
+  become: false
+  roles:
+    - role: proxmox_exec_node
+      vars:
+        pen_target_group: pwf_preflight_query_node
+        pen_caller: proxmox_patch_weekly_full_preflight
+
+# ---------------------------------------------------------------------------
+# Step 0b: Preflight - Verify control node is not on the Proxmox cluster
 #
 # If the Ansible controller (ansible_hostname) is a VM running on pve1/pve2,
 # evacuate would migrate it mid-run, breaking this playbook.
 # Must be run from quory (external, non-cluster host) instead.
 # ansy may be on the cluster without issue when running from quory.
+#
+# Runs on whichever node Step 0a selected (pwf_preflight_query_node), not a
+# hardcoded pve1, so this confirmation still runs when pve1 specifically is
+# unreachable but pve2 is not (AC9).
 # ---------------------------------------------------------------------------
 - name: Preflight - Verify control node is not on Proxmox cluster
-  hosts: "{{ groups['proxmox'][0] }}"
+  hosts: pwf_preflight_query_node
   gather_facts: false
   become: true
   vars:
@@ -113,112 +181,326 @@
           docs/ai/policies/ansible_test_safety_policy.md.
         quiet: true
 
+    # Marks that every abort check above actually ran and passed. Read by
+    # Step 0c immediately below - see that play's header comment for why
+    # this exists (Coordinator review finding, 2026-08-01).
+    #
+    # delegate_facts: true is required here, not optional: delegate_to
+    # localhost alone only changes *where the module executes* - without
+    # delegate_facts, set_fact still records the fact against this task's
+    # own inventory_hostname (the selected query node), not localhost, so
+    # Step 0c's hostvars['localhost'] lookup would find nothing and this
+    # guard would fail closed on every run, including successful ones.
+    # Confirmed by decoy (delegate_to alone left the fact on the original
+    # host; adding delegate_facts: true put it on localhost as intended).
+    - name: Record that control-node-separation preflight actually ran
+      ansible.builtin.set_fact:
+        _preflight_confirmed: true
+      delegate_to: localhost
+      delegate_facts: true
+      become: false
+
+# ---------------------------------------------------------------------------
+# Step 0c: Fail closed if the control-node-separation preflight did not run
+#
+# Step 0b's play (hosts: pwf_preflight_query_node) silently matches zero
+# hosts - and is therefore skipped in its entirety, with the rest of the
+# playbook simply continuing - whenever that dynamic group ends up empty.
+# Concretely: roles/proxmox_exec_node's own calling-convention assert
+# requires the calling play's hosts to equal groups['proxmox'] *exactly*
+# (tasks/main.yml T1), which breaks under `--limit <single-node>` (Step 0a's
+# ansible_play_hosts_all then differs from the unlimited groups['proxmox']),
+# so Step 0a can fail to populate the group. Ansible does not treat "a play
+# matched no hosts" as an error on its own, so nothing else in this
+# playbook would necessarily notice - this play exists solely to turn that
+# silence into a hard, explicit stop (Coordinator review finding
+# 2026-08-01: requirement.md §4 requires the control-node-separation
+# confirmation to not be skipped silently, for any reason, not just this
+# one).
+#
+# hosts: proxmox (not localhost) is deliberate: a `hosts: localhost` play is
+# itself silently skipped under `--limit <node-not-matching-localhost>`
+# (confirmed by decoy - see implement record), which would make a
+# localhost-based guard useless for exactly the scenario this defends
+# against. `hosts: proxmox` intersected with `--limit <a-real-proxmox-node>`
+# is always non-empty, so this play (and thus this guard) still runs.
+#
+# roles/proxmox_exec_node's own --limit handling is explicitly out of scope
+# here (tracked separately, docs/ai/status.md Next) - this guard does not
+# add --limit support to that role, it only refuses to proceed when the
+# confirmation it gates did not happen, regardless of the reason.
+# ---------------------------------------------------------------------------
+- name: Fail closed if the control-node-separation preflight did not run
+  hosts: proxmox
+  gather_facts: false
+  tasks:
+    - name: Assert the preflight confirmation actually happened
+      ansible.builtin.assert:
+        that:
+          - hostvars['localhost']['_preflight_confirmed'] | default(false) | bool
+        fail_msg: >-
+          The control-node-separation preflight (Step 0b) did not run - the
+          query node group (pwf_preflight_query_node) was empty or that play
+          was otherwise skipped, so whether this controller is on the
+          Proxmox cluster was never confirmed. Refusing to proceed
+          (requirement.md §4). A common cause is `--limit <single-node>`
+          breaking roles/proxmox_exec_node's calling-convention assert
+          (that role's own --limit handling is a separate, already-tracked
+          item - docs/ai/status.md - and is not addressed by this guard).
+        quiet: true
+      run_once: true
+      delegate_to: localhost
+      become: false
+
 # ---------------------------------------------------------------------------
 # Step 1a: Healthcheck both nodes
 # ---------------------------------------------------------------------------
 - import_playbook: proxmox_healthcheck.yml
 
-# Step 1b: Stop if either node is not OK
+# Step 1b: Determine per-node eligibility; stop only if nothing is patchable
 #
-# 2026-07-30: proxmox_healthcheck.yml (Step 1a) は到達不能nodeを除外して
-# 片肺で完走するようになった(docs/ai/adr/008-proxmox-readonly-check-unreachable-node.md)。
-# 到達不能nodeはこのplayに残ったままだが proxmox_report を持たないため、次の
-# fail タスクの `when:` がそのnode上では未定義変数エラーになる。停止すること
-# 自体は正しい(apply側は両nodeを要求する、SB-027/SB-028/SB-032)が、理由が
-# 読める形で止まるようにする1タスクを先に置く。
-- name: Abort if either node healthcheck is not OK
+# requirement.md (2026-08-01 proxmox_auto_apply_widening) §2.2 / SB-028 /
+# SB-032: the fixed-pair requirement ("both nodes must answer and be OK
+# before anything proceeds") is retired. A node that is unreachable or
+# unhealthy is excluded from this run instead of aborting the whole job —
+# proxmox_patch_dryrun.yml already tolerates a missing node the same way
+# (SB-094). This play only refuses to continue when there is nothing left to
+# patch at all (no node is both reachable and healthy); it does not decide
+# which node(s) actually get patched — that is derived later (Step 2b) from
+# the dry-run's own node coverage, which independently re-runs healthcheck
+# and is the authoritative source for "which node(s) took part".
+#
+# 2026-07-30: proxmox_healthcheck.yml (Step 1a) already excludes unreachable
+# nodes and completes on the survivor(s)
+# (docs/ai/adr/008-proxmox-readonly-check-unreachable-node.md). A node
+# excluded there is still a member of this new play (each play re-evaluates
+# `hosts: proxmox` independently) but never got `proxmox_report` set, so it
+# is read defensively below (prn_reachable short-circuits before
+# proxmox_report is touched).
+- name: Determine per-node eligibility and stop if nothing is patchable
   hosts: proxmox
   gather_facts: false
-  any_errors_fatal: true
   tasks:
-    - name: Fail if any candidate node was unreachable during healthcheck
-      ansible.builtin.fail:
-        msg: >-
-          weekly full patch requires every node in group 'proxmox' to be
-          reachable, but {{ _wf_unreachable | join(', ') }} did not answer
-          during the healthcheck play. Apply-side drift avoidance
-          (SB-027 / SB-028 / SB-032) requires the full fixed pair.
-      vars:
-        _wf_unreachable: >-
+    - name: Record per-node eligibility for this run
+      ansible.builtin.set_fact:
+        _wf_node_eligible: >-
+          {{ (prn_reachable | default(false) | bool) and
+             ((proxmox_report.result.status | default('')) == 'OK') }}
+
+    - name: Determine eligible/unreachable/unhealthy node sets
+      ansible.builtin.set_fact:
+        _wf_eligible_nodes: >-
           {{ ansible_play_hosts_all
              | map('extract', hostvars)
-             | selectattr('prn_reachable', 'defined')
+             | selectattr('_wf_node_eligible', 'equalto', true)
+             | map(attribute='inventory_hostname') | list }}
+        _wf_unreachable_nodes: >-
+          {{ ansible_play_hosts_all
+             | map('extract', hostvars)
              | selectattr('prn_reachable', 'equalto', false)
+             | map(attribute='inventory_hostname') | list }}
+        _wf_unhealthy_nodes: >-
+          {{ ansible_play_hosts_all
+             | map('extract', hostvars)
+             | selectattr('prn_reachable', 'equalto', true)
+             | selectattr('_wf_node_eligible', 'equalto', false)
              | map(attribute='inventory_hostname') | list }}
       run_once: true
       delegate_to: localhost
       become: false
-      when: _wf_unreachable | length > 0
 
-    - name: Fail if healthcheck is not OK
+    # This is additional to (not a duplicate of) proxmox_reachable_nodes'
+    # own "no candidate node is reachable" fail inside Step 1a: that one
+    # catches zero *reachable* nodes; this one also catches the case where
+    # one or more nodes answered but none of them is healthy enough to
+    # patch (SB-021: WARNING/CRITICAL healthcheck forbids apply).
+    - name: Fail if no node is eligible for this run
       ansible.builtin.fail:
         msg: >-
-          {{ inventory_hostname }} healthcheck is {{ proxmox_report.result.status }}.
-          Both nodes must be OK before proceeding with weekly full patch.
-      when: proxmox_report.result.status != 'OK'
+          weekly full patch: no node in group 'proxmox' is both reachable and
+          healthy this run. unreachable={{ _wf_unreachable_nodes | join(', ') if _wf_unreachable_nodes | length > 0 else 'none' }},
+          unhealthy={{ _wf_unhealthy_nodes | join(', ') if _wf_unhealthy_nodes | length > 0 else 'none' }}.
+          Stopping instead of a silent no-op (SB-094 / requirement.md §2.2).
+      run_once: true
+      delegate_to: localhost
+      become: false
+      when: _wf_eligible_nodes | length == 0
 
 # ---------------------------------------------------------------------------
-# Step 2a: Dry-run (produces _final_status on groups['proxmox'][0])
+# Step 2a: Dry-run (produces _final_status on whichever proxmox node carried
+# the run_once - see the lookup note in Step 2b below)
 #
 # proxmox_patch_dryrun role sets _final_status with run_once + delegate_to:
 # localhost but without delegate_facts: true, so the fact is stored on the
-# run_once source host (groups['proxmox'][0]), not on localhost.
+# run_once source host, not on localhost. That host is normally
+# groups['proxmox'][0] (pve1), but is whichever proxmox node actually
+# survived to the merge phase if pve1 itself did not (single-node scenario).
 # ---------------------------------------------------------------------------
 - import_playbook: proxmox_patch_dryrun.yml
 
 # Step 2b: Handle dry-run status
 #
-# PATCH_READY            → continue to evacuate/patch/restore flow
-# NO_UPDATES             → skip + normal exit (dry-run role already notified: info)
-# MAINTENANCE_REQUIRED   → skip + normal exit (dry-run role already notified: warning)
-# MAJOR_UPGRADE_DETECTED → skip + normal exit (dry-run role already notified: warning)
-# BLOCKED                → fail (apt/dpkg broken, patch ops halted - manual action)
-# UNKNOWN / other        → fail (unexpected state)
+# requirement.md (2026-08-01 proxmox_auto_apply_widening) §2.1 table:
+#
+#   NO_UPDATES                          → skip, normal exit (dry-run already notified: info)
+#   PATCH_READY                         → proceed
+#   MAINTENANCE_REQUIRED (remove_count==0) → proceed (NEW - was skip)
+#   MAINTENANCE_REQUIRED (remove_count>0)  → skip, normal exit (dry-run already notified: warning)
+#   MAJOR_UPGRADE_DETECTED              → skip, normal exit (dry-run already notified: warning)
+#   BLOCKED                             → fail (apt/dpkg broken - manual action)
+#   UNKNOWN / other / no node covered   → fail (unexpected state)
+#
+# The fixed-pair requirement is retired (SB-027/SB-028/SB-032 revision, §2.2):
+# a dry-run that covered only one node (SB-094) can now proceed. Which
+# node(s) actually get patched is derived below from the dry-run's own node
+# coverage (_final_report.node_summaries), not decided here.
 #
 # Semaphore only has success/fail (no warning). For the warning-level skip
 # statuses the dry-run role has already sent a Slack notification, so the job
 # ends as a normal (success) exit instead of failing — failing would surface a
 # false error in Semaphore even though patching was correctly skipped, not broken.
-- name: Handle dry-run status - skip cleanly or abort on genuine error
+- name: Handle dry-run status - proceed, skip cleanly, or abort on genuine error
   hosts: localhost
   gather_facts: false
   vars:
-    _status: "{{ hostvars[groups['proxmox'][0]]['_final_status'] | default('UNKNOWN') }}"
-    # 2026-07-26 review 2026-07-26_004 Critical Issue #2: a single-node
-    # dry-run (SB-094) is a valid dry-run outcome but must never satisfy this
-    # fixed-pair apply gate (AC5). node_summaries is keyed by node name, so
-    # this is empty unless the dry-run that produced _status actually covered
-    # every groups['proxmox'] member.
-    _dryrun_missing_nodes: "{{ groups['proxmox'] | difference((hostvars[groups['proxmox'][0]]['_final_report'] | default({}))['node_summaries'] | default({}) | list) }}"
-    # Patching intentionally skipped AND the dry-run role already notified Slack
-    # → end the job as a normal (success) exit, not a failure.
-    _weekly_full_skip_statuses:
-      - NO_UPDATES
-      - MAINTENANCE_REQUIRED
-      - MAJOR_UPGRADE_DETECTED
+    # _final_status/_final_report are set by a run_once + delegate_to:
+    # localhost task in roles/proxmox_patch_dryrun without delegate_facts:
+    # true, so the fact lands on whichever proxmox node actually carried that
+    # run_once task. Normally that is groups['proxmox'][0] (pve1), but if
+    # pve1 itself did not reach dry-run's merge phase (e.g. pve1 is the node
+    # that is down — exactly the single-node scenario this requirement
+    # targets), Ansible's run_once picks the next surviving host (pve2)
+    # instead, and the fact lands there. A fixed groups['proxmox'][0] lookup
+    # would then read an undefined fact and silently default to UNKNOWN, so
+    # this looks up whichever proxmox group member actually has the fact.
+    _status_hosts_with_fact: >-
+      {{ groups['proxmox']
+         | map('extract', hostvars)
+         | selectattr('_final_status', 'defined')
+         | map(attribute='inventory_hostname') | list }}
+    _status_host: "{{ _status_hosts_with_fact[0] if (_status_hosts_with_fact | length > 0) else groups['proxmox'][0] }}"
+    _status: "{{ hostvars[_status_host]['_final_status'] | default('UNKNOWN') }}"
+    _wf_final_report: "{{ hostvars[_status_host]['_final_report'] | default({}) }}"
+    _wf_remove_count: "{{ _wf_final_report.remove_count | default(0) | int }}"
+    _wf_dryrun_nodes: "{{ _wf_final_report.node_summaries | default({}) | list }}"
+    _wf_proceed: >-
+      {{ (_wf_dryrun_nodes | length > 0) and
+         ((_status == 'PATCH_READY') or
+          (_status == 'MAINTENANCE_REQUIRED' and _wf_remove_count == 0)) }}
   tasks:
     - name: Set skip flag and end play cleanly (patch skipped, dry-run role already notified)
-      when: _status in _weekly_full_skip_statuses
+      when: not (_wf_proceed | bool)
       block:
         - name: Set skip flag for subsequent plays
           ansible.builtin.set_fact:
             _weekly_full_skip: true
 
+        - name: Fail if the skip is not one of the known clean-skip statuses
+          ansible.builtin.fail:
+            msg: >-
+              Dry-run status is {{ _status }} (remove_count={{ _wf_remove_count }}),
+              covering node(s): {{ _wf_dryrun_nodes | join(', ') if _wf_dryrun_nodes | length > 0 else 'none' }}.
+              Weekly full patch apply requires PATCH_READY or
+              MAINTENANCE_REQUIRED without removes on at least one node (or a
+              clean skip: NO_UPDATES / MAJOR_UPGRADE_DETECTED /
+              MAINTENANCE_REQUIRED with removes). Stopping. (BLOCKED =
+              apt/dpkg broken; UNKNOWN or no node covered = unexpected.)
+          when: >-
+            not (_status in ['NO_UPDATES', 'MAJOR_UPGRADE_DETECTED'] or
+                 (_status == 'MAINTENANCE_REQUIRED' and _wf_remove_count > 0))
+
         - name: End this play (normal exit - patching intentionally skipped)
           ansible.builtin.meta: end_play
 
-    - name: Fail if dry-run status is a genuine error, unexpected, or did not cover both nodes
-      ansible.builtin.fail:
-        msg: >-
-          Dry-run status is {{ _status }}, missing node summaries for:
-          {{ _dryrun_missing_nodes | join(', ') if _dryrun_missing_nodes | length > 0 else 'none' }}.
-          Weekly full patch apply requires PATCH_READY with both
-          {{ groups['proxmox'] | join(', ') }} present (or a clean skip:
-          {{ _weekly_full_skip_statuses | join(', ') }}). Stopping.
-          (BLOCKED = apt/dpkg broken; UNKNOWN = unexpected; missing nodes =
-          a single-node dry-run cannot satisfy this fixed-pair gate per
-          SB-094 - manual action required.)
-      when: _status != 'PATCH_READY' or _dryrun_missing_nodes | length > 0
+    # From here _wf_proceed is true: PATCH_READY or MAINTENANCE_REQUIRED
+    # without removes, covering one or both nodes (§2.1, §2.2).
+    - name: Set per-node targets and single-node disclosure flags for this run
+      ansible.builtin.set_fact:
+        _weekly_full_skip: false
+        _weekly_full_status: "{{ _status }}"
+        _weekly_full_remove_count: "{{ _wf_remove_count }}"
+        _weekly_full_target_pve2: "{{ 'pve2' in _wf_dryrun_nodes }}"
+        _weekly_full_target_pve1: "{{ 'pve1' in _wf_dryrun_nodes }}"
+        _weekly_full_single_node: "{{ _wf_dryrun_nodes | length == 1 }}"
+        # §2.2 B案: evacuate always needs a healthy destination_node
+        # (roles/proxmox_evacuate_node, unmodified) - only run it when both
+        # nodes are actually part of this run. In single-node mode there is
+        # nowhere to evacuate to, so Steps 3/7 skip evacuate entirely and go
+        # straight to apply (guest-presence already gated above).
+        _weekly_full_both_nodes: "{{ ('pve2' in _wf_dryrun_nodes) and ('pve1' in _wf_dryrun_nodes) }}"
+        # §2.2: SB-001's "pve2 first" is a sequencing rule for when both
+        # nodes are available, not a precondition for patching pve1 alone.
+        # When pve1 is the sole target, disclose that pve2 was not validated
+        # first (AC4) instead of silently reusing the two-node ordering text.
+        _weekly_full_pve2_precedence_missing: "{{ ('pve1' in _wf_dryrun_nodes) and ('pve2' not in _wf_dryrun_nodes) }}"
+
+    # requirement.md §2.2 "単一node時のguest退避(B案、2026-08-01追加,
+    # Yoshinobu判断)": with only one node in this run, there is no reachable
+    # destination to evacuate anything to (roles/proxmox_evacuate_node
+    # requires a healthy destination_node - unmodified, SB-012/SB-088 unmet).
+    # Stopping guests unattended to force the apply through is explicitly
+    # rejected. So: single-node + the target already has zero running guests
+    # -> apply directly (no evacuate step, see Steps 3/7 gating below).
+    # Single-node + the target has running guests -> do not apply, end green,
+    # notify (AC10). This check only runs for the single-node case; the
+    # two-node case is unaffected (evacuate runs as before).
+    - name: Query cluster resources on the sole single-node target for a running-guest check
+      # check_mode: false: `command` auto-skips under --check by default,
+      # which would leave _wf_single_node_pvesh undefined and crash the next
+      # task's `.stdout` access whenever _weekly_full_single_node is true.
+      # This playbook's tester-gate (check-mode-native) already requires
+      # read-only diagnostic queries to run for real under --check (same
+      # reasoning as the Step 0b preflight's "Get cluster resources" task).
+      ansible.builtin.command:
+        cmd: pvesh get /cluster/resources --output-format json
+      register: _wf_single_node_pvesh
+      changed_when: false
+      check_mode: false
+      when: _weekly_full_single_node | bool
+      delegate_to: "{{ _wf_dryrun_nodes[0] }}"
+      become: true
+
+    - name: Determine whether the single-node target has running guests
+      ansible.builtin.set_fact:
+        _weekly_full_single_node_has_guests: >-
+          {{ (_wf_single_node_pvesh.stdout | from_json
+              | selectattr('type', 'defined')
+              | selectattr('type', 'in', ['qemu', 'lxc'])
+              | selectattr('node', 'defined')
+              | selectattr('node', 'equalto', _wf_dryrun_nodes[0])
+              | selectattr('status', 'defined')
+              | selectattr('status', 'equalto', 'running')
+              | list | length > 0)
+             if (_weekly_full_single_node | bool) else false }}
+
+    - name: Skip single-node apply when the sole target still has running guests (§2.2 B案, AC10)
+      when: (_weekly_full_single_node | bool) and (_weekly_full_single_node_has_guests | bool)
+      block:
+        - name: Send Slack notification for guest-blocked single-node skip
+          ansible.builtin.include_tasks: "{{ playbook_dir }}/../roles/common_slack/tasks/notify.yml"
+          vars:
+            slack_channel: "patches"
+            slack_status: "{{ 'info' if ansible_check_mode else 'warning' }}"
+            slack_title: >-
+              [Proxmox Patch] 単一node適用を見送り - running guestあり ({{ _wf_dryrun_nodes[0] }})
+            slack_message: |
+              Proxmox weekly full patch: {{ _wf_dryrun_nodes[0] }} のみが到達可能でしたが、
+              running guestが残っているため自動適用を見送りました。
+
+              実行日時: {{ lookup('pipe', 'date "+%Y-%m-%d %H:%M:%S %Z"') }}
+              dry-run status: {{ _status }} (remove_count={{ _wf_remove_count }})
+
+              反対nodeが利用不能で退避先が無いため、guestを無人で停止して適用を
+              強行する運用は採用していません(requirement.md 2026-08-01
+              proxmox_auto_apply_widening §2.2 B案、Yoshinobu判断)。手動で対応するか、
+              反対nodeの復旧を待って自動適用が再開されるのを待ってください。
+
+        - name: Set skip flag for subsequent plays
+          ansible.builtin.set_fact:
+            _weekly_full_skip: true
+
+        - name: End this play (normal exit - single-node apply skipped, guests present)
+          ansible.builtin.meta: end_play
 
 # ---------------------------------------------------------------------------
 # Step 2c: Set recovery mute for the full patch window
@@ -262,31 +544,61 @@
 
 # ---------------------------------------------------------------------------
 # Step 3: Evacuate pve2
+#
+# requirement.md §2.2: gated additionally on _weekly_full_target_pve2 (set in
+# Step 2b from the dry-run's own node coverage) so a single-node run that
+# covered only pve1 does not also try to touch pve2. Also gated on
+# _weekly_full_both_nodes (§2.2 B案): roles/proxmox_evacuate_node
+# unconditionally requires a healthy destination_node (the opposite node),
+# which does not exist in single-node mode — skip evacuate entirely rather
+# than let it reach that healthcheck and abort. Step 2b already refused to
+# proceed at all if the sole single-node target still has running guests, so
+# reaching here in single-node mode means there is nothing to evacuate.
 # ---------------------------------------------------------------------------
 - import_playbook: proxmox_evacuate_node.yml
-  when: not (hostvars['localhost']['_weekly_full_skip'] | default(false))
+  when:
+    - not (hostvars['localhost']['_weekly_full_skip'] | default(false))
+    - hostvars['localhost']['_weekly_full_target_pve2'] | default(false)
+    - hostvars['localhost']['_weekly_full_both_nodes'] | default(false)
   vars:
     target_node: pve2
 
 # ---------------------------------------------------------------------------
 # Step 4: Patch apply pve2
+#
+# In single-node mode (pve1 unavailable) Step 3 was skipped, so this runs
+# directly against pve2 without a preceding evacuate — safe because Step 2b
+# already confirmed pve2 has no running guests before allowing this far
+# (§2.2 B案). roles/proxmox_patch_apply_node's own running-guest check
+# (SB-088, unmodified) still re-verifies this independently.
 # ---------------------------------------------------------------------------
 - import_playbook: proxmox_patch_apply_node.yml
-  when: not (hostvars['localhost']['_weekly_full_skip'] | default(false))
+  when:
+    - not (hostvars['localhost']['_weekly_full_skip'] | default(false))
+    - hostvars['localhost']['_weekly_full_target_pve2'] | default(false)
   vars:
     target_node: pve2
 
 # ---------------------------------------------------------------------------
 # Step 5: Post-patch healthcheck pve2
+#
+# ignore_unreachable is defensive here: pve2 is not this play's target host
+# whenever it was excluded from the dry-run (unreachable or unhealthy at
+# Step 1b/2), which is exactly when the meta: end_play below also fires. It
+# guards against pve2 flipping to genuinely unreachable between dry-run and
+# this step in the (unlikely) case that ever raced ahead of the flag.
 # ---------------------------------------------------------------------------
 - name: pve2 post-patch healthcheck
   hosts: pve2
   gather_facts: false
   become: true
+  ignore_unreachable: true
   tasks:
-    - name: Skip if NO_UPDATES
+    - name: Skip if patch was not applied to pve2 this run
       ansible.builtin.meta: end_play
-      when: hostvars['localhost']['_weekly_full_skip'] | default(false)
+      when: >-
+        (hostvars['localhost']['_weekly_full_skip'] | default(false)) or
+        not (hostvars['localhost']['_weekly_full_target_pve2'] | default(false))
 
     - name: Gather facts for healthcheck role
       ansible.builtin.setup:
@@ -304,39 +616,77 @@
 
 # ---------------------------------------------------------------------------
 # Step 6: Restore pve2
+#
+# Runs whenever pve2 is this run's target - single-node or both-node alike
+# (gated only on _weekly_full_target_pve2, deliberately not also on
+# _weekly_full_both_nodes the way Step 3's evacuate is). In single-node mode
+# nothing was evacuated off pve2, so this is a no-op in the common case, but
+# it is left running on purpose: it also acts as a safety net that restores
+# any guest tagged prefer<pve2> that ended up away from home for some other
+# reason (independent of this run's own evacuate/apply sequence). Skipping
+# it here would remove that safety net for no benefit, since it does not
+# touch the down node and cannot fail the way evacuate does (Coordinator
+# review finding 4, 2026-08-01 - decided not to gate this on
+# _weekly_full_both_nodes; see implement record §5.4).
 # ---------------------------------------------------------------------------
 - import_playbook: proxmox_restore_vm_placement.yml
-  when: not (hostvars['localhost']['_weekly_full_skip'] | default(false))
+  when:
+    - not (hostvars['localhost']['_weekly_full_skip'] | default(false))
+    - hostvars['localhost']['_weekly_full_target_pve2'] | default(false)
   vars:
     target_node: pve2
 
 # ---------------------------------------------------------------------------
 # Step 7: Evacuate pve1
+#
+# requirement.md §2.2: gated additionally on _weekly_full_target_pve1. When
+# pve2 is unreachable/unhealthy and pve1 is the sole target, this runs
+# without pve2 having been validated/patched first — the "pve2 first" order
+# (SB-001) is a sequencing rule for when both nodes are available, not a
+# precondition for patching the survivor alone (disclosed to Slack in Step
+# 11 via _weekly_full_pve2_precedence_missing, AC4). Also gated on
+# _weekly_full_both_nodes (§2.2 B案) — see the equivalent note on Step 3;
+# when pve1 is the sole target, evacuate is skipped and Step 8 applies
+# directly (Step 2b already confirmed pve1 has no running guests).
 # ---------------------------------------------------------------------------
 - import_playbook: proxmox_evacuate_node.yml
-  when: not (hostvars['localhost']['_weekly_full_skip'] | default(false))
+  when:
+    - not (hostvars['localhost']['_weekly_full_skip'] | default(false))
+    - hostvars['localhost']['_weekly_full_target_pve1'] | default(false)
+    - hostvars['localhost']['_weekly_full_both_nodes'] | default(false)
   vars:
     target_node: pve1
 
 # ---------------------------------------------------------------------------
 # Step 8: Patch apply pve1
+#
+# Same single-node note as Step 4: when pve2 is unavailable, Step 7 was
+# skipped and this runs directly against pve1 (Step 2b already confirmed no
+# running guests).
 # ---------------------------------------------------------------------------
 - import_playbook: proxmox_patch_apply_node.yml
-  when: not (hostvars['localhost']['_weekly_full_skip'] | default(false))
+  when:
+    - not (hostvars['localhost']['_weekly_full_skip'] | default(false))
+    - hostvars['localhost']['_weekly_full_target_pve1'] | default(false)
   vars:
     target_node: pve1
 
 # ---------------------------------------------------------------------------
 # Step 9: Post-patch healthcheck pve1
+#
+# ignore_unreachable is defensive, see the equivalent note on Step 5.
 # ---------------------------------------------------------------------------
 - name: pve1 post-patch healthcheck
   hosts: pve1
   gather_facts: false
   become: true
+  ignore_unreachable: true
   tasks:
-    - name: Skip if NO_UPDATES
+    - name: Skip if patch was not applied to pve1 this run
       ansible.builtin.meta: end_play
-      when: hostvars['localhost']['_weekly_full_skip'] | default(false)
+      when: >-
+        (hostvars['localhost']['_weekly_full_skip'] | default(false)) or
+        not (hostvars['localhost']['_weekly_full_target_pve1'] | default(false))
 
     - name: Gather facts for healthcheck role
       ansible.builtin.setup:
@@ -354,9 +704,16 @@
 
 # ---------------------------------------------------------------------------
 # Step 10: Restore pve1
+#
+# Same single-node note as Step 6: runs whenever pve1 is this run's target,
+# regardless of _weekly_full_both_nodes. No-op when nothing was evacuated,
+# but left running as a safety net (see Step 6's comment for the full
+# rationale).
 # ---------------------------------------------------------------------------
 - import_playbook: proxmox_restore_vm_placement.yml
-  when: not (hostvars['localhost']['_weekly_full_skip'] | default(false))
+  when:
+    - not (hostvars['localhost']['_weekly_full_skip'] | default(false))
+    - hostvars['localhost']['_weekly_full_target_pve1'] | default(false)
   vars:
     target_node: pve1
 
@@ -381,16 +738,27 @@
       # text via debug instead — the check-mode-flavored title/message
       # below are still built and still shown via that debug output, they
       # just no longer reach Slack.
+      #
+      # requirement.md (2026-08-01 proxmox_auto_apply_widening) AC4: disclose
+      # the actual target node(s) and, for a single-node run, the fact that
+      # it is single-node (and whether pve2's precedence validation was
+      # skipped) instead of the previous hardcoded "pve2 → pve1".
       block:
         - name: Include common_slack notify tasks
           ansible.builtin.include_tasks: "{{ playbook_dir }}/../roles/common_slack/tasks/notify.yml"
           vars:
+            _wf_target_nodes: >-
+              {{ (['pve2'] if (_weekly_full_target_pve2 | default(false)) else []) +
+                 (['pve1'] if (_weekly_full_target_pve1 | default(false)) else []) }}
+            _wf_single: "{{ _weekly_full_single_node | default(false) }}"
             slack_channel: "patches"
             slack_status: "{{ 'info' if ansible_check_mode else 'ok' }}"
             slack_title: >-
               {{ '[Proxmox Patch] check-mode: weekly full patch plan-only'
                  if ansible_check_mode
-                 else '[Proxmox Patch] Weekly Full Patch Complete - pve2/pve1' }}
+                 else ('[Proxmox Patch] Weekly Full Patch Complete (single-node: ' + _wf_target_nodes[0] + ')'
+                       if (_wf_single | bool) and (_wf_target_nodes | length > 0)
+                       else '[Proxmox Patch] Weekly Full Patch Complete - pve2/pve1') }}
             slack_message: |
               {% if ansible_check_mode %}
               Proxmox weekly full patch の --check 実行が完了しました。
@@ -401,9 +769,30 @@
               {% endif %}
 
               実行日時: {{ lookup('pipe', 'date "+%Y-%m-%d %H:%M:%S %Z"') }}
-              対象ノード: pve2 → pve1（順番に適用）
-              {% if not ansible_check_mode %}
+              対象ノード: {{ _wf_target_nodes | join(' → ') if _wf_target_nodes | length > 0 else 'pve2 → pve1（順番に適用）' }}
+              {% if _wf_single | bool %}
 
-              pve2: 退避 → パッチ適用 → 復帰 完了
-              pve1: 退避 → パッチ適用 → 復帰 完了
+              [単一node適用] 今回は {{ _wf_target_nodes[0] | default('(不明)') }} のみを対象としました。
+              {% if _weekly_full_pve2_precedence_missing | default(false) %}
+              pve2 が到達不能または不健全だったため、pve2 の先行検証・適用実績が
+              ないまま pve1 に適用しました(requirement.md 2026-08-01
+              proxmox_auto_apply_widening §2.2、SB-001 読み替え)。
+              {% else %}
+              pve1 が到達不能または不健全だったため、pve2 のみに適用しました。
+              {% endif %}
+              {% endif %}
+              {% if (_weekly_full_status | default('')) == 'MAINTENANCE_REQUIRED' %}
+
+              [INFO] dry-run status は MAINTENANCE_REQUIRED でしたが、remove を
+              含まないため widened policy(2026-08-01)により自動適用しました。
+              {% endif %}
+              {% if not ansible_check_mode %}
+              {% for n in _wf_target_nodes %}
+
+              {% if _weekly_full_both_nodes | default(false) %}
+              {{ n }}: 退避 → パッチ適用 → 復帰 完了
+              {% else %}
+              {{ n }}: パッチ適用 完了(単一node適用のため退避は行っていません。復帰playbookは実行されますが、何も退避していないため実質no-opです)
+              {% endif %}
+              {% endfor %}
               {% endif %}

@@ -20,9 +20,7 @@
 
 | # | 項目 | 現在地 | 次にやること |
 |---|---|---|---|
-| 1 | **転記ドリフトの機械検査 + Proxmox Policyの改名・scope拡張** | 実装・独立レビューとも完了(Step 2・Step 3ともApprove)。Auditorの差し戻し1件も是正済み。**作業ツリーに未commitで残っている** | **Yoshinobuのcommit。Policy本文(タイトル・冒頭リード・SB-001・SB-020表・変更履歴)の最終承認を含む。** 案件記録は `docs/ai/reviews/norm_drift_mechanical_check/`(001〜008) |
-
-**「一次調査の結果をSlack通知 + quory→ansy同期の即時実行」(R14)は2026-08-01にクローズした。** commit `4e7233b`、quory・ansy双方へ配備済み。**境界の非通過側3件はすべてPASS** — forced commandが引数を無視する(任意コマンドが実行されない)、専用ユーザーが他のunitを起動できない(`cron.service` の `ActiveEnterTimestamp` が試行前後で不変)、`recovery-exec` が鍵を読めない(`sudo -u recovery-exec` で実際に再現)。同期の即時起動も、timerの発火とは別の非定刻起動として観測した。**残る観測はWatchが持つ。** 案件記録は `docs/ai/reviews/incident_investigation_notify/`(001〜006)。**R15(修正依頼の自動起票)はやらない**(2026-08-01 Yoshinobu)。
+| 1 | **weekly full patchの自動適用範囲の拡大**(`MAINTENANCE_REQUIRED`のremoveなしを自動適用、単一node適用、fixed-pair gate撤廃) | 実装・独立レビュー・Tester検証すべて完了(AC1〜AC10 PASS)。Auditorは条件付き受入。**作業ツリーに未commitで残っている** | **Yoshinobuのcommit。Policy本文の改訂18箇所(SB-001の必須目的の撤回を含む)の最終承認を含む。** 案件記録は `docs/ai/reviews/proxmox_auto_apply_widening/`(001〜005) |
 
 ## Watch(観測待ち)
 
@@ -37,7 +35,7 @@
 | **月次実行と同期起動が競合したとき静かにskipするか**(AC8) | 月次Knowledge振り返り(2026-08-26)の実行中に一次調査が走ったとき。**または外側flockを占有して意図的に作る** | 同期起動が exit 0 で終わり `failed` にならないこと。取りこぼしは次の定刻同期が埋めること。**意図的に作る場合はロックの占有という非冪等操作を伴う**ため、実施の可否はその時点で判断する | 同上 | 2026-08-01 |
 | **一次調査の失敗が本番で可視化されるか**(IC-038の本番実測) | 一次調査が実際に失敗したとき(LLM呼び出し失敗・タイムアウト等) | `_investigations/` に `status: failed` の成果物が残り、かつ `systemctl is-failed homelab-incident-investigate.service` が `failed` を返すこと。**2026-08-01時点で本番の成果物は10件すべて `status: new`** であり、失敗経路は配備前fixtureでしか通っていない。`SuccessExitStatus=75` により、flockによる正常なskipは `failed` にならない | 同上 | 2026-08-01 |
 | **monnie の grafana 更新が、次回も `plugins-bundled` で失敗するか** | 次に grafana パッケージが更新されるとき | **予測: 事前に `/var/lib/grafana/plugins-bundled` を退避しない限り、`dpkg` の設定処理が失敗して `iF` で止まる。** 根拠は `postinst` の無条件 `mv` と、移動先を消す処理がパッケージのどこにも無いこと(2026-08-01に `.deb` 同梱スクリプトと `diff` して確認)。**外れた(退避なしで通った)なら upstream が直したということ**で、そのときは手順側の記述を落とす。手順と復旧方法は `docs/ai/context/operations/ubuntu-vm-patch.md`「既知の落とし穴」が正本 | 同Context、`reports/incidents/_investigations/semaphore-512.*` | 2026-08-01 |
-| weekly full patchの**apply gateを実データで通す** | Proxmox dry-runが `PATCH_READY` を返す週 | `playbooks/proxmox_patch_weekly_full.yml` の `_dryrun_missing_nodes` が実データで空になること。現状の根拠はdecoy検証のみ | `docs/ai/reviews/proxmox_patch_dryrun/2026-07-26_005_test_result.md` L426 | 2026-07-27 |
+| **拡大した自動適用が実データで通るか**(`MAINTENANCE_REQUIRED`のremoveなし自動適用・単一node適用) | 次の土曜06:00の`UN-SAFE:Proxmox Weekly Full Patch`(直近は2026-08-08) | Semaphoreジョブが**緑**で終わること。加えて①`MAINTENANCE_REQUIRED`かつremoveなしなら実際に適用され `reports/proxmox-patch/` に当日のapply reportが出る ②pve1が未起動なら、pve2にrunning guestがあるため**適用せず緑で終わり通知が出る**。**赤になってよいのは `BLOCKED` と全node到達不能のときだけ。**旧Watch行の検証手段だった`_dryrun_missing_nodes`は本改修で削除済み(fixed-pair gate撤廃のため) | `docs/ai/reviews/proxmox_auto_apply_widening/2026-08-01_004_test_result.md` | 2026-08-01 |
 | Proxmoxパッチ自動チェーンの **実発火の観測** | パッチ件数が少なく手動介入が要らない週末 | 自動チェーンが最後まで通ったログ。過去2回(07-11/12、07-18/19)は大量パッチで手動対応となり未観測 | `docs/ai/reviews/tester_mode/`、`docs/ai/context/operations/proxmox-operations.md` | 2026-07-27 |
 | Alloy **Phase 3(異常値のFire)** | Lokiにログが十分蓄積した時点 | requirementは作成済み。Grafana Exploreで対象シグネチャの出現頻度を見て閾値を決める | `docs/ai/reviews/promtail_to_alloy/2026-07-19_phase3_alerting_requirement.md` | 2026-07-27 |
 | ubuntu_nightly の **monnie / authy リブート経路が実機で通るか** | 次に各ホストの `reboot_required` が true になる夜 | `[ubuntu_nightly] OK - monnie` / `authy` がinfoへ飛ぶこと。失敗した場合は本文に**失敗タスク名と理由**が入っていること(固定文言でないこと)。**authy側(commit `3fbb9e8`)は実機検証を経ずに本番投入している** — decoy検証のみ | `docs/ai/memory/incidents/2026-07-30_ubuntu-nightly-monnie-external-port-wait.md`、`docs/ai/reviews/ubuntu_nightly_reboot_check/` | 2026-07-30 |

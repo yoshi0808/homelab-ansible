@@ -269,24 +269,54 @@
           {{ (_sim_updates | select('in', proxmox_patch_apply_important_components) | list) +
              (_sim_updates | select('match', '^(' + (proxmox_patch_apply_important_component_prefixes | join('|')) + ')') | list) }}
 
-    - name: Determine if re-dry-run shows MAINTENANCE_REQUIRED
+    # requirement.md (2026-08-01 proxmox_auto_apply_widening) §2.1/§2.3:
+    # classify the re-dry-run the same way SB-025 classifies the weekly
+    # dry-run (major upgrade first, then important-component-or-remove,
+    # else patch ready), instead of collapsing everything into a single
+    # MAINTENANCE_REQUIRED-vs-not boolean. This node-local classification is
+    # independent of the cluster-level weekly dry-run status: it runs fresh,
+    # immediately before applying, in case anything changed since the last
+    # weekly dry-run.
+    - name: Classify re-dry-run result
       ansible.builtin.set_fact:
-        _redryrun_is_mr: >-
-          {{ (_sim_updates | length > proxmox_patch_apply_major_upgrade_threshold | int) or
-             (_important_updates | length > 0) or
-             (_sim_removes | length > 0) }}
-        _redryrun_mr_reason: >-
-          {%- if _sim_updates | length > proxmox_patch_apply_major_upgrade_threshold | int -%}
+        _redryrun_major_upgrade: "{{ _sim_updates | length > proxmox_patch_apply_major_upgrade_threshold | int }}"
+        _redryrun_has_important: "{{ _important_updates | length > 0 }}"
+        _redryrun_has_removes: "{{ _sim_removes | length > 0 }}"
+
+    - name: Determine re-dry-run status and reason
+      ansible.builtin.set_fact:
+        _redryrun_status: >-
+          {%- if _redryrun_major_upgrade | bool -%}
+          MAJOR_UPGRADE_DETECTED
+          {%- elif (_redryrun_has_important | bool) or (_redryrun_has_removes | bool) -%}
+          MAINTENANCE_REQUIRED
+          {%- else -%}
+          PATCH_READY
+          {%- endif -%}
+        _redryrun_reason: >-
+          {%- if _redryrun_major_upgrade | bool -%}
           major upgrade suspected ({{ _sim_updates | length }} packages exceed threshold {{ proxmox_patch_apply_major_upgrade_threshold }})
-          {%- elif _important_updates | length > 0 -%}
+          {%- elif (_redryrun_has_important | bool) and (_redryrun_has_removes | bool) -%}
+          important components detected: {{ _important_updates | unique | join(', ') }}; removes detected: {{ _sim_removes | join(', ') }}
+          {%- elif _redryrun_has_important | bool -%}
           important components detected: {{ _important_updates | unique | join(', ') }}
-          {%- elif _sim_removes | length > 0 -%}
+          {%- elif _redryrun_has_removes | bool -%}
           removes detected: {{ _sim_removes | join(', ') }}
           {%- else -%}
           none
           {%- endif -%}
 
-    # Compare with latest dry-run JSON when MAINTENANCE_REQUIRED
+    # §2.1: MAINTENANCE_REQUIRED with no removes is now auto-applied.
+    # MAINTENANCE_REQUIRED with removes, and MAJOR_UPGRADE_DETECTED, still
+    # require a human — either the job stops in auto mode, or manual mode
+    # supplies the matching confirmation string (§2.3).
+    - name: Determine whether this status still requires human confirmation
+      ansible.builtin.set_fact:
+        _redryrun_requires_confirmation: >-
+          {{ (_redryrun_status == 'MAJOR_UPGRADE_DETECTED') or
+             (_redryrun_status == 'MAINTENANCE_REQUIRED' and (_redryrun_has_removes | bool)) }}
+
+    # Compare with latest dry-run JSON whenever the status is not PATCH_READY
     - name: Find latest unified dry-run JSON
       ansible.builtin.set_fact:
         _latest_dryrun_packages: >-
@@ -296,46 +326,56 @@
           {%- else -%}
           []
           {%- endif -%}
-      when: _redryrun_is_mr | bool
+      when: _redryrun_status != 'PATCH_READY'
 
     - name: Compute package diff vs latest dry-run
       ansible.builtin.set_fact:
         _new_vs_dryrun: "{{ _sim_updates | difference(_latest_dryrun_packages | default([])) }}"
         _unchanged_vs_dryrun: "{{ _sim_updates | intersect(_latest_dryrun_packages | default([])) }}"
-      when: _redryrun_is_mr | bool
+      when: _redryrun_status != 'PATCH_READY'
 
-    - name: Abort if MAINTENANCE_REQUIRED detected (auto mode)
-      when: (_redryrun_is_mr | bool) and proxmox_patch_apply_mode == 'auto'
+    - name: Abort if status still requires confirmation (auto mode)
+      when: (_redryrun_requires_confirmation | bool) and proxmox_patch_apply_mode == 'auto'
       block:
         - ansible.builtin.set_fact:
-            _apply_abort_type: "maintenance_required"
-            _apply_error_msg: "MAINTENANCE_REQUIRED: {{ _redryrun_mr_reason }}"
+            _apply_abort_type: "{{ 'major_upgrade_detected' if _redryrun_status == 'MAJOR_UPGRADE_DETECTED' else 'maintenance_required' }}"
+            _apply_error_msg: "{{ _redryrun_status }}: {{ _redryrun_reason }}"
         - ansible.builtin.fail:
             msg: "{{ _apply_error_msg }}"
 
-    - name: Abort if manual mode used without explicit confirmation
+    - name: Abort if manual mode used without the matching explicit confirmation
       when: >-
-        (_redryrun_is_mr | bool) and
+        (_redryrun_requires_confirmation | bool) and
         proxmox_patch_apply_mode == 'manual' and
-        proxmox_patch_apply_manual_confirm != 'MAINTENANCE_REQUIRED'
+        proxmox_patch_apply_manual_confirm != _redryrun_status
       block:
         - ansible.builtin.set_fact:
             _apply_abort_type: "manual_not_confirmed"
             _apply_error_msg: >-
-              apply_mode=manual requires explicit confirmation when MAINTENANCE_REQUIRED is detected.
-              Add: -e proxmox_patch_apply_manual_confirm=MAINTENANCE_REQUIRED
+              apply_mode=manual requires explicit confirmation matching the detected status
+              ({{ _redryrun_status }}). Add: -e proxmox_patch_apply_manual_confirm={{ _redryrun_status }}
         - ansible.builtin.fail:
             msg: "{{ _apply_error_msg }}"
 
     - name: Warn and continue (manual mode, confirmed)
       ansible.builtin.debug:
         msg: >-
-          [WARNING] apply_mode=manual confirmed: MAINTENANCE_REQUIRED detected but continuing.
-          Reason: {{ _redryrun_mr_reason }}
+          [WARNING] apply_mode=manual confirmed: {{ _redryrun_status }} detected but continuing.
+          Reason: {{ _redryrun_reason }}
       when: >-
-        (_redryrun_is_mr | bool) and
+        (_redryrun_requires_confirmation | bool) and
         proxmox_patch_apply_mode == 'manual' and
-        proxmox_patch_apply_manual_confirm == 'MAINTENANCE_REQUIRED'
+        proxmox_patch_apply_manual_confirm == _redryrun_status
+
+    - name: Note auto-apply under widened MAINTENANCE_REQUIRED policy (no removes)
+      ansible.builtin.debug:
+        msg: >-
+          [INFO] MAINTENANCE_REQUIRED detected but auto-applying: no package
+          removes are present (requirement.md 2026-08-01 proxmox_auto_apply_widening
+          §2.1). Reason: {{ _redryrun_reason }}
+      when: >-
+        (_redryrun_status == 'MAINTENANCE_REQUIRED') and
+        not (_redryrun_requires_confirmation | bool)
 
     # =========================================================================
     # Phase 2a/2b: optional seed -> download -> publish -> apply
@@ -861,8 +901,8 @@
     - name: Set notification subject and body
       ansible.builtin.set_fact:
         _notify_subject: >-
-          {%- if _apply_abort_type == 'maintenance_required' -%}
-          [ABORT] {{ inventory_hostname }}: 自動適用中止 - 更新内容が変化しました
+          {%- if _apply_abort_type in ['maintenance_required', 'major_upgrade_detected'] -%}
+          [ABORT] {{ inventory_hostname }}: 自動適用中止 - {{ _redryrun_status | default('MAINTENANCE_REQUIRED') }} 検出
           {%- elif _apply_abort_type in ['control_node', 'healthcheck', 'vms_not_evacuated', 'apt_update', 'apt_check', 'sim_failed', 'manual_not_confirmed'] -%}
           [ABORT] {{ inventory_hostname }}: 前提チェック失敗 ({{ _apply_abort_type }})
           {%- elif _apply_abort_type == 'download_failed' -%}
@@ -905,9 +945,9 @@
           {% else %}
           (未実施)
           {% endif %}
-          {% if _apply_abort_type == 'maintenance_required' %}
+          {% if _apply_abort_type in ['maintenance_required', 'major_upgrade_detected'] %}
 
-          [ABORT] MAINTENANCE_REQUIRED 検出
+          [ABORT] {{ _redryrun_status | default('MAINTENANCE_REQUIRED') }} 検出
           中止理由: {{ _apply_error_msg }}
 
           最新 dry-run から追加された更新候補:
@@ -928,7 +968,12 @@
             (なし)
           {% endif %}
 
-          対応方法: dry-run を再実行してください。
+          対応方法: {{ 'manual mode + 確認文字列で明示的に上書きするか、' if _apply_abort_type == 'major_upgrade_detected' else '' }}dry-run を再実行してください。
+          {% endif %}
+          {% if _apply_abort_type == 'none' and _redryrun_status is defined and _redryrun_status == 'MAINTENANCE_REQUIRED' %}
+
+          [INFO] MAINTENANCE_REQUIRED (remove なし) のため widened policy (2026-08-01) により自動適用しました。
+          理由: {{ _redryrun_reason }}
           {% endif %}
           {% if _apply_abort_type in ['apt_update', 'apt_check', 'sim_failed'] %}
           中止理由: {{ _apply_error_msg }}
@@ -937,7 +982,7 @@
           =========================================
           Phase 3: download
           =========================================
-          {% if not (_apply_abort_type in ['control_node', 'healthcheck', 'vms_not_evacuated', 'apt_update', 'apt_check', 'sim_failed', 'maintenance_required', 'manual_not_confirmed']) %}
+          {% if not (_apply_abort_type in ['control_node', 'healthcheck', 'vms_not_evacuated', 'apt_update', 'apt_check', 'sim_failed', 'maintenance_required', 'major_upgrade_detected', 'manual_not_confirmed']) %}
           download bytes  : {{ _download_bytes }}
           download seconds: {{ _download_seconds }}
           cache hit        : {{ _download_cache_hit }}
@@ -960,7 +1005,7 @@
           =========================================
           Phase 4: apply
           =========================================
-          {% if not (_apply_abort_type in ['control_node', 'healthcheck', 'vms_not_evacuated', 'apt_update', 'apt_check', 'sim_failed', 'maintenance_required', 'manual_not_confirmed', 'download_failed']) %}
+          {% if not (_apply_abort_type in ['control_node', 'healthcheck', 'vms_not_evacuated', 'apt_update', 'apt_check', 'sim_failed', 'maintenance_required', 'major_upgrade_detected', 'manual_not_confirmed', 'download_failed']) %}
           適用パッケージ数: {{ _sim_updates | length }}
           apply seconds  : {{ _apply_seconds }}
           apply log      : {{ _apply_log_path }}
