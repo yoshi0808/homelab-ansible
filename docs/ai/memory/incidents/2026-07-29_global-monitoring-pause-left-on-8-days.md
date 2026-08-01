@@ -49,6 +49,8 @@ pause自体は**解除で復旧する**(`homelab-monitoring-resume`がflagを削
 
 構造的な再発防止(global pauseへのTTL付与、または未解除の定期通知)は**本Incidentでは実施していない**。`docs/ai/status.md` の Next へ起票した。この2つは設計判断を含むため、Incident対応として即断せず案件として扱う。
 
+**2026-08-01追記: 後者(未解除の定期通知)を実施した。** `playbooks/recovery_monitoring_check.yml`がglobal pauseの継続と`recovery-probe`の停止を日次で確認し、該当時のみ経過時間つきで`alerts`へ警告する(Policy AR-103、案件記録`docs/ai/reviews/recovery_pause_daily_check/`)。**TTL付与は採らなかった** — 自動resumeは意図的に停止しているhostに対して復旧ladderを誤発火させ得るため、解除の判断は人間に残す(Yoshinobu選択)。日次起動はSemaphoreのscheduleであり、**登録されるまでこの仕組みは動かない**(状態は`docs/ai/status.md` Watch)。
+
 ## 確認方法
 
 - `homelab-monitoring-status` が `ACTIVE` を返すこと。

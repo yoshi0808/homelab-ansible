@@ -65,6 +65,7 @@ playbook の入口を置く。処理本体は原則として `roles/` に実装�
 | [`recovery_exec_setup.yml`](recovery_exec_setup.yml) | `dev_nodes:control_nodes` | recovery-exec、Codex runner、SSH鍵生成経路を配備 | `check-mode-native` | `recovery_exec` |
 | [`recovery_ha_failover.yml`](recovery_ha_failover.yml) | `pve1` | 承認された対象のHA failover | `check-mode-native` | `recovery_ha_failover` |
 | [`recovery_io_setup.yml`](recovery_io_setup.yml) | `dev_nodes:control_nodes` | Slack I/O bridgeを配備 | `check-mode-native` | `recovery_io` |
+| [`recovery_monitoring_check.yml`](recovery_monitoring_check.yml) | `control_nodes` | 自律復旧が有効か（global pause継続・probe停止）の日次確認 | `safe-readonly` | playbook内tasks, `common_slack` notify tasks |
 | [`recovery_probe_notify.yml`](recovery_probe_notify.yml) | `localhost` | recovery probeのSlack通知 | `role-guarded` | `common_slack` notify tasks |
 | [`recovery_probe_setup.yml`](recovery_probe_setup.yml) | `dev_nodes:control_nodes` | recovery probeとmute CLIを配備 | `check-mode-native` | `recovery_probe`, `recovery_mute` |
 | [`recovery_push_drill_setup.yml`](recovery_push_drill_setup.yml) | `quory` | recovery push drill用unitを配備 | `check-mode-native` | `recovery_push` drill tasks |

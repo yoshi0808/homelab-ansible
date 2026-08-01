@@ -1,0 +1,137 @@
+---
+# recovery_monitoring_check.yml - 自律復旧が有効になっているかの日次確認
+#
+# 対象: control_nodes（quory）。状態の読み取りのみで、pause / muteを変更しない。
+#
+# 目的: 「自律復旧が効いていない状態が続いていることに誰も気づかない」を塞ぐ。
+# 塞ぐ穴は2つある。
+#   1. global pauseはTTLを持たない（target別muteは1〜240分で自動失効するが、
+#      global pauseは明示的なresumeまで無期限）。2026-07-21から8日間、全target
+#      の自律復旧が無効のまま気づかれなかった。
+#      docs/ai/memory/incidents/2026-07-29_global-monitoring-pause-left-on-8-days.md
+#   2. recovery-probe.service は Restart=on-failure だけを持ち、OnFailure= に
+#      よる通知経路が無い。systemctl stop / disable で止めた場合、pauseと同じく
+#      誰も気づかない。
+#
+# 正常時は通知しない。通知が来たこと自体が異常の信号である。日次実行は
+# Semaphoreのschedule（06:30 JST）が担う。
+#
+# 規範の正本: docs/ai/policies/autonomous_recovery_policy.md AR-103
+# 経緯: docs/ai/reviews/recovery_pause_daily_check/
+#
+# tester-gate: safe-readonly — 状態の読み取り（wrapper実行、unit状態の照会、
+# 設定ファイルとflagの読み取り）のみで構成する。異常検出時のSlack通知は
+# common_slackのtester_mode / skip_notifications / ansible_check_modeで抑止できる。
+
+- name: Recovery monitoring - daily armed check
+  hosts: control_nodes
+  gather_facts: false
+  become: false
+  tasks:
+    # read-onlyのwrapper。--check時にskipさせると「PAUSEDでも常にACTIVEと
+    # 解釈される」形で静かに壊れるため、check_mode: false で必ず実行する。
+    - name: Query global monitoring pause state
+      ansible.builtin.command: homelab-monitoring-status
+      register: rmc_status
+      changed_when: false
+      check_mode: false
+
+    # 先頭の語だけを取り出して厳密に突き合わせる。正規表現の前方一致だと
+    # 将来 `ACTIVE_but_stale` のような出力が「正常」として通ってしまう。
+    - name: Take the first word of the reported status
+      ansible.builtin.set_fact:
+        rmc_status_word: "{{ rmc_status.stdout | trim | split(' ') | first | default('') }}"
+
+    # 判定不能を正常扱いにしない。wrapperの出力書式が変わったときは、
+    # 「ACTIVEと読めてしまう」より「赤で止まる」方が安全である。
+    - name: Fail when the monitoring status cannot be interpreted
+      ansible.builtin.assert:
+        that:
+          - rmc_status_word in ['ACTIVE', 'PAUSED']
+        fail_msg: >-
+          homelab-monitoring-status returned a value this playbook cannot
+          interpret: {{ rmc_status.stdout | default('(no output)') }}.
+          Refusing to report the monitoring state as healthy.
+        quiet: true
+
+    - name: Record whether global pause is in effect
+      ansible.builtin.set_fact:
+        rmc_paused: "{{ rmc_status_word == 'PAUSED' }}"
+
+    # pause flagのパスはprobe自身が読む設定ファイルから取る。同じ値を
+    # playbookへ直書きすると4箇所目の複製になり、片方だけ変わったときに
+    # 「pauseされているのにmtimeが読めない」形でずれる。
+    - name: Read the probe config to locate the pause flag
+      ansible.builtin.slurp:
+        src: /etc/homelab-recovery/recovery-probe.json
+      register: rmc_probe_config
+      when: rmc_paused | bool
+
+    - name: Stat the pause flag to learn how long the pause has lasted
+      ansible.builtin.stat:
+        path: "{{ (rmc_probe_config.content | b64decode | from_json).monitoring_pause_flag }}"
+      register: rmc_pause_flag
+      when: rmc_paused | bool
+
+    # 有効なhostは inventories/homelab/host_vars/ の変数が正本であり、
+    # host名をここへ直書きしない（roles/recovery_probe/defaults は false）。
+    - name: Query recovery-probe service state
+      ansible.builtin.systemd_service:
+        name: recovery-probe
+      register: rmc_probe_state
+      changed_when: false
+      failed_when: false
+      check_mode: false
+      when: recovery_probe_service_enabled | default(false) | bool
+
+    # unitが存在しない場合もここは 'unknown' となり、下の判定でdownに倒れる
+    # （failed_when: false で握り潰したうえで正常扱いにしない）。
+    - name: Record whether the probe is down where it should be running
+      ansible.builtin.set_fact:
+        rmc_probe_active_state: "{{ rmc_probe_state.status.ActiveState | default('unknown') }}"
+        rmc_probe_down: >-
+          {{ (recovery_probe_service_enabled | default(false) | bool)
+             and (rmc_probe_state.status.ActiveState | default('unknown')) != 'active' }}
+
+    # 時刻はJST表記（+09:00）に揃える。%z は実オフセットを出すため、
+    # 実行ホストのTZが変わっても嘘にならない（リテラルの +09:00 を書くと
+    # UTCの値にJSTのラベルを付ける詐称になり得る）。%z は "+0900" 形式で
+    # 返るので、コロン区切りへ整えるだけの置換を掛ける。
+    - name: Format the pause start time and elapsed duration
+      ansible.builtin.set_fact:
+        rmc_pause_since: >-
+          {{ ('%Y-%m-%dT%H:%M:%S%z' | strftime(rmc_pause_flag.stat.mtime))
+             | regex_replace('([+-]\d{2})(\d{2})$', '\1:\2') }}
+        rmc_pause_hours: "{{ ((now(fmt='%s') | int) - (rmc_pause_flag.stat.mtime | int)) // 3600 }}"
+        rmc_pause_days: "{{ ((now(fmt='%s') | int) - (rmc_pause_flag.stat.mtime | int)) // 86400 }}"
+      when: rmc_paused | bool
+
+    - name: Report the monitoring state
+      ansible.builtin.debug:
+        msg: >-
+          {{ inventory_hostname }}: global pause={{ rmc_status.stdout | trim }},
+          recovery-probe={{ rmc_probe_active_state }}
+
+    - name: Notify that autonomous recovery is not fully armed
+      when: rmc_paused | bool or rmc_probe_down | bool
+      block:
+        - name: Include common_slack notify tasks
+          ansible.builtin.include_tasks: "{{ playbook_dir }}/../roles/common_slack/tasks/notify.yml"
+          vars:
+            slack_channel: alerts
+            slack_status: warning
+            slack_title: "[recovery] 自律復旧が有効になっていません"
+            slack_message: |
+              {{ inventory_hostname }} で自律復旧が有効になっていません。
+
+              {% if rmc_paused | bool %}
+              global pause: {{ rmc_status.stdout | trim }}
+                since  : {{ rmc_pause_since }}
+                elapsed: {{ rmc_pause_hours }} 時間（約 {{ rmc_pause_days }} 日）
+                解除    : homelab-monitoring-resume （対象の健全性を確認してから）
+              {% endif %}
+              {% if rmc_probe_down | bool %}
+              recovery-probe: {{ rmc_probe_active_state }}（期待値: active）
+                起動    : systemctl start recovery-probe
+              {% endif %}
+              Checked at: {{ ('%Y-%m-%dT%H:%M:%S%z' | strftime(now(fmt='%s') | int)) | regex_replace('([+-]\d{2})(\d{2})$', '\1:\2') }}

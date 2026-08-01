@@ -23,6 +23,8 @@ target別muteは`homelab-mute set/status/clear`で操作する。global pauseは
 4. global pauseを伴う処理が失敗した場合、原因と全targetの状態を確認し、人間が明示的にresumeする。
 5. mute / pause中のprobe skipとcounter reset、pushのmute確認はPolicy §4のgateであり、runbook判断で迂回しない。
 
+**解除忘れは日次確認が拾う。** `playbooks/recovery_monitoring_check.yml`がglobal pauseの継続と`recovery-probe`の停止を毎朝確認し、いずれかに該当するときだけ`alerts`へ経過時間つきで通知する(Policy AR-103)。正常時は無通知であり、**通知が来ないことを「確認された」の意味に読まない** — 日次実行そのものが行われたかはSemaphoreのジョブ履歴で見る。target別muteは自動失効するため対象外である。
+
 自動mute対象とTTLの具体値は各呼出playbook / role varsを正本とする。
 
 現行の横断契約は次のとおりである。

@@ -123,6 +123,17 @@ muteまたはglobal pauseが有効ならprobe cycleをskipし、そのtargetの�
 <!-- AR-078 -->
 証明書deployはglobal pause後に実施し、正常終了した場合だけresumeする。失敗してpauseが残った場合は、人間が明示resumeするまで全targetの監視を再開しない。
 
+<!-- AR-103 -->
+**global pauseが継続していること、およびprobeが稼働していないことを、日次で人間へ通知する。** global pauseはTTLを持たない(AR-075)ため、解除忘れは誰かが能動的に状態を問い合わせるまで検出されない。同じく`recovery-probe`のunitは失敗時の自動再起動だけを持ち、明示的に停止された場合を知らせる経路を持たない。両者は「自律復旧が効いていない状態が続く」という同一の失敗classであり、単一の日次確認で扱う。
+
+- 検査は状態の読み取りのみで行い、pause / muteを変更しない。**TTLによる自動resumeは採らない** — 意図的に停止しているhostに対して復旧ladderが誤発火し得るため、解除の判断は人間が行う。
+- 正常時は通知しない。通知が到達したこと自体を異常の信号とする。
+- 通知にはpauseの開始時刻と経過時間を含める。解除忘れの深刻さ(1日か8日か)を受信者がその場で判断できるようにするためである。
+- 状態を`ACTIVE` / `PAUSED`のいずれとも解釈できない場合は、正常扱いにせず非ゼロで停止する。
+- target別mute(TTLで自動失効する)は本確認の対象に含めない。解除忘れが構造的に起こらず、かつ定期patch処理が立てるmuteと重なって偽警報を生むためである。
+
+実装は`playbooks/recovery_monitoring_check.yml`、日次起動はSemaphoreのscheduleが担う。根拠は`docs/ai/memory/incidents/2026-07-29_global-monitoring-pause-left-on-8-days.md`(8日間の未検出)、案件記録は`docs/ai/reviews/recovery_pause_daily_check/`。
+
 ## 5. ライフサイクル・処理フロー
 
 ### 共通の経路分離
@@ -365,3 +376,4 @@ Codex wrapperはsudo、setuid、file capabilityによる権限昇格を前提に
 | 2026-07-24 | Git HEADの旧288行版を標準8節へ再編。Policy核を維持し、非規範の環境・Repository・Operations情報をContextへ分離。旧表の数値VM IDは転載せず、inventory / vars / codeを正本とした |
 | 2026-07-29 | Loki横断ログ調査(AR-095〜AR-101)を新設し、AR-026に検証済みparameter付き調査の例外を追加。案件記録: `docs/ai/reviews/slack_loki_investigation/` |
 | 2026-07-31 | execpolicyが安全境界として成立しないことが実測で確定したため、AR-069 / AR-071 / AR-073を実態(能力の不在で境界を作る)へ改訂し、AR-102を新設。§7の節名も`Execpolicy、wrapper、file権限`から改めた。根拠: `docs/ai/memory/incidents/2026-07-31_codex-execpolicy-allowlist-not-enforcing.md` |
+| 2026-08-01 | global pauseの解除忘れとprobe停止を日次で検知する規定としてAR-103を新設。TTLによる自動resumeは採らず、通知で人間の判断を挟む形とした(Yoshinobu選択)。根拠: `docs/ai/memory/incidents/2026-07-29_global-monitoring-pause-left-on-8-days.md`、案件記録: `docs/ai/reviews/recovery_pause_daily_check/` |
