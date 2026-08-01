@@ -64,6 +64,7 @@
   を置き、実体を `roles/common_slack/tasks/capture.yml` に書く。**パスは既存38箇所と同じ `{{ playbook_dir }}/../roles/...` の絶対形で書く**(相対 include にしない。`notify.yml` 自身がrole invocationではなく絶対形で指名されて読み込まれるため、相対解決に依存しない)。`notify.yml` の既存行は**1行も変更しない**。
 - **(b) b-1を採用。** `capture.yml` の中身全体を `block:` / `rescue:` で包む。`rescue:` は `ansible.builtin.debug` 1つのみ。書き込みtaskには `changed_when: false` を付け、changed数も動かさない。**`assert` / `fail` / `ignore_errors` を使わない。**
 - **(c) c-2を採用。** `capture.yml` に `when:` を付けず、到達したすべての通知を記録する。`slack_status: ok` も記録する。フィルタは収集器と叙述側(Step 2)が行う。
+  - **【2026-08-01 補足】「`when:` を付けず」を、「通知の内容で分岐しない」の意味に限定した。** 実装は現在1つだけ `when:` を持つ — **収集器がこのcontrollerに配備されているか**である。捕捉は `delegate_to: localhost` によりcontroller側へ書くが、捕捉を行うのはquoryだけ(IC-004)であり、ansyから流した実行のレコードは**読み手のいないまま蓄積していた**(2026-08-01に15件を実測)。**c-2の趣旨(到達した通知を内容で選別しない)は変わっていない** — 捕捉可能なcontrollerでは従来どおり `ok` も含めて無条件に記録する。**通知の属性(status / channel / title / message / tester_mode / skip_notifications)を条件に使うことは引き続き禁止。** 経緯は `docs/ai/reviews/common_slack_capture_scope/2026-08-01_001_requirement.md`。
 - **(d) d-2を採用。** T1はバンドルIDを決めない。`reports/incidents/_spool/<epoch>-<rand8>.json` にレコードを1件書くだけとする。収集器がSemaphoreジョブと突き合わせてIDを確定し、レコードをバンドルへ取り込む。
 - **(補1) `check_mode: false` を付けない。** `--check` 実行では捕捉も書かない。`check_mode` の値自体はレコードのフラグとして持つ(通常実行時のみ書かれるので常に false になるが、将来 `check_mode: false` を足した場合に意味を持つ)。
 - **(補2) 参照する変数はすべて `| default('')` を通す。** `slack_channel` / `slack_status` / `slack_title` / `slack_message` のいずれかを定義していない呼び出し元があっても、T1が原因でplayが落ちないようにする。

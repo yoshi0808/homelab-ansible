@@ -98,6 +98,14 @@
 #   deploy-time-only), per Coordinator decision — moving it to the incident_capture
 #   role's deploy-time setup would break capture on ansy (Tester's dev box), which
 #   never runs that role.
+#      **SUPERSEDED (2026-08-01).** The creation task still lives here, but the whole
+#      block is now gated on a collector being deployed on this controller (see the
+#      "Detect whether an incident collector is deployed" task below). The reason
+#      recorded above did not hold: ansy has no collector at all (IC-004 — capture
+#      runs on quory only), so "capture on ansy" had no consumer and the records
+#      accumulated unread (15 of them by 2026-08-01, oldest from late July).
+#      Requirement: docs/ai/reviews/common_slack_capture_scope/
+#      2026-08-01_001_requirement.md.
 #
 # record_version 1 is the input contract for the collector (roles/incident_capture/
 # files/incident-capture-collector.py). Field set below (based on
@@ -160,8 +168,15 @@
 #   - No SSH, no HTTP, no external network I/O. Local filesystem + local subprocess
 #     (date/hostname) only, same pattern already used for JST timestamps elsewhere in
 #     this repo (e.g. roles/recovery_ha_failover/tasks/main.yml).
-#   - No `when:` anywhere in this file. Every notification that reaches this include
-#     is captured (ADR-004 (c) / D7); filtering is the collector's/Step 2's job.
+#   - **REVISED 2026-08-01.** Originally: "No `when:` anywhere in this file. Every
+#     notification that reaches this include is captured (ADR-004 (c) / D7);
+#     filtering is the collector's/Step 2's job." The rule now reads: **no `when:`
+#     may branch on the notification itself** — status, channel, title, message,
+#     tester_mode, skip_notifications are all off limits as conditions, and every
+#     notification reaching this include on a capture-enabled controller is still
+#     captured unconditionally. The single permitted `when:` is the **deployment
+#     state of the controller** (is a collector present to consume the record),
+#     which is a different axis from filtering and does not weaken ADR-004 (c) / D7.
 #   - No `assert` / `fail` / `ignore_errors`. Failures are isolated by block/rescue only.
 #   - `rescue:` contains exactly one `ansible.builtin.debug` task.
 #   - Every task: `delegate_to: localhost`, `become: false`, `changed_when: false`.
@@ -196,90 +211,126 @@
   delegate_to: localhost
   become: false
   block:
-    - name: Resolve capture context (spool dir, id, record — single evaluation)
-      ansible.builtin.set_fact:
-        _capture_ctx: >-
-          {%- set _spool_dir = capture_spool_dir | default(reports_base_dir ~ '/incidents/_spool') -%}
-          {%- set _now = lookup('pipe', "TZ='Asia/Tokyo' date '+%s %Y-%m-%dT%H:%M:%S+09:00'") -%}
-          {%- set _epoch = _now.split(' ')[0] -%}
-          {%- set _written_at = _now.split(' ')[1] -%}
-          {%- set _id = _epoch ~ '-' ~ ('%08x' | format(4294967296 | random)) -%}
-          {{ {
-            'spool_dir': _spool_dir,
-            'id': _id,
-            'record': {
-              'record_version': 1,
-              'id': _id,
-              'written_at': _written_at,
-              'controller': lookup('pipe', 'hostname -s'),
-              'play_name': ansible_play_name | default(''),
-              'play_host': inventory_hostname,
-              'slack_channel': slack_channel | default(''),
-              'slack_status': slack_status | default(''),
-              'slack_title': slack_title | default(''),
-              'slack_message': slack_message | default(''),
-              'tester_mode': tester_mode | default(false) | bool,
-              'skip_notifications': skip_notifications | default(false) | bool,
-              'check_mode': ansible_check_mode | default(false) | bool,
-            }
-          } }}
-      delegate_to: localhost
-      become: false
-      changed_when: false
+    # 2026-08-01: 収集器が配備されているcontrollerでだけ捕捉する。
+    #
+    # 判定に使うのは**収集器の設定ファイルの存在**であり、spoolディレクトリの
+    # 存在ではない。**spoolの側で判定してはならない** — 上の不変条件が
+    # 「`capture_spool_dir` を存在しない/書けないパスへ差し替えてAC4を検証する」
+    # と定めており、AC4は「書き込みが試みられて失敗すること」に依存している。
+    # spoolの存在で門を作ると、AC4の検証が「黙ってskip」に化けて成立しなくなる。
+    #
+    # 経緯: ansyには収集器(homelab-incident-capture)が無く、IC-004により
+    # 捕捉はquoryでのみ行う。にもかかわらずこのファイルはcontroller側
+    # (`delegate_to: localhost`)へ書くため、**ansyから流した実行の分が
+    # 読み手のいないまま蓄積していた**(2026-08-01時点で15件、最古は7月下旬)。
+    #
+    # **この変更は過去のCoordinator判断を覆している。** 上のTASK-COUNT節は
+    # 「spoolディレクトリ作成をdeploy時へ移すとansy(Testerの開発機)で
+    # captureが壊れるので意図的に残した」と記録している。**その「capture」に
+    # 実体が無かった** — ansyには読み手が存在せず、書いたものは誰にも
+    # 消費されない。判断の記録は
+    # docs/ai/reviews/common_slack_capture_scope/2026-08-01_001_requirement.md。
+    # 不変条件「No `when:` anywhere in this file」の緩和(2026-08-01)。
+    # 元の趣旨は「**どの通知を捕捉するか**を内容で絞らない(ADR-004 (c) / D7、
+    # 絞り込みは収集器の仕事)」ことであり、ここで見ているのは通知の内容では
+    # なく**配備状態**である。**通知の属性(status/channel/title等)を条件に
+    # 使う `when:` は引き続き禁止**とする。
+    #
+    # `stat` + `register` ではなく Jinja の `is exists` を使う理由(2026-08-01、
+    # 独立レビューF1を受けた差し替え): ①**タスクを1つも増やさない** —
+    # このファイルはタスク数を減らすために設計を練った経緯があり(上の
+    # TASK-COUNT節)、38箇所の通知経路すべてに乗る ②**新しい変数を作らない** —
+    # `register` を足すと `ansible-lint` の `var-naming[no-role-prefix]` が
+    # 1件増える(実測: HEAD版4件 → stat版5件)。`when:` は元々controller側で
+    # 評価され、このblockは `delegate_to: localhost` なので、**判定する
+    # ファイルシステムと書き込む先が同じ**である。
+    - name: Capture only where a collector will consume the record
+      when: "(capture_collector_marker | default('/etc/homelab-recovery/incident-capture.json')) is exists"
+      block:
+        - name: Resolve capture context (spool dir, id, record — single evaluation)
+          ansible.builtin.set_fact:
+            _capture_ctx: >-
+              {%- set _spool_dir = capture_spool_dir | default(reports_base_dir ~ '/incidents/_spool') -%}
+              {%- set _now = lookup('pipe', "TZ='Asia/Tokyo' date '+%s %Y-%m-%dT%H:%M:%S+09:00'") -%}
+              {%- set _epoch = _now.split(' ')[0] -%}
+              {%- set _written_at = _now.split(' ')[1] -%}
+              {%- set _id = _epoch ~ '-' ~ ('%08x' | format(4294967296 | random)) -%}
+              {{ {
+                'spool_dir': _spool_dir,
+                'id': _id,
+                'record': {
+                  'record_version': 1,
+                  'id': _id,
+                  'written_at': _written_at,
+                  'controller': lookup('pipe', 'hostname -s'),
+                  'play_name': ansible_play_name | default(''),
+                  'play_host': inventory_hostname,
+                  'slack_channel': slack_channel | default(''),
+                  'slack_status': slack_status | default(''),
+                  'slack_title': slack_title | default(''),
+                  'slack_message': slack_message | default(''),
+                  'tester_mode': tester_mode | default(false) | bool,
+                  'skip_notifications': skip_notifications | default(false) | bool,
+                  'check_mode': ansible_check_mode | default(false) | bool,
+                }
+              } }}
+          delegate_to: localhost
+          become: false
+          changed_when: false
 
-    # No `mode:` here (2026-07-28, ACL mask incident — see
-    # docs/ai/reviews/incident_auto_capture/2026-07-28_016_t1_production_observation_test_result.md
-    # and .../2026-07-28_018_acl_mask_plan.md §1). (a) On a directory that
-    # carries POSIX ACLs, `file`'s chmod does not just set the requested bits
-    # — it rewrites the ACL mask entry, which caps every named-user/
-    # named-group entry's *effective* permission regardless of what that
-    # entry itself grants. (b) Ownership of this directory's permission bits
-    # belongs solely to the `incident_capture` role (plan §2 C1); this task's
-    # only job is to create the directory when it is missing (e.g. on ansy,
-    # which never runs that role) — never to modify an existing directory's
-    # mode/ACL. (c) In production this caused `recovery-exec`'s named-user
-    # ACL entry on `_spool/` to be silently truncated from rwx to r-x every
-    # time this task ran against an already-ACL'd directory, which broke the
-    # collector's ability to unlink consumed spool records. (d) Do NOT add
-    # `mode:` back here "to be explicit/safe" — on an ACL'd directory that is
-    # exactly the operation that reintroduces the incident; permissions for
-    # an existing directory are the role's responsibility, not this file's.
-    - name: Ensure capture spool directory exists
-      ansible.builtin.file:
-        path: "{{ _capture_ctx.spool_dir }}"
-        state: directory
-      delegate_to: localhost
-      become: false
-      changed_when: false
+        # No `mode:` here (2026-07-28, ACL mask incident — see
+        # docs/ai/reviews/incident_auto_capture/2026-07-28_016_t1_production_observation_test_result.md
+        # and .../2026-07-28_018_acl_mask_plan.md §1). (a) On a directory that
+        # carries POSIX ACLs, `file`'s chmod does not just set the requested bits
+        # — it rewrites the ACL mask entry, which caps every named-user/
+        # named-group entry's *effective* permission regardless of what that
+        # entry itself grants. (b) Ownership of this directory's permission bits
+        # belongs solely to the `incident_capture` role (plan §2 C1); this task's
+        # only job is to create the directory when it is missing (e.g. on ansy,
+        # which never runs that role) — never to modify an existing directory's
+        # mode/ACL. (c) In production this caused `recovery-exec`'s named-user
+        # ACL entry on `_spool/` to be silently truncated from rwx to r-x every
+        # time this task ran against an already-ACL'd directory, which broke the
+        # collector's ability to unlink consumed spool records. (d) Do NOT add
+        # `mode:` back here "to be explicit/safe" — on an ACL'd directory that is
+        # exactly the operation that reintroduces the incident; permissions for
+        # an existing directory are the role's responsibility, not this file's.
+        - name: Ensure capture spool directory exists
+          ansible.builtin.file:
+            path: "{{ _capture_ctx.spool_dir }}"
+            state: directory
+          delegate_to: localhost
+          become: false
+          changed_when: false
 
-    - name: Write capture record directly to spool (atomic via copy's os.rename)
-      ansible.builtin.copy:
-        content: "{{ _capture_ctx.record | to_nice_json }}\n"
-        dest: "{{ _capture_ctx.spool_dir }}/{{ _capture_ctx.id }}.json"
-      delegate_to: localhost
-      become: false
-      changed_when: false
+        - name: Write capture record directly to spool (atomic via copy's os.rename)
+          ansible.builtin.copy:
+            content: "{{ _capture_ctx.record | to_nice_json }}\n"
+            dest: "{{ _capture_ctx.spool_dir }}/{{ _capture_ctx.id }}.json"
+          delegate_to: localhost
+          become: false
+          changed_when: false
 
-    - name: Mark capture id as actually written (2026-07-27, Coordinator decision post-review)
-      # Deliberately a 4th, separate task instead of folding this into the
-      # write task above. `notify.yml`'s footer must only ever show an id
-      # that corresponds to a record that is actually on disk — if any of
-      # the three tasks above this one raises, `rescue:` fires and this task
-      # never runs, so `_capture_written_id` stays undefined and the footer
-      # degrades to '' (see notify.yml). `_capture_ctx.id` alone could not be
-      # used for that purpose: it is set by the very first task in this
-      # block, before the directory-create/write tasks that can actually
-      # fail, so a failure between "id computed" and "record written" left
-      # `_capture_ctx.id` defined while no file existed — an independent
-      # review (docs/ai/reviews/incident_auto_capture/2026-07-27_013_review_w6_notify.md)
-      # reproduced this and the Coordinator decided the +1 task (ok 7->8) is
-      # worth paying to close it. Cost accepted; do not re-collapse this into
-      # the write task to save a task.
-      ansible.builtin.set_fact:
-        _capture_written_id: "{{ _capture_ctx.id }}"
-      delegate_to: localhost
-      become: false
-      changed_when: false
+        - name: Mark capture id as actually written (2026-07-27, Coordinator decision post-review)
+          # Deliberately a 4th, separate task instead of folding this into the
+          # write task above. `notify.yml`'s footer must only ever show an id
+          # that corresponds to a record that is actually on disk — if any of
+          # the three tasks above this one raises, `rescue:` fires and this task
+          # never runs, so `_capture_written_id` stays undefined and the footer
+          # degrades to '' (see notify.yml). `_capture_ctx.id` alone could not be
+          # used for that purpose: it is set by the very first task in this
+          # block, before the directory-create/write tasks that can actually
+          # fail, so a failure between "id computed" and "record written" left
+          # `_capture_ctx.id` defined while no file existed — an independent
+          # review (docs/ai/reviews/incident_auto_capture/2026-07-27_013_review_w6_notify.md)
+          # reproduced this and the Coordinator decided the +1 task (ok 7->8) is
+          # worth paying to close it. Cost accepted; do not re-collapse this into
+          # the write task to save a task.
+          ansible.builtin.set_fact:
+            _capture_written_id: "{{ _capture_ctx.id }}"
+          delegate_to: localhost
+          become: false
+          changed_when: false
 
   rescue:
     - name: Notification evidence capture failed (ignored)
