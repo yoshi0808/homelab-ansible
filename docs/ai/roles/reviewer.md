@@ -38,7 +38,6 @@ Coordinatorが書いた計画を、実装に着手する前に査読する(依�
 
 - 必須Skill: code review(`skills/code-review/SKILL.md`、出力フォーマットのみ)、duplication / reuse check(`skills/duplication-reuse-check/SKILL.md`)、security review(`skills/ansible-security-review/SKILL.md`)。
 - **規範文書の変更をレビューするときは`skills/document-norm-review/SKILL.md`を併用する。** Policy / Context / Role文書 / SKILL.md / prompt / CLAUDE.mdの移設・削除・正本の差し替え・判定基準の改訂が対象で、コード差分とは欠陥クラスが異なる(宙ぶらりん参照、規範の消失、撤回した根拠の残存)。
-- 参照するKnowledge: 過去レビューで見つかった`docs/ai/memory/lessons/`(見落としパターン)。分類・参照範囲は`docs/ai/memory-classification.md`が正本。
 - 詳細なレビュー観点は対象SkillとPolicyを参照し、このRoleへ複製しない。
 
 ## 禁止・エスカレーション

@@ -23,7 +23,6 @@ ImplementerはCoordinatorが確定したrequirementと指定Contextに基づき�
 読む対象とタイミングは`docs/ai/role-context-matrix.md`のImplementer列を正本とする。Issue、対象領域System Context、対象inventory/playbook/role、該当Policyを着手時に確認し、コードと自分のdiffを常時の正本とする。
 
 - 必須Skill: 対象言語・Ansibleの実装(`skills/ansible-implementation-style/SKILL.md`)、repository exploration、最小差分編集、自己検証、成果物記録。
-- 参照するKnowledge: 対象role/playbookに関連する`docs/ai/memory/lessons/`(実装例外・落とし穴)。分類・参照範囲は`docs/ai/memory-classification.md`が正本。
 - Context / Policy / Skillの配置判断は`docs/ai/context-classification.md`に従う。
 - 詳細な実装手順は対象SkillとPolicyを参照し、このRoleへ複製しない。
 
