@@ -25,6 +25,35 @@
 
 Prometheusのmanual updateとrollbackは`prometheus_update_check.yml`を人間が明示実行することで行う(Policy §7 UV-035〜UV-039、2026-07-25更新)。実行判断は人間が行い、artifactのdownload・backup・binary差し替え・restart・health確認はplaybookが一括して行う。
 
+## 既知の落とし穴: monnie の grafana 更新
+
+**grafana パッケージを更新するときは、事前に `/var/lib/grafana/plugins-bundled` を退避する。** 退避しないと `dpkg` の設定処理が必ず失敗し、パッケージが `iF`(設定失敗)で止まる。
+
+```bash
+sudo mv /var/lib/grafana/plugins-bundled /var/lib/grafana/plugins-bundled.$(date +%Y%m%d)
+# 更新後、問題なければ退避分は削除してよい
+```
+
+理由は grafana の `postinst` にある(2026-08-01に `.deb` 同梱のスクリプトと導入済みスクリプトを `diff` して、パッケージ由来かつ改変なしであることを確認済み)。
+
+```sh
+# postinst:27-28 — 条件が付いていない
+mv $GRAFANA_HOME/data/plugins-bundled $DATA_DIR   # = /usr/share/grafana/data/... → /var/lib/grafana
+```
+
+`mv` は移動先の同名ディレクトリが空でないと失敗する。移動先は `/var/lib`(データ領域)なのでパッケージは消さず、`preinst` は存在せず、`prerm`/`postinst` にも削除処理は無い。**したがって一度成功すると、以後の更新は必ず失敗する。** `postinst` は `set -e` なので、この1行で以降(権限設定・provisioningディレクトリ・サービス再起動)がすべて止まる。
+
+**復旧手順**(既に `iF` になっている場合):
+
+```bash
+sudo mv /var/lib/grafana/plugins-bundled /var/lib/grafana/plugins-bundled.<日付>
+sudo dpkg --configure -a        # RESTART_ON_UPGRADE=true なので grafana-server も再起動される
+dpkg -l grafana | tail -1       # ii になること
+curl -sk https://localhost:3000/api/health   # Grafana は HTTPS。database:ok と version を確認
+```
+
+**この落とし穴が次回も再現するかは観測点である**(`docs/ai/status.md` の Watch)。upstream が直せば再現しない。初出は2026-08-01の `ubuntu_vm_full_upgrade`(monnie、13.1.0 → 13.1.1)で、一次調査の成果物は `reports/incidents/_investigations/semaphore-512.*`。
+
 ## Nightlyと朝healthcheck
 
 方針1 VMでは次の順序を使う。
