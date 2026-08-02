@@ -20,7 +20,7 @@
 
 | # | 項目 | 現在地 | 次にやること |
 |---|---|---|---|
-| 1 | **開発と運用の境界を、設定でなく能力の不在で作る**(`docs/ai/reviews/dev_prod_boundary/`) | **Phase 1 完了。** `sandbox` VM(pve2、タグ`sandbox`、HA `state: ignored`)+ Semaphore `SANDBOX:`テンプレート3本 + ラダー3roleへのタグ適格化 + `recovery_probe`の検証用第2インスタンス(`recovery-probe-sandbox`、`state_dir`分離)。**2026-08-02に probe→ラダー連結と`stopped`→start を実データで観測**(S3の2/4)。検証インスタンスは**常設せず窓を開閉する**運用(週次パッチが`sandbox`をmuteしないため常駐すると衝突する)。Phase 2〜3は未着手 | **Phase 1 の実行分は完了**(AC1/AC2/AC3/AC14/AC18を実データで観測。AC17はWatchへ持ち越し、flappingはdescope、独立Tester検証は通さない判断で記録済み)。次は **Phase 2(配備物ドリフト検出)** — Phase 4 の関門である成功指標S2を作る工程。**U3(pve1の`ann`権限)は pve1 稼働時に確認** |
+| 1 | **開発と運用の境界を、設定でなく能力の不在で作る**(`docs/ai/reviews/dev_prod_boundary/`) | **Phase 1 完了。** `sandbox` VM(pve2、タグ`sandbox`、HA `state: ignored`)+ Semaphore `SANDBOX:`テンプレート3本 + ラダー3roleへのタグ適格化 + `recovery_probe`の検証用第2インスタンス(`recovery-probe-sandbox`、`state_dir`分離)。**2026-08-02に probe→ラダー連結と`stopped`→start を実データで観測**(S3の2/4)。検証インスタンスは**常設せず窓を開閉する**運用(週次パッチが`sandbox`をmuteしないため常駐すると衝突する)。Phase 2〜3は未着手 | **Phase 1 の実行分は完了**(AC1/AC2/AC3/AC14/AC18を実データで観測。AC17はWatchへ持ち越し、flappingはdescope、独立Tester検証は通さない判断で記録済み)。次は **Phase 2(配備物ドリフト検出)** — Phase 4 の関門である成功指標S2を作る工程。**未確認前提は残っていない**(U3・AC17とも2026-08-03に確認済) |
 
 ## Watch(観測待ち)
 
@@ -28,7 +28,6 @@
 
 | 項目 | 発火条件 | 検証手段 | 一次記録 | 最終確認 |
 |---|---|---|---|---|
-| **`recovery_ha_failover` の Phase 1-2 が未検証**(`sandbox` 相手) | pve1 が稼働しているとき | quory の Semaphore で `SANDBOX: Recovery ha failover (check)` を1回起動する。Phase 2 は `/cluster/status` のオンライン非現在ノードから移行先を選ぶため、**pve1 停止中は assert が正しく失敗し実行できない**(実装の不備ではない)。`--check` なので relocate は発行されない | `docs/ai/reviews/dev_prod_boundary/2026-08-02_003_implement_phase1_repo.md` 2.10 | 2026-08-02 |
 | quoryの作業ツリーを**Coordinator / Testerが直接確認できない** | quoryの作業ツリー状態を検証したいとき | 接続identity(`ann`)と所有者(`yoshi`)が異なり `dubious ownership` が `rc=128` で拒否する。回避には `safe.directory` が要り承認範囲外。**gitの状態は読めないが、ファイルの中身は読めるので内容で代替できる**(2026-08-01に実施)。`semaphore.db` も `ann` では開けない | `docs/ai/reviews/proxmox_patch_dryrun/2026-07-26_005_test_result.md`、`.../incident_auto_capture_step2/2026-07-28_004_quory_units_survey.md` | 2026-08-01 |
 | 月次Knowledge振り返りの**初回無人実行**。**障害評価(2本目の `claude -p`)を含む** | 毎月26日(期日の正本はauto-memory `MEMORY.md` 先頭行。ここへ写さない) | ansyで `systemctl list-timers ansible-knowledge-review.timer` と `journalctl -u ansible-knowledge-review`。実行後は作業ツリーに未commit差分が出る。**障害評価の成果物は `reports/incidents/_evaluations/` に出る(gitignore済みなので差分には現れない)。** 手動での通しは2026-07-28に成功済み | `roles/knowledge_review/`、`docs/ai/reviews/incident_auto_capture_step2/2026-07-28_020_u11_test_result.md` | 2026-07-28 |
 | Context陳腐化チェック追加後の**`knowledge_review_timeout`(1800秒)が足りるか** | 次回2026-08-26の月次実行 | `journalctl -u ansible-knowledge-review`でタイムアウト終了していないか確認。Testerのdecoy見積もりでは余裕が無い可能性が高いとされた(実測はデータが無く不可) | `docs/ai/reviews/knowledge_review_context_check/2026-07-29_005_u1_test_result.md` | 2026-07-29 |
