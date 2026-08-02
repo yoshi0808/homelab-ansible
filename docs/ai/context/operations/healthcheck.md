@@ -46,7 +46,7 @@ Ansible: 配置、実行、JSON読込、期待値比較、warning/critical分類
 
 ## 3. tester-gateマーカーと実guardの整合
 
-`playbooks/*.yml`冒頭の`# tester-gate: safe-readonly`コメントは、Slack通知抑止の実際のguard(`roles/common_slack/tasks/notify.yml`の`skip_notifications | default(false) | bool or ansible_check_mode | bool`)と一致している必要がある。TODO 7-2(pilot1)・pilot2で、コメントの理由文と実guardが乖離する“marker drift”が実際に見つかった。reviewerは変更対象playbookのマーカー文言と`common_slack/notify.yml`の条件式を必ず突き合わせる。
+`playbooks/*.yml`冒頭の`# tester-gate: safe-readonly`コメントは、Slack通知抑止の実際のguard(`roles/common_slack/tasks/notify.yml`の`skip_notifications | default(false) | bool or ansible_check_mode | bool or (AIエージェントセッション検出 and not slack_force_send)`、3条件のいずれか)と一致している必要がある。TODO 7-2(pilot1)・pilot2で、コメントの理由文と実guardが乖離する“marker drift”が実際に見つかった。reviewerは変更対象playbookのマーカー文言と`common_slack/notify.yml`の条件式を必ず突き合わせる。
 
 ## 4. reportの保存パターン
 

@@ -21,7 +21,7 @@
 #
 # tester-gate: safe-readonly — 状態の読み取り（wrapper実行、unit状態の照会、
 # 設定ファイルとflagの読み取り）のみで構成する。異常検出時のSlack通知は
-# common_slackのskip_notifications / ansible_check_modeで抑止できる。
+# common_slackのskip_notifications / ansible_check_mode / AIエージェントセッション検出(3条件)で抑止できる。
 
 - name: Recovery monitoring - daily armed check
   hosts: control_nodes

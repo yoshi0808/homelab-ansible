@@ -7,7 +7,7 @@
 # 各マーカーの意味は docs/ai/policies/ansible_test_safety_policy.md を参照:
 #   - safe-readonly     : read-only 収集のみ。ゲート不要
 #   - role-guarded       : 副作用が Slack 通知のみで、common_slack notify.yml の
-#                          skip_notifications ガードで抑止される
+#                          抑止guard(TS-031)で止まる
 #   - risk-accepted      : 常に本実行してよいと人間が判断。dry-run を持たず、
 #                          --check を渡されたら停止する(TS-030)。加えて条件2
 #                          (破壊的な本体操作を省いた検証には意味がない)の理由を

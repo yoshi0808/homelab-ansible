@@ -6,7 +6,7 @@
 # 2026-08-01独立レビューM1差し戻し: 当初`role-guarded`としていたが、Policy
 # (`docs/ai/policies/ansible_test_safety_policy.md` TS-005)の定義は
 # 「副作用がSlack通知のみで、roles/common_slack/tasks/notify.ymlの抑止guard
-# (skip_notifications/ansible_check_mode)で止まる」ことを要件に
+# (skip_notifications/ansible_check_mode/AIエージェントセッション検出の3条件)で止まる」ことを要件に
 # するが、本playbookはそのnotify.ymlを一切includeしていない(N2充足のため
 # `community.general.slack`を直接呼ぶ、§3.1参照)。`role-guarded`は
 # TS-022により`--check`なしの通常実行が許される分類のため、抑止guardが

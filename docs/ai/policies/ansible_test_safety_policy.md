@@ -18,7 +18,7 @@ playbookごとに「`--check`の有無で挙動がどう変わるか」「本実
 | 種別 | 意味 |
 |---|---|
 | `safe-readonly` | 完全read-only(収集・観測のみ)。ゲート不要、常に本実行してよい |
-| `role-guarded` | 副作用がSlack通知のみで、`roles/common_slack/tasks/notify.yml`の抑止guardで止まる |
+| `role-guarded` | 副作用がSlack通知のみで、`roles/common_slack/tasks/notify.yml`の抑止guard(TS-031)で止まる |
 | `risk-accepted` | 破壊性はあるが、§4の2条件を満たすため常に本実行してよいと人間が判断したもの。**dry-runを持たず、`--check`を渡された場合は適用せずに停止する**(TS-030) |
 | `check-mode-native` | read-onlyな診断・検証部分は`--check`でも常に本実行し、実際の破壊的操作(またはそれに依存する後続処理)だけを`ansible_check_mode`でゲートする |
 | `dry-run-aware` | 破壊的コマンド自体を、`ansible_check_mode`下でネイティブのdry-run引数に差し替えて実行する(スキップではなく安全な引数での実行) |
@@ -109,6 +109,8 @@ block化するかの判断は**依存するtaskがファイル上で連続して
 <!-- TS-031 -->
 `ansible_check_mode`が真のとき、`roles/common_slack/tasks/notify.yml`はSlackへ送信せず通知本文を出力に示す。**この判定はnotify.yml側だけが持ち、呼び出し側が`check_mode: false`で覆さない。** 分類によらず一貫させ、check mode下で送信する例外を作らない — 例外を1つ作れば、それが唯一の抜け道になる(TS-029と同じ理由)。抑止を明示したい場合の`skip_notifications`は従来どおり有効で、`--check`を付けずに本適用しつつ通知だけ止める手段はこちらである。
 
+notify.ymlはこれらに加え、環境変数`CLAUDECODE`でAIエージェントセッションを検出した場合も既定でSlackへ送信しない(第3の抑止条件)。**明示的に送信したい場合の`slack_force_send`はこの第3条件だけを上書きし、`skip_notifications`と`ansible_check_mode`のどちらも上書きしない** — `slack_force_send`と`ansible_check_mode`を同時に真で渡しても送信しないことが、本条の「check mode下で送信する例外を作らない」という不変条件の順守である。詳細はnotify.ymlのヘッダコメントを参照し、条件の数・文言をこの表・本節へ複製しない。
+
 ## 7. 制約・禁止事項
 
 ### 機械チェック
@@ -165,3 +167,4 @@ roleやtask fileへ`tester-gate`の分類名と理由を複製しない。**参�
 | 2026-07-31 | TS-036を新設し、roleやtask fileへ`tester-gate`の分類名と理由を複製せず、playbookヘッダへの参照に留めることを定めた。`scripts/check-tester-gate.sh`が`playbooks/`配下しか検査しないため、複製された記述は機械チェックの外で陳腐化する(`roles/cloudkey_cert_deploy/tasks/main.yml`がTS-030導入前の文言を複製したまま残っていた実例に基づく、独立レビューで指摘・是正)。案件記録: `docs/ai/reviews/check_mode_semantics/2026-07-31_020_round2_close_implement.md` |
 | 2026-08-02 | `tester_mode`を渡すと停止する移行assertを29本のplaybookから削除し(`# tester-gate:`マーカーは対象外)、「背景: `tester_mode` / `tester_gate` roleとの区別」節を削除した。**退番: TS-003 / TS-004(再利用しない)**。`tester_mode`という識別子はリポジトリの現行の指示・コードから完全に消えた。案件記録: `docs/ai/reviews/tester_mode_full_removal/2026-08-02_009_implement_r10.md` |
 | 2026-08-02 | 本文に埋め込まれていた移設元注記・Incident日付・分類設計日・実例日付を除去し、規則本文とTS番号だけを残す整理を行った(`docs/ai/reviews/norm_docs_rationale_removal_round3/`)。許可・禁止・停止条件、TS番号はいずれも変更していない。TS番号の新設・退番はない |
+| 2026-08-02 | TS-031へ第3の抑止条件(AIエージェントセッション検出、環境変数`CLAUDECODE`)を追加し、明示送信の`slack_force_send`がこの条件だけを上書きし`skip_notifications`・`ansible_check_mode`を上書きしないことを明記した(TS番号の新設・退番はない)。TS-005の`role-guarded`定義文からTS-031への参照を追加した。案件記録: `docs/ai/reviews/slack_send_optin/` |

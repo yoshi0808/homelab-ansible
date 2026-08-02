@@ -1,5 +1,5 @@
 ---
-# tester-gate: safe-readonly — 実patchなし（apt-get update/check、-s dist-upgrade）。healthcheck通知のみcallerでguardし、全経路をcommon_slackのskip_notifications/ansible_check_modeで抑止
+# tester-gate: safe-readonly — 実patchなし（apt-get update/check、-s dist-upgrade）。healthcheck通知のみcallerでguardし、全経路をcommon_slackのskip_notifications/ansible_check_mode/AIエージェントセッション検出(3条件)で抑止
 #
 # 2026-07-06: roles/proxmox_patch_dryrun の command/copy/file タスクに
 # check_mode: false が付いていなかったため、素の --check だと自動 skip されて

@@ -5,6 +5,13 @@
 #   slack_title:   Notification title
 #   slack_message: Notification body
 #
+# Incoming vars (optional):
+#   slack_force_send: true overrides suppression trigger 3 (AI agent session
+#     detection) only. It cannot override trigger 1 (skip_notifications) or
+#     trigger 2 (ansible_check_mode) — see TS-031
+#     (docs/ai/policies/ansible_test_safety_policy.md). If either of those
+#     is true, suppression wins regardless of slack_force_send.
+#
 # 2026-07-31 (R3, docs/ai/reviews/check_mode_semantics/
 # 2026-07-31_001_requirement.md): ansible_check_mode is a second,
 # unconditional suppression trigger alongside skip_notifications.
@@ -16,9 +23,23 @@
 # to force a real send under --check; that decision now belongs to this
 # file alone.
 #
-# 2026-08-02: suppression is now exactly these two triggers. A former third,
-# now-removed trigger variable has no effect if passed — Ansible silently
-# ignores unused extra vars.
+# 2026-08-02: a former third trigger variable (unrelated to the one added
+# below) was removed; passing it has no effect — Ansible silently ignores
+# unused extra vars.
+#
+# 2026-08-02 (R1, docs/ai/reviews/slack_send_optin/
+# 2026-08-02_001_requirement.md): suppression now has three triggers —
+# skip_notifications, ansible_check_mode, and a new third trigger: an AI
+# agent session, detected via the CLAUDECODE environment variable (set by
+# Claude Code's Bash tool; absent under systemd timer / Semaphore
+# invocation, where INVOCATION_ID is set instead — this asymmetry is the
+# detection signal). Detection reads the controller's environment via
+# lookup('env', ...), which is unaffected by which host the surrounding
+# play targets or by delegate_to (verified empirically; see implement
+# record docs/ai/reviews/slack_send_optin/2026-08-02_003_implement.md).
+# If the variable is unset or empty, this trigger does NOT fire — detection
+# failure falls toward sending, never toward silence. slack_force_send=true
+# overrides this trigger only (see "Incoming vars (optional)" above).
 
 - name: Capture notification evidence (best-effort, never fails the play)
   block:
@@ -29,10 +50,19 @@
       ansible.builtin.debug:
         msg: "Notification evidence capture include failed and was ignored. This does not affect the notification itself."
 
-- name: "[skip_notifications] Show notification instead of sending"
+- name: Detect AI agent session (CLAUDECODE env var; suppression trigger 3)
+  ansible.builtin.set_fact:
+    _slack_agent_session_detected: "{{ (lookup('env', 'CLAUDECODE') | default('', true) | trim | length) > 0 }}"
+  delegate_to: localhost
+  become: false
+
+- name: "[suppressed] Show notification instead of sending"
   ansible.builtin.debug:
     msg:
-      - "[skip_notifications] 通知スキップ（skip_notifications/ansible_check_modeのいずれかがtrue）"
+      - "[suppressed] 通知スキップ（trigger1 skip_notifications / trigger2 ansible_check_mode / trigger3 AIエージェントセッション検出 のいずれかがtrue）"
+      - "trigger1 skip_notifications      : {{ skip_notifications | default(false) | bool }}"
+      - "trigger2 ansible_check_mode      : {{ ansible_check_mode | bool }}"
+      - "trigger3 agent_session_detected  : {{ _slack_agent_session_detected }}（slack_force_send={{ slack_force_send | default(false) | bool }} で上書き可。trigger1/2は上書き不可）"
       - "channel : {{ slack_channel }}"
       - "status  : {{ slack_status }}"
       - "title   : {{ slack_title }}"
@@ -42,11 +72,15 @@
   when: >-
     skip_notifications | default(false) | bool
     or ansible_check_mode | bool
+    or (_slack_agent_session_detected
+        and not (slack_force_send | default(false) | bool))
 
 - name: Send Slack notification (best-effort)
   when: >-
     not (skip_notifications | default(false) | bool
-         or ansible_check_mode | bool)
+         or ansible_check_mode | bool
+         or (_slack_agent_session_detected
+             and not (slack_force_send | default(false) | bool)))
   block:
     - name: Load Slack variables
       ansible.builtin.include_vars:

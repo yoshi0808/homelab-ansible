@@ -1,5 +1,5 @@
 ---
-# tester-gate: safe-readonly — read-only診断（冪等な収集script配置とlocal report保存を含む）。異常時通知はcaller側に抑止guardがなく、common_slack内のskip_notifications/ansible_check_modeで抑止する
+# tester-gate: safe-readonly — read-only診断（冪等な収集script配置とlocal report保存を含む）。異常時通知はcaller側に抑止guardがなく、common_slack内のskip_notifications/ansible_check_mode/AIエージェントセッション検出(3条件)で抑止する
 #
 # 2026-07-30: 到達不能nodeを除外して残りのnodeで継続する
 # (ignore_unreachable + proxmox_reachable_nodes)。理由と契約は
