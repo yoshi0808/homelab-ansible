@@ -68,7 +68,6 @@
   loop:
     - /var/lib/homelab-recovery/probe
     - /var/lib/homelab-recovery/probe/notify-queue
-    - /var/lib/homelab-recovery/probe/drill
   become: true
   when: not ansible_check_mode
   tags: [destructive]

@@ -13,13 +13,13 @@
 #   2. Healthcheck on destination_node (must be OK before evacuation)
 #   3. Evacuate target_node (healthcheck + migrate non-HA VMs + maintenance mode + HA wait)
 #
-# tester-gate: check-mode-native — tester_mode/tester_gate を廃止。
-# roles/proxmox_evacuate_node/tasks/main.yml の healthcheck・VM識別・分類
-# (read-only)は --check の有無にかかわらず常に本実行し、実際の migrate /
-# maintenance mode / HA待機 / 強制停止(Phase 3-6)は ansible_check_mode で
-# ゲートする(tags: destructive)。非HA VMはオンラインマイグレーションも可能だが、
-# 全体の平仄を取るため --check 時は一切 VM を動かさない(Yoshinobu指示、
-# 2026-07-06)。詳細は docs/ai/policies/ansible_test_safety_policy.md。
+# tester-gate: check-mode-native — roles/proxmox_evacuate_node/tasks/main.yml
+# の healthcheck・VM識別・分類(read-only)は --check の有無にかかわらず常に
+# 本実行し、実際の migrate / maintenance mode / HA待機 / 強制停止
+# (Phase 3-6)は ansible_check_mode でゲートする(tags: destructive)。非HA VMは
+# オンラインマイグレーションも可能だが、全体の平仄を取るため --check 時は
+# 一切 VM を動かさない(Yoshinobu指示、2026-07-06)。詳細は
+# docs/ai/policies/ansible_test_safety_policy.md。
 
 - name: Validate target_node
   hosts: localhost

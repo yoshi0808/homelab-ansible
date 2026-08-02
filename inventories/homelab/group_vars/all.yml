@@ -1,5 +1,1 @@
 reports_base_dir: /home/yoshi/homelab-ansible/reports
-
-# tester_mode: 実変更・外部副作用(通知含む)ゼロを保証する不変条件フラグ。
-# 通常運用(Semaphore タイマー等)では false。tester は -e tester_mode=true で上書きする。
-tester_mode: false

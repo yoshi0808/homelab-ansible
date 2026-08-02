@@ -9,10 +9,10 @@
 # 通知: 証明書更新結果をメールで通知する（renewed/skipped/failed）。
 # cleanup失敗時もメール通知後にPlaybook自体がfailするため、systemd unitのstateで検知できる。
 #
-# tester-gate: check-mode-native — tester_mode/tester_gate を廃止。prepare_ca /
-# issue / cleanup は --check の有無にかかわらず常に本実行する(CA鍵のtmpfs展開・
-# 削除やCA側での鍵生成のみで、quoryのライブサービスには触れないため)。
-# deploy_semaphore だけは ansible_check_mode でゲートする(tags: destructive)。
+# tester-gate: check-mode-native — prepare_ca / issue / cleanup は --check
+# の有無にかかわらず常に本実行する(CA鍵のtmpfs展開・削除やCA側での鍵生成の
+# みで、quoryのライブサービスには触れないため)。deploy_semaphore だけは
+# ansible_check_mode でゲートする(tags: destructive)。
 # 理由: quory は本 playbook を含む自動化を動かしている本番 Semaphore(制御平面)
 # そのものであり、証明書配置ミスによる semaphore 再起動失敗はCloudKeyのような
 # 「Web UIのSSLが効かなくなるだけ」より復旧コストが高い(直接SSHでの復旧が必要

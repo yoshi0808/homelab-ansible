@@ -53,7 +53,7 @@ monthlyは`quory`から固定時刻のsingle scheduleで実行する。
 <!-- BRV-011 -->
 本Policyに対応するplaybookは`proxmox_backup_restore_verify.yml`の1本とする。
 
-この入口のtester-gateは`risk-accepted`である(判断基準は`docs/ai/policies/ansible_test_safety_policy.md` TS-009〜TS-011: 対象は専用固定restore VMIDに限定され本番VMへの実害がないこと、かつ実restoreを省略すると検証自体の意味が失われることの2条件を満たす)。`--check`を指定してもrestore / start / stop / destroyを含む本実行になり、挙動は変わらない。`tester_mode`/`tester_gate`は廃止済みの概念であり本Playbookでも参照しない(`tester_mode=true`を指定した場合はassertでfailする)。
+この入口のtester-gateは`risk-accepted`である(判断基準は`docs/ai/policies/ansible_test_safety_policy.md` TS-009〜TS-011: 対象は専用固定restore VMIDに限定され本番VMへの実害がないこと、かつ実restoreを省略すると検証自体の意味が失われることの2条件を満たす)。`risk-accepted`は`--check`を安全な実行手段として提供しない(TS-030)。`--check`を指定すると`ansible_check_mode`を検査する停止assertでplayが止まり、指定しなければrestore / start / stop / destroyを含む本実行になる。
 
 この分類自体はYoshinobuが判断済み(2026-07-06)であり、monthly実行のたびに個別の実行判断を必要としない。`quory`からのmonthly schedule実行(BRV-042)、`ansy`からのmanual実行(BRV-006)のいずれも同じ扱いとする。
 

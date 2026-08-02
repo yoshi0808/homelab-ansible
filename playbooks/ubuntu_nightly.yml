@@ -1,9 +1,9 @@
 ---
-# tester-gate: check-mode-native — tester_mode/tester_gate を廃止。reboot-required
-# 判定(stat/needrestart)は --check の有無にかかわらず常に本実行し、実際の
-# reboot + reboot後検証 + 結果通知(tags: destructive)だけを ansible_check_mode
-# でゲートする。reboot_required=true かつ --check のときは「reboot予定だが未実施」
-# の軽量レポート/通知を別途出す。詳細は docs/ai/policies/ansible_test_safety_policy.md。
+# tester-gate: check-mode-native — reboot-required判定(stat/needrestart)は
+# --check の有無にかかわらず常に本実行し、実際の reboot + reboot後検証 +
+# 結果通知(tags: destructive)だけを ansible_check_mode でゲートする。
+# reboot_required=true かつ --check のときは「reboot予定だが未実施」の軽量
+# レポート/通知を別途出す。詳細は docs/ai/policies/ansible_test_safety_policy.md。
 
 - name: Ubuntu nightly - conditional reboot and service check (radius_servers)
   hosts: radius_servers

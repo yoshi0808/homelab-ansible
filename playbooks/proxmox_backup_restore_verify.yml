@@ -22,10 +22,10 @@
 # a hardcoded host name — see
 # docs/ai/reviews/proxmox_exec_node_selection/2026-07-29_002_plan.md.
 #
-# tester-gate: risk-accepted — tester_mode/tester_gate を廃止。この playbook に
-# dry-run 区分はない。--check を渡すと、変更を行う各play(Play 2 / Play 3)の
-# pre_tasks に置かれた停止 assert(TS-030)により変更を一切行わずに停止する。
-# --check なしの通常実行では常に本実行する。
+# tester-gate: risk-accepted — この playbook に dry-run 区分はない。--check
+# を渡すと、変更を行う各play(Play 2 / Play 3)の pre_tasks に置かれた停止
+# assert(TS-030)により変更を一切行わずに停止する。--check なしの通常実行
+# では常に本実行する。
 # tester-gate-condition2: playbookの存在意義そのものが「バックアップが本当にリストアできるかの実地検証」であり、実際にqmrestoreしない検証には意味がない。
 # 理由: 対象は常にVMID 999固定の使い捨てVM、本番VMは設定read-onlyのみ、NIC切断
 # 起動で隔離、always:で確実に999を破棄(所有者トークンで二重チェック)されるため、

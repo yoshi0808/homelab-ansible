@@ -1,9 +1,9 @@
 ---
-# tester-gate: check-mode-native — tester_mode/tester_gate を廃止。
-# roles/recovery_vm_reboot/tasks/main.yml の Phase 1 (read-only タグ再検証)は
-# --check の有無にかかわらず常に本実行し、Phase 2 以降(shutdown/start)は
-# ansible_check_mode でゲートする(tags: destructive)。自律復旧ラダーの実処理
-# のため、--check 時に実行してはならない(Yoshinobu指示、2026-07-06)。詳細は
+# tester-gate: check-mode-native — roles/recovery_vm_reboot/tasks/main.yml
+# の Phase 1 (read-only タグ再検証)は --check の有無にかかわらず常に本実行し、
+# Phase 2 以降(shutdown/start)は ansible_check_mode でゲートする
+# (tags: destructive)。自律復旧ラダーの実処理のため、--check 時に実行しては
+# ならない(Yoshinobu指示、2026-07-06)。詳細は
 # docs/ai/policies/ansible_test_safety_policy.md。
 # recovery_vm_reboot.yml
 #

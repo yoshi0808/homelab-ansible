@@ -63,10 +63,10 @@
 #
 # unsafe: applies OS patches
 #
-# tester-gate: check-mode-native — tester_mode/tester_gate を廃止。preflight・
-# healthcheck・dry-run(read-only)は --check の有無にかかわらず常に本実行し、
-# 実際のevacuate/patch apply/restore(import_playbook先で各々ansible_check_mode
-# によりゲート済み)は --check 時には行わない。このオーケストレータ自身は
+# tester-gate: check-mode-native — preflight・healthcheck・dry-run
+# (read-only)は --check の有無にかかわらず常に本実行し、実際のevacuate/
+# patch apply/restore(import_playbook先で各々ansible_check_modeによりゲート
+# 済み)は --check 時には行わない。このオーケストレータ自身は
 # import_playbook 先のゲートを信頼し、二重にスキップしない
 # (read-only部分のテスト網羅性を落とさないため)。詳細は
 # docs/ai/policies/ansible_test_safety_policy.md。

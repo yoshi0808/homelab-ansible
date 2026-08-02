@@ -1,9 +1,9 @@
 ---
-# tester-gate: dry-run-aware — tester_mode/tester_gate を廃止。実際に破壊的な
-# fstrim コマンド自体を ansible_check_mode 下ではネイティブの --dry-run に
-# 差し替えて実行する(スキップではなく安全な引数での実行)。SSH接続・メニュー
-# 遷移・RCマーカーのパースは --check の有無にかかわらず常に本実行される。
-# 詳細は roles/sophos_trim/tasks/main.yml と docs/ai/policies/ansible_test_safety_policy.md。
+# tester-gate: dry-run-aware — 実際に破壊的な fstrim コマンド自体を
+# ansible_check_mode 下ではネイティブの --dry-run に差し替えて実行する
+# (スキップではなく安全な引数での実行)。SSH接続・メニュー遷移・RCマーカーの
+# パースは --check の有無にかかわらず常に本実行される。詳細は
+# roles/sophos_trim/tasks/main.yml と docs/ai/policies/ansible_test_safety_policy.md。
 - name: Sophos Firewall SSD Trim
   hosts: sophos
   gather_facts: false

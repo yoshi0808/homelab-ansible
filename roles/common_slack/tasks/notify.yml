@@ -6,8 +6,8 @@
 #   slack_message: Notification body
 #
 # 2026-07-31 (R3, docs/ai/reviews/check_mode_semantics/
-# 2026-07-31_001_requirement.md): ansible_check_mode is now a third,
-# unconditional suppression trigger alongside tester_mode/skip_notifications.
+# 2026-07-31_001_requirement.md): ansible_check_mode is a second,
+# unconditional suppression trigger alongside skip_notifications.
 # Whenever --check is in effect, this file never sends to Slack — it shows
 # the full text via the debug task below instead — regardless of playbook
 # classification (check-mode-native or risk-accepted) and regardless of
@@ -15,6 +15,10 @@
 # the gap where a caller's check_mode: false on the surrounding block used
 # to force a real send under --check; that decision now belongs to this
 # file alone.
+#
+# 2026-08-02: suppression is now exactly these two triggers. A former third,
+# now-removed trigger variable has no effect if passed — Ansible silently
+# ignores unused extra vars.
 
 - name: Capture notification evidence (best-effort, never fails the play)
   block:
@@ -25,10 +29,10 @@
       ansible.builtin.debug:
         msg: "Notification evidence capture include failed and was ignored. This does not affect the notification itself."
 
-- name: "[tester_mode] Show notification instead of sending"
+- name: "[skip_notifications] Show notification instead of sending"
   ansible.builtin.debug:
     msg:
-      - "[tester_mode] 通知スキップ（tester_mode/skip_notifications/ansible_check_modeのいずれかがtrue）"
+      - "[skip_notifications] 通知スキップ（skip_notifications/ansible_check_modeのいずれかがtrue）"
       - "channel : {{ slack_channel }}"
       - "status  : {{ slack_status }}"
       - "title   : {{ slack_title }}"
@@ -36,14 +40,12 @@
   delegate_to: localhost
   become: false
   when: >-
-    tester_mode | default(false) | bool
-    or skip_notifications | default(false) | bool
+    skip_notifications | default(false) | bool
     or ansible_check_mode | bool
 
 - name: Send Slack notification (best-effort)
   when: >-
-    not (tester_mode | default(false) | bool
-         or skip_notifications | default(false) | bool
+    not (skip_notifications | default(false) | bool
          or ansible_check_mode | bool)
   block:
     - name: Load Slack variables

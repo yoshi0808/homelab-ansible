@@ -125,7 +125,6 @@ REQUIRED_SPOOL_FIELDS = {
     "slack_status",
     "slack_title",
     "slack_message",
-    "tester_mode",
     "skip_notifications",
     "check_mode",
 }

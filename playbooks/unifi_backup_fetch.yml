@@ -16,9 +16,9 @@
 #
 # 通知: 結果を Slack へ通知する(取得・保存 OK = info/ok、失敗 = alerts/error)。
 #
-# tester-gate: risk-accepted — tester_mode/tester_gate を廃止。この playbook に
-# dry-run 区分はない。--check を渡すと pre_tasks の停止 assert(TS-030)により
-# 変更を一切行わずに停止する。--check なしの通常実行では常に本実行する。
+# tester-gate: risk-accepted — この playbook に dry-run 区分はない。--check
+# を渡すと pre_tasks の停止 assert(TS-030)により変更を一切行わずに停止する。
+# --check なしの通常実行では常に本実行する。
 # tester-gate-condition2: バックアップ生成・ダウンロード・鮮度検証という一連の非冪等API操作そのものが検証対象であり、それを省いた検証には意味がない(proxmox_backup_restore_verifyと同じ理由)。
 # 理由: CloudKey側の設定変更は行わずバックアップ生成
 # API(UIの「バックアップ取得」ボタンと同等)を叩くのみで本番サービスへの影響は

@@ -41,7 +41,7 @@
 #       despite that gate.
 #
 # This file is included unconditionally from the top of notify.yml, before the
-# tester_mode/skip_notifications suppression gate. It writes ONE spool record per
+# skip_notifications suppression gate. It writes ONE spool record per
 # reached notification. A collector (Step 2) later reads these records from `_spool/`
 # and folds them into `reports/incidents/<id>/`.
 #
@@ -152,7 +152,6 @@
 #                               unconditionally, including "ok" (ADR-004 (c) / D7)
 #   slack_title          str    as passed to notify.yml (may be '')
 #   slack_message        str    as passed to notify.yml (may be '')
-#   tester_mode          bool   flag only, not a filter (R1)
 #   skip_notifications   bool   flag only, not a filter (R1)
 #   check_mode           bool   ansible_check_mode; always false in practice because
 #                               this file never sets check_mode: false, so it does not
@@ -172,7 +171,7 @@
 #     notification that reaches this include is captured (ADR-004 (c) / D7);
 #     filtering is the collector's/Step 2's job." The rule now reads: **no `when:`
 #     may branch on the notification itself** — status, channel, title, message,
-#     tester_mode, skip_notifications are all off limits as conditions, and every
+#     skip_notifications are all off limits as conditions, and every
 #     notification reaching this include on a capture-enabled controller is still
 #     captured unconditionally. The single permitted `when:` is the **deployment
 #     state of the controller** (is a collector present to consume the record),
@@ -186,7 +185,7 @@
 #     (module has no check_mode support), so the whole file no-ops under --check.
 #   - All referenced notify.yml vars go through `| default('')` / `| default(false)`
 #     so an undefined slack_channel/slack_status/slack_title/slack_message/
-#     tester_mode/skip_notifications never breaks the caller (ADR-004 補2).
+#     skip_notifications never breaks the caller (ADR-004 補2).
 #   - Spool location is a variable (`capture_spool_dir`), not hardcoded, so it can be
 #     redirected in tests (e.g. to a nonexistent/unwritable path for AC4 verification).
 #   - Output extension is `.json` only — written directly by `copy` (atomic, see
@@ -269,7 +268,6 @@
                   'slack_status': slack_status | default(''),
                   'slack_title': slack_title | default(''),
                   'slack_message': slack_message | default(''),
-                  'tester_mode': tester_mode | default(false) | bool,
                   'skip_notifications': skip_notifications | default(false) | bool,
                   'check_mode': ansible_check_mode | default(false) | bool,
                 }

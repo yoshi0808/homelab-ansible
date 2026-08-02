@@ -1,5 +1,5 @@
 ---
-# tester-gate: role-guarded — 副作用は Slack 通知のみで、common_slack notify.yml の tester_mode ガードで抑止される
+# tester-gate: role-guarded — 副作用は Slack 通知のみで、common_slack notify.yml の skip_notifications/ansible_check_mode ガードで抑止される
 #
 # recovery-probe の通知キュー flush から呼ばれる(1 通知 = 1 実行)。
 # キューファイルをそのまま extra-vars として渡す:

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# playbook check_mode 安全分類 lint(旧 tester_mode 不変条件 lint)
+# playbook check_mode 安全分類 lint
 #
 # playbooks/ 配下の全 playbook が、ヘッダに以下いずれかの `# tester-gate:` マーカーを
-# 持つことを機械チェックする(単なる tester_mode 文字列やコメントでは通らない)。
+# 持つことを機械チェックする(単なるコメントでは通らない)。
 # tester_gate role は 2026-07-06〜07 の ansible_check_mode 移行で廃止済み。
 # 各マーカーの意味は docs/ai/policies/ansible_test_safety_policy.md を参照:
 #   - safe-readonly     : read-only 収集のみ。ゲート不要

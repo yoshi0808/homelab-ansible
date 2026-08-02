@@ -9,8 +9,6 @@
   LLM(Codex)はインターネット断で使えないため経由しない
 - authy / monnie: E-1 では検知 → 通知のみ(ラダー自動起動は E-2)
 - 通知はキューに積み、外部到達性が回復したら flush する
-- drill: state_dir/drill/<target> ファイルが存在すると強制的に障害扱いとし、
-  ラダーは -e tester_mode=true で実行(実変更ゼロのエンドツーエンド試験)
 
 実行モード:
   recovery-probe.py            # daemon(systemd から起動)
@@ -286,10 +284,9 @@ def wait_for_recovery(cfg, target, tconf):
     return False
 
 
-def fire_ladder(cfg, target, tconf, failed_probes, drill):
-    """sophos-fw の決定論ラダー。drill 時は tester_mode=true で実行する。"""
-    label = "[drill] " if drill else ""
-    extra = [f"target={target}"] + (["tester_mode=true"] if drill else [])
+def fire_ladder(cfg, target, tconf, failed_probes):
+    """sophos-fw の決定論ラダー。"""
+    extra = [f"target={target}"]
 
     # --- §8.4: 実行中ロック ---
     lock_dir = os.path.join(cfg["state_dir"], "ladder.lock")
@@ -304,7 +301,7 @@ def fire_ladder(cfg, target, tconf, failed_probes, drill):
         if len(firings) >= 3:
             queue_notify(
                 cfg, "error",
-                f"{label}[recovery-probe] flapping エスカレーション - {target}",
+                f"[recovery-probe] flapping エスカレーション - {target}",
                 f"直近 24 時間で 3 回以上ラダーが発火したため自動復旧を停止しました。"
                 f"手動確認が必要です。failed probes: {failed_probes}",
             )
@@ -326,7 +323,7 @@ def fire_ladder(cfg, target, tconf, failed_probes, drill):
         if vm_status == "pve-unreachable":
             queue_notify(
                 cfg, "critical",
-                f"{label}[recovery-probe] pve 到達不能 - {target}",
+                f"[recovery-probe] pve 到達不能 - {target}",
                 "probe は失敗していますが pve クラスタにも到達できません。"
                 "より大きい障害の可能性があります。手動対応が必要です。",
             )
@@ -335,13 +332,10 @@ def fire_ladder(cfg, target, tconf, failed_probes, drill):
             # requirement: stopped → reboot ではなく start(決定論)
             queue_notify(
                 cfg, "warning",
-                f"{label}[recovery-probe] VM 停止検知 → start 実行 - {target}",
+                f"[recovery-probe] VM 停止検知 → start 実行 - {target}",
                 f"VM が stopped 状態のため start を実行します"
                 f"(node={vm_node}, vmid={vm_id})。",
             )
-            if drill:
-                log(f"LADDER {target}: drill — start はスキップ(実 VM は stopped ではない想定)")
-                return
             started = pvesh_vm_start(cfg, pve_host, vm_node, vm_id)
             log(f"LADDER {target}: vm start ok={started}")
             if started and wait_for_recovery(cfg, target, tconf):
@@ -360,7 +354,7 @@ def fire_ladder(cfg, target, tconf, failed_probes, drill):
         if vm_status == "not-found":
             queue_notify(
                 cfg, "critical",
-                f"{label}[recovery-probe] VM 不明 - {target}",
+                f"[recovery-probe] VM 不明 - {target}",
                 "pvesh で対象 VM が見つかりません。手動確認が必要です。",
             )
             return
@@ -368,19 +362,12 @@ def fire_ladder(cfg, target, tconf, failed_probes, drill):
         # --- Ladder: VM reboot ---
         queue_notify(
             cfg, "warning",
-            f"{label}[recovery-probe] ラダー開始 - {target}",
+            f"[recovery-probe] ラダー開始 - {target}",
             f"failed probes: {failed_probes} / VM は running のまま無応答(ハング疑い)。"
             f"VM reboot を実行します。",
         )
         r = run_playbook(cfg, "recovery_vm_reboot.yml", extra)
         log(f"LADDER {target}: vm_reboot rc={r.returncode}")
-        if drill:
-            queue_notify(
-                cfg, "ok",
-                f"{label}[recovery-probe] drill 完了 - {target}",
-                f"vm_reboot (tester_mode) rc={r.returncode}。実変更なし。",
-            )
-            return
         if r.returncode == 0 and wait_for_recovery(cfg, target, tconf):
             queue_notify(
                 cfg, "ok",
@@ -418,22 +405,10 @@ def fire_ladder(cfg, target, tconf, failed_probes, drill):
 # ---------------------------------------------------------------------------
 # main loop
 # ---------------------------------------------------------------------------
-def drill_requested(cfg, target):
-    return os.path.exists(os.path.join(cfg["state_dir"], "drill", target))
-
-
-def clear_drill(cfg, target):
-    try:
-        os.unlink(os.path.join(cfg["state_dir"], "drill", target))
-    except FileNotFoundError:
-        pass
-
-
 def main():
     once = "--once" in sys.argv
     cfg = load_config()
     os.makedirs(cfg["state_dir"], exist_ok=True)
-    os.makedirs(os.path.join(cfg["state_dir"], "drill"), exist_ok=True)
     counters = {t: 0 for t in cfg["targets"]}
     isp_down_since = None
     # 外部到達性チェックの連続失敗数と、最初の失敗理由。閾値は設けない
@@ -464,10 +439,7 @@ def main():
                 log(f"PROBE {target}: muted (残 {rem // 60} 分) — skip")
                 continue
 
-            drill = drill_requested(cfg, target)
             ok, failed = probe_target(cfg, target, tconf)
-            if drill:
-                ok, failed = False, ["drill"]
 
             if once:
                 log(f"PROBE {target}: {'OK' if ok else 'FAIL ' + str(failed)}")
@@ -494,20 +466,15 @@ def main():
             if action == "ladder":
                 # ISP 切り分け: LAN 側 probe のうち icmp が生きていて外部だけ
                 # 死んでいるケースは probe_target 内で ok になるためここには来ない。
-                fire_ladder(cfg, target, tconf, failed, drill)
-                if drill:
-                    clear_drill(cfg, target)
+                fire_ladder(cfg, target, tconf, failed)
             else:
-                label = "[drill] " if drill else ""
                 queue_notify(
                     cfg, "error",
-                    f"{label}[recovery-probe] 異常検知 - {target}",
+                    f"[recovery-probe] 異常検知 - {target}",
                     f"failed probes: {failed}(閾値 {cfg['threshold']} 回連続)。"
                     f"E-1 では通知のみ。調査には Slack で @Homelab へ依頼するか"
                     f"手動で対応してください。",
                 )
-                if drill:
-                    clear_drill(cfg, target)
 
         # --- 外部到達性の状態遷移監視(ISP/FW 断。発火はしない。回復後に遅延通知) ---
         ext_ok, ext_reason = external_reachable(cfg)

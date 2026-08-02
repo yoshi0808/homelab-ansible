@@ -19,11 +19,11 @@
 # target_node: pve1 or pve2 (required)
 # Assumes: VM/CT evacuation has already been done before running this playbook.
 #
-# tester-gate: check-mode-native — pilot migration away from tester_mode/tester_gate.
-# Gating now relies on Ansible's native --check (ansible_check_mode): read-only /
-# diagnostic command tasks force check_mode: false so they run for real under
-# --check, while the destructive block (apt-get dist-upgrade, reboot) stays gated
-# by ansible_check_mode. See docs/ai/policies/ansible_test_safety_policy.md.
+# tester-gate: check-mode-native — Gating relies on Ansible's native --check
+# (ansible_check_mode): read-only / diagnostic command tasks force
+# check_mode: false so they run for real under --check, while the
+# destructive block (apt-get dist-upgrade, reboot) stays gated by
+# ansible_check_mode. See docs/ai/policies/ansible_test_safety_policy.md.
 
 - name: Validate target_node before main play
   hosts: localhost

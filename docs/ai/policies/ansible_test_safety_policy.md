@@ -13,7 +13,7 @@ playbookごとに「`--check`の有無で挙動がどう変わるか」「本実
 ### 背景: `tester_mode` / `tester_gate` roleとの区別
 
 <!-- TS-003 -->
-`tester_mode`変数と`tester_gate` roleは2026-07-06〜07に廃止済みであり、`roles/tester_gate`は実在しない。廃止理由は、`tester_gate`がplay / host単位で`end_play` / `end_host`するため、危険操作の手前にある本来安全な診断ロジック(healthcheck、apt dry-runシミュレーション等)までテスト対象から外れ、テストの実効性が低かったことである。Ansible標準の`--check`(`ansible_check_mode`)をゲート機構とする方式へ移行した。Semaphoreの`--check`オプションがそのまま効くため独自の`-e`変数は不要である。
+`tester_mode`変数と`tester_gate` roleは廃止済みであり、`roles/tester_gate`は実在しない。ゲート機構はAnsible標準の`--check`(`ansible_check_mode`)であり、Semaphoreの`--check`オプションがそのまま効くため独自の`-e`変数は不要である。`tester_mode`という識別子への参照も全経路から撤去済みで、`-e tester_mode=true`を渡しても(未使用のextra varとして)無視されるだけである。現在この識別子が現れるのは、渡されると停止する29本の移行assert(task名`[migration]`)のみである。
 
 <!-- TS-004 -->
 本Policyが定める`# tester-gate:`**ヘッダマーカーは廃止されていない**。名前が似ているだけの別物であり、廃止済みの`tester_mode`と混同しない。
@@ -153,7 +153,7 @@ wrapperは付け忘れ防止の補助であり、安全性の最終判断はplay
 ### マーカーの扱い
 
 <!-- TS-026 -->
-マーカーの分類名だけを安全の根拠に使わない。分類名、理由文、実際の抑止guard名、実行経路が一致しているかを照合する。過去に理由文が廃止済みの`tester_mode` guardを指しながら実guardは`skip_notifications`だった「marker drift」が複数playbookで実在した。
+マーカーの分類名だけを安全の根拠に使わない。分類名、理由文、実際の抑止guard名、実行経路が一致しているかを照合する。理由文が指すguard名と実装上のguardが乖離する「marker drift」は複数playbookで実在した。
 
 <!-- TS-036 -->
 roleやtask fileへ`tester-gate`の分類名と理由を複製しない。**参照に留める**——「呼び出し元のplaybookヘッダを参照」といった1行の言及にとどめ、`# tester-gate: <種別> — <理由>`形式そのものやTS-009条件1/条件2の説明文を複製しない。`scripts/check-tester-gate.sh`は`playbooks/`配下しか検査しないため、複製された記述は機械チェックの外で陳腐化する(2026-07-31、`roles/cloudkey_cert_deploy/tasks/main.yml`がTS-030導入前の「`--check`込みで常に本実行する」という文言を複製したまま残っていた実例)。分類・理由の複製が既に無いか確認する方法は`grep -rn "^# tester-gate:" roles/`。
