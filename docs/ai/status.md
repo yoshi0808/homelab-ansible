@@ -20,7 +20,7 @@
 
 | # | 項目 | 現在地 | 次にやること |
 |---|---|---|---|
-| 1 | **開発と運用の境界を、設定でなく能力の不在で作る**(`docs/ai/reviews/dev_prod_boundary/`) | **Phase 1 がほぼ完了。** `sandbox` VM(pve2、タグ`sandbox`、HA `state: ignored`)+ Semaphore `SANDBOX:`テンプレート3本 + ラダー3roleへのタグ適格化 + `recovery_probe`の検証用第2インスタンス(`recovery-probe-sandbox`、`state_dir`分離)。**2026-08-02に probe→ラダー連結と`stopped`→start を実データで観測**(S3の2/4)。検証インスタンスは**常設せず窓を開閉する**運用(週次パッチが`sandbox`をmuteしないため常駐すると衝突する)。Phase 2〜3は未着手 | **Phase 1 の残りは AC1 / AC2 の実行のみ**(手順は実装記録2.11に確定。`qm set --boot order=` で UEFI待機させて AC2 → 戻して AC1)。AC17はWatchへ持ち越し、flappingはdescope、独立Tester検証は通さない判断で記録済み。実行後にPhase 1クローズ → **Phase 2(配備物ドリフト検出)着手**。**U3(pve1の`ann`権限)は pve1 稼働時に確認** |
+| 1 | **開発と運用の境界を、設定でなく能力の不在で作る**(`docs/ai/reviews/dev_prod_boundary/`) | **Phase 1 完了。** `sandbox` VM(pve2、タグ`sandbox`、HA `state: ignored`)+ Semaphore `SANDBOX:`テンプレート3本 + ラダー3roleへのタグ適格化 + `recovery_probe`の検証用第2インスタンス(`recovery-probe-sandbox`、`state_dir`分離)。**2026-08-02に probe→ラダー連結と`stopped`→start を実データで観測**(S3の2/4)。検証インスタンスは**常設せず窓を開閉する**運用(週次パッチが`sandbox`をmuteしないため常駐すると衝突する)。Phase 2〜3は未着手 | **Phase 1 の実行分は完了**(AC1/AC2/AC3/AC14/AC18を実データで観測。AC17はWatchへ持ち越し、flappingはdescope、独立Tester検証は通さない判断で記録済み)。次は **Phase 2(配備物ドリフト検出)** — Phase 4 の関門である成功指標S2を作る工程。**U3(pve1の`ann`権限)は pve1 稼働時に確認** |
 
 ## Watch(観測待ち)
 

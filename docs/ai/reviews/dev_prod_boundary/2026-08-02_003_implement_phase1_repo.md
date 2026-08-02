@@ -253,7 +253,7 @@ pve2 | Validate target variable (prevent path traversal)
 - `roles/recovery_service_restart/tasks/main.yml` の `target != 'sophos-fw'` — sandbox に影響しない
 - `roles/recovery_vm_reboot/tasks/main.yml` L84 / L95 のタスク名(文字列のみ)
 
-## 2.11 AC1 / AC2 の実行手順(未実行)
+## 2.11 AC1 / AC2 の実行と結果(実施済み 2026-08-03)
 
 順番が重要である。起動順を戻す前に AC2 を撃つ。
 
@@ -272,6 +272,46 @@ pve2 | Validate target variable (prevent path traversal)
 | 4 | ACPI shutdown でゲストが正常停止(60秒以内)→ 強制停止タスクは skip → start → running。**終了コード0** |
 
 いずれも `reports/recovery_investigations/sandbox/` にJSONレポートが生成され、Slack へ `[recovery_vm_reboot] ... - sandbox` の通知が出る。
+
+### 実施結果
+
+手順は途中で変わった。当初案の `qm set --boot order=`(空値)は Proxmox が受け付けず(`invalid format - missing key`)、ゲスト内で ACPI を無視させる方式へ切り替えた。さらに**QEMU guest agent が有効なため `pvesh status/shutdown` がエージェント経由で停止し、`HandlePowerKey=ignore` を迂回する**ことが判明したため、ゲスト内で `qemu-guest-agent` を mask した(2.11.1)。
+
+| AC | Semaphore task | 結果 | `used_force_stop` | 経路 |
+|---|---|---|---|---|
+| **AC2**(強制電源断フォールバック) | 538 | **success** / `failed=0` | **`true`** | ACPI 送信 → 12回リトライ全滅(60秒タイムアウト)→ `Force power off` 実行 → start → running |
+| **AC1**(正常系) | 541 | **success** / `failed=0` | **`false`** | ACPI 送信 → 2回リトライで停止 → 強制停止は skip → start → running |
+
+レポートは両方とも `reports/recovery_investigations/sandbox/` へ保存され、所有者は `yoshi`(2.11.2 の修正が実データで効いていることの裏づけ)。
+
+**AC2 は本番では再現できない。** sophos-fw を60秒ハングさせる必要があるためである。
+
+### 2.11.1 ゲスト側の設定変更(sandbox 固有・恒久)
+
+| 設定 | 状態 | 理由 |
+|---|---|---|
+| `qemu-guest-agent` | **mask したまま維持** | `recovery_vm_reboot_guest_agent_targets` に `sandbox` は含まれず、role は常に ACPI 経路を使う。エージェントが生きていると role の前提とゲストの実態がずれる。**mask して sophos-fw と同条件を保つ** |
+| `/etc/systemd/logind.conf.d/99-sandbox-ac2.conf` | **AC2 実施後に削除** | AC2 専用。`HandlePowerKey` は既定(poweroff)へ復帰済み |
+
+### 2.11.2 発見(2): 本番のレポート保存が権限で失敗する
+
+**Semaphore task 535 の失敗から判明した。** ラダー本体は完走したが、最後の `Ensure report directory exists` が `[Errno 13] Permission denied` で落ちた。
+
+```
+reports/recovery_investigations/  … 所有 uid 1002(quory に存在しない uid)/ mode 755
+report タスク                      … become: false → quory では yoshi として実行
+→ yoshi は親ディレクトリにも配下にも書けない
+```
+
+**`reports/` 配下14ディレクトリのうち、これだけが uid 1002 所有**だった(他13件は `yoshi`)。ansy 側は `yoshi:yoshi` で正常。中身は 2026-06-27 の開発時の2件のみで、以後1件も書かれていない。
+
+**影響は sandbox に限らない。** 本番のラダーが実際に発火すると、リブートが成功してもレポート保存で play が失敗し、`recovery-probe.py` は `r.returncode != 0` を見て**リブート失敗と判定する**。`fire_ladder` はそこから hacritical 対象(sophos-fw / authy)の HA failover へ進むため、**成功した復旧が失敗と誤読され、不要な failover を起こす**。
+
+顕在化していなかったのは自律チェーンが本番で一度も実発火していないためである(`docs/ai/status.md` の既存 Watch)。
+
+**対処**: quory で `chown -R yoshi:homelab-ansible reports/recovery_investigations` を実施(quory は非保護ホストのため Coordinator 判断・事後報告)。task 538 / 541 のレポートが `yoshi` 所有で保存されたことで修正を確認した。
+
+**この修正は git の外にある。** quory を作り直せば再発する。Phase 2 のドリフト検出の対象へ含める(requirement R8 ⑥)。**Incident として起票するかは Yoshinobu の判断に委ねる** — 実害は出ていないが「窓は開いていた」類である。
 
 ## 3. 未実施・未解決
 
