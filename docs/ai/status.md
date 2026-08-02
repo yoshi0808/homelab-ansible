@@ -20,7 +20,7 @@
 
 | # | 項目 | 現在地 | 次にやること |
 |---|---|---|---|
-| 1 | **開発と運用の境界を、設定でなく能力の不在で作る** | requirement + 全体plan作成済(`docs/ai/reviews/dev_prod_boundary/`)。Next表にあった4項目(pveshの検証方法 / 権限の厳格化 / 開発と運用の環境分離 / Codexの調査面を広げSSH鍵配布を縮小する)を統合。**設計判断はD1〜D5まですべて合意済み、コードは未着手。** Phase 1〜3は能力を増やすだけで、失うのはPhase 4(`ann@homelab-ansible`鍵の削除)のみ | **Yoshinobuの実機作業から始まる** — pve2に`sandbox` VM作成・タグ付与・`state: ignored`でHA登録・Semaphoreテンプレート作成。並行してCoordinatorがPhase 1のplanを切る。**未確認前提はU3(pve1の`ann`権限)のみで、週末のpve1稼働時に確認する** |
+| 1 | **開発と運用の境界を、設定でなく能力の不在で作る**(`docs/ai/reviews/dev_prod_boundary/`) | **Phase 1 がほぼ完了。** `sandbox` VM(pve2、タグ`sandbox`、HA `state: ignored`)+ Semaphore `SANDBOX:`テンプレート3本 + ラダー3roleへのタグ適格化 + `recovery_probe`の検証用第2インスタンス(`recovery-probe-sandbox`、`state_dir`分離)。**2026-08-02に probe→ラダー連結と`stopped`→start を実データで観測**(S3の2/4)。検証インスタンスは**常設せず窓を開閉する**運用(週次パッチが`sandbox`をmuteしないため常駐すると衝突する)。Phase 2〜3は未着手 | **Phase 1 の残りは AC1 / AC2 の実行のみ**(手順は実装記録2.11に確定。`qm set --boot order=` で UEFI待機させて AC2 → 戻して AC1)。AC17はWatchへ持ち越し、flappingはdescope、独立Tester検証は通さない判断で記録済み。実行後にPhase 1クローズ → **Phase 2(配備物ドリフト検出)着手**。**U3(pve1の`ann`権限)は pve1 稼働時に確認** |
 
 ## Watch(観測待ち)
 
@@ -28,6 +28,7 @@
 
 | 項目 | 発火条件 | 検証手段 | 一次記録 | 最終確認 |
 |---|---|---|---|---|
+| **`recovery_ha_failover` の Phase 1-2 が未検証**(`sandbox` 相手) | pve1 が稼働しているとき | quory の Semaphore で `SANDBOX: Recovery ha failover (check)` を1回起動する。Phase 2 は `/cluster/status` のオンライン非現在ノードから移行先を選ぶため、**pve1 停止中は assert が正しく失敗し実行できない**(実装の不備ではない)。`--check` なので relocate は発行されない | `docs/ai/reviews/dev_prod_boundary/2026-08-02_003_implement_phase1_repo.md` 2.10 | 2026-08-02 |
 | quoryの作業ツリーを**Coordinator / Testerが直接確認できない** | quoryの作業ツリー状態を検証したいとき | 接続identity(`ann`)と所有者(`yoshi`)が異なり `dubious ownership` が `rc=128` で拒否する。回避には `safe.directory` が要り承認範囲外。**gitの状態は読めないが、ファイルの中身は読めるので内容で代替できる**(2026-08-01に実施)。`semaphore.db` も `ann` では開けない | `docs/ai/reviews/proxmox_patch_dryrun/2026-07-26_005_test_result.md`、`.../incident_auto_capture_step2/2026-07-28_004_quory_units_survey.md` | 2026-08-01 |
 | 月次Knowledge振り返りの**初回無人実行**。**障害評価(2本目の `claude -p`)を含む** | 毎月26日(期日の正本はauto-memory `MEMORY.md` 先頭行。ここへ写さない) | ansyで `systemctl list-timers ansible-knowledge-review.timer` と `journalctl -u ansible-knowledge-review`。実行後は作業ツリーに未commit差分が出る。**障害評価の成果物は `reports/incidents/_evaluations/` に出る(gitignore済みなので差分には現れない)。** 手動での通しは2026-07-28に成功済み | `roles/knowledge_review/`、`docs/ai/reviews/incident_auto_capture_step2/2026-07-28_020_u11_test_result.md` | 2026-07-28 |
 | Context陳腐化チェック追加後の**`knowledge_review_timeout`(1800秒)が足りるか** | 次回2026-08-26の月次実行 | `journalctl -u ansible-knowledge-review`でタイムアウト終了していないか確認。Testerのdecoy見積もりでは余裕が無い可能性が高いとされた(実測はデータが無く不可) | `docs/ai/reviews/knowledge_review_context_check/2026-07-29_005_u1_test_result.md` | 2026-07-29 |
@@ -62,6 +63,7 @@
 
 | 項目 | 内容 | 根拠 |
 |---|---|---|
+| **ACPI shutdown がエラーを返したとき強制電源断へ落ちない** | `roles/recovery_vm_reboot/tasks/main.yml` は guest agent shutdown(L84)に `ignore_errors: true` を付けるが、**ACPI shutdown(L95)には付けていない**。ACPI がタイムアウトでなくエラーを返すと play が落ち、L136 の強制停止フォールバックに到達しない。**`sophos-fw` は ACPI 一択の対象**であり、VM が locked(バックアップ・マイグレーション中)や paused のときに該当しうる。**欠陥と断定していない** — locked 中に強制停止を撃つより失敗して人間へ上げるほうが正しい場面もあり、どちらの設計を採るかの判断が要る | `docs/ai/reviews/dev_prod_boundary/2026-08-02_003_implement_phase1_repo.md` 2.9(`sandbox` 検証の副産物として発見) |
 | **月次評価に一次調査の成果物を読ませる**(R13) | 月次評価のprompt(`roles/knowledge_review/templates/incident-review-prompt.md.j2`)は `_investigations/` を読まない。一次調査が付いていないバンドルや、拾われないまま滞留している調査結果の指摘(IC-021)が働かない。**見送った理由(成果物の実物が1件も無い)は解消した** — 2026-08-01時点で10件ある。**次回の月次は2026-08-26** | `docs/ai/reviews/incident_auto_investigation/2026-07-31_001_requirement.md` §5 R13 |
 | **一次調査成果物の保持期間と、滞留の検知** | `_investigations/` は消す仕組みを持たず、拾われないまま溜まった成果物を知る経路も無い(IC-021の一次調査への適用)。**Policy §8が「未決」として明示している項目のうち、一次調査が本番稼働に入ったことで実際に効き始めた2件**である。バンドル本体は `incident_capture_retention_days`(30日)で消えるため、成果物だけが残り続ける | `docs/ai/policies/incident_capture_policy.md` §8 |
 | 障害捕捉 Step 1 の残件2件 | ①**R8(Semaphore外ジョブの保険)が未実装** ②シェルとPythonで staged mode 取得を**二重実装**している負債。**置き場が他に無いためここに持つ**(規律1の例外) | `docs/ai/reviews/incident_auto_capture/` |

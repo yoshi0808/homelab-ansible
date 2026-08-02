@@ -15,3 +15,7 @@ recovery_service_restart_units:
     - prometheus.service
     - loki.service
     - unpoller.service
+  # 検証用の使い捨て VM。本番と同一のコードで restart 経路を撃つための最小の
+  # エントリで、家庭向けサービスは載せない。
+  sandbox:
+    - ssh.service

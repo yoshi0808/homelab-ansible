@@ -65,10 +65,10 @@
           - target is defined
           - target | length > 0
           - target is match('^[A-Za-z0-9_-]+$')
-          - target in ['authy', 'sophos-fw']
+          - target in ['authy', 'sophos-fw', 'sandbox']
         fail_msg: >-
           target が不正です: '{{ target | default('') }}'.
-          HA フェイルオーバーの対象は authy / sophos-fw のみです。
+          HA フェイルオーバーの対象は authy / sophos-fw / sandbox のみです。
           (monnie は hacritical タグなしのため対象外)
   roles:
     - recovery_ha_failover

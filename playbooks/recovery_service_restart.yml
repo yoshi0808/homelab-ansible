@@ -62,10 +62,10 @@
           - target is defined
           - target | length > 0
           - target is match('^[A-Za-z0-9_-]+$')
-          - target in ['authy', 'monnie']
+          - target in ['authy', 'monnie', 'sandbox']
         fail_msg: >-
           target が不正です: '{{ target | default('') }}'.
-          サービス restart の対象は authy / monnie のみです。
+          サービス restart の対象は authy / monnie / sandbox のみです。
           (sophos-fw はサービス restart の対象外)
   roles:
     - recovery_service_restart

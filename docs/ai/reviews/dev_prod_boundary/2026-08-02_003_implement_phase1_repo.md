@@ -148,11 +148,138 @@ systemctl disable --now recovery-probe-sandbox    # 窓を閉じる
 
 なお `recovery_vm_reboot_guest_agent_targets` は `[authy, monnie]` のままであり、**`sandbox` は guest agent ではなく ACPI 経路を通る** — これは意図どおりで、sophos-fw と同じ経路を検証することになる。
 
+## 2.7 実機観測: probe → `stopped` → start(AC3 相当)
+
+2026-08-02 21:44〜21:51 に実施。検証インスタンスを一時的に起動し、Yoshinobu が PVE GUI で `sandbox` を停止、経過を観測したのち停止した。
+
+```
+21:46:15 → 21:50:27   PROBE sandbox: FAIL ['icmp','tcp:22'] (1/5) … (5/5)
+21:50:34   LADDER sandbox: pvesh status = stopped
+21:50:34   NOTIFY queued: [warning] VM 停止検知 → start 実行 - sandbox
+21:50:37   LADDER sandbox: vm start ok=True
+21:51:10   NOTIFY queued: [ok] 復旧確認 (start) - sandbox
+21:51:13 / 21:51:16   NOTIFY sent ×2
+```
+
+| 観測項目 | 結果 |
+|---|---|
+| 閾値(60秒×5)の到達 | 期待どおり |
+| `pick_pve_host` → `pvesh` 確証 | `stopped` を取得 |
+| **決定論分岐(reboot ではなく start)** | `pvesh_vm_start` が実行され `ok=True`。VM は `running` へ復帰 |
+| `wait_for_recovery` | 33秒で回復を検知 |
+| 通知 | warning → ok の2本。見出しに `sandbox` が入り本番障害と区別できる。**Slack 着信を Yoshinobu が確認** |
+| **`ladder.lock`** | `probe-sandbox/` 配下に生成され、`finally` で解放された。**本番側 `state_dir` には現れなかった**(AC14 相当が実データで成立) |
+| `firings-sandbox.json` | 1件記録(flapping カウンタ) |
+| **本番インスタンスへの影響** | 無し。`ExecMainStartTimestamp` は `10:20:25` のまま、本番 `state_dir` は `notify-queue` のみ |
+
+**削除した probe drill が訓練するはずだった配線が、実データで通ったことになる。** drill と異なり障害は偽物ではない。
+
+観測後、`systemctl disable --now recovery-probe-sandbox` で窓を閉じた(`disabled` / `inactive` を確認)。
+
+### 副作用: 検証由来の通知が incident spool に載る
+
+通知2本が quory の `reports/incidents/_spool/` に捕捉された(`slack_title: [recovery-probe] 復旧確認 (start) - sandbox` 等、`skip_notifications: False` / `check_mode: False`)。`homelab-incident-capture.timer` は active であり、このまま起票される。
+
+**削除せず残す判断(2026-08-02 Yoshinobu)。** 「検証を回したときにどう記録へ残るか」自体が成果物として意味を持ち、削除すると捕捉されたものを消す形になるため。ただし検証を繰り返すたびに溜まるので、**検証由来の通知を捕捉対象から外す条件**を requirement の P2 へ申し送る。
+
+## 2.8 AC18 の充足(2.7 の実行データによる)
+
+**別途の実行を要しない。** 2.7 の実行中、`sandbox` は 21:45 頃の停止から probe が起動をかける 21:50:37 まで**約5分間 `stopped` のまま**であり、**HA は一度も起動を試みていない**。これは `state: ignored` のサービスが CRM のマネージャ状態から除外される(`PVE/HA/Manager.pm` L1047 / L1059-1064)ことの実データによる裏づけであり、AC18(「`ignored` のVMをHAが自動起動しないこと」)を満たす。
+
+副次的に、R5 が旧 R5 から引き取った懸念 —「HA管理下のVMは停止すると自動起動され、ラダーの『VMを起こす』検証と競合する」— が `state: ignored` によって実際に解消されていることも確認できた。
+
+## 2.9 発見: ACPI shutdown の失敗時に強制電源断へ落ちない
+
+`roles/recovery_vm_reboot/tasks/main.yml` の Phase 2 は、2つの shutdown 手段で**エラー時の扱いが非対称**である。
+
+| タスク | `ignore_errors` |
+|---|---|
+| L84 `Send guest agent shutdown command (authy / monnie)` | **あり** |
+| L95 `Send ACPI shutdown command (sophos-fw or agent shutdown failed)` | **なし** |
+
+ACPI shutdown が**タイムアウトではなくエラー**を返した場合、play はそこで失敗し、L136 の `Force power off if soft shutdown timed out (fallback)` に到達しない。playbook ヘッダは「ACPI shutdown が timeout の場合は `pvesh .../status/stop`(強制)にフォールバック」と述べており、エラー時の経路は想定されていない。
+
+**`sophos-fw` は guest agent を持たず ACPI 一択の対象である。** VM が locked(バックアップ・マイグレーション中)や paused の状態では `pvesh create .../status/shutdown` が非ゼロを返しうるため、その場合は強制停止まで進まない。
+
+**これを欠陥と断定しない。** locked 中に強制停止を撃つほうが有害な場面もあり、失敗して人間へ上げるのが正しい設計でもありうる。**判断が要る非対称**として `docs/ai/status.md` の Next へ載せ、本案件では扱わない(Phase 1 の scope 外)。
+
+なお AC2 を案B(起動順を空にして UEFI シェルで待たせる)で行う場合、`pvesh status/shutdown` は QEMU に受理されて成功し、ゲストが応答しないことで**タイムアウト側**に落ちる。したがって案Bは本節の非対称に影響されず、意図どおり強制電源断の経路を通る。
+
+## 2.10 Phase 1 クローズにあたっての判断(2026-08-02 Yoshinobu合意)
+
+| # | 事項 | 判断 |
+|---|---|---|
+| ① | AC1 / AC2 | **実施する。** 手順は 2.11。Yoshinobu が Semaphore と `qm set` で起動する |
+| ② | **AC17**(failover `--check`) | **持ち越し。** pve1 が停止中で Phase 2 の「オンラインな非現在ノード」assert が通らない。**実装の不備ではなく前提の不在**。pve1 稼働時に `SANDBOX: Recovery ha failover (check)` を1回起動して確認する。`docs/ai/status.md` の Watch へ検証手段つきで載せる |
+| ② | **flapping**(24時間に3回のラダー発火) | **descope。** VM停止3回を要し、得られるのは「カウンタが3で止まる」ことの確認に限られる。費用対効果が見合わない |
+| ③ | **独立 Tester による受入判定** | **通さずにクローズする。** 本セッションは subagent を起動しない前提で運用したため。`docs/ai/roles/coordinator.md`「受入条件(AC)の実機検証をCoordinator自身で済ませない」に対する**明示的な例外**である。判定の追試可能性は、quory の journal と本記録 2.7 の一次記録によって担保する |
+
+## 2.10.1 見落とし: `target` 名の allowlist が playbook 側にもう1枚あった
+
+**Semaphore task #533 が失敗して判明した(2026-08-02)。** 原因は pve1 の停止ではない — `proxmox_exec_node` は pve1 の到達性 probe を `...ignoring` で正しく処理し pve2 を選んでいた。実際の失敗はこれである。
+
+```
+pve2 | Validate target variable (prevent path traversal)
+  assertion: target in ['authy', 'monnie', 'sophos-fw']
+  msg: target が不正です: 'sandbox'.
+```
+
+**ラダーのゲートはタグ1枚ではなく、少なくとも3層あった。**
+
+| 層 | 場所 | 内容 | 当初の把握 |
+|---|---|---|---|
+| 1 | playbook の `pre_tasks` | `target` 名の allowlist(path traversal 防止) | **見落としていた** |
+| 2 | role の Phase 1 | Proxmox タグの照合 | 把握・修正済み |
+| 3 | role defaults | target ごとの対象サービス表(`recovery_service_restart` のみ) | **見落としていた** |
+
+`2026-08-02_001_requirement.md` 4.4 に書いた「ホスト名のハードコードはどこにもない」は**誤りである**。role の Phase 1 だけを読んで断定し、playbook の `pre_tasks` を確認していなかった。同 4.4 の「タグは2枚目のゲート」という結論自体は変わらないが、1枚目の実体は `recovery_probe_targets` ではなく**この playbook 側 allowlist** である。
+
+### 修正
+
+| ファイル | 変更 |
+|---|---|
+| `playbooks/recovery_vm_reboot.yml` L69 | `['authy','monnie','sophos-fw']` → `+ 'sandbox'` |
+| `playbooks/recovery_ha_failover.yml` L68 | `['authy','sophos-fw']` → `+ 'sandbox'` |
+| `playbooks/recovery_service_restart.yml` L65 | `['authy','monnie']` → `+ 'sandbox'` |
+| `roles/recovery_service_restart/defaults/main.yml` | `recovery_service_restart_units` へ `sandbox: [ssh.service]` を追加(層3) |
+
+いずれも**リテラルの追加**であり、変数化していない(層2と同じ理由)。`fail_msg` の列挙も実態へ合わせた。
+
+### 再発防止としてやったこと
+
+ラダー経路の playbook・role・defaults を対象に、`authy` / `monnie` / `sophos-fw` を名指ししている箇所を**網羅的に洗った**。残る名指しは次の3件で、いずれも意図どおりのため変更しない。
+
+- `roles/recovery_vm_reboot/defaults/main.yml` の `recovery_vm_reboot_guest_agent_targets: [authy, monnie]` — `sandbox` を含めないことで **ACPI 経路(= sophos-fw と同じ)を通す**
+- `roles/recovery_service_restart/tasks/main.yml` の `target != 'sophos-fw'` — sandbox に影響しない
+- `roles/recovery_vm_reboot/tasks/main.yml` L84 / L95 のタスク名(文字列のみ)
+
+## 2.11 AC1 / AC2 の実行手順(未実行)
+
+順番が重要である。起動順を戻す前に AC2 を撃つ。
+
+```
+1. pve2:      sudo qm set 2000 --boot order=          # UEFI シェルで待たせる
+2. Semaphore: SANDBOX: Recovery vm reboot             # AC2 = 強制電源断フォールバック
+3. pve2:      sudo qm set 2000 --boot order=scsi0     # 起動順を戻す
+4. Semaphore: SANDBOX: Recovery vm reboot             # AC1 = 正常系
+```
+
+**期待する観測**
+
+| 手順 | 期待 |
+|---|---|
+| 2 | ACPI shutdown は成功するがゲストが応答せず、`recovery_vm_reboot_soft_shutdown_timeout_s`(60秒)でタイムアウト → `Force power off ...` が実行され `_rvr_used_force_stop: true` → start → running。**終了コード0**、レポートに強制停止した旨が残る |
+| 4 | ACPI shutdown でゲストが正常停止(60秒以内)→ 強制停止タスクは skip → start → running。**終了コード0** |
+
+いずれも `reports/recovery_investigations/sandbox/` にJSONレポートが生成され、Slack へ `[recovery_vm_reboot] ... - sandbox` の通知が出る。
+
 ## 3. 未実施・未解決
 
 | # | 内容 |
 |---|---|
-| N1 | **実機ACは未実施**(AC1 / AC2 / AC3 / AC17 / AC18)。配備は完了したが(2.5)、AC1 / AC3 は `sandbox.internal` の名前解決(N5)が要る。AC2(強制電源断フォールバック)と AC17(failover `--check`)は Semaphore テンプレートから起動でき、DNS を待たずに実施可能。**AC14 の前提(state_dir 分離)は 2.5 で実機確認済み** |
+| N1 | **AC3 / AC14 / AC18 は実機データで充足**(2.7 / 2.8)。**未実行は AC1 / AC2 のみ**で、手順は 2.11 に確定済み。**AC17 は持ち越し(pve1停止中)、flapping は descope**(2.10) |
+| N8 | ~~独立 Tester の要否~~ **判断済み(2.10 ③)。通さずにクローズする。** 例外である事実と理由を 2.10 に記録した |
+| N9 | **ACPI shutdown のエラー時に強制電源断へ落ちない非対称**(2.9)。本案件の scope 外。`docs/ai/status.md` の Next へ載せた |
 | N2 | ~~対象リストの置き場所~~ **決定・実施済み**(2.5)。専用 playbook の `vars` |
 | N5 | ~~`sandbox.internal` が未登録~~ **解消(2026-08-02)。** DNS と ansy / quory の `/etc/hosts` の双方へ登録済み。quory から `getent` / ICMP / tcp:22 を3回連続で確認 |
 | N7 | **内部DNSを提供しているのは `sophos-fw` 自身**であり、再起動・フェイルオーバー中は名前解決ができない(2026-08-02 Yoshinobu指摘)。ラダーの第一の標的が DNS サーバでもあるため、DNS だけに頼ると「sophos-fw を直すために pve1 を名前で引く」で詰む。**quory の `/etc/hosts` がこの循環を切っており、便宜の重複ではなく設計上の耐障害機構である**。`docs/ai/context/system/autonomous-recovery.md` に追記し、requirement R8 ⑤ でドリフト検出の対象に加えた |

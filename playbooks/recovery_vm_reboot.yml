@@ -66,9 +66,9 @@
           - target is defined
           - target | length > 0
           - target is match('^[A-Za-z0-9_-]+$')
-          - target in ['authy', 'monnie', 'sophos-fw']
+          - target in ['authy', 'monnie', 'sophos-fw', 'sandbox']
         fail_msg: >-
           target が不正です: '{{ target | default('') }}'.
-          VM リブートの対象は authy / monnie / sophos-fw のみです。
+          VM リブートの対象は authy / monnie / sophos-fw / sandbox のみです。
   roles:
     - recovery_vm_reboot
