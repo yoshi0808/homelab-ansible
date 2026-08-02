@@ -40,14 +40,20 @@
         that: _rhf_vm | length > 0
         fail_msg: "対象 VM が見つかりません: target={{ target }}"
 
-    - name: Assert target has hacritical tag (HA failover は hacritical のみ)
+    # 適格タグはここにリテラルで書く。role default 等の変数へ括り出さない —
+    # 変数は -e で上書きでき、任意の VM をラダー対象にできてしまう。
+    # sandbox は使い捨ての検証用 VM。HA 登録が state: ignored の間は CRM が
+    # 当該サービスをマネージャ状態から除外するため、Phase 3 の relocate は
+    # 発行しても VM を動かさない。
+    - name: Assert target has hacritical or sandbox tag (ops は対象外)
       ansible.builtin.assert:
         that:
           - _rhf_vm.tags is defined
-          - _rhf_vm.tags is search('(^|;)hacritical(;|$)')
+          - (_rhf_vm.tags is search('(^|;)hacritical(;|$)')) or
+            (_rhf_vm.tags is search('(^|;)sandbox(;|$)'))
         fail_msg: >-
           対象外: {{ target }} は HA フェイルオーバーの対象ではありません。
-          hacritical タグが必要です (monnie は ops タグのため対象外)。
+          hacritical または sandbox タグが必要です (monnie は ops タグのため対象外)。
           (実際のタグ: {{ _rhf_vm.tags | default('(none)') }})
 
     - name: Store current VM node

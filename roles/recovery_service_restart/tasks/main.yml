@@ -39,16 +39,20 @@
         that: _rsr_vm | length > 0
         fail_msg: "対象 VM が見つかりません: target={{ target }}"
 
+    # 適格タグはここにリテラルで書く。role default 等の変数へ括り出さない —
+    # 変数は -e で上書きでき、任意の VM をラダー対象にできてしまう。
+    # sandbox は使い捨ての検証用 VM。
     - name: Assert target is eligible for service restart
       ansible.builtin.assert:
         that:
           - _rsr_vm.tags is defined
           - (_rsr_vm.tags is search('(^|;)hacritical(;|$)')) or
-            (_rsr_vm.tags is search('(^|;)ops(;|$)'))
+            (_rsr_vm.tags is search('(^|;)ops(;|$)')) or
+            (_rsr_vm.tags is search('(^|;)sandbox(;|$)'))
           - target != 'sophos-fw'
         fail_msg: >-
           対象外: {{ target }} はサービス restart の対象ではありません。
-          hacritical または ops タグが必要、かつ sophos-fw は除外されます。
+          hacritical、ops または sandbox タグが必要、かつ sophos-fw は除外されます。
           (実際のタグ: {{ _rsr_vm.tags | default('(none)') }})
 
     - name: Assert target VM is running

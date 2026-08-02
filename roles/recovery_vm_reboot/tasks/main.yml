@@ -40,15 +40,21 @@
         that: _rvr_vm | length > 0
         fail_msg: "対象 VM が見つかりません: target={{ target }}"
 
+    # 適格タグはここにリテラルで書く。role default 等の変数へ括り出さない —
+    # 変数は -e で上書きでき、任意の VM をラダー対象にできてしまう。
+    # sandbox は使い捨ての検証用 VM で、本番と同一のコードでラダーを撃つために
+    # 適格とする。撃つ相手は target 名の指名で決まるため、このタグを足しても
+    # 本番が到達できる対象は増えない。
     - name: Assert target is eligible for VM reboot
       ansible.builtin.assert:
         that:
           - _rvr_vm.tags is defined
           - (_rvr_vm.tags is search('(^|;)hacritical(;|$)')) or
-            (_rvr_vm.tags is search('(^|;)ops(;|$)'))
+            (_rvr_vm.tags is search('(^|;)ops(;|$)')) or
+            (_rvr_vm.tags is search('(^|;)sandbox(;|$)'))
         fail_msg: >-
           対象外: {{ target }} は VM リブートの対象ではありません。
-          hacritical または ops タグが必要です。
+          hacritical、ops または sandbox タグが必要です。
           (実際のタグ: {{ _rvr_vm.tags | default('(none)') }})
 
     - name: Store verified VM metadata

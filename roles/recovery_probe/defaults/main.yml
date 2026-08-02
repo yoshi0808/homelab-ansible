@@ -42,6 +42,29 @@ recovery_probe_pve_hosts:
 # (handlers/main.yml)。この値が決めるのは enable + 起動の有無だけである。
 recovery_probe_service_enabled: false
 
+# インスタンス名。空文字列は本番インスタンスを意味し、既定値のままなら unit 名・
+# 設定パス・状態ディレクトリはすべて従来と同一の値になる(値を変えないこと自体が
+# 要件である — ここがずれると本番 daemon が別物として再配備される)。
+#
+# 値を入れると第2インスタンスになる。**daemon 本体は共有する** — 同じ
+# recovery-probe.py を別の設定で起動するのであって、コードは複製しない。
+#
+# 分離が必要なのは state_dir である。fire_ladder の実行中ロックは
+# `state_dir/ladder.lock` であり target 別ではない(flapping の
+# `firings-<target>.json` とは異なる)。検証用インスタンスを本番の state_dir で
+# 動かすと、検証中に本番の障害が起きたときラダーが `LADDER skip: lock held` で
+# 見送られる。
+recovery_probe_instance: ""
+
+recovery_probe_unit_name: "recovery-probe{{ ('-' ~ recovery_probe_instance) if recovery_probe_instance else '' }}"
+recovery_probe_config_path: "/etc/homelab-recovery/{{ recovery_probe_unit_name }}.json"
+recovery_probe_state_dir: "/var/lib/homelab-recovery/probe{{ ('-' ~ recovery_probe_instance) if recovery_probe_instance else '' }}"
+
+# mute と監視一時停止フラグも既定は本番の値。第2インスタンスで本番と共有すると、
+# 本番の mute が検証側を黙らせる(逆も同様)ため、分けるなら明示的に上書きする。
+recovery_probe_mute_dir: /var/lib/homelab-recovery/mute
+recovery_probe_monitoring_pause_flag: /var/lib/recovery-exec/workspace/monitoring-paused
+
 # 検知対象。action: ladder = 決定論ラダー(VM reboot → hacritical なら failover)/
 # notify = 通知のみ
 #

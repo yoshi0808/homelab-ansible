@@ -1,0 +1,67 @@
+---
+# tester-gate: check-mode-native — 本体は roles/recovery_probe であり、分類は
+# playbooks/recovery_probe_setup.yml と同一である。ディレクトリ作成・設定・unit
+# 配置は Ansible 標準の check_mode で安全にプレビューでき、本番へ作用するのは
+# daemon の enable+start / restart のみで、roles/recovery_probe/tasks/main.yml と
+# handlers/main.yml が when: not ansible_check_mode でゲートする。詳細は
+# docs/ai/policies/ansible_test_safety_policy.md。
+#
+# recovery-probe の**検証用第2インスタンス**を quory へ配備する。
+#
+# 本番インスタンス(playbooks/recovery_probe_setup.yml)とはコードを共有し、
+# 設定と状態ディレクトリだけを分ける。daemon 本体は両インスタンスとも
+# /usr/local/sbin/recovery-probe.py であり、複製しない。
+#
+#   本番        : unit recovery-probe          state /var/lib/homelab-recovery/probe
+#   検証(本file): unit recovery-probe-sandbox  state /var/lib/homelab-recovery/probe-sandbox
+#
+# state_dir を分ける理由は fire_ladder の実行中ロックである。
+# `state_dir/ladder.lock` は target 別ではないため、共有すると検証中に本番の
+# 障害が起きたときラダーが `LADDER skip: lock held` で見送られる。
+#
+# 使用方法:
+#   ansible-playbook playbooks/recovery_probe_sandbox_setup.yml -l quory
+#
+# **既定では enable / start しない。** 起動は、標的 VM(sandbox)が名前解決でき
+# 到達可能になってから、意図的に行う — 到達できない標的を監視対象にしたまま
+# 起動すると、閾値到達のたびにラダーが発火し flapping エスカレーションに至る。
+#
+# 設計: docs/ai/reviews/dev_prod_boundary/2026-08-02_001_requirement.md R6
+- name: Deploy recovery-probe verification instance (sandbox)
+  hosts: control_nodes
+  gather_facts: true
+  become: true
+  vars:
+    recovery_probe_instance: sandbox
+
+    # 本番と共有しない。共有すると本番の mute が検証側を黙らせる(逆も同様)。
+    #
+    # **このインスタンスに homelab-mute は効かない。** homelab-mute が書くのは
+    # 本番の mute ディレクトリであり、ここで指定した先ではない。mute ファイルが
+    # 無いときの mute_remaining() は FileNotFoundError を握って 0 を返すため、
+    # 検証インスタンスは常に非 mute として動く。止めたいときは
+    # `systemctl stop recovery-probe-sandbox` を使う。
+    recovery_probe_mute_dir: /var/lib/homelab-recovery/mute-sandbox
+    recovery_probe_monitoring_pause_flag: /var/lib/homelab-recovery/probe-sandbox/monitoring-paused
+
+    # 標的の到達性が整うまで起動しない(上記ヘッダ参照)。
+    recovery_probe_service_enabled: false
+
+    # 検証用の標的のみ。本番の3件(sophos-fw / authy / monnie)は載せない。
+    #
+    # failover: false — sandbox は HA へ state: ignored で登録してあり、CRM が
+    # 当該サービスをマネージャ状態から除外するため relocate を発行しても VM は
+    # 動かない。ラダーから呼ぶと Phase 4 の待機 300 秒を消費して必ず
+    # エスカレーションするだけなので、failover 段は
+    # `SANDBOX: Recovery ha failover (check)` テンプレート(--check)で
+    # 個別に検証する。
+    recovery_probe_targets:
+      sandbox:
+        host: sandbox.internal
+        probes: ["icmp", "tcp:22"]
+        action: ladder
+        failover: false
+  tasks:
+    - name: Deploy recovery-probe (sandbox instance)
+      ansible.builtin.include_role:
+        name: recovery_probe

@@ -12,7 +12,7 @@
 # ことはない(state: restarted は停止中のサービスを起動してしまうため、この区別が要る)。
 - name: Restart recovery-probe
   ansible.builtin.systemd:
-    name: recovery-probe
+    name: "{{ recovery_probe_unit_name }}"
     daemon_reload: true
     state: restarted
   become: true

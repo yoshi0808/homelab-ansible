@@ -1,5 +1,5 @@
 [Unit]
-Description=Homelab recovery probe (pull detection for autonomous recovery)
+Description=Homelab recovery probe (pull detection for autonomous recovery){{ ' [instance: ' ~ recovery_probe_instance ~ ']' if recovery_probe_instance else '' }}
 Documentation=file://{{ recovery_probe_repo_dir }}/docs/ai/reviews/autonomous_recovery/2026-07-02_001_requirement.md
 After=network-online.target
 Wants=network-online.target
@@ -7,7 +7,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 User={{ recovery_probe_user }}
-Environment=RECOVERY_PROBE_CONFIG=/etc/homelab-recovery/recovery-probe.json
+Environment=RECOVERY_PROBE_CONFIG={{ recovery_probe_config_path }}
 ExecStart=/usr/bin/python3 /usr/local/sbin/recovery-probe.py
 Restart=on-failure
 RestartSec=30
