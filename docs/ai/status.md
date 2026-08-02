@@ -20,7 +20,7 @@
 
 | # | 項目 | 現在地 | 次にやること |
 |---|---|---|---|
-**進行中の案件は無い。**
+| 1 | **開発と運用の境界を、設定でなく能力の不在で作る** | requirement + 全体plan作成済(`docs/ai/reviews/dev_prod_boundary/`)。Next表にあった4項目(pveshの検証方法 / 権限の厳格化 / 開発と運用の環境分離 / Codexの調査面を広げSSH鍵配布を縮小する)を統合。**設計判断はD1〜D5まですべて合意済み、コードは未着手。** Phase 1〜3は能力を増やすだけで、失うのはPhase 4(`ann@homelab-ansible`鍵の削除)のみ | **Yoshinobuの実機作業から始まる** — pve2に`sandbox` VM作成・タグ付与・`state: ignored`でHA登録・Semaphoreテンプレート作成。並行してCoordinatorがPhase 1のplanを切る。**未確認前提はU3(pve1の`ann`権限)のみで、週末のpve1稼働時に確認する** |
 
 ## Watch(観測待ち)
 
@@ -64,11 +64,7 @@
 |---|---|---|
 | **月次評価に一次調査の成果物を読ませる**(R13) | 月次評価のprompt(`roles/knowledge_review/templates/incident-review-prompt.md.j2`)は `_investigations/` を読まない。一次調査が付いていないバンドルや、拾われないまま滞留している調査結果の指摘(IC-021)が働かない。**見送った理由(成果物の実物が1件も無い)は解消した** — 2026-08-01時点で10件ある。**次回の月次は2026-08-26** | `docs/ai/reviews/incident_auto_investigation/2026-07-31_001_requirement.md` §5 R13 |
 | **一次調査成果物の保持期間と、滞留の検知** | `_investigations/` は消す仕組みを持たず、拾われないまま溜まった成果物を知る経路も無い(IC-021の一次調査への適用)。**Policy §8が「未決」として明示している項目のうち、一次調査が本番稼働に入ったことで実際に効き始めた2件**である。バンドル本体は `incident_capture_retention_days`(30日)で消えるため、成果物だけが残り続ける | `docs/ai/policies/incident_capture_policy.md` §8 |
-| **`pvesh` が関わる本番への検証方法** | `recovery_probe` の probe drill を削除した結果、probe → pveノード選定 → `pvesh` 確証 → ラダー起動という**配線を訓練する経路が無くなる**。ansyから本体まで含めた冪等でない検証は行わないという前提の下で、どう確かめるかを決める必要がある | Yoshinobu表明(2026-08-02)「pveshが関係する本番への検証方法は別途Coordinatorと相談する」。`docs/ai/reviews/tester_mode_full_removal/2026-08-02_001_requirement.md` OQ1の決定 |
 | 障害捕捉 Step 1 の残件2件 | ①**R8(Semaphore外ジョブの保険)が未実装** ②シェルとPythonで staged mode 取得を**二重実装**している負債。**置き場が他に無いためここに持つ**(規律1の例外) | `docs/ai/reviews/incident_auto_capture/` |
-| **権限の厳格化(Yoshinobuが実施予定)** | **Yoshinobuが権限を厳格化する方向で調整すると表明した(2026-08-02)。「やりたくても出来ない」制約が課される。** ブロックされたら別経路を探さず止めて報告する扱いは変えない(`docs/ai/core.md`「安全機構がブロックしたとき」)。**設計時の材料として渡した事実**: 2026-08-02、`ssh` での状態を変えない確認からしか出てこなかった発見が2件あり、うち1件(`incident-capture-collector.py` が配備物として旧版のまま)は実害の窓が開いていた。もう1件(`recovery-probe.py` のdrill生存)は潜在経路だった。**どちらもWatchでは拾えず実機で気づいた。書込系を締めるのと読取まで締まるのとでは検出力が変わる** | Yoshinobu表明(2026-08-02)。関連は本表の「開発と運用の環境分離」 |
-| **開発と運用の環境分離(長期議論。着手時期未定)** | **開発側(Claude Code)が本番ホストへ直接コマンドを叩けること自体が事故の素地**である。現在はharness(`.claude/settings.json` の `autoMode`)で抑止しているが、これは「設計で作った境界」ではなく設定に依存した抑止であり、`docs/ai/memory/lessons/permission-boundaries-must-be-designed-not-prompted.md` が危ういと指摘している形に当たる。一方で**本プロジェクトには開発環境(本番の複製)が無い**ため、本番への到達を全面的に断つと検証手段が消えて開発効率が落ちる。「開発=Claude Code / 運用=Codex」の棲み分けを前提に、**環境をどう分けるか・役割分担をどう引き直すか**を議論する。単発の改修ではなく設計判断を伴う | Yoshinobu表明(2026-08-01)。関連する既存の方向として本表の「Codexの調査面を広げ、SSH鍵配布を縮小する」と工程側の「Operator役の新設」があり、**3件は同じ問い(開発と運用の境界をどこに引くか)の別の面**である |
-| **Codexの調査面を広げ、SSH鍵配布を縮小する**(方向。着手時期未定) | `homelab-investigate-*` がSSHで取る情報のうち**ログ系は既にLokiへ集約済み**で、`loki-count` / `loki-window` が**鍵を使わない調査経路の実例**になっている。残るのは①リアルタイムの現在値②復旧アクション。②はSemaphoreテンプレート経由へ寄せれば鍵は3本から実質1本へ減るが、境界が forced command から「どのテンプレートを起動できるか」へ移るため新しい面のゲートが要る。**ターゲット側のforced commandは、execpolicyが防御層から外れた現在いちばん硬く効いている層**であり、「無くす」ではなく「同じ強さへ置き換える」形にしないと実質的な防御が下がる | `roles/recovery_exec/defaults/main.yml`、`docs/ai/memory/incidents/2026-07-31_codex-execpolicy-allowlist-not-enforcing.md` |
 | 時刻表記JST規約をrepoへ明文化 | 規約本体がCoordinatorのauto-memoryにあり、repo内は `autonomous_recovery_policy.md` L174(通知文言の1行)のみ。Implementerが従うべき規約なのでrepo側が正本であるべき。**障害バンドルがSemaphoreのUTCとreportsのJSTを混在させる** | `grep -rn "JST" docs/` が通知文言1件のみ |
 | `proxmox_snapshot_check` の時刻が**コントローラの暗黙システムTZに依存**している | `roles/proxmox_snapshot_check/tasks/main.yml:57` の `strftime` はJinjaの既定(`utc=False`)を使うため、ansyのシステムTZが変わると出力もずれる。repo内で唯一このクラス。**急がない、かつ安易に直すと悪化する** — `%z` が実オフセットを出すので**TZが変わっても嘘にはならない**。`+09:00` の直書きは UTC の値に JST ラベルを付ける「詐称」になる | `docs/ai/reviews/ubuntu_nightly_reboot_check/2026-07-30_004_review_jst_sweep.md` |
 | **reboot後のpost-check待ち時間をPolicyに規定するか** | `retries: 12` / `delay: 10` と `wait_for timeout: 120` は**実装判断のみで、Policyに根拠が無い**(UV系・TS系・AR系のいずれにも規定なし)。値そのものは実測に対し6倍の余裕があり急がないが、次に同種のチェックを足す人が拠るものが無い | `docs/ai/reviews/ubuntu_nightly_reboot_check/2026-07-30_002_policy_review.md` |
