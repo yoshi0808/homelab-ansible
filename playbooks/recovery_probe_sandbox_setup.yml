@@ -22,9 +22,25 @@
 # 使用方法:
 #   ansible-playbook playbooks/recovery_probe_sandbox_setup.yml -l quory
 #
-# **既定では enable / start しない。** 起動は、標的 VM(sandbox)が名前解決でき
-# 到達可能になってから、意図的に行う — 到達できない標的を監視対象にしたまま
-# 起動すると、閾値到達のたびにラダーが発火し flapping エスカレーションに至る。
+# **既定では enable / start しない。常設もしない。** 検証したい窓の間だけ
+#
+#   systemctl enable --now recovery-probe-sandbox     # 窓を開ける
+#   systemctl disable --now recovery-probe-sandbox    # 窓を閉じる
+#
+# として使い、終わったら止める。常時起動しない理由は2つある。
+#
+# 1. **週次パッチと衝突する。** `proxmox_evacuate_node` は `prefer*` タグを持たない
+#    VM を移行対象にせず、Phase 6 で「残って稼働している VM」として停止する。
+#    sandbox はこれに該当するため、パッチ中に停止される。probe が常駐していると
+#    5 分後にラダーが発火し、**パッチ中のノードで VM を起動しにいく**。
+#    週次パッチが mute するのは authy / monnie / sophos-fw の3件だけで、
+#    sandbox は含まれない。
+# 2. **常駐させても回帰検出は増えない。** 動かすコードは本番 probe と同一であり、
+#    本番インスタンスが実 target に対して常時走っている。検証インスタンスを
+#    足しても新しく捕まるものは無い。
+#
+# 標的が到達不能なまま起動しないこと。閾値到達のたびにラダーが発火し flapping
+# エスカレーションに至る。
 #
 # 設計: docs/ai/reviews/dev_prod_boundary/2026-08-02_001_requirement.md R6
 - name: Deploy recovery-probe verification instance (sandbox)
@@ -34,15 +50,13 @@
   vars:
     recovery_probe_instance: sandbox
 
-    # 本番と共有しない。共有すると本番の mute が検証側を黙らせる(逆も同様)。
+    # mute ディレクトリと監視一時停止フラグは**本番と共有する**(= 既定値のまま
+    # 上書きしない)。mute_remaining() が読むのは `<mute_dir>/<target>.json` で
+    # target ごとに別ファイルであり、本番の target 3件と `sandbox` は名前が
+    # 重ならないため干渉しない。共有することで `homelab-mute sandbox <分>` が
+    # そのまま効き、暴走時の安全弁になる。
     #
-    # **このインスタンスに homelab-mute は効かない。** homelab-mute が書くのは
-    # 本番の mute ディレクトリであり、ここで指定した先ではない。mute ファイルが
-    # 無いときの mute_remaining() は FileNotFoundError を握って 0 を返すため、
-    # 検証インスタンスは常に非 mute として動く。止めたいときは
-    # `systemctl stop recovery-probe-sandbox` を使う。
-    recovery_probe_mute_dir: /var/lib/homelab-recovery/mute-sandbox
-    recovery_probe_monitoring_pause_flag: /var/lib/homelab-recovery/probe-sandbox/monitoring-paused
+    # 分離が要るのは state_dir だけである(`ladder.lock` が target 別でないため)。
 
     # 標的の到達性が整うまで起動しない(上記ヘッダ参照)。
     recovery_probe_service_enabled: false

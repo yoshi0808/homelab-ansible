@@ -109,6 +109,24 @@ ExecStart              : /usr/bin/python3 /usr/local/sbin/recovery-probe.py   �
 | 状態ディレクトリ | `/var/lib/homelab-recovery/probe` と `probe-sandbox` が**別に存在**(**AC14 の前提が実機で成立**) |
 | 検証側 config | `state_dir` / `mute_dir` / `monitoring_pause_flag` が本番と別、`targets` は `sandbox` の1件のみ |
 
+### 2.5.1 配備後の設計修正(2026-08-02、週次パッチとの相互作用の確認により)
+
+初回配備の直後に2点を直し、再配備した(`changed=1`。本番 config・本番 daemon の起動時刻とも無変更を再確認済み)。
+
+**修正1: mute ディレクトリと監視一時停止フラグを本番と共有へ戻した。** 分離した当初の理由(「共有すると本番の mute が検証側を黙らせる」)は誤りだった — `mute_remaining()` が読むのは `<mute_dir>/<target>.json` で target ごとに別ファイルであり、本番の3件と `sandbox` は名前が重ならないため干渉しない。分離すると `homelab-mute sandbox <分>` が効かず、暴走時の安全弁を失う。**分離が要るのは `state_dir` だけである**(`ladder.lock` が target 別でないため)。
+
+**修正2: 検証インスタンスを常設しないことにした。** 理由は2つ。
+
+1. **週次パッチと衝突する。** `proxmox_evacuate_node` は `prefer*` タグを持たない VM を移行対象にせず、Phase 6 で「残って稼働している VM」として停止する。`sandbox` はこれに該当するためパッチ中に停止され、probe が常駐していると5分後にラダーが発火して**パッチ中のノードで VM を起動しにいく**。週次パッチが mute するのは `authy` / `monnie` / `sophos-fw` の3件のみで(`playbooks/proxmox_patch_weekly_full.yml` L514 / L522 / L530)、`sandbox` は含まれない。
+2. **常駐させても回帰検出は増えない。** 動かすコードは本番 probe と同一で、本番インスタンスが実 target に対して常時走っている。
+
+運用は「窓を開けて閉じる」形とし、playbook ヘッダに明記した。
+
+```
+systemctl enable --now recovery-probe-sandbox     # 窓を開ける
+systemctl disable --now recovery-probe-sandbox    # 窓を閉じる
+```
+
 **既定では enable / start しない。** 標的が到達不能なまま起動すると、閾値到達のたびにラダーが発火して flapping エスカレーションに至るため。
 
 ### 検証インスタンスの標的設定(N2 の決定)
@@ -136,8 +154,9 @@ ExecStart              : /usr/bin/python3 /usr/local/sbin/recovery-probe.py   �
 |---|---|
 | N1 | **実機ACは未実施**(AC1 / AC2 / AC3 / AC17 / AC18)。配備は完了したが(2.5)、AC1 / AC3 は `sandbox.internal` の名前解決(N5)が要る。AC2(強制電源断フォールバック)と AC17(failover `--check`)は Semaphore テンプレートから起動でき、DNS を待たずに実施可能。**AC14 の前提(state_dir 分離)は 2.5 で実機確認済み** |
 | N2 | ~~対象リストの置き場所~~ **決定・実施済み**(2.5)。専用 playbook の `vars` |
-| N5 | **`sandbox.internal` の内部DNSレコードが未登録**(2.6)。検証インスタンスを起動できる前提が揃っていない。DNS は Sophos 側のため Yoshinobu 作業 |
-| N6 | 検証インスタンスには `homelab-mute` が効かない(mute ディレクトリが別)。止めるときは `systemctl stop recovery-probe-sandbox`。playbook ヘッダに明記した |
+| N5 | ~~`sandbox.internal` が未登録~~ **解消(2026-08-02)。** DNS と ansy / quory の `/etc/hosts` の双方へ登録済み。quory から `getent` / ICMP / tcp:22 を3回連続で確認 |
+| N7 | **内部DNSを提供しているのは `sophos-fw` 自身**であり、再起動・フェイルオーバー中は名前解決ができない(2026-08-02 Yoshinobu指摘)。ラダーの第一の標的が DNS サーバでもあるため、DNS だけに頼ると「sophos-fw を直すために pve1 を名前で引く」で詰む。**quory の `/etc/hosts` がこの循環を切っており、便宜の重複ではなく設計上の耐障害機構である**。`docs/ai/context/system/autonomous-recovery.md` に追記し、requirement R8 ⑤ でドリフト検出の対象に加えた |
+| N6 | ~~検証インスタンスに `homelab-mute` が効かない~~ **解消(2.5.1 修正1)。** mute ディレクトリを本番と共有したため `homelab-mute sandbox <分>` が効く |
 | N3 | `SANDBOX: Recovery ha failover (check)` に `--check` を焼き込めない(Semaphore の制約)。ただし HA が `state: ignored` の間は CRM がサービスをマネージャ状態から除外するため、`relocate` を発行しても VM は動かない(`PVE/HA/Manager.pm` L1047 / L1059-1064 をソースで確認。実行しての確認は AC17 実施時) |
 | N4 | pve1 の `ann` 権限と authorized_keys(U3)は依然未確認。週末に確認する |
 

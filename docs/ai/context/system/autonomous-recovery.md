@@ -28,6 +28,10 @@ service recoveryの現行対象は、`authy`の`freeradius`と、`monnie`の`pro
 
 各probeの`host` fieldはtargetのFQDNを明示する。
 
+**名前解決はquoryの`/etc/hosts`が担保する。DNSに依存させない。** 内部DNSを提供しているのは`sophos-fw`自身であり、**ラダーの第一の標的でもある**。sophos-fwが停止・再起動・フェイルオーバー中はDNSが引けないため、DNSだけに頼るとラダーは「sophos-fwを直すためにpve1/pve2を名前で引く」ところで詰む。quoryの`/etc/hosts`はこの循環を切るために存在し、pve1 / pve2 / sophos-fw / authy / monnie / ansy / cloudkey / UniFi機器を網羅している。
+
+この`/etc/hosts`は**Ansible管理外の手動状態**である。エントリが古くなっても平常時は症状が出ず、**DNSが引けない障害時にだけ効かなくなる** — いちばん困るときにだけ壊れる形なので、targetを増減したときは同時に更新すること。
+
 ## Accountとdaemon
 
 | Identity | 配置 | 現状の責務 |
