@@ -132,7 +132,7 @@ muteまたはglobal pauseが有効ならprobe cycleをskipし、そのtargetの�
 - 状態を`ACTIVE` / `PAUSED`のいずれとも解釈できない場合は、正常扱いにせず非ゼロで停止する。
 - target別mute(TTLで自動失効する)は本確認の対象に含めない。解除忘れが構造的に起こらず、かつ定期patch処理が立てるmuteと重なって偽警報を生むためである。
 
-実装は`playbooks/recovery_monitoring_check.yml`、日次起動はSemaphoreのscheduleが担う。根拠は`docs/ai/memory/incidents/2026-07-29_global-monitoring-pause-left-on-8-days.md`(8日間の未検出)、案件記録は`docs/ai/reviews/recovery_pause_daily_check/`。
+実装は`playbooks/recovery_monitoring_check.yml`、日次起動はSemaphoreのscheduleが担う。案件記録は`docs/ai/reviews/recovery_pause_daily_check/`。
 
 ## 5. ライフサイクル・処理フロー
 
@@ -377,3 +377,4 @@ Codex wrapperはsudo、setuid、file capabilityによる権限昇格を前提に
 | 2026-07-29 | Loki横断ログ調査(AR-095〜AR-101)を新設し、AR-026に検証済みparameter付き調査の例外を追加。案件記録: `docs/ai/reviews/slack_loki_investigation/` |
 | 2026-07-31 | execpolicyが安全境界として成立しないことが実測で確定したため、AR-069 / AR-071 / AR-073を実態(能力の不在で境界を作る)へ改訂し、AR-102を新設。§7の節名も`Execpolicy、wrapper、file権限`から改めた。根拠: `docs/ai/memory/incidents/2026-07-31_codex-execpolicy-allowlist-not-enforcing.md` |
 | 2026-08-01 | global pauseの解除忘れとprobe停止を日次で検知する規定としてAR-103を新設。TTLによる自動resumeは採らず、通知で人間の判断を挟む形とした(Yoshinobu選択)。根拠: `docs/ai/memory/incidents/2026-07-29_global-monitoring-pause-left-on-8-days.md`、案件記録: `docs/ai/reviews/recovery_pause_daily_check/` |
+| 2026-08-02 | AR-103本文にあった根拠引用(`docs/ai/memory/incidents/2026-07-29_global-monitoring-pause-left-on-8-days.md`。上記2026-08-01行に同一引用が既存)を除去し、実装・案件記録のポインタだけを残した(`docs/ai/reviews/norm_docs_rationale_removal_round3/`)。許可・禁止・停止条件、AR番号はいずれも変更していない。AR番号の新設・退番はない |

@@ -5,7 +5,7 @@ description: homelab-ansibleで規範文書(Policy / Context / Role文書 / SKIL
 
 # 規範文書レビュー(欠陥クラス・チェックリスト)
 
-`skills/code-review/SKILL.md`はコード差分向けの出力型、`skills/ansible-security-review/SKILL.md`はAnsible実装の攻撃面を扱う。本Skillは**規範文書そのものの変更**を対象とし、2026-07-24〜27の案件で反復して検出された欠陥クラスを項目化したもの。
+`skills/code-review/SKILL.md`はコード差分向けの出力型、`skills/ansible-security-review/SKILL.md`はAnsible実装の攻撃面を扱う。本Skillは**規範文書そのものの変更**を対象とし、反復して検出された欠陥クラスを項目化したもの。
 
 **適用対象**: 規範の移設・削除・正本の差し替え、判定基準の改訂、安全境界・責任分界の変更、Policy群の横断的な再配置。いずれも**「結果の検証は通るのに、対象の選定が間違っている」が成立する形**であり、書いた本人には見えない。
 

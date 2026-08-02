@@ -30,7 +30,7 @@ RICE / MoSCoW / ICE のいずれかを案件の性質に応じて使う。
 ### Alternatives Considered
 ```
 
-**`skills/architecture-decision-record/SKILL.md`(ADR)とは統合しない**: Decision Memoは優先順位づけ(What/When、Yoshinobuへの提言止まりで決定権を持たない)、ADRはスコープ確定後の実装方式選択(How)。扱う論点が異なるため別Skillのまま運用する(2026-07-23確定。2026-07-29、Tech Lead廃止によりいずれもCoordinatorが作成する)。
+**`skills/architecture-decision-record/SKILL.md`(ADR)とは統合しない**: Decision Memoは優先順位づけ(What/When、Yoshinobuへの提言止まりで決定権を持たない)、ADRはスコープ確定後の実装方式選択(How)。扱う論点が異なるため別Skillのまま運用する。
 
 ## 適用先
 

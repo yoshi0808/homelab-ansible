@@ -14,11 +14,6 @@ SSHで各ホストの`date`を直接比較する方式ではなく、各ホス�
 遅延を補正する仕組みを持つため、SSH越しの値取得よりも正確に時刻差を測定できる
 （sophos-fwのみ、自己報告手段が無いため直接比較で代替する例外）。
 
-当初はSSHで各ホストの`date`を一回取得して差分を計算する方式を検討したが、
-実機検証でSSH接続確立自体の測定誤差（数百ms〜数秒）が検出したい時刻ズレと
-同程度以上になることが判明し、各ホスト自身の自己診断結果を収集する方式へ
-転換した（経緯: docs/ai/reviews/time_sync_check/2026-06-23_006_implement.md）。
-
 ## 2. 対象と実行範囲
 
 
@@ -50,15 +45,13 @@ CloudKey（UniFi controller）がadopted device（AP/スイッチ）へ配布す
 設定がある。再起動・GUI保存操作でDBが再生成される可能性があり、Ansibleでの
 直接編集はGUI管理と衝突しうる（sophos-fwと同様の判断）。このため
 `time_sync_ntp_reference.yml`はcloudkeyを対象にしない。quory参照の追加が
-必要な場合は、ユーザーがGUIから手動で登録する運用とする
-（2026-06-25実施: `ntp.nict.jp`/`ntp.jst.mfeed.ad.jp`/`quory.internal`）。
+必要な場合は、ユーザーがGUIから手動で登録する運用とする。
 
-2026-07-16、adopted APのbusybox ntpdが`quory.internal`のAAAA問い合わせに対する
-Sophos DNSのNXDOMAIN応答をhard failureとして扱い`bad address`で失敗する事象が
-判明した（CloudKey自身はglibcリゾルバのため同名を問題なく解決でき、この問題は
-再現しない）。Sophos側でのNXDOMAIN是正は不可能なため、`ntp_server_3`を
-`quory.internal`からquoryのIPアドレスへ、GUI経由でユーザー自身が変更済みである
-（IPリテラルは本ファイルへ書かない。core.md）。
+adopted APのbusybox ntpdは`quory.internal`のAAAA問い合わせに対するSophos DNSの
+NXDOMAIN応答をhard failureとして扱い`bad address`で失敗する（CloudKey自身は
+glibcリゾルバのため同名を問題なく解決でき、この問題は再現しない）。Sophos側で
+NXDOMAINを是正できないため、`ntp_server_3`は`quory.internal`ではなくquoryの
+IPアドレスをGUI経由で登録する（IPリテラルは本ファイルへ書かない。core.md）。
 
 `time_sync_check.yml`側のcloudkey判定（`timedatectl timesync-status`の数値
 Offset取得）はCloudKey自身のsystemd-timesyncd（Ubiquiti/Debian pool参照、上記の
@@ -242,3 +235,4 @@ role / playbook）
 | v1.0 | 2026-06-25 | 初版。quory基準の自己報告方式によるNTP同期チェックと、quory参照追加の準備playbookを定義。 |
 | v1.1 | 2026-07-25 | 標準8見出しへ再編し、安全境界の意味を維持。 |
 | v1.2 | 2026-07-26 | Yoshinobuの再点検を反映。CloudKeyのquory参照はhostnameでなくIP登録済みである事実(2026-07-16のAP busybox resolver問題)にTIME-007を訂正。個別ホスト接続失敗とquoryの実際の同期異常の重大度を入れ替え(接続失敗→warning、閾値超過→error)、個別ホスト失敗だけではジョブを非ゼロ終了させず他ホストの検証を継続する方針をTIME-019/021/022として明記。 |
+| v1.3 | 2026-08-02 | 本文に埋め込まれていた改訂経緯・実施日付を除去し、規則本文とTIME番号だけを残す整理を行った(`docs/ai/reviews/norm_docs_rationale_removal_round3/`)。TIME-001からSSH方式検討の経緯段落(受け皿は`docs/ai/reviews/time_sync_check/2026-06-23_006_implement.md`)、TIME-007から2026-06-25実施時の登録値スナップショット(その後quory.internal→IP変更で陳腐化済み)を除去し、busybox ntpdのNXDOMAIN失敗とIP登録という現在も有効な事実・規則は日付なしで残した。許可・禁止・停止条件、TIME番号はいずれも変更していない。TIME番号の新設・退番はない |

@@ -173,7 +173,7 @@ always   一時ファイル掃除 → サマリ生成 → Slack 通知 → 失�
 - CSRF（優先順位）: レスポンスヘッダー **`X-CSRF-Token` を最優先**、無ければ
   `X-Updated-CSRF-Token`。**両ヘッダーとも空のときに限り**、JWT ペイロードの
   `csrfToken` をデコードして fallback とする（ヘッダーが有効なら JWT は一切触らない）。
-  - 実機（CloudKey Gen2 Plus, 2026-06-15）ではログイン応答に両ヘッダーが返り、
+  - 実機（CloudKey Gen2 Plus）ではログイン応答に両ヘッダーが返り、
     供給源は `X-CSRF-Token` になる。JWT fallback は CloudKey 側仕様変更時の保険。
 - 認証ヘッダー: 状態に関わる要求には `Cookie: TOKEN=<JWT>` / `X-CSRF-Token: <csrf>` /
   `Origin: https://cloudkey.internal` を付与する。
@@ -238,6 +238,7 @@ always   一時ファイル掃除 → サマリ生成 → Slack 通知 → 失�
 | v1.0 | 2026-06-15 | 初版。UniFi OS システムバックアップを週次取得し Synology NFS へ保存する方式を定義。pve1 実機で E2E 検証済み。 |
 | v1.1 | 2026-07-25 | 標準8見出しへ再編し、孤立code fenceを修正。 |
 | v1.2 | 2026-07-25 | pve1夏季平日シャットダウン運用対応(ADR-001)。実行ホストをpve1固定からpve1優先・pve2フェイルオーバーへ変更したことを反映。 |
+| v1.3 | 2026-08-02 | 本文に埋め込まれていた実測日付を除去し、規則本文とUNIFI番号だけを残す整理を行った(`docs/ai/reviews/norm_docs_rationale_removal_round3/`)。CSRFヘッダー優先順位の実機確認事実(実測日を除いても事実自体は不変)から日付だけを除去した。許可・禁止・停止条件、UNIFI番号はいずれも変更していない。UNIFI番号の新設・退番はない |
 
 
 <!-- UNIFI-017 -->

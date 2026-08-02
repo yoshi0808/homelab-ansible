@@ -26,7 +26,7 @@
 #       removes; clean-skip rc=0 on NO_UPDATES / MAJOR_UPGRADE_DETECTED /
 #       MAINTENANCE_REQUIRED with removes; fail on BLOCKED/UNKNOWN/no node
 #       covered
-#   2d. single-node only (§2.2 B案, AC10): if the sole target still has a
+#   2d. single-node only (SB-088, AC10): if the sole target still has a
 #       running guest, do not apply - end green and notify instead (there is
 #       no reachable destination to evacuate it to, and stopping guests
 #       unattended is explicitly rejected). Two-node runs are unaffected.
@@ -411,7 +411,7 @@
         _weekly_full_target_pve2: "{{ 'pve2' in _wf_dryrun_nodes }}"
         _weekly_full_target_pve1: "{{ 'pve1' in _wf_dryrun_nodes }}"
         _weekly_full_single_node: "{{ _wf_dryrun_nodes | length == 1 }}"
-        # §2.2 B案: evacuate always needs a healthy destination_node
+        # SB-088: evacuate always needs a healthy destination_node
         # (roles/proxmox_evacuate_node, unmodified) - only run it when both
         # nodes are actually part of this run. In single-node mode there is
         # nowhere to evacuate to, so Steps 3/7 skip evacuate entirely and go
@@ -462,7 +462,7 @@
               | list | length > 0)
              if (_weekly_full_single_node | bool) else false }}
 
-    - name: Skip single-node apply when the sole target still has running guests (§2.2 B案, AC10)
+    - name: Skip single-node apply when the sole target still has running guests (SB-088, AC10)
       when: (_weekly_full_single_node | bool) and (_weekly_full_single_node_has_guests | bool)
       block:
         - name: Send Slack notification for guest-blocked single-node skip
@@ -537,7 +537,7 @@
 # requirement.md §2.2: gated additionally on _weekly_full_target_pve2 (set in
 # Step 2b from the dry-run's own node coverage) so a single-node run that
 # covered only pve1 does not also try to touch pve2. Also gated on
-# _weekly_full_both_nodes (§2.2 B案): roles/proxmox_evacuate_node
+# _weekly_full_both_nodes (SB-088): roles/proxmox_evacuate_node
 # unconditionally requires a healthy destination_node (the opposite node),
 # which does not exist in single-node mode — skip evacuate entirely rather
 # than let it reach that healthcheck and abort. Step 2b already refused to
@@ -558,7 +558,7 @@
 # In single-node mode (pve1 unavailable) Step 3 was skipped, so this runs
 # directly against pve2 without a preceding evacuate — safe because Step 2b
 # already confirmed pve2 has no running guests before allowing this far
-# (§2.2 B案). roles/proxmox_patch_apply_node's own running-guest check
+# (SB-088). roles/proxmox_patch_apply_node's own running-guest check
 # (SB-088, unmodified) still re-verifies this independently.
 # ---------------------------------------------------------------------------
 - import_playbook: proxmox_patch_apply_node.yml
@@ -634,7 +634,7 @@
 # (SB-001) is a sequencing rule for when both nodes are available, not a
 # precondition for patching the survivor alone (disclosed to Slack in Step
 # 11 via _weekly_full_pve2_precedence_missing, AC4). Also gated on
-# _weekly_full_both_nodes (§2.2 B案) — see the equivalent note on Step 3;
+# _weekly_full_both_nodes (SB-088) — see the equivalent note on Step 3;
 # when pve1 is the sole target, evacuate is skipped and Step 8 applies
 # directly (Step 2b already confirmed pve1 has no running guests).
 # ---------------------------------------------------------------------------

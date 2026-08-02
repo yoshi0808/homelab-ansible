@@ -13,7 +13,7 @@ https://github.com/anthropics/knowledge-work-plugins/blob/main/engineering/skill
 
 unit / integration / e2e の3層でtest planを構成する。
 
-## Ansible文脈への翻訳(2026-07-23、自作)
+## Ansible文脈への翻訳
 
 「e2e」に相当する段階を次の3段階に対応させる。
 
@@ -21,7 +21,7 @@ unit / integration / e2e の3層でtest planを構成する。
 2. apply(限定対象への実適用)
 3. 事後健全性チェック(healthcheck系roleでの確認)
 
-## 実行コマンドの組み立て(2026-07-26、実地の反復失敗から)
+## 実行コマンドの組み立て
 
 Testerが自分のsandboxからplaybookを実行する際は、temp pathを実行ユーザーごとに分離する。
 固定パスにすると別ユーザー(`ann` / `yoshi`)の残骸と衝突してUNREACHABLEになる。

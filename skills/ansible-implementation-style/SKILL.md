@@ -5,7 +5,7 @@ description: homelab-ansibleのImplementerがshell/Python/Jinja2を含むAnsible
 
 # Ansible Implementation Style
 
-Ansible専用の公式Skillは存在しないため、内部で使う個別言語ごとにベンダー公式の一次情報を直接参照する。SKILL.md形式の非公式ラッパーは導入しない(2026-07-23確定)。本文には要点のみ記載し、原文は転記しない。
+Ansible専用の公式Skillは存在しないため、内部で使う個別言語ごとにベンダー公式の一次情報を直接参照する。SKILL.md形式の非公式ラッパーは導入しない。本文には要点のみ記載し、原文は転記しない。
 
 **revision追跡**: 以下は全て公式ドキュメントの「latest」参照であり、git commitのような固定revisionを持たない。参照日は2026-07-23。Ansible公式ドキュメントはAnsibleのリリースに追従して内容が変わりうるため、Ansibleのメジャーバージョンアップ時など内容が古くなったと疑われる場合は該当URLを再確認する。Google Style Guideは更新頻度が低く、通常は再確認不要。
 
@@ -62,7 +62,7 @@ task の `vars:` に `lookup('pipe', ...)` のような**副作用や時刻を�
 
 ## check_mode の実装上の落とし穴
 
-出典: 旧`docs/ai/prompts/core.md` §18.3(項目1・4・5)および§18.2(項目2・3のinclude例外)から移設(2026-07-26、移行表C18-03/04/06/07/08/10)。実装時に繰り返し踏んだ／踏みかけた問題であり、新しいplaybookを書くときとレビューするときに毎回確認する。分類の意味・実行義務そのものは`docs/ai/policies/ansible_test_safety_policy.md`が正本(TS-028が本節を参照している)。
+実装時に繰り返し踏んだ／踏みかけた問題であり、新しいplaybookを書くときとレビューするときに毎回確認する。分類の意味・実行義務そのものは`docs/ai/policies/ansible_test_safety_policy.md`が正本(TS-028が本節を参照している)。
 
 1. **moduleごとにcheck_mode挙動が3パターンに分かれる。**
    - 非対応・auto-skip: `command` / `shell` / `expect` / `uri`(`ansible-doc <module>`の`attributes.check_mode.support: none`で確認できる)
@@ -88,4 +88,4 @@ task の `vars:` に `lookup('pipe', ...)` のような**副作用や時刻を�
 
 ## 適用条件
 
-セキュリティに関わる実装判断(shell/commandモジュールへの変数注入対策等)は`skills/ansible-security-review/SKILL.md`を参照する。本Skillは表現・スタイルレベルの基準であり、Reviewer/Testerの検査基準には拡張しない(2026-07-23確認済み)。ただし上記「check_modeの実装上の落とし穴」はReviewerも確認対象とする(出典の§18.3が実装時とレビュー時の双方を対象としていた)。
+セキュリティに関わる実装判断(shell/commandモジュールへの変数注入対策等)は`skills/ansible-security-review/SKILL.md`を参照する。本Skillは表現・スタイルレベルの基準であり、Reviewer/Testerの検査基準には拡張しない。ただし上記「check_modeの実装上の落とし穴」はReviewerも確認対象とする。

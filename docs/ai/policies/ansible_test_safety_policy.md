@@ -1,6 +1,6 @@
 # Ansible Test Safety Policy
 
-本書は全playbookに付与する`# tester-gate:`マーカーの分類、その意味、実行方法、機械チェック、Roleごとの実行義務の正本である。旧`docs/ai/prompts/core.md` §18から移設した(2026-07-26)。環境事実と実装詳細は対応Contextを参照し、競合時は本Policyを優先する。
+本書は全playbookに付与する`# tester-gate:`マーカーの分類、その意味、実行方法、機械チェック、Roleごとの実行義務の正本である。環境事実と実装詳細は対応Contextを参照し、競合時は本Policyを優先する。
 
 ## 1. 目的
 
@@ -77,7 +77,7 @@ tasks:
 ```
 
 <!-- TS-030 -->
-`risk-accepted`は`--check`を安全な実行手段として提供しない。**実際に変更を行う各playの`pre_tasks`に、`ansible_check_mode`が真なら停止するassertを置く。** `check_mode: false`は「`--check`を無視して適用する」意味であり、停止条件が無ければdry-runのつもりの実行がそのまま本番適用になる(2026-07-31 Incident: subagentが`--check`付きで実配備した)。**停止の有無はplay単位で確認する** — 複数playを持つplaybookでは、変更を行うplayすべてに要る。
+`risk-accepted`は`--check`を安全な実行手段として提供しない。**実際に変更を行う各playの`pre_tasks`に、`ansible_check_mode`が真なら停止するassertを置く。** `check_mode: false`は「`--check`を無視して適用する」意味であり、停止条件が無ければdry-runのつもりの実行がそのまま本番適用になる。**停止の有無はplay単位で確認する** — 複数playを持つplaybookでは、変更を行うplayすべてに要る。
 
 <!-- TS-032 -->
 `risk-accepted`のplaybookをcheck-mode-safeにした場合は、**分類そのものを`check-mode-native`へ変え**、TS-030の停止assertと`check_mode: false`を外す。「`risk-accepted`のまま`--check`でも安全」という第3の状態を作らない。`--check`が何を意味するかはヘッダのマーカーが単独で決める。
@@ -91,7 +91,7 @@ read-onlyな診断taskには`check_mode: false`、破壊的task(またはそれ�
 複数の破壊的taskが相互依存する場合(reboot→post-reboot検証→報告、migrate→maintenance mode→HA待機→強制停止など)は、個別taskへ`when`を付けるより、一連をまとめて1つのnamed blockにしblock単位でゲートする。
 
 <!-- TS-033 -->
-block化するかの判断は**依存するtaskがファイル上で連続しているか**で分ける。連続していてblockにまとめられるならblockにする。**間に独立したtaskが挟まっていて、blockにするには並べ替えが要る場合は、並べ替えない** — 既存の実行順序が別の前提(先にディレクトリが存在すること等)を満たしている可能性があり、それを崩すリスクの方が大きい。その場合は同一の`when:`を個別taskへ付け、**なぜblockにしなかったかをその場のコメントへ書く**。理由を書かずに個別ゲートを選ぶと、次の担当が同型の連鎖を別の書き方で扱う(2026-07-31、同一案件のバッチ間で実際に発生した)。
+block化するかの判断は**依存するtaskがファイル上で連続しているか**で分ける。連続していてblockにまとめられるならblockにする。**間に独立したtaskが挟まっていて、blockにするには並べ替えが要る場合は、並べ替えない** — 既存の実行順序が別の前提(先にディレクトリが存在すること等)を満たしている可能性があり、それを崩すリスクの方が大きい。その場合は同一の`when:`を個別taskへ付け、**なぜblockにしなかったかをその場のコメントへ書く**。理由を書かずに個別ゲートを選ぶと、次の担当が同型の連鎖を別の書き方で扱う。
 
 ### dry-run-aware: ネイティブdry-runへ差し替え
 
@@ -140,7 +140,7 @@ block化するかの判断は**依存するtaskがファイル上で連続して
 wrapperは付け忘れ防止の補助であり、安全性の最終判断はplaybook headerのマーカーと承認済みtest_planに基づいて行う。wrapperを通したことを安全の根拠にしない。
 
 <!-- TS-029 -->
-検証者が`check-mode-native` / `dry-run-aware`のゲートを明示的に迂回するためのescape hatch(旧設計で検討された`allow_unsafe=true`等)は実装しない。この決定は2026-07-06の分類設計時に確認され、現在もリポジトリ内に該当実装は存在しない。ゲートを迂回する必要が生じた場合は、迂回機構を作るのではなくYoshinobuの本番適用判断を経る。
+検証者が`check-mode-native` / `dry-run-aware`のゲートを明示的に迂回するためのescape hatch(旧設計で検討された`allow_unsafe=true`等)は実装しない。現在もリポジトリ内に該当実装は存在しない。ゲートを迂回する必要が生じた場合は、迂回機構を作るのではなくYoshinobuの本番適用判断を経る。
 
 ### マーカーの扱い
 
@@ -148,7 +148,7 @@ wrapperは付け忘れ防止の補助であり、安全性の最終判断はplay
 マーカーの分類名だけを安全の根拠に使わない。分類名、理由文、実際の抑止guard名、実行経路が一致しているかを照合する。理由文が指すguard名と実装上のguardが乖離する「marker drift」は複数playbookで実在した。
 
 <!-- TS-036 -->
-roleやtask fileへ`tester-gate`の分類名と理由を複製しない。**参照に留める**——「呼び出し元のplaybookヘッダを参照」といった1行の言及にとどめ、`# tester-gate: <種別> — <理由>`形式そのものやTS-009条件1/条件2の説明文を複製しない。`scripts/check-tester-gate.sh`は`playbooks/`配下しか検査しないため、複製された記述は機械チェックの外で陳腐化する(2026-07-31、`roles/cloudkey_cert_deploy/tasks/main.yml`がTS-030導入前の「`--check`込みで常に本実行する」という文言を複製したまま残っていた実例)。分類・理由の複製が既に無いか確認する方法は`grep -rn "^# tester-gate:" roles/`。
+roleやtask fileへ`tester-gate`の分類名と理由を複製しない。**参照に留める**——「呼び出し元のplaybookヘッダを参照」といった1行の言及にとどめ、`# tester-gate: <種別> — <理由>`形式そのものやTS-009条件1/条件2の説明文を複製しない。`scripts/check-tester-gate.sh`は`playbooks/`配下しか検査しないため、複製された記述は機械チェックの外で陳腐化する。分類・理由の複製が既に無いか確認する方法は`grep -rn "^# tester-gate:" roles/`。
 
 <!-- TS-027 -->
 `safe-readonly`であっても、冪等なscript配置、localhostへのreport保存、条件付きSlack通知などの副作用を持つ場合がある。分類名から副作用ゼロを推定しない。
@@ -164,3 +164,4 @@ roleやtask fileへ`tester-gate`の分類名と理由を複製しない。**参�
 | 2026-07-31 | `risk-accepted`へ独立した1行`# tester-gate-condition2: <理由>`マーカーを新設(TS-034)。`scripts/check-tester-gate.sh`にマーカーの存在と理由の非空を検査させ、この検査が「著者が条件2を述べたこと」の確認であり「主張の正しさ」の確認ではないという限界を明記(TS-035)。棚卸し(`2026-07-31_004_classification_audit.md`)でrisk-accepted維持と判定された3本(`cloudkey_cert_deploy.yml` / `proxmox_backup_restore_verify.yml` / `unifi_backup_fetch.yml`)のヘッダへ適用し、TS-030導入後も残っていた「--checkの有無にかかわらず常に本実行する」というmarker driftも是正。案件記録: `docs/ai/reviews/check_mode_semantics/2026-07-31_020_round2_close_implement.md` |
 | 2026-07-31 | TS-036を新設し、roleやtask fileへ`tester-gate`の分類名と理由を複製せず、playbookヘッダへの参照に留めることを定めた。`scripts/check-tester-gate.sh`が`playbooks/`配下しか検査しないため、複製された記述は機械チェックの外で陳腐化する(`roles/cloudkey_cert_deploy/tasks/main.yml`がTS-030導入前の文言を複製したまま残っていた実例に基づく、独立レビューで指摘・是正)。案件記録: `docs/ai/reviews/check_mode_semantics/2026-07-31_020_round2_close_implement.md` |
 | 2026-08-02 | `tester_mode`を渡すと停止する移行assertを29本のplaybookから削除し(`# tester-gate:`マーカーは対象外)、「背景: `tester_mode` / `tester_gate` roleとの区別」節を削除した。**退番: TS-003 / TS-004(再利用しない)**。`tester_mode`という識別子はリポジトリの現行の指示・コードから完全に消えた。案件記録: `docs/ai/reviews/tester_mode_full_removal/2026-08-02_009_implement_r10.md` |
+| 2026-08-02 | 本文に埋め込まれていた移設元注記・Incident日付・分類設計日・実例日付を除去し、規則本文とTS番号だけを残す整理を行った(`docs/ai/reviews/norm_docs_rationale_removal_round3/`)。許可・禁止・停止条件、TS番号はいずれも変更していない。TS番号の新設・退番はない |

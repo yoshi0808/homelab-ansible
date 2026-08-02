@@ -13,9 +13,9 @@ https://github.com/anthropics/knowledge-work-plugins/blob/main/engineering/skill
 
 Duplicated logic、poor abstractions、magic numbers → バグ・開発速度低下の原因になる。
 
-## homelab-ansibleでの運用手順(2026-07-23、出典なし・自作)
+## homelab-ansibleでの運用手順
 
-- **発見・指示はCoordinatorが担う**(2026-07-29、Tech Lead廃止に伴い統合): requirement作成・タスク分解時に、既存のfilter_plugin/role/他playbookとの重複可能性を洗い出し、再利用対象をrequirementへ明記する。
+- **発見・指示はCoordinatorが担う**: requirement作成・タスク分解時に、既存のfilter_plugin/role/他playbookとの重複可能性を洗い出し、再利用対象をrequirementへ明記する。
 - **Reviewerは照合のみ**: 「指定された既存資産を実装が実際に使ったか」を確認する軽量な検査に限定する。全リポジトリ横断検索はReviewerに行わせない。
 
 ## 適用先

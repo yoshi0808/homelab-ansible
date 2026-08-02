@@ -1,6 +1,6 @@
 # Log / Observability Policy
 
-本書はhomelabの**観測プレーン** — 集中log収集・保全・検索と、**dashboard / alert ruleの配備方式** — に関する許可、禁止、停止条件、判断軸の正本である(2026-07-30のv4.0でscopeをsyslog収集から観測プレーン全体へ拡張した。経緯はLOG-074)。current topologyとrepository構成は対応Contextを参照し、競合時は本Policyを優先する。
+本書はhomelabの**観測プレーン** — 集中log収集・保全・検索と、**dashboard / alert ruleの配備方式** — に関する許可、禁止、停止条件、判断軸の正本である。current topologyとrepository構成は対応Contextを参照し、競合時は本Policyを優先する。
 
 **発火条件の「値」は本書に書かない。** provisioning YAML自身が正本であり、本書が持つのは管理の作法だけである(LOG-078〜LOG-081)。
 
@@ -12,11 +12,11 @@ homelabのsyslogを収集・正規化・保存し、**異常の能動的な検�
 ### 検知の2系統と本Policyの範囲
 
 <!-- LOG-063 -->
-homelabの観測は次の2系統からなる。**本Policyは、両系統の収集経路と、両系統の可視化・検知定義の「配備方式」に規範を持つ**(2026-07-30改訂、v4.0)。系統ごとの**検知内容**(どのシグナルをどの条件で拾うか)の規範は系統別に置き、syslog系統は本Policy §4、metrics系統はprovisioning YAML自身が正本である(LOG-078)。
+homelabの観測は次の2系統からなる。**本Policyは、両系統の収集経路と、両系統の可視化・検知定義の「配備方式」に規範を持つ**。系統ごとの**検知内容**(どのシグナルをどの条件で拾うか)の規範は系統別に置き、syslog系統は本Policy §4、metrics系統はprovisioning YAML自身が正本である(LOG-078)。
 
 | 系統 | 収集 | 保存 | 検知の現状 |
 |---|---|---|---|
-| metrics | unpollerがネットワーク機器から収集 | Prometheus | **運用中**。Grafanaのalert ruleがport dropとerrorを検知して通知する。**2026-07-30以降、定義はrepoのprovisioning YAMLが正本**(LOG-078〜LOG-084) |
+| metrics | unpollerがネットワーク機器から収集 | Prometheus | **運用中**。Grafanaのalert ruleがport dropとerrorを検知して通知する。**定義はrepoのprovisioning YAMLが正本**(LOG-078〜LOG-084) |
 | syslog | rsyslogとGrafana Alloy | Loki | **未実装**。蓄積内容の事後参照に留まる |
 
 <!-- LOG-064 -->
@@ -25,7 +25,7 @@ homelabの観測は次の2系統からなる。**本Policyは、両系統の収�
 <!-- LOG-065 -->
 metrics系統では、通知の**発生頻度そのものを運用者が判断材料に使う**。少数の発火は様子見とし、同一portのdropが頻発する場合に問題ありと判断する。**この解釈は「障害判断の基準」であり、「発火条件」とは別の概念である**(用語の定義はLOG-079)。発火条件には表現されず人間の判断に属する。
 
-**この非対称は意図的な設計であり、調整不足ではない。** 現行4ルールは「素朴な発火条件 + 人間側の障害判断」という組み合わせで成立している(2026-07-30、`docs/ai/adr/007-grafana-provisioning-as-code.md` 設計判断8)。障害判断の一部を発火条件側(`for`・rate窓・port別)へ移すことは可能だが、**移した分だけ根拠を書く義務が発火条件側へ移る**(LOG-081)。移す判断はYoshinobuが行う。
+**この非対称は意図的な設計であり、調整不足ではない。** 現行4ルールは「素朴な発火条件 + 人間側の障害判断」という組み合わせで成立している(`docs/ai/adr/007-grafana-provisioning-as-code.md` 設計判断8)。障害判断の一部を発火条件側(`for`・rate窓・port別)へ移すことは可能だが、**移した分だけ根拠を書く義務が発火条件側へ移る**(LOG-081)。移す判断はYoshinobuが行う。
 
 ### syslog系統で将来検知したい対象
 
@@ -110,7 +110,7 @@ Lokiへのpushはmonnie localhostへ限定する。
 | UniFi switch port alert rule 4件 | `monnie` | `roles/grafana_provisioning/files/alerting/unifi-switch-port-errors.yaml` | alerting provisioning(folder `UniFi`) |
 
 <!-- LOG-089 -->
-**dashboard providerの名前を変更しない。** Grafanaはprovider名を `grafana.app/managerId` としてリソースの所有者識別子に使う(2026-07-30実測)。改名すると既存リソースとの所有関係が切れ、孤児化・UID変化・folder所属の変化を招きうる。
+**dashboard providerの名前を変更しない。** Grafanaはprovider名を `grafana.app/managerId` としてリソースの所有者識別子に使う。改名すると既存リソースとの所有関係が切れ、孤児化・UID変化・folder所属の変化を招きうる。
 
 source、現行stream、管理ownerの具体構成は [System Context](../context/system/monitoring.md) を参照する。playbook / roleは`playbooks/*.yml`・`roles/*`を直接参照する(`docs/ai/context/ansible/repository-overview.md`)。config、template、dashboard JSONの実体はcodeを正本とする。
 
@@ -122,7 +122,7 @@ source、現行stream、管理ownerの具体構成は [System Context](../contex
 |---|---|---|
 | `alloy_setup.yml` | `alloy` | monnie receiver、Alloy config、validated cutover |
 | `rsyslog_forward_to_monnie.yml` | `rsyslog_forward_to_monnie` | Ubuntu senderのsingle-host rollout |
-| `grafana_provisioning.yml` | `grafana_provisioning` | **dashboardとalert ruleのrepo正本化・配備**(2026-07-30追加、LOG-078〜LOG-086) |
+| `grafana_provisioning.yml` | `grafana_provisioning` | **dashboardとalert ruleのrepo正本化・配備**(LOG-078〜LOG-086) |
 
 <!-- LOG-032 -->
 **3入口すべてcheck-mode-nativeである。** APPLYはproduction logging pathまたは観測プレーンの定義を変更するためYoshinobuの明示判断を必要とする。
@@ -170,10 +170,10 @@ normalized sourcesはrsyslogがlevelを行頭へ確定し、Alloyが抽出する
 UniFi sourcesは明示severityを安全に認識できる場合だけbest-effortでlevelを付与し、不明な行を誤分類しない。
 
 <!-- LOG-075 -->
-LOG-025の帰結として、**UniFi由来の行の多くは`level`ラベルを持たない**。2026-07-26の実測で、monnieのrsyslogは受信時に行を書き換えており、送信元が持っていたseverity(`daemon.notice`等)は保存される行から消える。したがってbest-effort判定が参照できるseverityトークンが存在せず、Lokiでは`detected_level`が`unknown`になる。これは仕様どおりの動作であり異常ではない。
+LOG-025の帰結として、**UniFi由来の行の多くは`level`ラベルを持たない**。monnieのrsyslogは受信時に行を書き換えており、送信元が持っていたseverity(`daemon.notice`等)は保存される行から消える。したがってbest-effort判定が参照できるseverityトークンが存在せず、Lokiでは`detected_level`が`unknown`になる。これは仕様どおりの動作であり異常ではない。
 
 <!-- LOG-076 -->
-LOG-075の帰結として、`level`を条件に含むLogQLセレクタは**UniFi / network-devices由来のイベントを一切返さない**。LogQLのlabel matcherはlabelが存在するstreamにしか適用されないため、Severityで何を選んでも該当しない。LOG-066の検知を設計する際は`level`でフィルタせず、`job`と`host`とmessage本文で特定する。実測の詳細は [Link Up/Down調査](../reviews/promtail_to_alloy/2026-07-26_030_investigation_unifi_linkup_level_match.md) を参照する。
+LOG-075の帰結として、`level`を条件に含むLogQLセレクタは**UniFi / network-devices由来のイベントを一切返さない**。LogQLのlabel matcherはlabelが存在するstreamにしか適用されないため、Severityで何を選んでも該当しない。LOG-066の検知を設計する際は`level`でフィルタせず、`job`と`host`とmessage本文で特定する。
 
 <!-- LOG-077 -->
 統合dashboardは、`level`を持つsource(Ubuntu / PVE / Sophos / CloudKey)と持たないsource(UniFi network devices)をpanel単位で分離する。前者はSeverityフィルタを適用し、後者は適用しない。両者を同一panelへ混在させるとSeverityフィルタの意味が曖昧になり、かつLOG-076によりnetwork-devices側が常に非表示になる。Event Timelineも同様に2系列へ分け、network-devices側を`level`非依存とする。
@@ -241,16 +241,9 @@ sender rolloutは一度に1 hostだけを対象にし、前段のend-to-end確�
 <!-- LOG-047 -->
 **syslog系統からの通知は未実装である。** Loki を参照する alert rule、Loki ruler、Alertmanagerのいずれも配備していない。dashboardに記載されたPhase 3のalert説明は将来設計のnoteであり、現行の通知契約ではない。
 
-**2026-07-30の改訂で「本Policy対象の2 playbook / 2 roleでは配備しない」という限定を外した。** `playbooks/grafana_provisioning.yml` が alert rule を配備するようになったため、「配備しないplaybook」を数え上げる形の記述では未実装であることを表現できなくなった。**未実装であるかどうかは、配備されている alert rule の datasource が Loki を参照しているかで判断する** — 現行の4ルールはすべてPrometheus参照(metrics系統)である。
-
-<!-- LOG-073 -->
-**退番(2026-07-30、v4.0)。再利用しない。** 旧内容は「metrics系統の検知ルールと通知経路の規範は本書で定義せず将来別Policyで扱う」「alert ruleの実体はGrafana UI側にありGit管理外であるため、リポジトリ内の記述をもって現在有効な検知内容と判断しない」だった。**後半は2026-07-30に事実として偽になった** — alert ruleはrepoのprovisioning YAMLが正本になり、Grafana UIからは編集できない(`provenance = file`)。前半の方針もYoshinobu判断で撤回した(LOG-074)。
+**未実装であるかどうかは、配備されている alert rule の datasource が Loki を参照しているかで判断する** — 現行の4ルールはすべてPrometheus参照(metrics系統)である。
 
 <!-- LOG-074 -->
-**方針を変更した(2026-07-30、v4.0)。** 旧内容は「収集を扱う本Policyへ検知ルールを追記せず、検知と通知を扱う別Policyへ集約する」だった。
-
-Yoshinobu判断(2026-07-30): 「policyファイルは更新しておいた方が良いと思います。`log_observability_policy.md`は、今は基盤の話であり、ダッシュボードの概念はここに含めても良いのではないでしょうか」
-
 **別Policyへ分離せず、本Policyのscopeを観測プレーン全体へ広げる。** 判断根拠は3つある。
 
 1. ファイル名が `log_observability_policy` であり、**Observabilityを名乗りながら本文がsyslog収集に限定されていた**。scope拡張は名称との整合を回復する方向である。
@@ -259,7 +252,7 @@ Yoshinobu判断(2026-07-30): 「policyファイルは更新しておいた方が
 
 **ただし本Policyが持つのは「配備方式」と「管理の作法」だけであり、発火条件の値は持たない**(LOG-078〜LOG-081)。
 
-### 観測プレーンの配備方式(2026-07-30新設、v4.0)
+### 観測プレーンの配備方式
 
 設計判断の正本は `docs/ai/adr/007-grafana-provisioning-as-code.md`。案件記録は `docs/ai/reviews/grafana_provisioning/`。
 
@@ -267,7 +260,7 @@ Yoshinobu判断(2026-07-30): 「policyファイルは更新しておいた方が
 **Grafanaのdashboardとalert ruleは、repoを正本としAnsibleのfile provisioningで配る。** 実装は単一role `roles/grafana_provisioning` と入口 `playbooks/grafana_provisioning.yml`。**手作業のUI importとホストへの直接配置を経路として認めない。** provisioning YAML / dashboard JSON そのものが定義の正本であり、Policyへ値を複製しない(`docs/ai/core.md`「値を二重に持たない」)。
 
 <!-- LOG-079 -->
-**「発火条件」と「障害判断の基準」を別の概念として扱い、どちらも単に「閾値」と呼ばない。** 1つの語が2つの世界を指すことが、この論点を曖昧にしていた(2026-07-30 Yoshinobu提起)。
+**「発火条件」と「障害判断の基準」を別の概念として扱い、どちらも単に「閾値」と呼ばない。**
 
 | 用語 | 何を決めるか | 正本 | 属する世界 |
 |---|---|---|---|
@@ -284,13 +277,13 @@ Yoshinobu判断(2026-07-30): 「policyファイルは更新しておいた方が
 **配備は複製に限り、配備時の変換・生成を行わない。** `ansible.builtin.copy` を使い `template` を使わない。gitにあるものとホストにあるものが一致する状態を保ち、SHA256突合を成立させる。**上流ダッシュボードのdatasource参照書き換え(UID化)は「取り込み時」の工程であり、配備時ではない。**
 
 <!-- LOG-083 -->
-**nameベースのdatasource参照を配備前に機械的に拒否する。** `${DS_...}` プレースホルダと、文字列型の `.datasource` 値の両方を検出したらpreflightで停止する。2026-07-12にGrafana 13.1でnameベースfallback解決が廃止され全パネルが描画不能になった事故と同一の欠陥クラスであり、**復旧はProxmox VMバックアップからの復元を要した**。この環境ではdatasourceの登録名を変更できないため(unpollerが送りprometheusとして登録される)、UID参照が唯一の正しい形である。判定条件の詳細は `docs/ai/reviews/grafana_provisioning/2026-07-30_001_requirement.md` R3の判定表。
+**nameベースのdatasource参照を配備前に機械的に拒否する。** `${DS_...}` プレースホルダと、文字列型の `.datasource` 値の両方を検出したらpreflightで停止する。この環境ではdatasourceの登録名を変更できないため(unpollerが送りprometheusとして登録される)、UID参照が唯一の正しい形である。判定条件の詳細は `docs/ai/reviews/grafana_provisioning/2026-07-30_001_requirement.md` R3の判定表。
 
 <!-- LOG-084 -->
 **notification policy treeとcontact pointをprovisioningで変更しない。** alerting YAMLのtop-levelキーは `apiVersion` と `groups` のみとし、`policies` / `resetPolicies` / `contactPoints` / `deleteContactPoints` を書かない。Slackへの到達は各ruleの `notification_settings.receiver` で行う(root policyの receiver は `empty` で child route を持たないため、labelによるroutingは成立しない)。非回帰は `alert_configuration.configuration_hash` の不変で機械的に示す。
 
 <!-- LOG-085 -->
-**Grafanaのexport機能で既存のdashboard正本を作り直さない。** ディスク上にclassic形式の原本が存在するdashboardについて、Grafana UIのexportはschema移行後の内容を出す(2026-07-30実測: UniFi Switchesで18パネル中15枚のpanel型が書き換わり、`links`・`timeFrom`・`cacheTimeout` 等が消える)。クエリは保たれるが**体裁設定が気づかれにくい形で失われる**。**正本はディスク上の原本であり、Grafanaの出力ではない。** exportを使うのは、classic原本が存在しないdashboardをclassic化する場合に限る。
+**Grafanaのexport機能で既存のdashboard正本を作り直さない。** ディスク上にclassic形式の原本が存在するdashboardについて、Grafana UIのexportはschema移行後の内容を出す。クエリは保たれるが**体裁設定が気づかれにくい形で失われる**。**正本はディスク上の原本であり、Grafanaの出力ではない。** exportを使うのは、classic原本が存在しないdashboardをclassic化する場合に限る。
 
 <!-- LOG-086 -->
 **reloadはサービスrestartで行い、admin資格情報やservice account tokenを新設しない。** 反映機構は配る物ごとに異なる — dashboard JSONはproviderが `updateIntervalSeconds` 間隔でpollするため**restart不要**、provider yamlとalerting YAMLは起動時読み込みのため**restart必要**。restart前には `roles/recovery_mute` でmonnieのmute窓を張り、自律復旧の誤発火を防ぐ(monnieは `recovery_push_targets` で `grafana-server` を復旧対象に含む)。実行時刻は `ubuntu_nightly` のmonnie処理時間帯と重ねない。
@@ -351,13 +344,7 @@ monnie receiverはAnsible / Git、Proxmox senderはmanual、appliance senderは�
 log-based Slack alertはlabels / alert rulesをcollection plane上へ載せるPhase 3構想であり、現行機能ではない。
 
 <!-- LOG-044 -->
-2026-07-16のPhase 1完了はhistorical resultとして保持し、現行notification contractにしない。
-
-<!-- LOG-045 -->
-2026-07-17時点のPhase 2実装済み / validation待ち状態は時点履歴として本書の現行状態へ固定しない。
-
-<!-- LOG-046 -->
-2026-07-17から18のPhase 2 extension稼働・是正は時点履歴として扱う。
+特定時点のPhase完了状態や実装状況(「実装済み」「validation待ち」等)は時点履歴として保持し、現行のnotification contractや許可条件として固定しない。
 
 <!-- LOG-061 -->
 過去の実機PASSとknown non-blocking事象は [Phase 1 investigation](../reviews/policy_standardization/2026-07-25_021_investigation_remaining_policies_rewrite.md) に保持し、現行の許可条件へ昇格させない。
@@ -366,6 +353,7 @@ log-based Slack alertはlabels / alert rulesをcollection plane上へ載せるPh
 
 | 版 | 日付 | 変更 |
 |---|---|---|
+| **v4.1** | **2026-08-02** | 本文に埋め込まれていた改訂注記・実測日付・判断の引用(Yoshinobu判断の逐語引用)・時点履歴の個別条項を除去し、規則本文とLOG番号だけを残す整理を行った(`docs/ai/reviews/norm_docs_rationale_removal_round3/`)。LOG-073の退番記録(本文にあった「退番(2026-07-30、v4.0)。再利用しない。」段落)を本節へ移し確定。**退番: LOG-073(再利用しない)**。内容は上記v4.0行のとおり。「時点履歴を現行契約に昇格させない」節のLOG-045 / LOG-046(Phase 2の時点別状態を個別に名指しする条項)をLOG-044の一般規則(「特定時点のPhase完了状態や実装状況は時点履歴として保持し、現行のnotification contractや許可条件として固定しない」)へ統合。**退番: LOG-045 / LOG-046(再利用しない)**。LOG-061は`../reviews/policy_standardization/2026-07-25_021_investigation_remaining_policies_rewrite.md`への保存先指定を含むため本文にそのまま残した。既存の許可・禁止・停止条件の内容、他のLOG番号は変更していない |
 | v1.0 | 2026-07-16 | PromtailからAlloyへのPhase 1移行を契機にPolicyを新設 |
 | v2.0 | 2026-07-17 | remote syslog funnelと4-value severity contractを追加 |
 | v2.1 | 2026-07-18 | Ubuntu sources、self-noise suppression、message-only body、dashboard defaultsを更新 |
