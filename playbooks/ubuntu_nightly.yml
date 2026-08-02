@@ -14,16 +14,6 @@
     nightly_report_dir: "{{ reports_base_dir }}/ubuntu-nightly"
 
   tasks:
-    - name: "[migration] tester_mode is deprecated for this playbook — use --check instead"
-      ansible.builtin.assert:
-        that: not (tester_mode | default(false) | bool)
-        fail_msg: >-
-          This playbook no longer supports -e tester_mode=true. Re-run with
-          --check instead — reboot-required detection runs for real under
-          --check, and only the actual reboot/post-reboot verification is
-          gated by ansible_check_mode. See docs/ai/policies/ansible_test_safety_policy.md.
-        quiet: true
-
     - name: Check reboot-required flag
       ansible.builtin.stat:
         path: /var/run/reboot-required
@@ -310,16 +300,6 @@
     nightly_report_dir: "{{ reports_base_dir }}/ubuntu-nightly"
 
   tasks:
-    - name: "[migration] tester_mode is deprecated for this playbook — use --check instead"
-      ansible.builtin.assert:
-        that: not (tester_mode | default(false) | bool)
-        fail_msg: >-
-          This playbook no longer supports -e tester_mode=true. Re-run with
-          --check instead — reboot-required detection runs for real under
-          --check, and only the actual reboot/post-reboot verification is
-          gated by ansible_check_mode. See docs/ai/policies/ansible_test_safety_policy.md.
-        quiet: true
-
     - name: Check reboot-required flag
       ansible.builtin.stat:
         path: /var/run/reboot-required

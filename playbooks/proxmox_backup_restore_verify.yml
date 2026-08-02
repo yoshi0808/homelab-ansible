@@ -78,15 +78,6 @@
           See docs/ai/reviews/check_mode_semantics/2026-07-31_001_requirement.md.
         quiet: true
 
-    - name: "[migration] tester_mode is deprecated for this playbook — it always runs for real"
-      ansible.builtin.assert:
-        that: not (tester_mode | default(false) | bool)
-        fail_msg: >-
-          This playbook no longer supports -e tester_mode=true and has no
-          dry-run mode (--check included): backup restore-verify always runs
-          for real. See docs/ai/policies/ansible_test_safety_policy.md.
-        quiet: true
-
   tasks:
     - name: Get cluster resources
       ansible.builtin.command:

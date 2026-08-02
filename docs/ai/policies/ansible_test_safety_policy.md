@@ -10,14 +10,6 @@ playbookごとに「`--check`の有無で挙動がどう変わるか」「本実
 <!-- TS-002 -->
 判断はplaybook先頭のマーカーを一次情報とする。マーカーと実装が乖離した場合は乖離自体を欠陥として扱い、マーカーの文言を安全の根拠に使わない。
 
-### 背景: `tester_mode` / `tester_gate` roleとの区別
-
-<!-- TS-003 -->
-`tester_mode`変数と`tester_gate` roleは廃止済みであり、`roles/tester_gate`は実在しない。ゲート機構はAnsible標準の`--check`(`ansible_check_mode`)であり、Semaphoreの`--check`オプションがそのまま効くため独自の`-e`変数は不要である。`tester_mode`という識別子への参照も全経路から撤去済みで、`-e tester_mode=true`を渡しても(未使用のextra varとして)無視されるだけである。現在この識別子が現れるのは、渡されると停止する29本の移行assert(task名`[migration]`)のみである。
-
-<!-- TS-004 -->
-本Policyが定める`# tester-gate:`**ヘッダマーカーは廃止されていない**。名前が似ているだけの別物であり、廃止済みの`tester_mode`と混同しない。
-
 ## 2. 対象と実行範囲
 
 <!-- TS-005 -->
@@ -171,3 +163,4 @@ roleやtask fileへ`tester-gate`の分類名と理由を複製しない。**参�
 | 2026-07-31 | TS-033を新設し、TS-015のblock化判断を「依存taskがファイル上で連続しているか」で分ける基準として明文化。同一案件のバッチ間で同型の連鎖が別の書き方になった実例に基づく。案件記録: `docs/ai/reviews/check_mode_semantics/` |
 | 2026-07-31 | `risk-accepted`へ独立した1行`# tester-gate-condition2: <理由>`マーカーを新設(TS-034)。`scripts/check-tester-gate.sh`にマーカーの存在と理由の非空を検査させ、この検査が「著者が条件2を述べたこと」の確認であり「主張の正しさ」の確認ではないという限界を明記(TS-035)。棚卸し(`2026-07-31_004_classification_audit.md`)でrisk-accepted維持と判定された3本(`cloudkey_cert_deploy.yml` / `proxmox_backup_restore_verify.yml` / `unifi_backup_fetch.yml`)のヘッダへ適用し、TS-030導入後も残っていた「--checkの有無にかかわらず常に本実行する」というmarker driftも是正。案件記録: `docs/ai/reviews/check_mode_semantics/2026-07-31_020_round2_close_implement.md` |
 | 2026-07-31 | TS-036を新設し、roleやtask fileへ`tester-gate`の分類名と理由を複製せず、playbookヘッダへの参照に留めることを定めた。`scripts/check-tester-gate.sh`が`playbooks/`配下しか検査しないため、複製された記述は機械チェックの外で陳腐化する(`roles/cloudkey_cert_deploy/tasks/main.yml`がTS-030導入前の文言を複製したまま残っていた実例に基づく、独立レビューで指摘・是正)。案件記録: `docs/ai/reviews/check_mode_semantics/2026-07-31_020_round2_close_implement.md` |
+| 2026-08-02 | `tester_mode`を渡すと停止する移行assertを29本のplaybookから削除し(`# tester-gate:`マーカーは対象外)、「背景: `tester_mode` / `tester_gate` roleとの区別」節を削除した。**退番: TS-003 / TS-004(再利用しない)**。`tester_mode`という識別子はリポジトリの現行の指示・コードから完全に消えた。案件記録: `docs/ai/reviews/tester_mode_full_removal/2026-08-02_009_implement_r10.md` |

@@ -70,15 +70,5 @@
         fail_msg: >-
           target が不正です: '{{ target | default('') }}'.
           VM リブートの対象は authy / monnie / sophos-fw のみです。
-
-    - name: "[migration] tester_mode is deprecated for this playbook — use --check instead"
-      ansible.builtin.assert:
-        that: not (tester_mode | default(false) | bool)
-        fail_msg: >-
-          This playbook no longer supports -e tester_mode=true. Re-run with
-          --check instead — tag verification runs for real under --check,
-          and the actual shutdown/start sequence is gated by
-          ansible_check_mode. See docs/ai/policies/ansible_test_safety_policy.md.
-        quiet: true
   roles:
     - recovery_vm_reboot

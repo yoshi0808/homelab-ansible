@@ -91,20 +91,6 @@
 # dry_run=true wholesale (it still validates apply-mode argument handling,
 # which a blanket dry_run override would skip).
 
-- name: "[migration] tester_mode is deprecated for this playbook — use --check instead"
-  hosts: localhost
-  gather_facts: false
-  connection: local
-  tasks:
-    - name: Assert tester_mode is not used
-      ansible.builtin.assert:
-        that: not (tester_mode | default(false) | bool)
-        fail_msg: >-
-          This playbook does not support -e tester_mode=true. Use --check
-          instead — see the header of this file for the check-mode-native
-          behavior. See docs/ai/policies/ansible_test_safety_policy.md.
-        quiet: true
-
 - name: Ubuntu VM full-upgrade judgement / manual apply (ansy, monnie, authy, quory)
   hosts: dev_nodes:control_nodes:radius_servers:monitoring_servers
   gather_facts: true

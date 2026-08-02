@@ -23,17 +23,6 @@
 - name: Deploy recovery push drill units (E-3)
   hosts: quory
   gather_facts: false
-  pre_tasks:
-    - name: "[migration] tester_mode is deprecated for this playbook — use --check instead"
-      ansible.builtin.assert:
-        that: not (tester_mode | default(false) | bool)
-        fail_msg: >-
-          This playbook no longer supports -e tester_mode=true. Re-run with
-          --check (add --check --diff for more detail) instead — read-only
-          checks now run for real under --check, and the destructive
-          deployment tasks are gated by ansible_check_mode. See
-          docs/ai/policies/ansible_test_safety_policy.md.
-        quiet: true
   tasks:
     - name: Setup drill units per target
       ansible.builtin.include_tasks: "{{ playbook_dir }}/../roles/recovery_push/tasks/drill_setup.yml"

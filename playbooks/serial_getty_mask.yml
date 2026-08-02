@@ -30,14 +30,6 @@
     serial_getty_mask_unit: serial-getty@ttyS0.service
 
   pre_tasks:
-    - name: Reject deprecated tester_mode
-      ansible.builtin.assert:
-        that: not (tester_mode | default(false) | bool)
-        fail_msg: >-
-          tester_mode is not supported. Use --check --diff for the read-only
-          preview; stop+mask is gated by ansible_check_mode.
-        quiet: true
-
     - name: Read current serial getty state
       ansible.builtin.command:
         argv:

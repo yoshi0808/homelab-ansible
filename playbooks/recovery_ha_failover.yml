@@ -70,15 +70,5 @@
           target が不正です: '{{ target | default('') }}'.
           HA フェイルオーバーの対象は authy / sophos-fw のみです。
           (monnie は hacritical タグなしのため対象外)
-
-    - name: "[migration] tester_mode is deprecated for this playbook — use --check instead"
-      ansible.builtin.assert:
-        that: not (tester_mode | default(false) | bool)
-        fail_msg: >-
-          This playbook no longer supports -e tester_mode=true. Re-run with
-          --check instead — tag/HA-registration/target-node verification
-          runs for real under --check, and the actual HA relocate is gated
-          by ansible_check_mode. See docs/ai/policies/ansible_test_safety_policy.md.
-        quiet: true
   roles:
     - recovery_ha_failover

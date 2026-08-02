@@ -43,16 +43,6 @@
           codex_update_check.yml must be run on quory only
           (current host: {{ ansible_facts['hostname'] }}).
 
-    - name: "[migration] tester_mode is deprecated for this playbook — use --check instead"
-      ansible.builtin.assert:
-        that: not (tester_mode | default(false) | bool)
-        fail_msg: >-
-          This playbook no longer supports -e tester_mode=true. Re-run with
-          --check instead — version collection runs for real under --check,
-          and only npm install (Codex CLI / npm itself) is gated by
-          ansible_check_mode. See docs/ai/policies/ansible_test_safety_policy.md.
-        quiet: true
-
 - name: Check and update Codex CLI on ansy and quory
   hosts: ansy:quory
   gather_facts: false

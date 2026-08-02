@@ -32,17 +32,6 @@
           - target_node in ['pve1', 'pve2']
         fail_msg: "target_node must be 'pve1' or 'pve2', got: '{{ target_node | default('undefined') }}'"
 
-    - name: "[migration] tester_mode is deprecated for this playbook — use --check instead"
-      ansible.builtin.assert:
-        that: not (tester_mode | default(false) | bool)
-        fail_msg: >-
-          This playbook no longer supports -e tester_mode=true. Re-run with
-          --check instead — healthcheck/VM identification runs for real
-          under --check, and the actual migrate/maintenance-mode/HA-wait
-          sequence is gated by ansible_check_mode. See
-          docs/ai/policies/ansible_test_safety_policy.md.
-        quiet: true
-
     - name: Set recovery mute for authy
       ansible.builtin.include_tasks: "{{ playbook_dir }}/../roles/recovery_mute/tasks/set.yml"
       when: not ansible_check_mode

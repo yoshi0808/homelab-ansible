@@ -31,16 +31,6 @@
           cert_renew_quory.yml must be run on quory only
           (current host: {{ ansible_facts['hostname'] }}).
 
-    - name: "[migration] tester_mode is deprecated for this playbook — use --check instead"
-      ansible.builtin.assert:
-        that: not (tester_mode | default(false) | bool)
-        fail_msg: >-
-          This playbook no longer supports -e tester_mode=true. Re-run with
-          --check instead — prepare_ca/issue/cleanup run for real under
-          --check, and only the quory semaphore cert deploy/restart step is
-          gated by ansible_check_mode. See docs/ai/policies/ansible_test_safety_policy.md.
-        quiet: true
-
 - name: cert_renew_quory - prepare CA key on quory
   hosts: quory
   gather_facts: false

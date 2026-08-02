@@ -170,17 +170,6 @@
           -e '{"proxmox_patch_weekly_full_allowed_controllers":["<hostname>"]}'
       when: _controller_hostname not in proxmox_patch_weekly_full_allowed_controllers
 
-    - name: "[migration] tester_mode is deprecated for this playbook — use --check instead"
-      ansible.builtin.assert:
-        that: not (tester_mode | default(false) | bool)
-        fail_msg: >-
-          This playbook no longer supports -e tester_mode=true. Re-run with
-          --check instead — preflight/healthcheck/dry-run run for real under
-          --check, and the actual evacuate/patch-apply/restore sequence is
-          gated by ansible_check_mode inside each imported playbook. See
-          docs/ai/policies/ansible_test_safety_policy.md.
-        quiet: true
-
     # Marks that every abort check above actually ran and passed. Read by
     # Step 0c immediately below - see that play's header comment for why
     # this exists (Coordinator review finding, 2026-08-01).
