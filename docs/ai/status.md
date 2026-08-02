@@ -51,7 +51,6 @@
 
 | 項目 | 内容 | 根拠 |
 |---|---|---|
-| **`skills/subagent-briefing/` の改訂**(申し送り5件を1本化) | いずれも「Coordinatorの依頼文の欠陥が実装・検証を歪めた」同一クラス。①subagentのscratch作業がリポジトリ内へ漏れる(自己参照シンボリックリンク2本。`git status --short` は未追跡ディレクトリの中身を畳むため取りこぼす)②前景タイムアウトを超える単位は依頼文でバックグラウンド実行と完了検知を扱う必要がある ③「レビューが独立に見つけるか」を試す項目を、レビュー担当が読むファイルに置いてはならない ④触れてよいパスをファイル単位で切ると、値の置き場所まで歪む(4回発生)⑤走行中のsubagentの中間成果がcommitに巻き込まれた | `docs/ai/reviews/incident_auto_capture_step2/progress.md` A-4 / A-5 / A-6 / A-7 / A-12 |
 | **Lesson昇格 1件** | subagentがharnessのブロックを迂回せず報告した**成功例** — `permission-boundaries-must-be-designed-not-prompted.md` は逸脱例しか持っていない | 同 A-8 |
 | **`skills/requirements-analysis/` に「配備物の棚卸し」を受入条件へ含める** | **「repoを直しても配備物は古いまま」という形が `tester_mode` 撤廃だけで2回出た** — `incident-capture-collector.py`(必須フィールド集合が旧版)と `recovery-probe.py`(削除したはずのdrillが両ホストで生存)。どちらも `git pull` では更新されず、setup playbookの実行が要る。**2回ともWatchでは拾えず、実機を見て気づいた。** 識別子や機構を撤廃する案件では、ACに「配備物側にも残っていないこと」を含める | `docs/ai/reviews/tester_mode_full_removal/2026-08-02_012_audit_r10.md`「本番反映で確認したこと」 |
 | `skills/requirements-analysis/` に索引更新を成果物へ含める | playbookを増やす案件で `playbooks/README.md` の更新を成果物に含めれば、**Auditorの職掌を広げずに**「受入条件の充足」の検査で拾える。**当初はrole索引も対象だったが、`role-map.md` / `playbook-map.md` は2026-07-29に廃止済みで対象は1つに縮小した** | 同 A-11、`docs/ai/context/ansible/repository-overview.md` L7 |
