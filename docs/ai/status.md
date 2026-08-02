@@ -20,7 +20,7 @@
 
 | # | 項目 | 現在地 | 次にやること |
 |---|---|---|---|
-| 1 | **開発と運用の境界を、設定でなく能力の不在で作る**(`docs/ai/reviews/dev_prod_boundary/`) | **Phase 1 完了。** `sandbox` VM(pve2、タグ`sandbox`、HA `state: ignored`)+ Semaphore `SANDBOX:`テンプレート3本 + ラダー3roleへのタグ適格化 + `recovery_probe`の検証用第2インスタンス(`recovery-probe-sandbox`、`state_dir`分離)。**2026-08-02に probe→ラダー連結と`stopped`→start を実データで観測**(S3の2/4)。検証インスタンスは**常設せず窓を開閉する**運用(週次パッチが`sandbox`をmuteしないため常駐すると衝突する)。Phase 2〜3は未着手 | **Phase 1 の実行分は完了**(AC1/AC2/AC3/AC14/AC18を実データで観測。AC17はWatchへ持ち越し、flappingはdescope、独立Tester検証は通さない判断で記録済み)。次は **Phase 2(配備物ドリフト検出)** — Phase 4 の関門である成功指標S2を作る工程。**未確認前提は残っていない**(U3・AC17とも2026-08-03に確認済) |
+| 1 | **開発と運用の境界を、設定でなく能力の不在で作る**(`docs/ai/reviews/dev_prod_boundary/`) | **Phase 1・2 完了。** Phase 1= `sandbox` VM + ラダー3roleのタグ適格化 + `recovery_probe` 検証用第2インスタンス(ラダー4分岐を実データで観測)。Phase 2= `deployment_drift_check` role/playbook(hash / unit状態 / forced command構造 / reports所有権 / /etc/hosts)を実装し、quory の Semaphore へ日次 `40 0 * * *` で登録。**Phase 4 の関門 S2・S3 は both 達成済み**。Phase 3 は未着手 | **Phase 3(調査面dispatchの拡張)に着手する。** 必須は①配備物ハッシュを返すチェック ②ラダー実行レポートを返すチェック(R13b) ③障害バンドル参照チェック(R14c。`incident_sync` 退役の前提)。**チェック追加は Yoshinobu 承認が要る(D5)**。Tier 2(template配備物の内容比較)とR9(Loki)は保留 |
 
 ## Watch(観測待ち)
 

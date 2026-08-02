@@ -1,0 +1,88 @@
+---
+# 各対象ホストで実際の状態を採取する。**判定はしない** — 収集のみ。
+# 判定・分類・通知は compare.yml(controller側)が行う
+# (docs/ai/context/operations/healthcheck.md)。
+
+- name: Select the checks that apply to this host
+  ansible.builtin.set_fact:
+    deployment_drift_check_my_files: "{{ deployment_drift_check_files | selectattr('hosts', 'contains', inventory_hostname) | list }}"
+    deployment_drift_check_my_units: "{{ deployment_drift_check_units | selectattr('hosts', 'contains', inventory_hostname) | list }}"
+    deployment_drift_check_my_keys: "{{ deployment_drift_check_forced_command_keys | selectattr('hosts', 'contains', inventory_hostname) | list }}"
+    deployment_drift_check_my_report_dirs: "{{ deployment_drift_check_report_dirs | selectattr('hosts', 'contains', inventory_hostname) | list }}"
+    deployment_drift_check_my_hosts_file: "{{ deployment_drift_check_hosts_file | selectattr('hosts', 'contains', inventory_hostname) | list }}"
+
+# --- ① 配備物のハッシュ ------------------------------------------------------
+- name: Stat deployed files
+  ansible.builtin.stat:
+    path: "{{ item.dest }}"
+    checksum_algorithm: sha256
+  loop: "{{ deployment_drift_check_my_files }}"
+  loop_control:
+    label: "{{ item.dest }}"
+  register: deployment_drift_check_file_stat
+  become: true
+
+# --- ②③ unit / timer の状態 -------------------------------------------------
+# systemctl show は unit 未配備でも rc=0 を返し、値が空になる。
+# 「未配備」と「状態が違う」を区別できるよう、生の値のまま持ち帰る。
+# noqa: command-instead-of-module — systemctl show の個別プロパティを取る
+# module は無い(ansible.builtin.systemd は状態の要約しか返さない)。
+# 「未配備」と「状態が違う」を区別するため LoadState を含む生の値が要る
+- name: Collect unit states  # noqa: command-instead-of-module
+  ansible.builtin.command:
+    cmd: >-
+      systemctl show {{ item.name | quote }}
+      --property=LoadState --property=UnitFileState --property=ActiveState
+      --property=TimersCalendar
+  loop: "{{ deployment_drift_check_my_units }}"
+  loop_control:
+    label: "{{ item.name }}"
+  register: deployment_drift_check_unit_show
+  changed_when: false
+  failed_when: false
+  become: true
+
+# --- ⑥ forced command の構造 -------------------------------------------------
+- name: Read recovery-exec authorized_keys
+  ansible.builtin.slurp:
+    src: "{{ item.path }}"
+  loop: "{{ deployment_drift_check_my_keys }}"
+  loop_control:
+    label: "{{ item.path }}"
+  register: deployment_drift_check_keys_raw
+  failed_when: false
+  become: true
+
+# --- ④ reports/ 配下の所有権 --------------------------------------------------
+- name: Collect ownership of directories directly under the reports root
+  ansible.builtin.command:
+    cmd: >-
+      find {{ item.path | quote }} -mindepth 1 -maxdepth 1 -type d
+      -printf '%f\t%u\t%g\n'
+  loop: "{{ deployment_drift_check_my_report_dirs }}"
+  loop_control:
+    label: "{{ item.path }}"
+  register: deployment_drift_check_report_owner
+  changed_when: false
+  failed_when: false
+  become: true
+
+# --- ⑤ /etc/hosts の内容 ------------------------------------------------------
+- name: Read hosts file
+  ansible.builtin.slurp:
+    src: "{{ item.path }}"
+  loop: "{{ deployment_drift_check_my_hosts_file }}"
+  loop_control:
+    label: "{{ item.path }}"
+  register: deployment_drift_check_hosts_raw
+  failed_when: false
+  become: true
+
+- name: Publish collected state for the controller-side comparison
+  ansible.builtin.set_fact:
+    deployment_drift_check_collected:
+      files: "{{ deployment_drift_check_file_stat.results | default([]) }}"
+      units: "{{ deployment_drift_check_unit_show.results | default([]) }}"
+      keys: "{{ deployment_drift_check_keys_raw.results | default([]) }}"
+      report_dirs: "{{ deployment_drift_check_report_owner.results | default([]) }}"
+      hosts_file: "{{ deployment_drift_check_hosts_raw.results | default([]) }}"

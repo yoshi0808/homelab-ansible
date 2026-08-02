@@ -69,6 +69,7 @@ playbook の入口を置く。処理本体は原則として `roles/` に実装�
 | [`recovery_probe_notify.yml`](recovery_probe_notify.yml) | `localhost` | recovery probeのSlack通知 | `role-guarded` | `common_slack` notify tasks |
 | [`recovery_probe_setup.yml`](recovery_probe_setup.yml) | `dev_nodes:control_nodes` | recovery probeとmute CLIを配備 | `check-mode-native` | `recovery_probe`, `recovery_mute` |
 | [`recovery_probe_sandbox_setup.yml`](recovery_probe_sandbox_setup.yml) | `control_nodes` | recovery probeの**検証用第2インスタンス**を配備(unit/設定/state_dirのみ分離、daemon本体は本番と共有。既定でenableしない) | `check-mode-native` | `recovery_probe` |
+| [`deployment_drift_check.yml`](deployment_drift_check.yml) | `control_nodes:dev_nodes:monitoring_servers:radius_servers:proxmox` | 配備物がrepoとずれていないかを検査(hash / unit状態 / forced command構造 / reports所有権 / /etc/hosts)。差分時のみ通知、正常時は無通知・rc0 | `safe-readonly` | `deployment_drift_check` |
 | [`recovery_push_drill_setup.yml`](recovery_push_drill_setup.yml) | `quory` | recovery push drill用unitを配備 | `check-mode-native` | `recovery_push` drill tasks |
 | [`recovery_push_setup.yml`](recovery_push_setup.yml) | `quory` | recovery push triggerを配備 | `check-mode-native` | `recovery_push` |
 | [`recovery_service_restart.yml`](recovery_service_restart.yml) | `pve1` | 承認された対象サービスの復旧restart | `check-mode-native` | `recovery_service_restart` |

@@ -1,0 +1,84 @@
+---
+# 配備物ドリフト検査の対象カタログ。
+#
+# **値は持たない。「何を見るか」だけを持つ。** 期待値は実行時に repo から取る
+# (ファイルはrepo内のsrcをその場でハッシュし、unitは下記の期待状態と突き合わせる)。
+# 値を書き写すと、このファイル自身がドリフトする。
+#
+# **対象は `copy` で配備されるものに限る。** `template` 配備物(dispatch script、
+# sudoers、unit本体、authorized_keys)は期待値を得るのに描画が要るため Tier 2 と
+# して後続で扱う。ただし authorized_keys だけは「forced command が付いているか」
+# という構造検査を deployment_drift_check_forced_command_keys で行う — 内容一致ではないが、
+# 最も危険なドリフト(forced commandの無い鍵が増える)はこれで捕まる。
+#
+# 設計: docs/ai/reviews/dev_prod_boundary/2026-08-03_005_plan_phase2.md
+
+# 検査対象ホスト(playbook の hosts: が参照する)
+deployment_drift_check_hosts: "control_nodes:dev_nodes:monitoring_servers:radius_servers:proxmox"
+
+# --- ① copy 配備物の内容 -----------------------------------------------------
+# src: repo内の相対パス / dest: 配備先 / hosts: 対象(inventory_hostname と照合)
+deployment_drift_check_files:
+  - hosts: [quory]
+    src: roles/recovery_probe/files/recovery-probe.py
+    dest: /usr/local/sbin/recovery-probe.py
+  - hosts: [quory]
+    src: roles/incident_capture/files/incident-capture-collector.py
+    dest: /usr/local/sbin/incident-capture-collector.py
+  - hosts: [quory]
+    src: roles/incident_investigate/files/incident-investigate.py
+    dest: /usr/local/sbin/incident-investigate.py
+  - hosts: [quory]
+    src: roles/recovery_push/files/recovery-push-dispatch.sh
+    dest: /usr/local/sbin/recovery-push-dispatch.sh
+  - hosts: [authy, monnie]
+    src: roles/recovery_push/files/recovery-push.sh
+    dest: /usr/local/sbin/recovery-push.sh
+  - hosts: [authy, monnie]
+    src: roles/recovery_push/files/recovery-trigger@.service
+    dest: /etc/systemd/system/recovery-trigger@.service
+  - hosts: [monnie]
+    src: roles/recovery_exec/files/recovery-loki-helper
+    dest: /usr/local/sbin/recovery-loki-helper
+
+# --- ②③ systemd unit / timer の状態 -----------------------------------------
+# enabled / active は期待値。timer は on_calendar も見る(空なら検査しない)
+deployment_drift_check_units:
+  - { hosts: [quory], name: recovery-probe.service, enabled: enabled, active: active }
+  - { hosts: [quory], name: recovery-io.service, enabled: enabled, active: active }
+  - { hosts: [quory], name: homelab-incident-capture.timer, enabled: enabled, active: active }
+  - { hosts: [quory], name: homelab-incident-investigate.timer, enabled: enabled, active: active }
+  - { hosts: [ansy], name: ansible-knowledge-review.timer, enabled: enabled, active: active }
+  # ansy では配置のみで起動しない(roles/recovery_probe の設計)。
+  # 「起動していないこと」も検査対象にする — 意図せず有効化されたら知りたい
+  - { hosts: [ansy], name: recovery-probe.service, enabled: disabled, active: inactive }
+  - { hosts: [ansy], name: recovery-io.service, enabled: disabled, active: inactive }
+
+# --- ⑥ forced command の構造検査 ---------------------------------------------
+# 全エントリが command= で始まること。entries は期待エントリ数。
+deployment_drift_check_forced_command_keys:
+  - { hosts: [authy, monnie], path: /home/recovery-exec/.ssh/authorized_keys, entries: 2 }
+  - { hosts: [pve1, pve2], path: /home/recovery-exec/.ssh/authorized_keys, entries: 1 }
+
+# --- ④ reports/ 配下の所有権 --------------------------------------------------
+# 直下のディレクトリがすべて同一の所有者であること(値は指定せず、揃っているか
+# だけを見る)。2026-08-03 に recovery_investigations だけが別uid所有で、本番
+# ラダーのレポート保存が権限で失敗する状態だった。
+deployment_drift_check_report_dirs:
+  - { hosts: [quory, ansy], path: "{{ reports_base_dir }}" }
+
+# --- ⑤ /etc/hosts の網羅 -----------------------------------------------------
+# 内部DNSを提供しているのは sophos-fw 自身であり、ラダーの第一の標的でもある。
+# DNSが引けない障害時に名前解決を担保しているのがこのファイルなので、
+# 「DNSではなく /etc/hosts に載っているか」を見る(getent では区別できない)。
+# 期待するホスト名は inventory から取る。
+deployment_drift_check_hosts_file:
+  - hosts: [quory]
+    path: /etc/hosts
+    require_groups: [proxmox, radius_servers, monitoring_servers, control_nodes, dev_nodes, sophos]
+
+# レポート保存先
+deployment_drift_check_report_dir: "{{ reports_base_dir }}/drift"
+
+# true にすると差分が無くても通知する(既定は差分時のみ)
+deployment_drift_check_notify_always: false

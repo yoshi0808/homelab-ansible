@@ -1,0 +1,99 @@
+---
+# 全ホストの finding を集約し、レポートを保存する。
+# 差分があるときだけ通知する。**正常時は無通知・終了コード0** で終える
+# (スケジューラが毎日赤くならないこと。AC7)。
+
+# lookup は参照のたびに再評価される。set_fact で一度だけ確定させないと、
+# 秒をまたいだ瞬間に「保存したファイル名」と「参照するファイル名」がずれる
+# (2026-08-03、実際にこの形で落ちた)。
+- name: Freeze the report timestamp (JST; repo規約でUTC/リテラルZは使わない)
+  ansible.builtin.set_fact:
+    deployment_drift_check_ts_iso: "{{ lookup('pipe', \"TZ='Asia/Tokyo' date '+%Y-%m-%dT%H:%M:%S+09:00'\") }}"
+    deployment_drift_check_ts: "{{ lookup('pipe', \"TZ='Asia/Tokyo' date '+%Y%m%d_%H%M%S+0900'\") }}"
+
+- name: Collect findings from every host that answered
+  ansible.builtin.set_fact:
+    deployment_drift_check_all_findings: >-
+      {%- set out = [] -%}
+      {%- for h in hostvars['localhost'].deployment_drift_check_play_hosts_all | default([]) -%}
+        {%- for f in hostvars[h].deployment_drift_check_findings | default([]) -%}
+          {%- set _ = out.append(f | combine({'host': h})) -%}
+        {%- endfor -%}
+      {%- endfor -%}
+      {{ out }}
+    deployment_drift_check_unverified: >-
+      {{ hostvars['localhost'].deployment_drift_check_play_hosts_all | default([])
+         | reject('in', hostvars['localhost'].deployment_drift_check_play_hosts_ok | default([])) | list }}
+
+- name: Ensure the drift report directory exists
+  ansible.builtin.file:
+    path: "{{ deployment_drift_check_report_dir }}"
+    state: directory
+    mode: "0755"
+  become: false
+  # safe-readonly: レポート保存は読み取り診断の一部であり、--check でも実行する
+  check_mode: false
+
+- name: Save the drift report
+  ansible.builtin.copy:
+    content: "{{ deployment_drift_check_report | to_nice_json }}"
+    dest: "{{ deployment_drift_check_report_dir }}/{{ deployment_drift_check_ts }}.json"
+    mode: "0644"
+  vars:
+    deployment_drift_check_report:
+      generated_at: "{{ deployment_drift_check_ts_iso }}"
+      controller: "{{ inventory_hostname }}"
+      # 到達できなかったホストは「異常なし」ではない。区別して残す
+      unverified_hosts: "{{ deployment_drift_check_unverified }}"
+      checked_hosts: "{{ hostvars['localhost'].deployment_drift_check_play_hosts_ok | default([]) }}"
+      checked_counts: >-
+        {{ dict(hostvars['localhost'].deployment_drift_check_play_hosts_ok | default([])
+           | zip(hostvars['localhost'].deployment_drift_check_play_hosts_ok | default([])
+                 | map('extract', hostvars, 'deployment_drift_check_checked_counts'))) }}
+      findings: "{{ deployment_drift_check_all_findings }}"
+      drift_count: "{{ deployment_drift_check_all_findings | length }}"
+  become: false
+  # safe-readonly: レポート保存は読み取り診断の一部であり、--check でも実行する
+  check_mode: false
+
+- name: Publish the latest report under a stable name
+  ansible.builtin.copy:
+    src: "{{ deployment_drift_check_report_dir }}/{{ deployment_drift_check_ts }}.json"
+    dest: "{{ deployment_drift_check_report_dir }}/latest.json"
+    remote_src: true
+    mode: "0644"
+  become: false
+  # safe-readonly: レポート保存は読み取り診断の一部であり、--check でも実行する
+  check_mode: false
+
+- name: Show the drift summary
+  ansible.builtin.debug:
+    msg:
+      - "drift        : {{ deployment_drift_check_all_findings | length }} 件"
+      - "checked      : {{ hostvars['localhost'].deployment_drift_check_play_hosts_ok | default([]) | join(', ') }}"
+      - "unverified   : {{ deployment_drift_check_unverified | join(', ') | default('(なし)', true) }}"
+      - "report       : {{ deployment_drift_check_report_dir }}/{{ deployment_drift_check_ts }}.json"
+
+- name: Notify only when drift was found
+  ansible.builtin.include_tasks: "{{ playbook_dir }}/../roles/common_slack/tasks/notify.yml"
+  vars:
+    slack_channel: "alerts"
+    slack_status: "warning"
+    slack_title: "[deployment_drift_check] DRIFT {{ deployment_drift_check_all_findings | length }}件"
+    slack_message: |
+      配備物がrepoの内容と食い違っています。
+
+      検査対象 : {{ hostvars['localhost'].deployment_drift_check_play_hosts_ok | default([]) | join(', ') }}
+      {% if deployment_drift_check_unverified | length > 0 %}
+      未確認   : {{ deployment_drift_check_unverified | join(', ') }}(到達できず。異常なしではありません)
+      {% endif %}
+
+      {% for f in deployment_drift_check_all_findings %}
+      - [{{ f.host }}] {{ f.category }} {{ f.item }}
+          期待: {{ f.expected }}
+          実際: {{ f.actual }}
+          {{ f.detail }}
+      {% endfor %}
+
+      レポート : {{ deployment_drift_check_report_dir }}/{{ deployment_drift_check_ts }}.json
+  when: (deployment_drift_check_all_findings | length) > 0 or (deployment_drift_check_notify_always | bool)

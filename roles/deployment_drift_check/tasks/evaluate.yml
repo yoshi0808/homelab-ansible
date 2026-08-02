@@ -1,0 +1,152 @@
+---
+# 収集した実際値を、controller が repo から出した期待値と突き合わせる。
+# ホストごとに自分の分だけを評価する(全ホスト分をまとめて回すより式が単純になる)。
+#
+# finding の型: { category, item, expected, actual, detail }
+
+- name: Build findings for deployed files
+  ansible.builtin.set_fact:
+    deployment_drift_check_findings_files: >-
+      {%- set out = [] -%}
+      {%- for r in deployment_drift_check_file_stat.results | default([]) -%}
+        {%- set want = deployment_drift_check_expected_hashes[r.item.src] | default('') -%}
+        {%- if not r.stat.exists | default(false) -%}
+          {%- set _ = out.append({'category': 'file', 'item': r.item.dest,
+                                  'expected': 'present (' ~ r.item.src ~ ')',
+                                  'actual': 'missing',
+                                  'detail': '配備物が存在しない'}) -%}
+        {%- elif want == '' -%}
+          {%- set _ = out.append({'category': 'file', 'item': r.item.dest,
+                                  'expected': 'repo側のハッシュ',
+                                  'actual': 'repo側のsrcが読めない',
+                                  'detail': r.item.src ~ ' がcontroller上に無い'}) -%}
+        {%- elif r.stat.checksum != want -%}
+          {%- set _ = out.append({'category': 'file', 'item': r.item.dest,
+                                  'expected': want,
+                                  'actual': r.stat.checksum,
+                                  'detail': 'repo(' ~ r.item.src ~ ')と内容が異なる'}) -%}
+        {%- endif -%}
+      {%- endfor -%}
+      {{ out }}
+
+- name: Build findings for systemd units
+  ansible.builtin.set_fact:
+    deployment_drift_check_findings_units: >-
+      {%- set out = [] -%}
+      {%- for r in deployment_drift_check_unit_show.results | default([]) -%}
+        {%- set kv = {} -%}
+        {%- for line in (r.stdout | default('')).splitlines() -%}
+          {%- set p = line.split('=', 1) -%}
+          {%- if p | length == 2 -%}{%- set _ = kv.update({p[0]: p[1]}) -%}{%- endif -%}
+        {%- endfor -%}
+        {%- if kv.get('LoadState', '') != 'loaded' -%}
+          {%- set _ = out.append({'category': 'unit', 'item': r.item.name,
+                                  'expected': 'loaded',
+                                  'actual': kv.get('LoadState', '(取得できず)'),
+                                  'detail': 'unitが配備されていない可能性(setup playbookの流し忘れ)'}) -%}
+        {%- else -%}
+          {%- if kv.get('UnitFileState', '') != r.item.enabled -%}
+            {%- set _ = out.append({'category': 'unit', 'item': r.item.name,
+                                    'expected': r.item.enabled,
+                                    'actual': kv.get('UnitFileState', ''),
+                                    'detail': 'enable状態が期待と異なる'}) -%}
+          {%- endif -%}
+          {%- if kv.get('ActiveState', '') != r.item.active -%}
+            {%- set _ = out.append({'category': 'unit', 'item': r.item.name,
+                                    'expected': r.item.active,
+                                    'actual': kv.get('ActiveState', ''),
+                                    'detail': '稼働状態が期待と異なる'}) -%}
+          {%- endif -%}
+        {%- endif -%}
+      {%- endfor -%}
+      {{ out }}
+
+- name: Build findings for forced-command keys
+  ansible.builtin.set_fact:
+    deployment_drift_check_findings_keys: >-
+      {%- set out = [] -%}
+      {%- for r in deployment_drift_check_keys_raw.results | default([]) -%}
+        {%- if r.content is not defined -%}
+          {%- set _ = out.append({'category': 'forced_command', 'item': r.item.path,
+                                  'expected': 'readable',
+                                  'actual': 'read failed',
+                                  'detail': 'authorized_keysが読めない(未配備か権限)'}) -%}
+        {%- else -%}
+          {%- set lines = (r.content | b64decode).splitlines()
+                          | map('trim') | reject('equalto', '') | list -%}
+          {%- set bad = lines | reject('match', '^command=') | list -%}
+          {%- if bad | length > 0 -%}
+            {%- set _ = out.append({'category': 'forced_command', 'item': r.item.path,
+                                    'expected': '全エントリが command= で始まる',
+                                    'actual': bad | length | string ~ '件が forced command なし',
+                                    'detail': 'forced commandの無い鍵は無制限の実行を許す'}) -%}
+          {%- endif -%}
+          {%- if lines | length != r.item.entries -%}
+            {%- set _ = out.append({'category': 'forced_command', 'item': r.item.path,
+                                    'expected': r.item.entries | string ~ ' entries',
+                                    'actual': lines | length | string ~ ' entries',
+                                    'detail': 'エントリ数が期待と異なる'}) -%}
+          {%- endif -%}
+        {%- endif -%}
+      {%- endfor -%}
+      {{ out }}
+
+- name: Build findings for report directory ownership
+  ansible.builtin.set_fact:
+    deployment_drift_check_findings_reports: >-
+      {%- set out = [] -%}
+      {%- for r in deployment_drift_check_report_owner.results | default([]) -%}
+        {%- set users = [] -%}
+        {%- for line in (r.stdout | default('')).splitlines() -%}
+          {%- set cols = line.split('\t') -%}
+          {%- if cols | length >= 2 -%}{%- set _ = users.append(cols[1]) -%}{%- endif -%}
+        {%- endfor -%}
+        {%- set uniq = users | unique | list -%}
+        {%- if uniq | length > 1 -%}
+          {%- set _ = out.append({'category': 'ownership', 'item': r.item.path,
+                                  'expected': '直下ディレクトリの所有者が一様',
+                                  'actual': uniq | join(', '),
+                                  'detail': '所有者が混在している。書き込みに失敗する経路がありうる'}) -%}
+        {%- endif -%}
+      {%- endfor -%}
+      {{ out }}
+
+- name: Build findings for the hosts file
+  ansible.builtin.set_fact:
+    deployment_drift_check_findings_hostsfile: >-
+      {%- set out = [] -%}
+      {%- for r in deployment_drift_check_hosts_raw.results | default([]) -%}
+        {%- if r.content is not defined -%}
+          {%- set _ = out.append({'category': 'hosts_file', 'item': r.item.path,
+                                  'expected': 'readable', 'actual': 'read failed',
+                                  'detail': ''}) -%}
+        {%- else -%}
+          {%- set body = r.content | b64decode -%}
+          {%- set want = [] -%}
+          {%- for g in r.item.require_groups -%}
+            {%- for h in groups[g] | default([]) -%}
+              {%- set _ = want.append(hostvars[h].ansible_host | default(h)) -%}
+            {%- endfor -%}
+          {%- endfor -%}
+          {%- set missing = want | unique | reject('in', body) | list -%}
+          {%- if missing | length > 0 -%}
+            {%- set _ = out.append({'category': 'hosts_file', 'item': r.item.path,
+                                    'expected': 'inventoryの全ホスト名を含む',
+                                    'actual': missing | join(', ') ~ ' が無い',
+                                    'detail': 'sophos-fw停止中はDNSが引けないため、ここに無い名前は障害時に解決できない'}) -%}
+          {%- endif -%}
+        {%- endif -%}
+      {%- endfor -%}
+      {{ out }}
+
+- name: Combine findings for this host
+  ansible.builtin.set_fact:
+    deployment_drift_check_findings: >-
+      {{ deployment_drift_check_findings_files + deployment_drift_check_findings_units + deployment_drift_check_findings_keys
+         + deployment_drift_check_findings_reports + deployment_drift_check_findings_hostsfile }}
+    deployment_drift_check_checked_counts:
+      files: "{{ deployment_drift_check_my_files | length }}"
+      units: "{{ deployment_drift_check_my_units | length }}"
+      keys: "{{ deployment_drift_check_my_keys | length }}"
+      report_dirs: "{{ deployment_drift_check_my_report_dirs | length }}"
+      hosts_file: "{{ deployment_drift_check_my_hosts_file | length }}"

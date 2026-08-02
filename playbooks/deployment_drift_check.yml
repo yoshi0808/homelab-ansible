@@ -1,0 +1,77 @@
+---
+# tester-gate: safe-readonly — 全taskが読み取りのみ(stat / systemctl show /
+# slurp / find)であり、対象ホストの状態を一切変えない。書き込みは controller 上の
+# レポート保存だけである。異常時通知は common_slack 内の3条件
+# (skip_notifications / ansible_check_mode / AIエージェントセッション検出)で抑止する。
+# 詳細は docs/ai/policies/ansible_test_safety_policy.md。
+#
+# deployment_drift_check.yml
+#
+# 目的: 「配備物がrepoとずれている」を、人が見に行くのを待たずに検出する。
+#
+# 背景: setup系playbookは手動で流されて成立しており、流し忘れても平常時は症状が
+# 出ない。2026-08-02〜03に実際に3件見つかった(collectorが旧版 / probeのdrill残存 /
+# reports配下の所有者異常)。いずれも `ssh` で見に行った人がいたから見つかった。
+#
+# **`--check --diff` による配備playbookの流用では検出できない。** 配備タスクの
+# 多くが `when: not ansible_check_mode` でブロックごとゲートされており(TS-014 /
+# TS-015)、`--check` ではタスクが評価されずスキップされるため、ずれていても
+# `changed=0` と出る。したがって独立した検査として書いてある。
+#
+# 使用方法:
+#   ansible-playbook playbooks/deployment_drift_check.yml
+#   # 対象を絞る: -e deployment_drift_check_hosts=quory
+#
+# 終了コード: 差分があっても **0**。差分はSlack通知とレポートで表す。
+# 到達できないホストは「未確認」として記録し、赤くしない(pve1の平日停止運用)。
+#
+# 設計: docs/ai/reviews/dev_prod_boundary/2026-08-03_005_plan_phase2.md
+
+- name: Deployment drift check - collect actual state
+  hosts: "{{ deployment_drift_check_hosts | default('control_nodes:dev_nodes:monitoring_servers:radius_servers:proxmox') }}"
+  gather_facts: false
+  become: false
+  # 到達できないホストで停止しない。未確認として report play が記録する
+  ignore_unreachable: true
+  vars_files:
+    - ../inventories/vars/slack.yml
+  tasks:
+    - name: Load the drift check catalog and expected values
+      ansible.builtin.include_role:
+        name: deployment_drift_check
+        tasks_from: expected
+
+    - name: Collect deployed state
+      ansible.builtin.include_role:
+        name: deployment_drift_check
+        tasks_from: collect
+
+    - name: Evaluate against the expected values
+      ansible.builtin.include_role:
+        name: deployment_drift_check
+        tasks_from: evaluate
+
+    # 集約playは hosts: localhost のため、この play の対象一覧を controller へ渡す。
+    # ansible_play_hosts は到達できたホストのみを含むので、_all との差が「未確認」になる
+    # noqa: run-once[task] — strategy は既定(linear)であり、この play で
+    # strategy を変える予定はない。ホスト一覧を controller へ1度だけ渡す用途
+    - name: Hand the play host lists to the controller  # noqa: run-once[task]
+      ansible.builtin.set_fact:
+        deployment_drift_check_play_hosts_all: "{{ ansible_play_hosts_all }}"
+        deployment_drift_check_play_hosts_ok: "{{ ansible_play_hosts }}"
+      delegate_to: localhost
+      delegate_facts: true
+      run_once: true
+
+- name: Deployment drift check - aggregate and report
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  become: false
+  vars_files:
+    - ../inventories/vars/slack.yml
+  tasks:
+    - name: Aggregate findings and report
+      ansible.builtin.include_role:
+        name: deployment_drift_check
+        tasks_from: report

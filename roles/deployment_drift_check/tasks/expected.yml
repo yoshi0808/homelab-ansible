@@ -1,0 +1,37 @@
+---
+# controller(repo を持つ側)で期待値を出す。
+# **値をカタログへ書き写さない** — 実行のたびに repo の現物から取る。
+
+- name: Stat repo-side sources for the expected hashes
+  ansible.builtin.stat:
+    path: "{{ playbook_dir }}/../{{ item }}"
+    checksum_algorithm: sha256
+  loop: "{{ deployment_drift_check_files | map(attribute='src') | unique | list }}"
+  loop_control:
+    label: "{{ item }}"
+  register: deployment_drift_check_src_stat
+  delegate_to: localhost
+  become: false
+
+- name: Build the expected-hash map
+  ansible.builtin.set_fact:
+    deployment_drift_check_expected_hashes: >-
+      {%- set m = {} -%}
+      {%- for r in deployment_drift_check_src_stat.results -%}
+        {%- if r.stat.exists | default(false) -%}
+          {%- set _ = m.update({r.item: r.stat.checksum}) -%}
+        {%- endif -%}
+      {%- endfor -%}
+      {{ m }}
+
+- name: Report sources that could not be read on the controller
+  ansible.builtin.debug:
+    msg: >-
+      repo側で読めなかったsrc:
+      {{ deployment_drift_check_src_stat.results | rejectattr('stat.exists', 'defined')
+         | map(attribute='item') | list
+         + (deployment_drift_check_src_stat.results | selectattr('stat.exists', 'defined')
+            | rejectattr('stat.exists') | map(attribute='item') | list) }}
+  when: >-
+    (deployment_drift_check_src_stat.results | selectattr('stat.exists', 'defined')
+     | rejectattr('stat.exists') | list | length) > 0
