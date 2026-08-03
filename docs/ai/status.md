@@ -20,7 +20,7 @@
 
 | # | 項目 | 現在地 | 次にやること |
 |---|---|---|---|
-| 1 | **quory作業ツリーの同期(`worktree_sync`)の配備** | **repoには入った(`68f40b4`)が、quoryの実物は何も変わっていない。** timerは1分間隔、Semaphoreジョブ実行中は見送る。requirement・実装・独立レビュー・追加変更の記録は `docs/ai/reviews/quory_worktree_sync/` | **Yoshinobu**: ①quoryで `git pull --ff-only`(この案件が自動化しようとしている当のもの。初回だけは手作業)②Semaphoreから `playbooks/worktree_sync_setup.yml` を実行。`worktree_sync_service_enabled: true` は `host_vars/quory.yml` にあるのでenable+startまで行われる |
+| — | **進行中の案件は無い。** | | |
 
 ## Watch(観測待ち)
 
@@ -46,8 +46,8 @@
 | **`recovery_monitoring_check.yml` の日次scheduleが登録され、実際に回っているか** | Yoshinobuが Semaphore UI へ **06:30 JST** の日次scheduleを登録した後 | ①Semaphoreのジョブ履歴に毎朝の実行が緑で並ぶこと ②`homelab-monitoring-pause` を伴う作業(現状 `cert_renew.yml` のみ)の翌朝までpauseが残っていれば `alerts` へ経過時間つきの警告が届くこと。**scheduleはrepo外のためAIから登録も確認もできず、未登録のままだと仕組みは沈黙したまま何も起きない**(正常時が無通知であるため、未登録と正常が区別できない) | `docs/ai/reviews/recovery_pause_daily_check/` | 2026-08-01 |
 | **Semaphoreの定期ジョブが `risk-accepted` へ `--check` を渡していないか**(残るは `proxmox_backup_restore_verify` と `cloudkey_cert_deploy` の2本) | 次に各定期ジョブが発火したとき | 渡していればそのジョブが **rc=2 で赤くなる**(TS-030の停止assert)。**Semaphoreの設定はrepo外でAIから確認できないため、事前確認ではなく発火で検出する設計を選んだ。** 赤が出た場合の正しい対処は、assertを外すことではなく**そのジョブから `--check` を外すこと** | `docs/ai/reviews/check_mode_semantics/2026-07-31_001_requirement.md` §7 OQ3、`docs/ai/policies/ansible_test_safety_policy.md` TS-030 | 2026-07-31 |
 | Semaphore実行環境で **fact caching が無効か** | Yoshinobuが Semaphore UI を開いたとき | ジョブ/テンプレート設定に `ANSIBLE_CACHE_PLUGIN` / `ANSIBLE_GATHERING` が注入されていないこと。**有効だと `proxmox_patch_dryrun` が停止中のノードをキャッシュ済みfactsから「到達可能」と誤判定する**。**repo外のためAIからは確認できない。** 残る影響は `proxmox_patch_dryrun` 1箇所のみ | `docs/ai/reviews/proxmox_patch_dryrun/2026-07-26_005_test_result.md` §14-5 a | 2026-07-29 |
-| **`worktree_sync` が quory 実機で通るか(4点まとめて初回に出る)** | 配備後の最初の実行(1分以内) | ①`ssh quory-investigate "journal-unit worktree-sync.service 1h"` にrc=0の実行が並ぶこと ②`#info` へ最初のpull成功通知が届くこと(=systemd配下でvaultが解けている証拠)③`git fetch` がsystemd配下でGitHubへ通ること ④`semaphore.db` のスキーマが `task.status` のままであること。**壊れ方はすべて安全側** — fetch不可ならerror通知が出てpullされず、DB不可なら「実行中」とみなして見送る。**黙って古いまま進む経路は無い**。見送りが続く場合の調査は今回追加した `ssh quory-investigate "semaphore-query running 20"` | `docs/ai/reviews/quory_worktree_sync/2026-08-03_004_implement_1min.md` §4 | 2026-08-03 |
-| **1分ごとの `git fetch`(1日1440回)がGitHub側の制限に触れないか** | 配備後、数日 | 触れた場合の出方は `git fetch` 失敗 → エッジ検出つきのerror通知。**通知が繰り返し出ないのは正常ではなく抑止の結果**なので、`ssh quory-investigate "journal-unit worktree-sync.service 24h"` で実際の失敗回数を見る。レート制限に触れない水準と判断したが**実測はしていない** | 同上 | 2026-08-03 |
+| **1分ごとの `git fetch`(1日1440回)がGitHub側の制限に触れないか** | 配備後、数日 | 触れた場合の出方は `git fetch` 失敗 → エッジ検出つきのerror通知。**通知が繰り返し出ないのは正常ではなく抑止の結果**なので、`ssh quory-investigate "journal-unit worktree-sync.service 24h"` で実際の失敗回数を見る。レート制限に触れない水準と判断したが**実測はしていない**(初日の稼働は正常) | `docs/ai/reviews/quory_worktree_sync/2026-08-03_004_implement_1min.md` §4 | 2026-08-03 |
+| **`worktree_sync` の異常系4経路が、実際に起きたときに設計どおり出るか** | それぞれの異常が実際に起きたとき(汚れたツリー / fetch失敗 / 履歴分岐 / 30分超の見送り) | 正常系(pull成功・無通知の追随済み)は2026-08-03に実機で確認済みだが、**異常系はすべて `/tmp` のdecoyでしか通っていない**。**「鳴らない」は正常と抑止中の両方を意味する**ため、Slackの沈黙を稼働の根拠にしない。一次情報は `ssh quory-investigate "journal-unit worktree-sync.service 24h"` | `docs/ai/reviews/quory_worktree_sync/2026-08-03_006_deploy_result.md` §6 | 2026-08-03 |
 | **`proxmox_backup_restore_verify` Play 3 の停止assertが実行検証できない** | 検証手段が無い。**Playの構造を変えたときに再考する** | **`--check` で観測する経路が原理的に存在しない** — Play 2 の停止assertが先に失敗して run 全体が止まるため Play 3 へ到達しない。これは多重防御であり、**現時点では静的な存在確認しかできない**。Play の順序・`add_host` の構造・Play 2 のassertを変更する人は、Play 3 側が唯一の防波堤になることを踏まえること | `docs/ai/reviews/check_mode_semantics/2026-07-31_022_audit.md` 指摘#2 | 2026-07-31 |
 
 ## Next(着手候補) — 工程・体制
