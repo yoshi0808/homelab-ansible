@@ -8,8 +8,10 @@
 #
 # Contract source: docs/ai/reviews/dev_prod_boundary/2026-08-03_008_phase3_check_catalog.md
 # §1 (class Q, 20 checks: Q1-Q4 bundle/investigation, Q5-Q7 reports, Q-C
-# common system (8), Q8-Q12 quory-specific). Do not add checks beyond that
-# table without Yoshinobu's approval (D5).
+# common system (8), Q8-Q12 quory-specific) plus §6 (D6, 4 checks: X1
+# acl-status is Q-only; X2/X3/X4 users/unit-files/forced-command-keys are
+# shared with classes G/P) — 24 total. Do not add checks beyond those
+# tables without Yoshinobu's approval.
 #
 # All checks are read-only (I-1): no pvesh create/set/delete, no systemctl
 # start/stop/restart/enable, no qm start/stop, no redirection, no tee/rm/mv/cp.
@@ -267,6 +269,62 @@ case "$check" in
       *) deny_invalid name ;;
     esac
     sha256sum -- "$target_path"
+    ;;
+
+  # --- §6 additions (D6, 2026-08-03): X1 is Q-only; X2-X4 are the same
+  # contract on classes G/P (recovery-investigate-dispatch.sh.j2 /
+  # recovery-investigate-dispatch-pve.sh.j2). No new write vocabulary here —
+  # only getfacl / getent / systemctl list-unit-files / this identity's own
+  # authorized_keys, all read. ---
+  acl-status)
+    [[ -n "$p1" && -z "$p2" && -z "$p3" ]] || deny_count
+    # Fixed name->path table, never built from the operand (I-3). Reading a
+    # path's ACL only requires traverse (x) on its parents, not any
+    # permission on the path itself (verified locally: getfacl on a 0700
+    # directory succeeds for another user who can only reach its parent) —
+    # so this works under the same traverse-only grants Q1-Q7/Q11 already
+    # rely on, with no sudo.
+    case "$p1" in
+      yoshi-home) target_path=/home/yoshi ;;
+      semaphore-dir) target_path=/var/lib/semaphore ;;
+      semaphore-db) target_path=/var/lib/semaphore/semaphore.db ;;
+      reports-root) target_path=/home/yoshi/homelab-ansible/reports ;;
+      *) deny_invalid path ;;
+    esac
+    getfacl -p -- "$target_path"
+    ;;
+  users)
+    [[ -z "$p1" && -z "$p2" && -z "$p3" ]] || deny_count
+    # uid bounds are fixed script constants (catalog §6.2 X2) — there is no
+    # operand to take them from. /etc/shadow is never touched.
+    while IFS=: read -r u_name _ u_uid _ _ _ u_shell; do
+      if (( u_uid >= 1000 && u_uid <= 64999 )); then
+        echo "${u_name}:${u_uid}:${u_shell}"
+      fi
+    done < <(getent passwd)
+    ;;
+  unit-files)
+    [[ -z "$p1" && -z "$p2" && -z "$p3" ]] || deny_count
+    systemctl list-unit-files --no-pager
+    ;;
+  forced-command-keys)
+    [[ -z "$p1" && -z "$p2" && -z "$p3" ]] || deny_count
+    # Self only: dev-investigate's own authorized_keys (catalog §6.2 X4 —
+    # never another identity's file). Key material (key type + base64 blob)
+    # is never printed, only the forced command path and comment field.
+    entry_count=0
+    while IFS= read -r keyline; do
+      [[ -z "$keyline" || "$keyline" == \#* ]] && continue
+      entry_count=$((entry_count + 1))
+      read -r opts _ _ comment <<<"$keyline"
+      if [[ "$opts" =~ command=\"([^\"]*)\" ]]; then
+        cmd_path="${BASH_REMATCH[1]}"
+      else
+        cmd_path="(none)"
+      fi
+      echo "${entry_count}: command=${cmd_path} comment=${comment:-(none)}"
+    done < /home/dev-investigate/.ssh/authorized_keys
+    echo "total: ${entry_count} entries"
     ;;
 
   *)

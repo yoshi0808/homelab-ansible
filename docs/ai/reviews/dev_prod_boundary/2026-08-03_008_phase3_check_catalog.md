@@ -157,3 +157,42 @@ pve 側の配備物は dispatch と sudoers と authorized_keys しか無く、�
 - **Codex 側の既存チェックを1つも削らない。** G1(`FILE_RE`)の修正は Codex の読める範囲を**広げる**方向のみ
 - **action 面(`recovery-action.sh` / `homelab-recover-*` / mute set・clear)は Claude Code へ一切露出しない。** requirement 4.5 のとおり共用しない
 - **pve / authy / monnie の script 本体は Codex と同一のまま。** 鍵エントリが1行増えるだけで、呼び出し元による分岐は入れない(AC10)
+
+---
+
+# 6. 追加チェック(D6、2026-08-03 承認)
+
+**Phase 4 で ansy の任意 read が消える前に足すもの。** 承認の根拠は「Phase 3 の作業で**現に必要になった**確認であり、想像上の需要ではない」こと(`2026-08-03_015_plan_phase4.md` D6)。§0 の不変条件 I-1〜I-7 はこの4件にもそのまま適用される。
+
+| # | check | class | operand と検証 | 実行内容 |
+|---|---|---|---|---|
+| X1 | `acl-status <path>` | **Q のみ** | 固定 enum: `yoshi-home` \| `semaphore-dir` \| `semaphore-db` \| `reports-root` | 対応する固定パスへ `getfacl -p`。**パスは operand から組み立てない** |
+| X2 | `users` | Q / G / P | 無し | ローカルユーザーの一覧。**uid 1000〜64999 に限り、`name:uid:shell` の3項目だけ**を出す。`/etc/shadow` には一切触れない |
+| X3 | `unit-files` | Q / G / P | 無し | `systemctl list-unit-files --no-pager`。ディレクトリ走査ではなく systemd に問う(パス操作を持ち込まない) |
+| X4 | `forced-command-keys` | Q / G / P | 無し | **自分自身の** `authorized_keys` について、エントリ数と、各行の「forced command のパス」「コメント欄」だけを出す。**鍵本体は出さない** |
+
+## 6.1 なぜこの4件なのか
+
+| # | Phase 3 で何に使ったか |
+|---|---|
+| X1 | `dev-investigate` に ACL が正しく付いたかの確認。**ACL は「付いているつもりで付いていない」が最も起きる形**で、症状は「helper が読めない」という間接的なものになる |
+| X2 | 新設ユーザーの存在確認と、既存 inbound ユーザー(`trigger` / `incident-inspect` 等)の棚卸し |
+| X3 | unit の実在確認。`journal-unit` / `unit-cat` の enum は**実在する unit しか受け付けない**ため、enum を直すには先に一覧が要る |
+| X4 | 配備後にエントリが期待どおり増えたかの確認。**日次ドリフト検査も同じことを見ているが、あちらは1日1回で、配備直後に確かめる手段が別に要る** |
+
+## 6.2 設計上の注意(実装時に確かめること)
+
+- **X1**: `getfacl` が `/home/yoshi`(`0711` + ACL)に対して、dispatch の実行 identity で読めるか。読めない場合、この check は成立しない — **成立しないなら実装せず報告すること**(sudo を足して通すのは `dev-investigate` の契約を壊す)
+- **X2**: uid 範囲の下限・上限を script 内の定数に持ち、operand から変えられないようにする
+- **X4**: class ごとに「自分自身の `authorized_keys`」が指す先が違う(Q=`dev-investigate`、G/P=`recovery-exec`)。**他ユーザーの `authorized_keys` を読めるようにしない**
+- 4件とも**書込語彙をひとつも増やさない**。`getfacl` / `getent` / `systemctl list-unit-files` / 自分のファイルの読み取りだけである
+
+## 6.3 総数の更新
+
+| class | §1〜§3 | §6 | 計 |
+|---|---|---|---|
+| Q(quory) | 20 | +4 | **24** |
+| G(authy / monnie) | +2 | +3(X2 / X3 / X4) | +5 |
+| P(pve1 / pve2) | +2 | +3(X2 / X3 / X4) | +5 |
+
+**新しく露出する語彙は `getfacl` / `getent` / `systemctl list-unit-files` の3種のみ。いずれも read である。**

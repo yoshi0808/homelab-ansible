@@ -61,7 +61,7 @@ run_remote() {
 # tokens carry no leading whitespace.
 case "$check" in
   {% for svc in target.investigate_services %}{{ svc }}|journal-{{ svc }}|journal-{{ svc }}-1h|journal-{{ svc }}-24h|journal-{{ svc }}-err|journal-{{ svc }}-warn|\
-{% endfor %}failed|disk|memory|load|network|ports|journal-system|dmesg|status{% for extra in target.investigate_extra | default([]) %}|{{ extra.name }}{% endfor %})
+{% endfor %}failed|disk|memory|load|network|ports|journal-system|dmesg|users|unit-files|forced-command-keys|status{% for extra in target.investigate_extra | default([]) %}|{{ extra.name }}{% endfor %})
     (( argc == 0 || argc == 1 )) || deny_count
     run_remote "$check"
     ;;
@@ -97,6 +97,12 @@ case "$check" in
   # Enums mirror recovery-investigate-dispatch.sh.j2 exactly. Codex and Claude
   # Code must reach the same checks (requirement R11) — the dispatch being
   # identical is not enough if this wrapper denies the check first.
+  #
+  # users / unit-files / forced-command-keys (catalog §6, D6, 2026-08-03) are
+  # handled above in the shared no-operand list — they take no argument, so
+  # they need no dedicated case arm here, only membership in that list so
+  # this wrapper does not deny them before the dispatch on the target host
+  # ever sees them (same R11 reasoning as above).
   deployed-hash)
     (( argc == 2 )) || deny_count
     case "$p1" in

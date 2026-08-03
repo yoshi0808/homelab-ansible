@@ -225,6 +225,43 @@ case "$check" in
     esac
     /usr/bin/systemctl cat "$p1"
     ;;
+  # --- catalog §6 additions (D6, 2026-08-03): X2-X4, shared contract with
+  # classes Q/G. No new write vocabulary — only getent / systemctl
+  # list-unit-files / this identity's own authorized_keys, all read.
+  # Absolute paths throughout, matching this file's existing style. ---
+  users)
+    [[ -z "$p1" && -z "$p2" ]] || deny_count
+    # uid bounds are fixed script constants (catalog §6.2 X2) — there is no
+    # operand to take them from. /etc/shadow is never touched.
+    while IFS=: read -r u_name _ u_uid _ _ _ u_shell; do
+      if (( u_uid >= 1000 && u_uid <= 64999 )); then
+        echo "${u_name}:${u_uid}:${u_shell}"
+      fi
+    done < <(/usr/bin/getent passwd)
+    ;;
+  unit-files)
+    [[ -z "$p1" && -z "$p2" ]] || deny_count
+    /usr/bin/systemctl list-unit-files --no-pager
+    ;;
+  forced-command-keys)
+    [[ -z "$p1" && -z "$p2" ]] || deny_count
+    # Self only: recovery-exec's own authorized_keys (catalog §6.2 X4 —
+    # never another identity's file). Key material (key type + base64 blob)
+    # is never printed, only the forced command path and comment field.
+    entry_count=0
+    while IFS= read -r keyline; do
+      [[ -z "$keyline" || "$keyline" == \#* ]] && continue
+      entry_count=$((entry_count + 1))
+      read -r opts _ _ comment <<<"$keyline"
+      if [[ "$opts" =~ command=\"([^\"]*)\" ]]; then
+        cmd_path="${BASH_REMATCH[1]}"
+      else
+        cmd_path="(none)"
+      fi
+      echo "${entry_count}: command=${cmd_path} comment=${comment:-(none)}"
+    done < /home/recovery-exec/.ssh/authorized_keys
+    echo "total: ${entry_count} entries"
+    ;;
   *)
     echo "denied: unknown command '${check:-}'" >&2
     exit 1

@@ -77,7 +77,8 @@ case "$check" in
   cluster-status|cluster-resources|ha-status|\
 replication-status|replication-list|cluster-quorum|\
 storage-status|zpool-health|zfs-list|\
-journal-replication|journal-system|journal-cluster)
+journal-replication|journal-system|journal-cluster|\
+users|unit-files|forced-command-keys)
     (( argc == 1 )) || deny_count
     run_remote "$check"
     ;;
@@ -123,6 +124,9 @@ journal-replication|journal-system|journal-cluster)
   # Enums mirror recovery-investigate-dispatch-pve.sh.j2 exactly. Codex and
   # Claude Code must reach the same checks (requirement R11) — the dispatch
   # being identical is not enough if this wrapper denies the check first.
+  #
+  # users / unit-files / forced-command-keys (catalog §6, D6, 2026-08-03) are
+  # handled above in the no-operand list — same R11 reasoning as above.
   deployed-hash)
     (( argc == 2 )) || deny_count
     case "$p1" in

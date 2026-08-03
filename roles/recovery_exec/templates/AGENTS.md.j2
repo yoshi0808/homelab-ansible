@@ -56,6 +56,19 @@ reached this host":
 - `unit-cat <unit>` — the unit file as systemd currently reads it. `<unit>`
   is one of this host's service names above, or `recovery-trigger@.service`.
 
+Account / inventory checks — use to confirm a change actually landed on this
+host (a new account exists, a unit is registered, a key was added) rather
+than assuming from the repo diff alone:
+- `users` — local accounts with uid 1000–64999, one per line as
+  `name:uid:shell`. No `/etc/shadow` access; system accounts and `nobody`
+  are excluded by the uid range.
+- `unit-files` — full `systemctl list-unit-files` output, to confirm a unit
+  is actually registered before using `journal-*`/`unit-cat` on it.
+- `forced-command-keys` — this host's own `authorized_keys` for
+  `recovery-exec`: an entry count plus, per entry, only the forced
+  `command=` path and the trailing comment. Never the key type or the
+  base64 key material itself.
+
 Node-specific checks:
 - `radius-port` — RADIUS UDP port binding (1812/1813)
 - `radius-config-check` — freeradius config validation (-XC, read-only, safe to run alongside live daemon)
@@ -99,6 +112,19 @@ reached this host":
   Paths are fixed in the script; no path may be passed.
 - `unit-cat <unit>` — the unit file as systemd currently reads it. `<unit>`
   is one of this host's service names above, or `recovery-trigger@.service`.
+
+Account / inventory checks — use to confirm a change actually landed on this
+host (a new account exists, a unit is registered, a key was added) rather
+than assuming from the repo diff alone:
+- `users` — local accounts with uid 1000–64999, one per line as
+  `name:uid:shell`. No `/etc/shadow` access; system accounts and `nobody`
+  are excluded by the uid range.
+- `unit-files` — full `systemctl list-unit-files` output, to confirm a unit
+  is actually registered before using `journal-*`/`unit-cat` on it.
+- `forced-command-keys` — this host's own `authorized_keys` for
+  `recovery-exec`: an entry count plus, per entry, only the forced
+  `command=` path and the trailing comment. Never the key type or the
+  base64 key material itself.
 
 Node-specific checks:
 - `prometheus-targets` — Prometheus target health (HTTP API)
@@ -183,6 +209,18 @@ Deployed artifact / unit introspection — use to tell "the repo was changed"
 from "the change reached this node":
 - `deployed-hash <name>` — sha256 of one deployed file. `<name>` is `investigate-dispatch-pve` or `authorized-keys`. Paths are fixed in the script; no path may be passed
 - `unit-cat <unit>` — the unit file as systemd currently reads it. Same unit list as `journal-unit`
+
+Account / inventory checks — use to confirm a change actually landed on this
+node rather than assuming from the repo diff alone:
+- `users` — local accounts with uid 1000–64999, one per line as
+  `name:uid:shell`. No `/etc/shadow` access; system accounts and `nobody`
+  are excluded by the uid range.
+- `unit-files` — full `systemctl list-unit-files` output, to confirm a unit
+  is actually registered before using `journal-unit`/`unit-cat` on it.
+- `forced-command-keys` — this node's own `authorized_keys` for
+  `recovery-exec`: an entry count plus, per entry, only the forced
+  `command=` path and the trailing comment. Never the key type or the
+  base64 key material itself.
 
 Parameterized checks reject extra arguments, options, shell metacharacters,
 and malformed identifiers before SSH and again at the pve forced-command
