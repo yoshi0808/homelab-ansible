@@ -84,7 +84,7 @@
     content: |
       # 障害の自動評価 {{ knowledge_review_started_at[:10] }}
 
-      評価対象ミラー: {{ knowledge_review_incident_mirror_dir }}
+      取得元: quoryへのdispatch経由でのライブ取得(2026-08-03、`incident_sync`退役)
       rc: {{ knowledge_review_incident_run.rc | default('n/a') }}
 
       ## 評価結果
@@ -120,14 +120,37 @@
 # ことを自己検証で確認済み(2026-07-26のNone/Undefined混同事故と同種の罠)。
 # .get() + default(..., true) なら値が無くても・null でも安全に既定値へ落ちる。
 #
+# 2026-08-03(Phase 4 Step 3、`incident_sync` 退役): STALE(ミラー心拍が
+# 古い)はミラーごと削除した — 代替なし(判断済み。plan §4 Step 3)。
+# 代わりに FETCH_ERROR を新設する。**意味の違い**: 旧STALEは「転送は成功
+# しているが心拍が古い(収集器が止まっている疑い)」という間接的な兆候
+# だったのに対し、FETCH_ERRORは「今回の実行でdispatch呼び出し自体が
+# 失敗し、件数を一切取得できなかった」という直接的な失敗である
+# (incident_metrics.yml の bundle_fetch_error。V3: 取得失敗と「取得できて
+# 0件」を区別する)。
+#
+# NO_DATAの意味の再考(Coordinator依頼事項): 旧NO_DATAは「ミラーの
+# bundle_total が0」であり、これには2つの原因が区別なく混ざっていた
+# — ①quory上に本当にバンドルが0件、②同期が一度も成功しておらずミラーが
+# 空(=旧mirror_stale/heartbeat-missingとほぼ同じ状況)。dispatchはquory
+# 原本への**ライブ問い合わせ**であり、②のような「同期が止まっている」
+# という中間状態が構造的に存在しない(取得できるかできないかの二値になる)。
+# したがって移行後のNO_DATAは**常に①の意味に絞られる**
+# (取得は成功したが実際に0件だった)。取得そのものの失敗は
+# bundle_fetch_error 経由で FETCH_ERROR として先に分岐するため、
+# NO_DATAへは混入しない。
+#
 # 既知の無害な挙動: --check のとき「Run incident evaluation」はskipされ
 # rc未定義となるため summary は FAILED になる(main.yml「Build summary」と同じ
-# 扱い)。成果物・通知とも not ansible_check_mode でガードされるため外部影響は
-# 無い。--check でFAILEDを見ても障害ではない。
+# 扱い)。また incident_metrics.yml も --check ではdispatchを呼ばない
+# ため bundle_fetch_error が非空になり(コメント: "not attempted under
+# --check")、FAILED判定の前段階としてFETCH_ERRORも常に真になりうる —
+# いずれにせよ成果物・通知は not ansible_check_mode でガードされるため
+# 外部影響は無い。--check でFAILED/FETCH_ERRORを見ても障害ではない。
 - name: Determine incident evaluation summary
   ansible.builtin.set_fact:
     incident_eval_summary: >-
       {{ 'FAILED' if (incident_eval_rc | int) != 0
-         else ('STALE' if (incident_eval_index.get('mirror_stale') | default(false, true) | bool)
+         else ('FETCH_ERROR' if (incident_eval_index.get('bundle_fetch_error') | default('', true) | trim | length > 0)
          else ('NO_DATA' if ((incident_eval_index.get('mirror_bundle_total') | default(0, true) | int) == 0)
          else 'OK')) }}

@@ -1,5 +1,0 @@
-# {{ incident_sync_trigger_user }} may start exactly this one systemd unit,
-# nothing else (N8 — this SSH-triggered path must not have any other
-# capability riding along on it). No wildcards: sudoers matches this command
-# line literally, including the --no-block flag.
-{{ incident_sync_trigger_user }} ALL = NOPASSWD: /bin/systemctl start --no-block {{ incident_sync_trigger_unit }}

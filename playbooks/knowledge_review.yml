@@ -33,12 +33,12 @@
       vars:
         slack_channel: >-
           {{ 'info' if (knowledge_review_summary in ['CHANGES', 'NO_CHANGES']
-                        and (incident_eval_summary | default('OK')) not in ['FAILED', 'STALE'])
+                        and (incident_eval_summary | default('OK')) not in ['FAILED', 'FETCH_ERROR'])
              else 'alerts' }}
         slack_status: >-
           {{ 'error' if knowledge_review_summary == 'FAILED'
              else ('warning' if (knowledge_review_summary == 'ABORTED_DIRTY'
-                                  or (incident_eval_summary | default('OK')) in ['FAILED', 'STALE'])
+                                  or (incident_eval_summary | default('OK')) in ['FAILED', 'FETCH_ERROR'])
                    else 'info') }}
         slack_title: "[knowledge_review] 月次Knowledge振り返り {{ knowledge_review_summary }}"
         slack_message: |
@@ -68,6 +68,8 @@
           新着バンドル: {{ incident_eval_index.get('bundles_new_since_last_eval', 0) }} 件
           昇格Incident: {{ incident_eval_index.get('incidents_added_since_last_eval', 0) }} 件
           最古の未評価: {{ (incident_eval_index.get('oldest_unreviewed_bundle') or {}).get('age_days', 'n/a') }} 日
-          ミラー心拍age: {{ incident_eval_index.get('mirror_heartbeat_age_seconds', 'n/a') }} 秒
+          {% if incident_eval_index.get('bundle_fetch_error') %}
+          取得エラー: {{ incident_eval_index.get('bundle_fetch_error') }}
+          {% endif %}
           {% endif %}
       when: not ansible_check_mode

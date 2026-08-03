@@ -8,7 +8,7 @@
 # the investigation body, or the artifact writer — those belong to
 # roles/incident_investigate (U2, a separate implementation unit) and are out
 # of scope here. This playbook never touches roles/recovery_exec,
-# roles/recovery_io, roles/incident_capture, or roles/incident_sync.
+# roles/recovery_io, or roles/incident_capture.
 #
 # Prerequisite: roles/recovery_exec must already be deployed on this host
 # (playbooks/recovery_exec_setup.yml) — homelab-semaphore-query and

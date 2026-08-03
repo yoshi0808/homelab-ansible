@@ -63,14 +63,6 @@
   tags: [destructive]
 
 # ---------------------------------------------------------------------------
-# N5/N8/N9: quory→ansy 即時同期起動のためのSSH鍵生成(受け側の配備は
-# playbooks/incident_sync_trigger_setup.ymlが別途行う。このtaskはあくまで
-# quory側の鍵を用意するだけで、ansyへは一切書き込まない — IC-013)。
-# ---------------------------------------------------------------------------
-- name: Ensure sync-trigger SSH key exists
-  ansible.builtin.import_tasks: sync_trigger.yml
-
-# ---------------------------------------------------------------------------
 # スクリプト・設定・systemd unit
 # ---------------------------------------------------------------------------
 - name: Deploy incident-investigate.py

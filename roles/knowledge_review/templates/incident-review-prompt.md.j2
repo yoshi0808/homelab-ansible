@@ -24,15 +24,35 @@
 
 ## 評価対象
 
-ミラー: `{{ knowledge_review_incident_mirror_dir }}`
-(quoryから毎時pullされたバンドルのコピー。転送だけが書き、上書きされる前提。
-ここに判断を書いても次の同期で失われるので、判断は標準出力側に書くこと)
+取得元: quory(本番)へのdispatch経由でのライブ取得(`bundle-list` /
+`bundle-show`)。**2026-08-03以降、quory→ansyの定期ミラー同期
+(`incident_sync`)は廃止されている。** 件数・最古バンドルの情報は
+起動側のAnsibleがdispatch経由で今回取得した値であり、mtimeではなく
+`summary.json` の `generated_at` を尺度にしている(最古バンドルのみ)。
 
-今回のウィンドウ(起動側のAnsibleが `summary.json` の `generated_at` を基準に
-既に算出済み。ファイルのmtimeではなくこの値が尺度である):
+**あなた自身(このセッション)がdispatchやSSHでquoryへ問い合わせることは
+できない。** 読める範囲は下記のとおりローカルの作業ツリーに限られる。
+
+- `reports/incidents/quory/` は `incident_sync` が生きていた間に運ばれた
+  **凍結スナップショット**であり、2026-08-03以降に生成された新規バンドルは
+  ここには増えない。以降の新規バンドルは件数と最古の情報しか分からず、
+  個別のsummary.json/ログはこのセッションから読めない。
+  - 個別バンドルを読める場合(このディレクトリに実体があるもの)は、
+    通常どおり内容を評価すること。
+  - 読めない場合(新規バンドルでこのディレクトリに実体が無い)は、
+    その旨を「個別の所見」に明記し、内容の推測や決めつけは書かないこと
+    (読めないことと問題が無いことは別である)。
+
+今回のウィンドウ(起動側のAnsibleが算出済み):
 
 - 前回評価日: {{ idx.get('previous_evaluation_date') | default('(初回。過去の評価記録なし)', true) }}
-- ミラー内バンドル総数: {{ idx.get('mirror_bundle_total') | default(0, true) }}
+{% if idx.get('bundle_fetch_error') %}
+- **注意: 今回の実行では上記の取得自体が失敗している。** 以下の件数・最古情報は
+  信頼できない値である。評価結果には「メトリクス取得に失敗したため件数は
+  不明」と明記し、推測で件数を埋めないこと。
+  取得エラー: {{ idx.get('bundle_fetch_error') }}
+{% endif %}
+- バンドル総数: {{ idx.get('mirror_bundle_total') | default(0, true) }}
 - 前回評価以降の新規バンドル数: {{ idx.get('bundles_new_since_last_eval') | default(0, true) }}
 {% set oldest = idx.get('oldest_unreviewed_bundle') %}
 {% if oldest %}
@@ -41,26 +61,28 @@
 - 未評価バンドルのうち最古: なし
 {% endif %}
 - 前回評価以降に `docs/ai/memory/incidents/` へ追加されたIncident記録: {{ idx.get('incidents_added_since_last_eval') | default(0, true) }}件
-- ミラー心拍(`_heartbeat.json`)の経過: {{ idx.get('mirror_heartbeat_age_seconds') | default('不明', true) }}秒(stale判定: {{ idx.get('mirror_stale') | default(false, true) }})
 
 ## やること
 
-1. 「前回評価以降の新規バンドル数」に該当するものを中心に、各バンドルの
-   `summary.json` を読み、何が起きたか・解消したか・どんな対応をしたかを評価する。
-   件数が多い場合は `summary.json` を先に全件ざっと見て、生ログ(`*.log`)を
-   開くのは判断に必要なものだけに絞ってよい(文脈が溢れることを避けるため)。
+1. 「前回評価以降の新規バンドル数」に該当するものを中心に、`reports/incidents/quory/`
+   に実体があるものは `summary.json` を読み、何が起きたか・解消したか・どんな
+   対応をしたかを評価する。件数が多い場合は `summary.json` を先に全件ざっと見て、
+   生ログ(`*.log`)を開くのは判断に必要なものだけに絞ってよい(文脈が溢れる
+   ことを避けるため)。実体が無いものは「読めなかった」と明記する(上記参照)。
 2. 既知条件(pve1の夏季平日シャットダウン運用など)による発火は、除外はしなくて
    よいが、それと分かるものにはその旨を書く(判定基準は今回は決め切らない)。
 3. 前回評価以降にIncident記録が1件も増えていないのに新規バンドルが複数ある
    場合、それを「昇格されないまま滞留している可能性」として明示的に指摘する。
+   内容を読めなかったバンドルであっても、件数自体からこの指摘はできる。
 4. 開発プロセス全般の見直しに資する所見があれば書く(このパイプラインの目的)。
 
 ## 書いてはいけないこと
 
 **生ログの内容を評価結果へ転記しない。** 引用は最小限にとどめ、詳細を知りたい
 読み手がたどれるよう、バンドルの識別子とパス(例:
-`{{ knowledge_review_incident_mirror_dir }}/<bundle_id>/summary.json`)への
-**参照だけ**を書く。
+`reports/incidents/quory/<bundle_id>/summary.json`。ただし2026-08-03以降の
+新規バンドルはこのパスに実体が無い場合がある — 上記参照)への**参照だけ**を
+書く。
 
 ## 出力
 

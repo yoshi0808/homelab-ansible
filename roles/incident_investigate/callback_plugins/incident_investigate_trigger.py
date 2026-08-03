@@ -85,8 +85,9 @@ DOCUMENTATION = r"""
 # 無効化と合わせた二重の無効化。上のdocstring「戻し方」参照)。
 # callback経路へ戻す場合、このパスは roles/incident_investigate/tasks/
 # main.yml が作っていたディレクトリ(yoshi:yoshi 0750)と文字どおり
-# 一致させる必要がある(incident_sync_outer_lock_path と同型の注意 —
-# 片方だけ変更すると無言で機構全体が動かなくなる)。callback pluginは
+# 一致させる必要がある(設定値を2箇所に持つ変数の一致が要る、という
+# 同型の注意 — 片方だけ変更すると無言で機構全体が動かなくなる)。callback
+# pluginは
 # Ansible変数を参照できない(ロード時点でplaybook変数のスコープが無い)ため、
 # リテラルで持たざるを得ない。
 QUEUE_DIR = "/var/lib/homelab-recovery/incident-investigate/queue"

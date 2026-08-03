@@ -37,15 +37,19 @@ knowledge_review_playbook_bin: /usr/bin/ansible-playbook
 # Policy: docs/ai/policies/incident_capture_policy.md(IC-005, IC-007, IC-017〜IC-020,
 #         IC-025, IC-031, IC-032, IC-033)
 #
-# roles/incident_sync が書くミラー(reports/incidents/quory/)を読むだけであり、
-# incident_sync の defaults(incident_sync_mirror_dir 等)は参照しない。値は一致
-# させてあるが、書き手が交差しない設計(IC-031)にするため各roleが自分の変数を持つ。
+# 2026-08-03(Phase 4 Step 3、`incident_sync` 退役に伴う移設): `roles/incident_sync`
+# が書いていたミラー(reports/incidents/quory/)は、周期的な追記が止まった
+# 凍結スナップショットとして残るのみで、以後は読みに行かない。滞留カウント
+# (mirror_bundle_total / bundles_new_since_last_eval / oldest_unreviewed_bundle)
+# は、quoryのdev-investigate dispatch(roles/dev_investigate、Phase 3)を
+# `ssh` 経由で叩いて直接取得する — 採取するのはtimerが動かすAnsible側
+# (このrole)であり、`claude -p` 側(incident-review-prompt.md.j2 を読む
+# セッション)はBash禁止のまま変わらない(結果ファイルを読むだけ)。
+# `mirror_heartbeat_age_seconds` / `mirror_stale` はミラー自身の健全性を
+# 見る指標だったため、ミラーごと削除した(代替なし)。詳細は
+# docs/ai/reviews/dev_prod_boundary/2026-08-03_017_implement_phase4_step2_3.md。
 
-# quoryからのミラー着地点(読むだけ)。roles/incident_sync が書く。
-knowledge_review_incident_mirror_dir: "{{ reports_base_dir }}/incidents/quory"
-
-# 評価成果物の置き場所。ここだけはAnsibleが書く(IC-032)。incident_sync の書込
-# 対象外であり、毎時の同期がミラーを上書きしても消えない(IC-031)。
+# 評価成果物の置き場所。ここだけはAnsibleが書く(IC-032)。
 knowledge_review_incident_eval_dir: "{{ reports_base_dir }}/incidents/_evaluations"
 
 # 評価工程(incident_metrics/incident_evaluation/incident_index_writeの3ファイル)
@@ -63,12 +67,23 @@ knowledge_review_incident_timeout: 900
 # 評価用 claude -p のモデル。既存の振り返り本体と揃える。
 knowledge_review_incident_model: "{{ knowledge_review_model }}"
 
-# ミラーの _heartbeat.json の generated_at がこの秒数より古ければ stale とみなす
-# (incident_metrics.yml が評価時点で再計算する。§2.6層3)。収集器の周期
-# (5分)の36倍 = 3時間。roles/incident_sync/defaults/main.yml の
-# incident_sync_heartbeat_max_age_s と**同じ値**であることを意図しているが、
-# 変数としては独立している(書き手が交差しない設計。IC-031)。**この2つを
-# 統合はしない**(別roleの変数を跨いで参照すると依存が増えるため)——
-# 片方だけ変えるとstale判定の基準がroleごとにずれる。変えるときは両方を
-# 確認すること。
-knowledge_review_incident_heartbeat_max_age_s: 10800
+# --- quory bundle dispatch経由での滞留カウント採取(Phase 4 Step 3) ---
+#
+# alias名(quory-investigate)と鍵は ansy(yoshi)の `~/.ssh/config`/
+# `~/.ssh/id_claude_investigate_quory` 側で定義済みのものを使う。この
+# リポジトリの管理下には無い(Phase 3 で配備した roles/dev_investigate は
+# quory側の受け口のみを作る)。dev-investigate 鍵を使うため Phase 4(ann鍵の
+# 削除)後も切れない。
+knowledge_review_incident_dispatch_ssh_bin: /usr/bin/ssh
+knowledge_review_incident_dispatch_alias: quory-investigate
+
+# SSHのTCP接続確立自体が固まった場合の上限。roles/recovery_exec の既存
+# テンプレート(homelab-investigate.sh.j2等)の `-o ConnectTimeout=10` より
+# やや広めに取った(quoryは本ホストと同一LAN内だが、月次1回の実行であり
+# 待たせても実害が小さいぶん安全側に倒した)。
+knowledge_review_incident_dispatch_connect_timeout_s: 15
+
+# dispatch呼び出し1回(bundle-list または bundle-show 1件)全体に対する
+# タイムアウト(秒)。いずれも軽いread-only操作であり、55件規模(2026-08-03
+# 実測)のbundle-list出力でも数秒で返ることを前提にした値。
+knowledge_review_incident_dispatch_timeout_s: 30

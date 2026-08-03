@@ -50,12 +50,18 @@ max_s を超えてなお確定しない場合だけ、諦めた事実を成果�
 
 成果物を書いた直後(2026-08-01、
 docs/ai/reviews/incident_investigation_notify/2026-08-01_001_requirement.md):
-post_artifact_actions() が quory→ansy の同期を即時起動し(N5・N8・N9)、続けて
-`#alerts` へプレーンテキストで完了通知を送る(N1〜N3・N7・N11)。この2つは
-どちらも成果物が既に書かれた**後**の処理であり、失敗しても本スクリプトの
-終了コード・成果物の内容に一切影響しない(N4・N6) — 例外は
+post_artifact_actions() が `#alerts` へプレーンテキストで完了通知を送る
+(N1〜N3・N7・N11)。これは成果物が既に書かれた**後**の処理であり、失敗しても
+本スクリプトの終了コード・成果物の内容に一切影響しない(N4・N6) — 例外は
 post_artifact_actions() 内部で必ず捕捉し、journalへstderr出力として残す
 だけに留める。
+
+2026-08-03(Phase 4 Step 2、`incident_sync` 退役): 以前はここで
+quory→ansyの同期即時起動(N5・N8・N9)も行っていたが、受け側機構
+(roles/incident_sync、ansy側の `incident-sync-trigger` ユーザー)ごと
+退役したため削除した。通知本文(iv_report_path)は、ansy側ミラーの相対
+パスではなく、quoryのdispatch(roles/dev_investigate)を経由した取得
+コマンドを渡す形に変更している(build_notify_payload() 参照)。
 """
 import json
 import os
@@ -627,43 +633,6 @@ def artifact_already_exists(artifact_dir, task_id):
 # 失敗はジャーナルへの stderr 出力としてのみ残す(IC-038の精神をこの後段にも
 # 適用する — 握りつぶすのではなく、可視化した上で無害化する)。
 # ---------------------------------------------------------------------------
-def trigger_ansy_sync(cfg):
-    """N5/N8/N9: quory→ansyの即時同期起動。
-
-    引数を一切取らない固定のSSH forced command(roles/incident_sync/files/
-    incident-sync-trigger.sh)を、専用の受け側ユーザーへBatchModeで叩くだけ。
-    このプロセス自身はansyへ一切書き込まない(IC-013はansy側の受け口が
-    `systemctl start --no-block ansible-incident-sync.service` という
-    単一のsudoers許可コマンドだけを実行することで保たれる — 実際の転送は
-    従来どおりansy起点のpullのまま)。
-
-    失敗(接続不可・認証失敗・timeout・受け側の非ゼロ終了)はすべて
-    RuntimeError/subprocess.TimeoutExpiredとして呼び出し元へ伝播させる —
-    ここでは何も揉み消さない。握りつぶし(non-fatal化)は呼び出し元の
-    post_artifact_actions の役目であり、この関数自身の役目ではない。
-    """
-    argv = [
-        cfg["sync_trigger_ssh_bin"],
-        "-i", cfg["sync_trigger_key"],
-        "-T",  # forced command側はptyを要求しない(no-pty)。クライアント側も要求しない。
-        "-o", "BatchMode=yes",
-        "-o", "StrictHostKeyChecking=yes",
-        "-o", f"UserKnownHostsFile={cfg['sync_trigger_known_hosts']}",
-        "-o", f"ConnectTimeout={cfg['sync_trigger_connect_timeout_s']}",
-        f"{cfg['sync_trigger_remote_user']}@{cfg['sync_trigger_host']}",
-        # N8: このコマンド文字列に何を書いても実行されない — 受け側の
-        # authorized_keysが `command=` で固定しており、$SSH_ORIGINAL_COMMAND
-        # は読まれない(roles/incident_sync/files/incident-sync-trigger.sh)。
-        # 空文字列や省略ではなく無害な明示のプレースホルダにしている。
-        "true",
-    ]
-    result = subprocess.run(argv, capture_output=True, text=True, timeout=cfg["sync_trigger_timeout_s"])
-    if result.returncode != 0:
-        raise RuntimeError(
-            f"sync trigger ssh failed rc={result.returncode} stderr={result.stderr.strip()!r}"
-        )
-
-
 def build_notify_payload(cfg, task_id, artifact, codex_error, wait_error):
     """N1〜N3・N11: playbooks/incident_investigate_notify.yml へ渡す
     extra-varsを組み立てる。
@@ -695,7 +664,12 @@ def build_notify_payload(cfg, task_id, artifact, codex_error, wait_error):
         "iv_known_condition_reason": kc.get("reason"),
         "iv_codex_error": codex_error or "",
         "iv_wait_error": wait_error or "",
-        "iv_report_path": f"{cfg['ansy_report_path_prefix']}/semaphore-{task_id}.md",
+        # 2026-08-03(Phase 4 Step 2、`incident_sync` 退役): 以前はansy側
+        # 同期先ミラーの相対パス(コピーが存在する前提)だったが、その
+        # コピーはもう作られない。実体はquoryにしか無いため、パスではなく
+        # 「これで読める」取得コマンドを渡す(defaults/main.ymlの
+        # incident_investigate_dispatch_ssh_alias 参照)。
+        "iv_report_path": f"ssh {cfg['dispatch_ssh_alias']} investigation-show semaphore-{task_id} md",
     }
 
 
@@ -733,25 +707,21 @@ def send_investigation_notification(cfg, task_id, artifact, codex_error, wait_er
 
 
 def post_artifact_actions(cfg, task_id, artifact, codex_error=None, wait_error=None):
-    """N4・N6・N7・AC3・AC7: 成果物を書いた直後だけ呼ぶ。同期起動→通知の順
-    (N7)。どちらかが失敗しても他方は試みる(N4とN6は独立の不変条件であり、
-    片方の失敗がもう片方の実行を妨げてはならない)。例外はここで必ず握り
-    つぶし、stderr(systemdジャーナルに残る)へ書くだけに留める — process_bundle
-    の戻り値・exit codeには一切影響させない。
+    """N4・N6・N7・AC3・AC7: 成果物を書いた直後だけ呼ぶ。
+
+    2026-08-03(Phase 4 Step 2、`incident_sync` 退役): 以前はここで
+    quory→ansy即時同期起動(N5/N8/N9)→通知の順(N7)で2アクション行って
+    いたが、同期起動先の受け側機構(roles/incident_sync)ごと退役したため
+    削除した。通知のみを行う。例外はここで必ず握りつぶし、stderr
+    (systemdジャーナルに残る)へ書くだけに留める — process_bundle の
+    戻り値・exit codeには一切影響させない(N4・AC3・AC7は通知1本のみに
+    ついて成立する)。
 
     codex_error / wait_error は排他利用を想定する(R2): Codexを実際に
     呼び出して失敗した経路は codex_error だけを渡し、Codexを一度も呼ばずに
     諦めた経路(give-up-waiting)は wait_error だけを渡す。両方Noneなら
     調査は正常完了しており、どちらの見出しも本文に出ない。
     """
-    try:
-        trigger_ansy_sync(cfg)
-    except Exception as e:
-        sys.stderr.write(
-            f"incident-investigate: sync trigger failed for semaphore-{task_id} "
-            f"(non-fatal — next hourly ansible-incident-sync.timer run will catch up, IC-012): {e}\n"
-        )
-
     try:
         send_investigation_notification(cfg, task_id, artifact, codex_error, wait_error)
     except Exception as e:
