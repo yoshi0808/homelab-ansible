@@ -88,10 +88,13 @@ requirement: `2026-08-02_001_requirement.md` R11 / R12 / R13b / R14c、AC9
 `homelab-incident-investigate.service` / `homelab-incident-investigate.timer` /
 `semaphore.service` /
 `ansible-cert-renew-quory.service` / `.timer` /
+`worktree-sync.service` / `worktree-sync.timer` /
 `ansible-authy-healthcheck.timer` / `ansible-monitoring-healthcheck.timer` /
 `ansible-proxmox-healthcheck.timer` / `ansible-proxmox-hw-check.timer` / `ansible-proxmox-patch-dryrun.timer`
 
 `status` が一括表示するのは先頭8つ(復旧パイプライン + Semaphore)に絞る。
+
+**`worktree-sync.service` / `.timer` は2026-08-03に追加(D5承認、`docs/ai/reviews/quory_worktree_sync/`)。** 同期の稼働はSlack通知だけでは判断できない — 異常系の通知は抑止つきで、**「鳴らない」は正常と抑止中の両方を意味する**。journalが唯一の一次情報になる。配備直後に気づいたため、dispatchの再配備を1回で済ませられた(Phase 4 D6と同じ判断)。
 
 #### `deployed-hash` name→パス表(class Q)
 

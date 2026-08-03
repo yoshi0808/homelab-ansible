@@ -81,6 +81,8 @@ _is_valid_unit() {
     semaphore.service
     ansible-cert-renew-quory.service
     ansible-cert-renew-quory.timer
+    worktree-sync.service
+    worktree-sync.timer
     ansible-authy-healthcheck.timer
     ansible-monitoring-healthcheck.timer
     ansible-proxmox-healthcheck.timer
