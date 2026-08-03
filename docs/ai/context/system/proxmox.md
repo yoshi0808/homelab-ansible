@@ -38,6 +38,23 @@
 - snapshot report等に実行時のゲスト識別子が含まれ得るが、それをContextやレビュー文書へ転載しない。
 - IPアドレス、VLAN ID、VM ID、認証情報、秘密情報を記載しない。到達先はinventory名またはFQDNで表す。
 
+## `pvesh create` の終了コードは、要求の受理であって実行の成功ではない
+
+`pvesh create /nodes/<node>/qemu/<vmid>/status/{shutdown,stop,start}` は**非同期タスクを作る API** である。要求が受理されるとタスクID(UPID)を標準出力へ返して **`rc=0` で戻り、実際にその操作が行われたかは戻り値に現れない。**
+
+**拒否されても `rc=0` である。** 2026-08-03に sandbox VM で実測した。
+
+| VMの状態 | `status/shutdown` の出力 | `rc` | 実際 |
+|---|---|---|---|
+| locked(`--lock backup`) | `VM is locked (backup)` + UPID | **0** | 停止しない(pid・uptime とも継続) |
+| stopped | `VM <vmid> not running` + UPID | **0** | 何も起きない |
+
+`status/stop`(強制電源断)も locked 状態で同じく `rc=0` を返し、VM は止まらなかった。
+
+**したがって `pvesh create` の rc を成功判定に使わない。** 操作が効いたかは、`pvesh get /cluster/resources` 等で**実状態をポーリングして確かめる。** 現行実装は2箇所ともこの形になっている(`roles/recovery_vm_reboot` は `until` によるポーリング、`roles/recovery_probe` は rc を実プローブと AND している)。**新しく `pvesh create` を書くときも、この形を崩さない。**
+
+なお、この非同期性のため「VM を止められない」状況は**エラーではなく待機のタイムアウトとして現れる。** ロック中の VM に対するラダーは、ソフト停止待ちと強制停止後の待ちを消化したうえで失敗し、report と通知を出す。**強制電源断を撃ち込まずに人間へ上げる**この挙動は意図どおりである。
+
 ## patch分類とcontrol nodeの配置
 
 - patch dry-runで使う分類CLIはansy、quory、またはmacOS側で動き、Proxmox hostへは配置しない。
