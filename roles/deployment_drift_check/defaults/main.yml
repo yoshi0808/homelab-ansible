@@ -72,6 +72,12 @@ deployment_drift_check_units:
   - { hosts: [quory], name: recovery-io.service, enabled: enabled, active: active }
   - { hosts: [quory], name: homelab-incident-capture.timer, enabled: enabled, active: active }
   - { hosts: [quory], name: homelab-incident-investigate.timer, enabled: enabled, active: active }
+  # 作業ツリーの自動同期(2026-08-03新設)。**止まっても静かである** — 同期が
+  # 走らなくなると quory は古いコードで動き続けるが、それ自体は通知を出さない
+  # (通知は同期が「動いた」ときと「失敗した」ときに出るもので、「呼ばれなく
+  # なった」ことは検出できない)。timerの生存を見るのはこの検査だけである。
+  # service 本体は Type=oneshot で常時 inactive のため対象にしない。
+  - { hosts: [quory], name: worktree-sync.timer, enabled: enabled, active: active }
   - { hosts: [ansy], name: ansible-knowledge-review.timer, enabled: enabled, active: active }
   # ansy では配置のみで起動しない(roles/recovery_probe の設計)。
   # 「起動していないこと」も検査対象にする — 意図せず有効化されたら知りたい

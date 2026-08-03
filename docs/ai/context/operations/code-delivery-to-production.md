@@ -56,6 +56,14 @@ ssh quory-investigate "deployed-hash <name>"       # quory側
 
 **識別子や機構を撤廃する案件では、受入条件に「配備物側にも残っていないこと」を含める**(`skills/requirements-analysis/`)。
 
+### 日次のドリフト検査が拾う範囲
+
+`playbooks/deployment_drift_check.yml`(`safe-readonly`、日次 00:40)が**自動で突合する**。対象カタログは `roles/deployment_drift_check/defaults/main.yml` が正本。
+
+**`copy` 配備物は内容まで見るが、`template` 配備物は見ない。** 期待値を得るのに描画が要るためで、dispatch script・sudoers・unit本体・`worktree-sync.sh` などが該当する(Tier 2、未着手)。**この穴は特定のroleの問題ではなく、配備方式で決まる。** `template` で配備したものは、日次検査に守られていないと考えること。
+
+unit の `enabled` / `active` は別軸で見ており、**timerが止められたことはここでしか検出できない** — 同期が呼ばれなくなっても、それ自体は通知を出さないため。
+
 ## 3. 自動同期(`worktree_sync`)が行うこと・行わないこと
 
 **行うこと**は `git pull --ff-only` だけである。
