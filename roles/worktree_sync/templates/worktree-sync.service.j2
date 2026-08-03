@@ -1,0 +1,24 @@
+[Unit]
+Description=Sync quory working tree with origin/{{ worktree_sync_branch }} (git pull --ff-only)
+Documentation=file://{{ worktree_sync_repo_dir }}/docs/ai/reviews/quory_worktree_sync/2026-08-03_001_requirement.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User={{ worktree_sync_run_user }}
+WorkingDirectory={{ worktree_sync_repo_dir }}
+# flock -n が防ぐのは worktree-sync.sh 自身の多重起動だけであり、Semaphoreジョブ
+# との排他ではない(Semaphoreはこのlockを取らない)。Semaphoreとの排他判定は
+# スクリプト内部でsemaphore.dbを直接読んで行う(worktree-sync.sh先頭コメント、
+# 設計の正本は上のDocumentation=)。
+# -E 75 は incident-capture / incident-investigate の前例に倣う。無いと、
+# flockが多重起動を弾いた正常なskipと、スクリプト自身の失敗が、どちらも
+# 同じ非ゼロ終了として systemd に見え、区別できなくなる。
+ExecStart=/usr/bin/flock -n -E 75 {{ worktree_sync_lock_path }} {{ worktree_sync_script_path }}
+SuccessExitStatus=75
+# スクリプト内部の段階timeoutの合計(fetch/merge/notify 各60s)は180sであり、
+# それと同値にすると余裕がゼロになる。成功したのにnotifyの途中で殺されると
+# 「成功したが証跡が無い」というAC-1に反する終わり方をするため、合計より
+# 明確に長く取る。
+TimeoutStartSec=300

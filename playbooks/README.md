@@ -108,6 +108,8 @@ playbook の入口を置く。処理本体は原則として `roles/` に実装�
 | [`systemd_timers.yml`](systemd_timers.yml) | `target_hosts`（既定`control_nodes`） | Ansible定期実行用systemd timerを管理 | `check-mode-native` | `systemd_timers` |
 | [`unifi_backup_fetch.yml`](unifi_backup_fetch.yml) | `pve1`（CloudKeyへ接続） | CloudKeyのUniFiバックアップを取得・保存 | `risk-accepted` | `unifi_backup_fetch` |
 | [`test_ca_env.yml`](test_ca_env.yml) | `localhost` | CA関連環境変数のローカル表示テスト | `safe-readonly` | playbook内tasks |
+| [`worktree_sync_setup.yml`](worktree_sync_setup.yml) | `quory` | quoryの作業ツリーをorigin/mainへ追随させる`git pull --ff-only`をsystemd timerから起動する仕組みを配備(Semaphoreジョブ実行中は見送り) | `check-mode-native` | `worktree_sync` |
+| [`worktree_sync_notify.yml`](worktree_sync_notify.yml) | `localhost` | `worktree_sync`の同期結果をSlackへ通知(worktree-sync.shから起動される) | `role-guarded` | `common_slack` notify tasks |
 
 ## 探し方
 

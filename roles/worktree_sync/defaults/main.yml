@@ -1,0 +1,63 @@
+---
+# worktree_sync: quory の作業ツリーを origin/main へ追随させる(git pull --ff-only)。
+# 配備先はquoryのみ。設計の正本:
+# docs/ai/reviews/quory_worktree_sync/2026-08-03_001_requirement.md §6(決定: 案B)・
+# §6.1(Semaphoreジョブとの排他)。
+
+worktree_sync_repo_dir: /home/yoshi/homelab-ansible
+worktree_sync_run_user: yoshi
+worktree_sync_remote: origin
+worktree_sync_branch: main
+
+# ローカル実行状態(見送り連続カウントのみ)。reports/ とは無関係の純粋なローカル
+# 状態のため、incident_capture_state_dir と同じ流儀で /var/lib 配下に置く。
+# yoshi が単独所有し、追加のACLは不要(自分のUIDで作るディレクトリのため。
+# semaphore.dbの読み取りも同じ理由でACL不要 — requirement F-11)。
+worktree_sync_state_dir: /var/lib/quory-worktree-sync
+
+worktree_sync_script_path: /usr/local/sbin/worktree-sync.sh
+worktree_sync_lock_path: /run/lock/worktree-sync.lock
+
+# Semaphoreジョブの実行中判定(requirement §6.1)。yoshiはsemaphore.dbの所有者
+# として元から読める(F-11)ため、新しい権限は要らない。値をテンプレート変数に
+# しているのは、Tester がansy上でこの値だけを差し替えたsandbox dbに対して
+# スクリプトの分岐(defer/pull)をdecoy検証できるようにするため
+# (homelab-semaphore-queryのような複数呼び出し元を持つ共有CLIではなく、この
+# roleだけが使う値のため、role defaultsに置くのが自然)。
+worktree_sync_semaphore_db: /var/lib/semaphore/semaphore.db
+worktree_sync_sqlite_bin: /usr/bin/sqlite3
+
+# worktree-sync.sh が通知のためだけに呼ぶ ansible-playbook(git操作はしない、
+# roles/common_slack/tasks/notify.yml を呼ぶだけ)。
+worktree_sync_playbook_bin: /usr/bin/ansible-playbook
+worktree_sync_notify_playbook: worktree_sync_notify.yml
+
+# 見送り(Semaphoreジョブ実行中によるdefer)が「連続してこの秒数を超えたら」通知
+# する(AC-B-2)。**回数ではなく時間で持つ。** 回数で持つと閾値の意味がtimer間隔に
+# 依存し、間隔を変えたときに黙って壊れる(実際、5分間隔前提の「3回」を1分間隔へ
+# 移すと3分で警告が出る。healthcheck系のジョブは数分かかるのが普通なので、
+# 毎朝の正常運転で鳴ることになっていた)。
+# 30分は「ふつうのSemaphoreジョブなら終わっているはず」の目安。
+worktree_sync_defer_notify_after_seconds: 1800
+
+# エラー通知はエッジ検出(状態が変わったときに出す)とし、同じ状態が続くあいだは
+# この秒数ごとにだけ再通知する。1分間隔では、汚れた作業ツリーのように人が直すまで
+# 続く状態が毎分Slackへ出てしまうため。**初回は即通知するので気づきは遅れない。**
+worktree_sync_error_renotify_seconds: 3600
+
+# systemd timer間隔。OnCalendar形式。
+# push直後に手でSemaphoreジョブを回す使い方があるため、追随の遅れを1分に抑える
+# (2026-08-03 Yoshinobu)。取得先はGitHub(origin)であり、1分ごとのfetchが
+# 1日1440回GitHubへ出ていく。
+worktree_sync_schedule: "*:*:00"
+
+# 1分間隔に対して既定のばらつき(1分)は大きすぎるため明示的に絞る。
+worktree_sync_timer_accuracy: 5s
+
+# true にすると systemd timer を enable + start する(本番quory)。
+# false のままだと配備(スクリプト・unit配置)だけが行われ、timerは起動しない。
+# inventories/homelab/host_vars/quory.yml から true が供給される
+# (recovery_probe_service_enabledと同じ理由: -eの渡し忘れがsha256sumや
+# git diffでは見えない「配備だけされて実体は起動していない」状態を作るため、
+# 真実をhost_varsへ置く)。
+worktree_sync_service_enabled: false

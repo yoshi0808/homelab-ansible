@@ -76,7 +76,9 @@ requirement: `2026-08-02_001_requirement.md` R11 / R12 / R13b / R14c、AC9
 | Q8 | `status` | 無し | 下表 unit 群の `systemctl status --no-pager -l`(失敗は `|| true` で飛ばす。既存 `status` と同型) |
 | Q9 | `journal-unit <unit> <window>` | `unit`: 下表 enum<br>`window`: `30m`\|`1h`\|`2h`\|`6h`\|`12h`\|`24h` | `journalctl -u <unit> --since ... -n 300 --no-pager` |
 | Q10 | `unit-cat <unit>` | 下表 enum | `systemctl cat <unit>`(配備された unit 本体の現物確認。R12 が例示) |
-| Q11 | `semaphore-query <query> <n>` | `query`: enum `recent-failed`\|`task-errors`\|`task-hosts`\|`task-output`\|`task-time`<br>`n`: `^[0-9]+$` | `homelab-semaphore-query <query> <n>` |
+| Q11 | `semaphore-query <query> <n>` | `query`: enum `recent-failed`\|`running`\|`task-errors`\|`task-hosts`\|`task-output`\|`task-time`<br>`n`: `^[0-9]+$` | `homelab-semaphore-query <query> <n>` |
+
+**`running` は2026-08-03に追加(D5承認、`docs/ai/reviews/quory_worktree_sync/` OQ-7)。** 終端でないstatusのタスクを新しい順に返す。**「実行中」をstatusの肯定的な列挙で書いていない** — Semaphoreが実行中に使う値はこの環境で観測されておらず、列挙すると観測漏れが「動いていない」という誤答になるため、終端3値(`success` / `error` / `stopped`、実測済み)の否定で書いてある。書込語彙は増えず、既存の「クエリ名 + 整数」契約も変えていない。
 | Q12 | `deployed-hash <name>` | 下表 enum | `sha256sum <対応する絶対パス>` |
 
 #### unit enum(実機で存在を確認済み。2026-08-03)

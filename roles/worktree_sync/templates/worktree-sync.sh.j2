@@ -1,0 +1,188 @@
+#!/bin/bash
+# worktree-sync.sh — quory の作業ツリーを origin/{{ worktree_sync_branch }} へ
+# 追随させる(git pull --ff-only)。systemd timer(worktree-sync.timer)から
+# 起動される。
+#
+# playbook自身にGit更新を行わせない(docs/ai/core.md)ため、gitを触るのはこの
+# スクリプトだけであり、通知だけを別のAnsible playbook
+# ({{ worktree_sync_notify_playbook }})に委譲する。
+#
+# 設計の正本: {{ worktree_sync_repo_dir }}/docs/ai/reviews/quory_worktree_sync/
+# 2026-08-03_001_requirement.md §6(決定: 案B)・§6.1(Semaphoreジョブとの排他)。
+#
+# 汚れた作業ツリーは自動で直さない(OQ-4: quoryではリポの内容を直接修正せず、
+# 必ずansyで直したものを配布する)。git status --porcelain が何かを報告したら、
+# --ff-only を試す前に必ず止まる(AC-2)。
+#
+# Semaphoreジョブとの排他は「確認して、動いていれば今回は諦める(defer)」
+# だけであり、確認とpullの間に始まるジョブとの競合は消せない
+# (受容済み、R-5・AC-B-3)。判定は終端status語彙(success/error/stopped)の
+# 完全な列挙に依存させず、「終端でないものは実行中とみなす」向きに倒す
+# (未知のstatus値が出ても安全側=見送る側に落ちる)。
+
+set -uo pipefail
+
+REPO_DIR="{{ worktree_sync_repo_dir }}"
+REMOTE="{{ worktree_sync_remote }}"
+BRANCH="{{ worktree_sync_branch }}"
+STATE_DIR="{{ worktree_sync_state_dir }}"
+DEFER_SINCE_FILE="$STATE_DIR/defer_since"
+NOTIFY_STATE_FILE="$STATE_DIR/notify_state"
+DEFER_NOTIFY_AFTER={{ worktree_sync_defer_notify_after_seconds }}
+ERROR_RENOTIFY_SECONDS={{ worktree_sync_error_renotify_seconds }}
+SEMAPHORE_DB="{{ worktree_sync_semaphore_db }}"
+SQLITE="{{ worktree_sync_sqlite_bin }}"
+ANSIBLE_PLAYBOOK_BIN="{{ worktree_sync_playbook_bin }}"
+NOTIFY_PLAYBOOK="{{ worktree_sync_notify_playbook }}"
+
+# 認証情報が無い/切れている場合にプロンプトで無限に止まらないようにする。
+export GIT_TERMINAL_PROMPT=0
+
+# 通知はベストエフォート(失敗してもこのスクリプトの終了コードには影響させない
+# — roles/common_slack/tasks/notify.yml 自身も「失敗してもplayを落とさない」
+# 設計であり、それに揃える)。JSON組み立てはpython3に譲る(Ansible -e に渡す
+# 値が日本語混じりの自由文になるため、シェルでの手組みクォートは避ける —
+# skills/ansible-implementation-style/SKILL.md「-eで空白を含む値を渡さない」)。
+notify() {
+  local status="$1" title="$2" message="$3" tmpfile
+  tmpfile=$(mktemp /tmp/worktree-sync-notify.XXXXXX.json) || return 0
+  SYNC_STATUS="$status" SYNC_TITLE="$title" SYNC_MESSAGE="$message" \
+    python3 - > "$tmpfile" <<'PYEOF'
+import json
+import os
+
+print(json.dumps({
+    "sync_status": os.environ["SYNC_STATUS"],
+    "sync_title": os.environ["SYNC_TITLE"],
+    "sync_message": os.environ["SYNC_MESSAGE"],
+}))
+PYEOF
+  (cd "$REPO_DIR" && timeout 60 "$ANSIBLE_PLAYBOOK_BIN" "playbooks/$NOTIFY_PLAYBOOK" -e "@$tmpfile") \
+    >/tmp/worktree-sync-notify.log 2>&1
+  rm -f "$tmpfile"
+}
+
+# 異常系の通知はエッジ検出にする。timerが1分間隔で回るため、人が直すまで続く状態
+# (汚れた作業ツリー等)を毎回通知すると、1時間に60通のSlackになる。
+#
+# signature が前回と違えば即通知する。**初回と、状態が別のものへ変わったときは
+# 遅れない。** 同じ signature が続くあいだは ERROR_RENOTIFY_SECONDS ごとにのみ
+# 再通知し、鳴り止んで忘れられることを防ぐ。
+#
+# 判定と記録を1つの関数にまとめてあるのは、「判定したが記録し忘れる」ことが
+# 起こらないようにするため。呼んだ側は戻り値だけを見る。
+should_notify() {
+  local sig="$1" now prev_sig="" prev_at=0
+  now=$(date +%s)
+  if [[ -r "$NOTIFY_STATE_FILE" ]]; then
+    IFS=$'\t' read -r prev_sig prev_at < "$NOTIFY_STATE_FILE" || true
+  fi
+  [[ "$prev_at" =~ ^[0-9]+$ ]] || prev_at=0
+  if [[ "$sig" != "$prev_sig" ]] || (( now - prev_at >= ERROR_RENOTIFY_SECONDS )); then
+    printf '%s\t%s\n' "$sig" "$now" > "$NOTIFY_STATE_FILE"
+    return 0
+  fi
+  return 1
+}
+
+# 健全な結果(追随済み / pull成功)に到達したら、抑止の状態を捨てる。次に異常が
+# 起きたときは必ず即通知される。
+clear_suppression_state() {
+  rm -f "$NOTIFY_STATE_FILE" "$DEFER_SINCE_FILE"
+}
+
+cd "$REPO_DIR" || exit 1
+
+# 1. 汚れたツリーは --ff-only を試す前に止まる(AC-2)。汚れを自分で解消しに
+#    いく経路はここには存在しない。
+dirty=$(git status --porcelain)
+if [[ -n "$dirty" ]]; then
+  # signature に汚れの中身のハッシュを混ぜる。別のものが汚れ始めたら、抑止中でも
+  # 即座に通知される(「同じ状態が続いている」と「新しい問題が増えた」は別)。
+  if should_notify "dirty:$(printf '%s' "$dirty" | sha256sum | cut -c1-16)"; then
+    notify error "[worktree_sync] quory working tree is dirty" \
+      "$REPO_DIR is not clean (git status --porcelain reported changes). git pull --ff-only was NOT attempted. This should not happen — quory's checkout is never edited directly (bring changes through ansy). Manual recovery required."
+  fi
+  exit 1
+fi
+
+# 2. リモートを取得し、追随済みかを判定する。
+if ! timeout 60 git fetch --quiet "$REMOTE" "$BRANCH"; then
+  # 取得先はGitHubであり、失敗の多くは一時的なもの(ネットワーク・GitHub側の
+  # 不調)。1分間隔でそのまま鳴らすと復旧まで毎分Slackへ出るため、エッジ検出を通す。
+  if should_notify "fetch-failed"; then
+    notify error "[worktree_sync] git fetch failed" \
+      "git fetch $REMOTE $BRANCH failed on $REPO_DIR (remote is GitHub). See journalctl -u worktree-sync.service for details. This notification is edge-triggered — it will not repeat every run while the failure persists."
+  fi
+  exit 1
+fi
+
+local_head=$(git rev-parse HEAD)
+remote_head=$(git rev-parse "$REMOTE/$BRANCH")
+
+if [[ "$local_head" == "$remote_head" ]]; then
+  # 既に最新。無駄な通知は出さない。抑止の状態もここで捨てる(健全な結果に
+  # 到達しているため)。
+  clear_suppression_state
+  exit 0
+fi
+
+# 3. Semaphoreジョブの実行中判定(requirement §6.1)。sqlite3自体が失敗した
+#    場合も「実行中」側に倒す(判定できないなら安全側)。
+running_count=$("$SQLITE" -readonly "$SEMAPHORE_DB" \
+  "SELECT count(*) FROM task WHERE status NOT IN ('success','error','stopped');" 2>/dev/null)
+[[ "$running_count" =~ ^[0-9]+$ ]] || running_count=1
+
+if (( running_count > 0 )); then
+  # 4. 見送る。待たない・殺さない・強行しない。pullせず終了コード0
+  #    (AC-B-1)。見送りが連続していることは閾値ごとにのみ通知する
+  #    (AC-B-2。1回目では通知しない)。
+  # 閾値は回数ではなく**経過時間**で持つ。回数だとtimer間隔を変えたときに
+  # 閾値の意味が黙って変わる(defaults の該当コメント参照)。
+  now=$(date +%s)
+  defer_since=$(cat "$DEFER_SINCE_FILE" 2>/dev/null || true)
+  if [[ ! "$defer_since" =~ ^[0-9]+$ ]]; then
+    defer_since=$now
+    echo "$defer_since" > "$DEFER_SINCE_FILE"
+  fi
+  defer_elapsed=$(( now - defer_since ))
+  if (( defer_elapsed >= DEFER_NOTIFY_AFTER )) && should_notify "defer"; then
+    notify warning "[worktree_sync] pull deferred for $(( defer_elapsed / 60 )) minutes" \
+      "A Semaphore job appears to be running against $REPO_DIR, so worktree-sync has deferred git pull --ff-only continuously for $(( defer_elapsed / 60 )) minutes without a successful pull. An ordinary job should have finished by now — investigate if this keeps growing. Nothing was changed here."
+  fi
+  exit 0
+fi
+
+# 5. Semaphoreは動いていない。見送りの起点を捨て、追随を試みる。
+#    確認とここでのmergeの間にジョブが始まる競合は消せない(R-5、受容済み)。
+rm -f "$DEFER_SINCE_FILE"
+
+merge_output=$(timeout 60 git merge --ff-only "$REMOTE/$BRANCH" 2>&1)
+merge_rc=$?
+
+if (( merge_rc != 0 )); then
+  # 履歴が分岐しているのか、それ以外の失敗なのかを区別して通知する。分岐は
+  # 「quoryのcheckoutに、ansyを通っていないcommitが存在する」ことを意味し、
+  # 汚れた作業ツリー(AC-2)と同じ規範違反である — 遅れているだけの状態とは
+  # 対処が違うため、同じ文面にしない。--ff-only が失敗しても、ここでは何も
+  # 復旧しない(rebase / reset / merge へ切り替えない)。
+  if git merge-base --is-ancestor "$local_head" "$remote_head" 2>/dev/null; then
+    if should_notify "merge-failed:${local_head:0:12}:${remote_head:0:12}"; then
+      notify error "[worktree_sync] git merge --ff-only failed" \
+        "$REPO_DIR could fast-forward from ${local_head:0:12} to ${remote_head:0:12} in principle, but the merge failed. Output: $merge_output"
+    fi
+  else
+    if should_notify "diverged:${local_head:0:12}:${remote_head:0:12}"; then
+      notify error "[worktree_sync] quory has commits that did not come through ansy" \
+        "$REPO_DIR at ${local_head:0:12} is NOT an ancestor of $REMOTE/$BRANCH at ${remote_head:0:12} — the histories have diverged, so this checkout holds commits that were never pushed from ansy. quory is never edited directly; bring changes through ansy. Nothing was changed here. Manual recovery required. Output: $merge_output"
+    fi
+  fi
+  exit 1
+fi
+
+new_head=$(git rev-parse HEAD)
+# 追随できた。抑止の状態を捨てる — 次に異常が起きたときは即通知される。
+clear_suppression_state
+notify ok "[worktree_sync] quory working tree updated" \
+  "$REPO_DIR fast-forwarded from ${local_head:0:12} to ${new_head:0:12} (origin/$BRANCH)."
+exit 0

@@ -1,0 +1,34 @@
+---
+# tester-gate: role-guarded — 副作用は Slack 通知のみで、common_slack notify.yml の
+# skip_notifications/ansible_check_mode/AIエージェントセッション検出(3条件)ガードで抑止される
+#
+# worktree-sync.sh(quory、systemd timerから起動)から呼ばれる(1通知=1実行)。
+# JSON extra-varsファイルをそのまま渡す:
+#   ansible-playbook playbooks/worktree_sync_notify.yml -e @<notify-file.json>
+#
+# Required extra vars:
+#   sync_status  — ok / warning / error
+#   sync_title   — 通知タイトル
+#   sync_message — 通知本文
+
+- name: Send quory worktree sync notification
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Assert required vars are defined
+      ansible.builtin.assert:
+        that:
+          - sync_status is defined
+          - sync_title is defined
+          - sync_message is defined
+
+    - name: Send Slack notification
+      ansible.builtin.include_tasks: "{{ playbook_dir }}/../roles/common_slack/tasks/notify.yml"
+      vars:
+        slack_channel: "{{ 'alerts' if sync_status in ['error', 'warning'] else 'info' }}"
+        slack_status: "{{ sync_status }}"
+        slack_title: "{{ sync_title }}"
+        slack_message: |
+          {{ sync_message }}
+
+          送信時刻: {{ lookup('pipe', "TZ='Asia/Tokyo' date '+%Y-%m-%dT%H:%M:%S+09:00'") }}

@@ -20,6 +20,13 @@ ansible_connection: "{{ 'local' if lookup('pipe', 'hostname -s') == 'quory' else
 # dev(ansy)は role default の false のままで、配置のみ・起動しない。
 recovery_probe_service_enabled: true
 
+# worktree_sync (roles/worktree_sync/defaults/main.yml):
+# quory はこの仕組みの唯一の配備先であり、timerを実際に動かす本番ホストである。
+# recovery_probe_service_enabled と同じ理由でhost_varsへ真実を置く
+# (-eの渡し忘れがsha256sumやgit diffでは見えない「配備だけされてtimerは
+# 起動していない」状態を作るため)。
+worktree_sync_service_enabled: true
+
 # ubuntu_vm_full_upgrade (roles/ubuntu_vm_full_upgrade/defaults/main.yml):
 # how Ansible itself is installed here, so the role's important-component
 # report/Slack output can say "apt管理: 判定対象" instead of leaving it

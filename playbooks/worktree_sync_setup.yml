@@ -1,0 +1,40 @@
+---
+# quory の作業ツリーを origin/main へ追随させる仕組み(git pull --ff-only)を
+# 配備する。設計の正本:
+# docs/ai/reviews/quory_worktree_sync/2026-08-03_001_requirement.md §6(決定: 案B)。
+#
+# 配備するもの: worktree-sync.sh(gitを触る素のスクリプト)+ systemd
+# service/timer unit。git更新はplaybook自身では行わない(docs/ai/core.md
+# 「playbook自身にGit更新を行わせない」)——スクリプトがgit pull --ff-onlyを
+# 終えたあとにansible-playbook playbooks/worktree_sync_notify.ymlを呼んで
+# 通知だけを行う。
+#
+# 対象: quoryのみ。Semaphoreと同じcheckoutをその場で書き換える仕組みのため、
+# 他ホストへは配備しない。
+#
+# Run:
+#   ansible-playbook playbooks/worktree_sync_setup.yml -l quory
+#
+# 本番有効化(timerをenable+start): inventories/homelab/host_vars/quory.yml の
+# worktree_sync_service_enabled: true から供給される(-eの渡し忘れで「配備だけ
+# されてtimerは動いていない」状態を作らないため。recovery_probe_service_enabled
+# と同じ理由・同じ流儀)。
+#
+# tester-gate: check-mode-native — TS-009条件1(quory以外への実害なし、他の
+# 既存本番serviceの再起動・reloadは一切発生しない)は満たすが、条件2(破壊的な
+# 本体操作を省いた検証には意味がない)は満たさない。状態ディレクトリ作成
+# (`file`)、スクリプト・systemd unit配備(`template`)はいずれもAnsible標準の
+# check_modeで安全にプレビューできる。実際に本番へ作用するのはtimerの
+# enable+startのみであり、roles/worktree_sync/tasks/main.ymlで
+# when: not ansible_check_mode によりゲートする。TS-010に照らし
+# risk-acceptedではなくcheck-mode-nativeが正しい分類(incident_capture_setup.yml
+# と同型の判断)。
+
+- name: Deploy quory worktree sync (git pull --ff-only via systemd timer)
+  hosts: quory
+  gather_facts: true
+  become: false
+  tasks:
+    - name: Run worktree_sync role
+      ansible.builtin.import_role:
+        name: worktree_sync

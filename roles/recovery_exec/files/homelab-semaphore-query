@@ -22,7 +22,7 @@ DB=/var/lib/semaphore/semaphore.db
 SQLITE=/usr/bin/sqlite3
 
 usage() {
-  echo "usage: homelab-semaphore-query <recent-failed <n>|task-errors <id>|task-hosts <id>|task-output <id>|task-time <id>>" >&2
+  echo "usage: homelab-semaphore-query <recent-failed <n>|running <n>|task-errors <id>|task-hosts <id>|task-output <id>|task-time <id>>" >&2
   exit 1
 }
 
@@ -42,6 +42,25 @@ case "$query" in
       exit 1
     fi
     sql="SELECT t.id, tpl.name AS template, tpl.playbook, t.status, substr(t.start,1,19) AS start FROM task t LEFT JOIN project__template tpl ON t.template_id = tpl.id WHERE t.status IN ('error','stopped') ORDER BY t.id DESC LIMIT ${param};"
+    ;;
+  running)
+    is_uint "$param" || usage
+    # 10# forces base-10 (same reason as recent-failed).
+    if (( 10#$param < 1 || 10#$param > 200 )); then
+      echo "denied: n out of range (1-200)" >&2
+      exit 1
+    fi
+    # 「実行中」を status の肯定的な列挙で書かない。Semaphore が実行中を表す
+    # 値(waiting / starting / running 等)はこの環境で観測されておらず、
+    # 列挙すると観測漏れがそのまま「動いていない」という誤答になる。終端3値
+    # (success / error / stopped)は実測済み(docs/ai/context/system/
+    # semaphore.md)なので、「終端でないものを実行中とみなす」向きに倒す。
+    # 未知の値が現れたら安全側(実行中とみなす側)へ落ちる。
+    #
+    # start は substr で19文字に切っていない。recent-failed が切り落として
+    # いる末尾のゾーン表記こそ、保存形式(Go の time.Time.String())を判断
+    # する材料になるため(task-time と同じ理由)。
+    sql="SELECT t.id, tpl.name AS template, tpl.playbook, t.status, t.start FROM task t LEFT JOIN project__template tpl ON t.template_id = tpl.id WHERE t.status NOT IN ('success','error','stopped') ORDER BY t.id DESC LIMIT ${param};"
     ;;
   task-errors)
     is_uint "$param" || usage

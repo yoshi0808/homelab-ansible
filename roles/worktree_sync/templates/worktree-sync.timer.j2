@@ -1,0 +1,12 @@
+[Unit]
+Description=Sync quory working tree with origin/{{ worktree_sync_branch }} (timer)
+
+[Timer]
+OnCalendar={{ worktree_sync_schedule }}
+# 取りこぼした周期を後から追いかけない。1分間隔では次の周期がすぐ来るため、
+# 遅れて走らせる意味が無い。
+Persistent=false
+AccuracySec={{ worktree_sync_timer_accuracy }}
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,72 @@
+---
+# worktree_sync: quory の作業ツリーを origin/main へ追随させる仕組みの配備。
+# 設計の正本: docs/ai/reviews/quory_worktree_sync/2026-08-03_001_requirement.md
+#
+# git pull --ff-only 自体は systemd timer から起動される素のスクリプト
+# (worktree-sync.sh)が行い、Ansibleはスクリプト・systemd unitの配備と、
+# スクリプトが呼ぶ通知playbook(worktree_sync_notify.yml)側のtask定義だけを
+# 持つ(playbook自身にGit更新を行わせない — docs/ai/core.md)。
+#
+# tester-gateの分類・理由は呼び出し元playbook
+# (playbooks/worktree_sync_setup.yml)のヘッダを参照する(TS-036)。
+
+- name: Ensure worktree_sync state directory exists (yoshi owned, no ACL needed)
+  ansible.builtin.file:
+    path: "{{ worktree_sync_state_dir }}"
+    state: directory
+    owner: "{{ worktree_sync_run_user }}"
+    group: "{{ worktree_sync_run_user }}"
+    mode: "0750"
+  become: true
+  when: not ansible_check_mode
+  tags: [destructive]
+
+- name: Deploy worktree-sync.sh
+  ansible.builtin.template:
+    src: worktree-sync.sh.j2
+    dest: "{{ worktree_sync_script_path }}"
+    owner: root
+    group: root
+    mode: "0755"
+  become: true
+  when: not ansible_check_mode
+  tags: [destructive]
+
+- name: Deploy worktree-sync systemd service unit
+  ansible.builtin.template:
+    src: worktree-sync.service.j2
+    dest: /etc/systemd/system/worktree-sync.service
+    owner: root
+    group: root
+    mode: "0644"
+  become: true
+  notify: Reload systemd for worktree_sync
+  when: not ansible_check_mode
+  tags: [destructive]
+
+- name: Deploy worktree-sync systemd timer unit
+  ansible.builtin.template:
+    src: worktree-sync.timer.j2
+    dest: /etc/systemd/system/worktree-sync.timer
+    owner: root
+    group: root
+    mode: "0644"
+  become: true
+  notify: Reload systemd for worktree_sync
+  when: not ansible_check_mode
+  tags: [destructive]
+
+- name: Flush handlers so units are reloaded before enabling
+  ansible.builtin.meta: flush_handlers
+
+- name: Enable and start worktree-sync timer (production only)
+  ansible.builtin.systemd:
+    name: worktree-sync.timer
+    daemon_reload: true
+    enabled: true
+    state: started
+  become: true
+  when:
+    - not ansible_check_mode
+    - worktree_sync_service_enabled | bool
+  tags: [destructive]
