@@ -20,7 +20,7 @@
 
 | # | 項目 | 現在地 | 次にやること |
 |---|---|---|---|
-| — | **進行中の案件は無い。** | | |
+| 1 | **quory作業ツリーの同期(`worktree_sync`)の配備** | **repoには入った(`68f40b4`)が、quoryの実物は何も変わっていない。** timerは1分間隔、Semaphoreジョブ実行中は見送る。requirement・実装・独立レビュー・追加変更の記録は `docs/ai/reviews/quory_worktree_sync/` | **Yoshinobu**: ①quoryで `git pull --ff-only`(この案件が自動化しようとしている当のもの。初回だけは手作業)②Semaphoreから `playbooks/worktree_sync_setup.yml` を実行。`worktree_sync_service_enabled: true` は `host_vars/quory.yml` にあるのでenable+startまで行われる |
 
 ## Watch(観測待ち)
 
@@ -46,6 +46,8 @@
 | **`recovery_monitoring_check.yml` の日次scheduleが登録され、実際に回っているか** | Yoshinobuが Semaphore UI へ **06:30 JST** の日次scheduleを登録した後 | ①Semaphoreのジョブ履歴に毎朝の実行が緑で並ぶこと ②`homelab-monitoring-pause` を伴う作業(現状 `cert_renew.yml` のみ)の翌朝までpauseが残っていれば `alerts` へ経過時間つきの警告が届くこと。**scheduleはrepo外のためAIから登録も確認もできず、未登録のままだと仕組みは沈黙したまま何も起きない**(正常時が無通知であるため、未登録と正常が区別できない) | `docs/ai/reviews/recovery_pause_daily_check/` | 2026-08-01 |
 | **Semaphoreの定期ジョブが `risk-accepted` へ `--check` を渡していないか**(残るは `proxmox_backup_restore_verify` と `cloudkey_cert_deploy` の2本) | 次に各定期ジョブが発火したとき | 渡していればそのジョブが **rc=2 で赤くなる**(TS-030の停止assert)。**Semaphoreの設定はrepo外でAIから確認できないため、事前確認ではなく発火で検出する設計を選んだ。** 赤が出た場合の正しい対処は、assertを外すことではなく**そのジョブから `--check` を外すこと** | `docs/ai/reviews/check_mode_semantics/2026-07-31_001_requirement.md` §7 OQ3、`docs/ai/policies/ansible_test_safety_policy.md` TS-030 | 2026-07-31 |
 | Semaphore実行環境で **fact caching が無効か** | Yoshinobuが Semaphore UI を開いたとき | ジョブ/テンプレート設定に `ANSIBLE_CACHE_PLUGIN` / `ANSIBLE_GATHERING` が注入されていないこと。**有効だと `proxmox_patch_dryrun` が停止中のノードをキャッシュ済みfactsから「到達可能」と誤判定する**。**repo外のためAIからは確認できない。** 残る影響は `proxmox_patch_dryrun` 1箇所のみ | `docs/ai/reviews/proxmox_patch_dryrun/2026-07-26_005_test_result.md` §14-5 a | 2026-07-29 |
+| **`worktree_sync` が quory 実機で通るか(4点まとめて初回に出る)** | 配備後の最初の実行(1分以内) | ①`ssh quory-investigate "journal-unit worktree-sync.service 1h"` にrc=0の実行が並ぶこと ②`#info` へ最初のpull成功通知が届くこと(=systemd配下でvaultが解けている証拠)③`git fetch` がsystemd配下でGitHubへ通ること ④`semaphore.db` のスキーマが `task.status` のままであること。**壊れ方はすべて安全側** — fetch不可ならerror通知が出てpullされず、DB不可なら「実行中」とみなして見送る。**黙って古いまま進む経路は無い**。見送りが続く場合の調査は今回追加した `ssh quory-investigate "semaphore-query running 20"` | `docs/ai/reviews/quory_worktree_sync/2026-08-03_004_implement_1min.md` §4 | 2026-08-03 |
+| **1分ごとの `git fetch`(1日1440回)がGitHub側の制限に触れないか** | 配備後、数日 | 触れた場合の出方は `git fetch` 失敗 → エッジ検出つきのerror通知。**通知が繰り返し出ないのは正常ではなく抑止の結果**なので、`ssh quory-investigate "journal-unit worktree-sync.service 24h"` で実際の失敗回数を見る。レート制限に触れない水準と判断したが**実測はしていない** | 同上 | 2026-08-03 |
 | **`proxmox_backup_restore_verify` Play 3 の停止assertが実行検証できない** | 検証手段が無い。**Playの構造を変えたときに再考する** | **`--check` で観測する経路が原理的に存在しない** — Play 2 の停止assertが先に失敗して run 全体が止まるため Play 3 へ到達しない。これは多重防御であり、**現時点では静的な存在確認しかできない**。Play の順序・`add_host` の構造・Play 2 のassertを変更する人は、Play 3 側が唯一の防波堤になることを踏まえること | `docs/ai/reviews/check_mode_semantics/2026-07-31_022_audit.md` 指摘#2 | 2026-07-31 |
 
 ## Next(着手候補) — 工程・体制
@@ -75,7 +77,6 @@
 | **`roles/proxmox_exec_node` のT1 assertが`--limit`を拒否する** | 同roleのT1は厳密一致であり、呼び出し側5本は`--limit`付きで実行できない。**新設した`roles/proxmox_reachable_nodes`では同じassertが実際に回帰を生み、部分集合へ緩めた**。exec_node側で`--limit`が許容されるべきかはPolicyを見ないと言えず、独立した確認を要する | `docs/ai/adr/008-proxmox-readonly-check-unreachable-node.md` Consequences |
 | **`proxmox_patch_dryrun`のinline機構を`proxmox_reachable_nodes`へ寄せ替える** | 同一機構が2つ並存している既知の負債。寄せ替えると副産物として上のWatch「fact cachingが無効か」がrepo側で塞がる(roleは`ping` probeで判定するため)。外した理由は、weekly full chainのapply gateが実データで未観測の段階で作り直すと回帰の切り分けができないこと | `docs/ai/reviews/proxmox_readonly_check_single_node/2026-07-30_001_requirement.md` §5 P1 |
 | **UV-011と汎用healthcheckの食い違い** | `ubuntu_vm_patch_policy.md` UV-011 は「`ansy`は方針2とし、rebootをunattended-upgradesに任せ、**Ansible healthcheckの対象にしない**」と定めるが、`roles/ubuntu_vm_full_upgrade/tasks/healthcheck.yml` の汎用checkは `['ansy', 'quory']` を対象にしている。**2026-08-01の修正が持ち込んだものではなく既存**。UV-011が禁じているのが「専用healthcheck playbookの対象にしない」なのか「あらゆるhealthcheckの対象にしない」なのかはPolicy本文から決められず、**解釈と改訂はYoshinobuの領域**。実装側のコメントは「ansy/quoryには専用healthcheck roleが無いので最小限の汎用checkを置いた」と実装者判断であることを明示している | `docs/ai/reviews/ubuntu_upgrade_healthcheck_scope/2026-08-01_004_audit.md`(Coordinatorが現物で照合) |
-| **quoryの作業ツリー同期(`git pull --ff-only`)の効率化** | 2026-07-29に一度**見送り**、「再提案しないこと」として記録していた項目を、2026-08-03にYoshinobu自身が再提起した。**当時の見送り理由は「playbook化するとAIから実行可能になり、Slack(`recovery_io` → Codex)へ載せると露出面が増える」だったが、Phase 4 で ansy は quory への認証情報を1つも持たなくなり、この前提は消えている。** 一方、read専用のdispatchへpull系の動詞を足す形は、その Phase 4 で作った境界そのものを崩す。**要件から起こす別案件とし、この行だけを根拠に着手しない。** 受け入れている残存リスクは従来どおり「quoryのcheckoutが古いまま、ラダー系playbookが旧コードで走る」こと | Yoshinobu表明(2026-08-03)。旧判断の本文は本ファイルの `git log` にある |
 | **規範文書間の突合を定期的に自動でかける仕組みの要否** | Auditorは案件クローズ時にしか起動しないため、案件が動いていない期間の規範ドリフトは拾えない。2026-07-29のCoordinator自己レビューで6件超の欠陥が見つかったが、これは人間が明示的に求めた1回限りの検出であり再発防止の仕組みではない。月次Knowledge振り返りの拡張が候補 | `docs/ai/reviews/process_retrospective/2026-07-29_005_techlead_retirement.md` §4 |
 
 ## 載せていないもの(判断の記録)
