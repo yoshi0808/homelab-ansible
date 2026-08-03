@@ -32,7 +32,7 @@ Semaphore schedule / systemd timer が実行
 
 `/usr/local/sbin/` や `/etc/systemd/system/` にあるscript・unitは、setup系playbookが**コピーした結果**であり、gitの管理下にない。repoを直してpullしても、**playbookを流すまで実物は変わらない**。
 
-**この形は実際に4回起きている。**
+**この形は実際に5回起きている。**
 
 | 事例 | 症状 |
 |---|---|
@@ -40,8 +40,11 @@ Semaphore schedule / systemd timer が実行
 | `recovery-probe.py` | 削除したはずのdrillが両ホストで生存 |
 | `recovery-investigate-dispatch-quory.sh`(2026-08-03) | repoに追加したチェックが使えない |
 | `homelab-semaphore-query`(2026-08-03) | 同上 |
+| `incident-investigate.py`(2026-08-04) | 退役した `incident_sync` の受け口を叩き続け、Slack通知が**もう作られないansy側ミラーのパス**を案内する |
 
-**前2件はWatchでは拾えず、実機を見て初めて気づいた。**
+**前2件はWatchでは拾えず、実機を見て初めて気づいた。5件目は日次ドリフト検査が自動で拾った**(初稼働の翌朝、`copy` 配備物であったため)。
+
+**変更が配備物へ届いていない期間は、repoと本番が「別々の世界を前提に動く」状態になりうる。** 5件目がその実例で、ansy側の受け口は撤去済みなのに quory の旧スクリプトはそれを呼び続けていた。個々の失敗はnon-fatalに設計されていても、**両側を同時に変える案件では、退役側を消す前後どちらで配備するかが挙動を決める。**
 
 ### 突合の手段
 
