@@ -38,12 +38,13 @@ harnessの安全機構(permission classifier、`permissions.deny`、`autoMode`)�
 ## 開発と本番の境界
 
 ```text
-ansy  = 開発、レビュー、検証、commit/push準備
+ansy  = 開発、レビュー、検証、commit/push
 Git   = 確定済みコードと文書の正本
 quory = Gitから取得した確定済みコードの本番実行基盤
 ```
 
 - quory上でコードを直接編集・commitしない。
+- **quoryのGit取得は自動だが、配備物(`/usr/local/` や `/etc/systemd/system/` へ配置したscript・unit)の更新は含まれない。** 経路と突合の手段は `docs/ai/context/operations/code-delivery-to-production.md`。
 - 未確認のコードをquoryの定期実行(timer / Semaphore schedule)へ載せない。
 - 作業開始時に `git status` と関連diffを確認する。
 - 差分に含めてよいのは、着手前の`git status`/diffで今回の依頼のscopeに含まれると確認できた変更だけである。ユーザーや他Agentの既存変更を上書き・破棄・整形の対象にしない。

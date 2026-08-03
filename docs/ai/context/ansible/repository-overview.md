@@ -34,15 +34,16 @@
 ## 開発と本番実行の境界
 
 ```text
-ansy: Issueに基づく開発・レビュー・検証・commit/push準備
-  -> Git: Yoshinobuが確定したコードと文書の正本
-  -> quory: working treeがcleanであることを確認後、確定済みGitを
-            git pull --ff-onlyで取得し、本番実行
+ansy: Issueに基づく開発・レビュー・検証・commit/push
+  -> Git: Yoshinobuが承認して確定したコードと文書の正本
+  -> quory: 確定済みGitをgit pull --ff-onlyで取得し、本番実行
+            (取得はtimerが自動で行う。配備物の更新は含まれない)
 ```
 
 - commit、push、本番適用、restart、reboot、patch、migrationはYoshinobuの判断対象である。
 - quoryでは原則としてコードを直接編集・commitしない。
 - playbook自身にGit更新を行わせない。Git取得と対象ホストへのAnsible処理を分離する。
+- **`git pull` が更新するのは作業ツリーだけであり、`/usr/local/` や `/etc/systemd/system/` へ配備されたscript・unitは古いままである。** 経路全体と突合の手段は `docs/ai/context/operations/code-delivery-to-production.md` を正本とする。
 - Contextへ接続値や秘密を複製しない。値はinventory、vars、Vault等の秘密管理から実行時に解決する。
 
 ## 更新時の最小確認
