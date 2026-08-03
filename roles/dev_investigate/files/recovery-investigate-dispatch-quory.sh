@@ -278,7 +278,7 @@ case "$check" in
   semaphore-query)
     [[ -n "$p1" && -n "$p2" && -z "$p3" ]] || deny_count
     case "$p1" in
-      recent-failed|running|task-errors|task-hosts|task-output|task-time) ;;
+      recent-failed|running|task-errors|task-hosts|task-output|task-time|template-list) ;;
       *) deny_invalid query ;;
     esac
     [[ "$p2" =~ ^[0-9]+$ ]] || deny_invalid n
