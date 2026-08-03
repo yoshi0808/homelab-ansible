@@ -94,15 +94,20 @@ Policy または Skill (該当業務のPolicyファイル新設・改訂、ま�
 1. **auto-memory側**: 残っている状態記述(「残:」「将来課題」「完了済み」)をrepoの現物と突き合わせ、①既に解決しているもの、②`docs/ai/status.md`へ移すべきもの、③影響先のコードやContextへ書くべきもの、に仕分ける。**auto-memoryは状態を持たない**のが到達点であり、月次はその漏れを回収する場である。
 2. **`docs/ai/status.md`自身**: 各行の検証手段を実際にたどり、記述が現物と合っているかを確かめる。このファイルの更新トリガはCoordinatorセッション内の3イベントだけなので、**セッションを経由せずに現実が変わった場合**(Yoshinobuが手動で片付けた、外部システムの状態が変わった)は誰も気づかない。月次がその唯一の周期的な検知点である。
 
-**起動はtimerが行う。** `roles/knowledge_review`が配置する`ansible-knowledge-review.timer`が毎月26日にansyで発火し、`playbooks/knowledge_review.yml`が`claude -p`でこの手順を無人実行する。
+**起動はtimerが行う。** `roles/knowledge_review`が配置する`ansible-knowledge-review.timer`が毎月26日にansyで発火し、`playbooks/knowledge_review.yml`がきっかけの通知を出す。振り返り自体は人がCoordinatorとの対話セッションで行う。
 
 **期日の正本はCoordinatorのMEMORY.md先頭の1行**であり続ける。timerは起動機構、MEMORY.mdは実施記録という分担で、振り返り自身が最後にこの行を更新する。二重管理を避けるため、期日を他所へ書かない。
 
-**自律の境界**: 振り返りは`docs/ai/memory/`・`docs/ai/context/`・`skills/`へ自分で書き出す。ただし`docs/ai/policies/`本文は書き換えず、必要な改訂は`docs/ai/memory/temporary/policy-proposal-<date>-<slug>.md`へ提案として残す(Policyは人間の判断領域)。commit/pushも行わない。作業ツリーが汚れているときは何も書かずに中止する。
+**書き出し先**: `docs/ai/memory/`・`docs/ai/context/`・`skills/`・`docs/ai/status.md`。`docs/ai/policies/`本文の改訂はYoshinobuの領域であり、必要なら提案として起こす。**状態の突合で見つかった差分は、その場で`docs/ai/status.md`へ反映する。**
 
-**無人実行は`docs/ai/status.md`を書き換えない。** 書込allowlistは上記3パスのみで、`status.md`はそこに含まれない(`role-routing-index.md`「無人実行されるCoordinator」の表)。読取は`docs/`配下なので可能である。したがって上記「状態の突合」で見つかった差分は、**書き換えずに報告へ列挙する**。auto-memoryを読み取りのみとしている扱いと同じで、反映は後で対話セッションかYoshinobuが行う。allowlistを広げて`status.md`を書けるようにするのは、封じ込めが成立している3条件(`docs/ai/memory/lessons/claude-code-unattended-session-confinement.md`)を崩さないか確認したうえで別途判断する。
+**Context陳腐化チェックも行う。** 上記3系統(Incident/auto-memory/工程往復案件)とは別軸で、`docs/ai/context/system/`・`docs/ai/context/operations/`・`docs/ai/context/ansible/repository-overview.md`が`roles/`・`playbooks/`・`inventories/homelab/`の現物と整合しているかを検査する。手順は次の4つ。
 
-**Context陳腐化チェックが追加されている。** 上記3系統(Incident/auto-memory/工程往復案件)とは別軸で、`docs/ai/context/system/`・`docs/ai/context/operations/`・`docs/ai/context/ansible/repository-overview.md`の記述内容が`roles/`・`playbooks/`・`inventories/homelab/`の現物と整合しているかを検査する。詳細は`roles/knowledge_review/templates/review-prompt.md.j2`「Context陳腐化チェック」節を参照。
+1. 各Context文書から、明示的に名指しされているrole名・playbook名・host名を拾う。
+2. 拾った名前が`roles/`・`playbooks/`・`inventories/homelab/hosts.yml`に実在するか確認する。存在しなければリネーム・削除された可能性が高く、指摘対象とする。
+3. 実在するものについて、Context文書が述べる「処理順序」「依存関係」「安全上の注意」のうち、対象の`tasks/main.yml`または`defaults/main.yml`から**明確に矛盾すると判断できるものだけ**を指摘する。解釈が割れるもの・断定できないものは指摘しない。
+4. **全文の逐語照合は求めない。** 前回以降にauto-memoryや案件記録で言及された形跡があるrole/playbookを優先し、終わらない範囲は「未確認」として次回へ持ち越す。
+
+**指摘は矛盾の指摘に留め、Context文書を自動で書き換えて「直す」ことは求めない。** Policyの技術的正否はこのチェックの範囲外である。
 
 ## 4. Role別のKnowledge参照範囲
 

@@ -53,7 +53,7 @@ description: homelab-ansibleでIncidentを記録するときに使う。「イ�
 
 ## 運用ルール
 
-- Coordinatorが月次で`docs/ai/memory/incidents/`を振り返る(`roles/knowledge_review`のtimerが起動する)。
+- Coordinatorが月次で`docs/ai/memory/incidents/`を振り返る(`roles/knowledge_review`のtimerがきっかけの通知を出す)。
 - 月次のタグ集計は`状態: 解決済み`のファイルのみを数える。`調査中`の原因分類は未確定のため集計を歪める。
 - ただし`調査中`のまま滞留している件数と経過日数は別途報告する。滞留自体が検出対象。
 - 同じ`原因分類`タグが複数件で繰り返し検出された場合、Lessonを経由せず直接、該当業務のPolicy改訂(許可/禁止/停止条件の明文化が必要な場合)またはSkill新設・改訂(再利用手順の整備が必要な場合)を検討する。

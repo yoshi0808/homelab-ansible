@@ -1,24 +1,26 @@
 ---
-# knowledge_review.yml - 月次Knowledge振り返り(仕分け・昇格判断)の無人実行
+# knowledge_review.yml - 月次Knowledge見直しの「きっかけ」通知
 #
-# 対象: localhost (ansy)。実ホストへは一切接続しない。
+# 対象: localhost (ansy)。実ホストへは接続しない(quoryへのdispatch呼び出しを除く。
+# これはquory上のread-only受け口を叩くのみで、quory側で状態を変えない)。
 # 実行元: ansy の systemd timer (ansible-knowledge-review.timer)。
 #         Semaphore からは実行しない(Coordinator の auto-memory が ansy にしか無いため)。
 #
-# 何をするか: claude -p を起動し、docs/ai/memory-classification.md の
-# 「月次振り返りの対象と手順」に従って Incident / auto-memory / reviews を
-# 3分類(手順→skills、環境固有の事実→lessons・context、考え方→decisions)に仕分ける。
-# 昇格結果は作業ツリーへ書き出すだけで commit はしない(commit は常に Yoshinobu)。
-# Policy 本文は書き換えず、必要なら docs/ai/memory/temporary/ へ提案を残す。
+# 何をするか: 無人LLMセッションを起動しない。行うのは次の3つだけ:
+#   1. MEMORY.md先頭行の次回期日更新(Ansibleが確定的に行う)
+#   2. quoryへのdispatch経由での障害バンドル滞留状況の取得(roles/knowledge_review)
+#   3. Slackへ「見直しの時期です」+ 上記メトリクスを通知する
+# 実際の仕分け・昇格判断(docs/ai/memory-classification.md「月次振り返りの
+# 対象と手順」)は、この通知を受けてYoshinobuが対話セッションと行う
+# (docs/ai/policies/incident_capture_policy.md IC-005)。
 #
-# 通知: 結果を Slack へ通知する(変更あり/変更なし/失敗)。
-#
-# tester-gate: check-mode-native — 状態収集(git status)は --check でも常に本実行し、
-# 実際の書き込みを伴う claude -p の起動と report 保存のみ ansible_check_mode でゲートする。
-# --check では「作業ツリーが汚れていないか」までを確認して終わる。
-# 副作用は ansy のリポジトリ作業ツリーと ~/.local/state 配下に限定され、実ホストには及ばない。
+# tester-gate: check-mode-native — MEMORY.md更新・quoryへのdispatch・状態ファイル
+# 書き込みは ansible_check_mode でゲートする(roles/knowledge_review内の各タスク
+# を参照)。--check では実書き込み・実接続を一切行わずに完走する。
+# 副作用は ansy のリポジトリ外(~/.claude/projects 配下のMEMORY.md、
+# ~/.local/state 配下)と、quoryへのread-onlyなdispatch呼び出しに限定される。
 
-- name: Monthly knowledge review
+- name: Monthly knowledge review kickoff notification
   hosts: localhost
   connection: local
   gather_facts: true
@@ -28,48 +30,45 @@
     - role: knowledge_review
 
   post_tasks:
-    - name: Notify result to Slack
+    - name: Notify kickoff to Slack
       ansible.builtin.include_tasks: "{{ playbook_dir }}/../roles/common_slack/tasks/notify.yml"
       vars:
         slack_channel: >-
-          {{ 'info' if (knowledge_review_summary in ['CHANGES', 'NO_CHANGES']
-                        and (incident_eval_summary | default('OK')) not in ['FAILED', 'FETCH_ERROR'])
-             else 'alerts' }}
+          {{ 'alerts' if (incident_notify_summary | default('OK')) == 'FETCH_ERROR' else 'info' }}
         slack_status: >-
-          {{ 'error' if knowledge_review_summary == 'FAILED'
-             else ('warning' if (knowledge_review_summary == 'ABORTED_DIRTY'
-                                  or (incident_eval_summary | default('OK')) in ['FAILED', 'FETCH_ERROR'])
-                   else 'info') }}
-        slack_title: "[knowledge_review] 月次Knowledge振り返り {{ knowledge_review_summary }}"
+          {{ 'warning' if (incident_notify_summary | default('OK')) == 'FETCH_ERROR' else 'info' }}
+        slack_title: "[knowledge_review] 月次Knowledge見直しのきっかけ"
         slack_message: |
-          月次Knowledge振り返りの結果です。
+          月次Knowledge見直しの時期です。判断はYoshinobuが対話セッションと行います
+          (このタイマーは、きっかけを通知するだけです。無人LLMは起動していません)。
 
-          結果: {{ knowledge_review_summary }}
-          作業ツリーの変更: {{ knowledge_review_changed_files }} ファイル
+          対象:
+          - docs/ai/memory/incidents/ の滞留(状態: 調査中)・打ち切り(状態: 未解決)の再検討
+          - Coordinatorのauto-memoryの3分類仕分け(手順→skills / 環境固有の事実→lessons・context / 考え方→decisions)
+          - 工程を何周も往復した案件記録
 
-          {% if knowledge_review_summary == 'CHANGES' %}
-          昇格結果が未commitで残っています。報告を確認のうえ commit してください。
-          報告: {{ knowledge_review_state_dir }}/report-*.md
-          {% elif knowledge_review_summary == 'FAILED' %}
-          実行が失敗しました。タイムアウト({{ knowledge_review_timeout }}秒)の可能性もあります。
-          報告: {{ knowledge_review_state_dir }}/report-*.md
-          journal: journalctl -u ansible-knowledge-review.service
-          {% elif knowledge_review_summary == 'ABORTED_DIRTY' %}
-          作業ツリーに未commitの変更があるため、振り返りを実行せず中止しました。
-          先月分の昇格結果が未commitのままだとここで止まります。commit 後に再実行してください。
-          再実行: systemctl start ansible-knowledge-review.service
-          {% else %}
-          今回昇格した項目はありません。
-          {% endif %}
-          {% if incident_eval_index is defined %}
+          次回のきっかけ通知予定: {{ knowledge_review_next_date }}
+          手順の正本: docs/ai/memory-classification.md「月次振り返りの対象と手順」
 
           ---
-          障害の自動評価: {{ incident_eval_summary | default('N/A') }}
-          新着バンドル: {{ incident_eval_index.get('bundles_new_since_last_eval', 0) }} 件
-          昇格Incident: {{ incident_eval_index.get('incidents_added_since_last_eval', 0) }} 件
-          最古の未評価: {{ (incident_eval_index.get('oldest_unreviewed_bundle') or {}).get('age_days', 'n/a') }} 日
-          {% if incident_eval_index.get('bundle_fetch_error') %}
-          取得エラー: {{ incident_eval_index.get('bundle_fetch_error') }}
+          障害バンドルの滞留状況(quoryへのdispatch経由でのライブ取得):
+          {% if incident_notify_index is defined %}
+          {% if incident_notify_index.bundle_fetch_error %}
+          取得エラー: {{ incident_notify_index.bundle_fetch_error }}
+          件数・経過日数は取得できていません(0件ではなく取得失敗です)。
+          {% else %}
+          バンドル総数: {{ incident_notify_index.bundle_total }} 件
+          前回通知({{ incident_notify_index.previous_notify_date | default('初回', true) }})以降の新着: {{ incident_notify_index.bundles_new_since_last_notify }} 件
+          {% if incident_notify_index.oldest_bundle %}
+          最古のバンドル: {{ incident_notify_index.oldest_bundle.id }}({{ incident_notify_index.oldest_bundle.age_days }}日前作成)
+          保持期限({{ incident_notify_index.oldest_bundle.retention_days }}日)まであと{{ incident_notify_index.oldest_bundle.remaining_days }}日
+          {% elif incident_notify_index.oldest_bundle_summary_parse_error %}
+          最古のバンドル: 不明(取得エラー: {{ incident_notify_index.oldest_bundle_summary_parse_error }})
+          {% else %}
+          最古のバンドル: なし(バンドル0件)
           {% endif %}
+          {% endif %}
+          {% else %}
+          障害バンドルの滞留状況の取得は無効化されています(knowledge_review_incident_notify_enabled=false)。
           {% endif %}
       when: not ansible_check_mode

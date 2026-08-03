@@ -1,79 +1,57 @@
 ---
-# 月次Knowledge振り返り(仕分け・昇格判断)
+# 月次のきっかけ通知(Knowledge見直し + 障害バンドルの滞留状況)。
 # 手順の正本: docs/ai/memory-classification.md「月次振り返りの対象と手順」
+# Policy: docs/ai/policies/incident_capture_policy.md(IC-005, IC-043, IC-044)
+#
+# 2026-08-03(Yoshinobu決定): claude -p の起動2本(振り返り本体・障害の自動評価)を
+# 廃止した。見直しの主体は人 + 対話セッションへ移り、このroleは「きっかけ」を
+# 出すだけになった。無人LLMセッションが1つも無いため、作業ツリーの清潔判定・
+# 中止(旧ABORTED_DIRTY)・auto-memoryスナップショット・権限プロファイル・promptは
+# 前提ごと外れて削除した(IC-025退番)。
+# 経緯: docs/ai/reviews/dev_prod_boundary/2026-08-03_020_implement_monthly_notify_only.md
 
-# Coordinatorのauto-memory置き場。repoツリー外にあるため --add-dir で明示的に渡す。
+# Coordinatorのauto-memory置き場。repoツリー外にある。MEMORY.md先頭行の
+# 次回期日更新にのみ使う(Ansibleが確定的に行う。LLMは関与しない)。
 # この置き場がansyにしか無いため、本roleはansy(dev_nodes)専用である。
 knowledge_review_automemory_dir: /home/yoshi/.claude/projects/-home-yoshi-homelab-ansible/memory
 
 # repo作業ツリー
 knowledge_review_repo_dir: /home/yoshi/homelab-ansible
 
-# claude CLI
-knowledge_review_claude_bin: /home/yoshi/.local/bin/claude
-knowledge_review_model: claude-opus-5
-
-# 実行記録(repo外。commit不要な運用ログ)
+# 実行状態の置き場(repo外。commit不要な運用状態。IC-044差分計算の基準を持ち越す)
 knowledge_review_state_dir: /home/yoshi/.local/state/knowledge-review
-
-# claude -p のタイムアウト(秒)
-knowledge_review_timeout: 1800
-
-# 作業ツリーが汚れていても実行するか。既定は false(中止する)。
-# 進行中の変更へ書き込みを混ぜないための安全弁。
-knowledge_review_allow_dirty: false
 
 # --- timer配置用(tasks/install_timer.yml) ---
 
-# 毎月26日。MEMORY.md先頭行の「次回のKnowledge月次振り返り」と同じ周期に合わせる
-# (前回=2026-07-26)。期日の正本はMEMORY.mdの当該行で、振り返り自身が更新する。
+# 毎月26日。MEMORY.md先頭行の「次回のKnowledge月次振り返り」と同じ周期に合わせる。
+# 期日の正本はMEMORY.mdの当該行で、本role自身が更新する。
 knowledge_review_schedule: "*-*-26 07:15:00"
 knowledge_review_run_user: yoshi
 knowledge_review_playbook_bin: /usr/bin/ansible-playbook
 
-# --- 障害の自動評価(incident_metrics → incident_evaluation → incident_index_write) ---
-# 設計の正本: docs/ai/reviews/incident_auto_capture_step2/2026-07-28_007_step2_plan.md
-#             §2.4・§2.5・§2.6。変数名と既定値の正本は同 §3 I-5。
-# Policy: docs/ai/policies/incident_capture_policy.md(IC-005, IC-007, IC-017〜IC-020,
-#         IC-025, IC-031, IC-032, IC-033)
+# --- 障害バンドルの滞留状況(tasks/incident_metrics.yml) ---
+# 設計の正本: 本roleのコメント(incident_metrics.yml)。
+# Policy: docs/ai/policies/incident_capture_policy.md(IC-043, IC-044)
 #
-# 2026-08-03(Phase 4 Step 3、`incident_sync` 退役に伴う移設): `roles/incident_sync`
-# が書いていたミラー(reports/incidents/quory/)は、周期的な追記が止まった
-# 凍結スナップショットとして残るのみで、以後は読みに行かない。滞留カウント
-# (mirror_bundle_total / bundles_new_since_last_eval / oldest_unreviewed_bundle)
-# は、quoryのdev-investigate dispatch(roles/dev_investigate、Phase 3)を
-# `ssh` 経由で叩いて直接取得する — 採取するのはtimerが動かすAnsible側
-# (このrole)であり、`claude -p` 側(incident-review-prompt.md.j2 を読む
-# セッション)はBash禁止のまま変わらない(結果ファイルを読むだけ)。
-# `mirror_heartbeat_age_seconds` / `mirror_stale` はミラー自身の健全性を
-# 見る指標だったため、ミラーごと削除した(代替なし)。詳細は
-# docs/ai/reviews/dev_prod_boundary/2026-08-03_017_implement_phase4_step2_3.md。
+# 件数・最古バンドルの情報はquoryのdev-investigate dispatch
+# (roles/dev_investigate、Phase 3)を `ssh` 経由で叩いて直接取得する
+# (2026-08-03時点で継続。`ann` は使わない — dev-investigate鍵はPhase 4の
+# ann鍵削除後も切れない)。
 
-# 評価成果物の置き場所。ここだけはAnsibleが書く(IC-032)。
-knowledge_review_incident_eval_dir: "{{ reports_base_dir }}/incidents/_evaluations"
+# 通知の障害バンドル滞留パートを有効にするか。既定 true。false にすると
+# incident_metrics.yml が include されず、次回期日更新とtimer配置のみ動く。
+knowledge_review_incident_notify_enabled: true
 
-# 評価工程(incident_metrics/incident_evaluation/incident_index_writeの3ファイル)
-# を有効にするか。既定 true。false にすると3ファイルとも include されない
-# (main.yml側のwhen)。既存の振り返り本体には一切影響しない(AC9)。
-knowledge_review_incident_eval_enabled: true
+# IC-044の差分計算に使う最小限の状態(前回実行時刻・見た最大バンドルid)の
+# 置き場。旧 `_evaluations/<date>-index.json`(claude -p評価の成果物置き場)は
+# 評価段の廃止に伴い削除した。この置き場は他の何にも読まれない本role専用の
+# 内部形式であり、外部契約ではないためschema versioningは持たない。
+knowledge_review_incident_notify_state_file: "{{ knowledge_review_state_dir }}/incident-notify-state.json"
 
-# 評価用 claude -p のタイムアウト(秒)。評価は summary.json の generated_at を
-# 起点に窓を区切って読む(§2.5・R-6)ぶん、全repoを仕分ける振り返り本体
-# (knowledge_review_timeout=1800)より軽いため半分を割り当てる。
-# unit の TimeoutStartSec 再計算(3600 = 1800 + 900 + 900)はこの値を前提にする
-# (templates/knowledge-review.service.j2)。
-knowledge_review_incident_timeout: 900
-
-# 評価用 claude -p のモデル。既存の振り返り本体と揃える。
-knowledge_review_incident_model: "{{ knowledge_review_model }}"
-
-# --- quory bundle dispatch経由での滞留カウント採取(Phase 4 Step 3) ---
-#
 # alias名(quory-investigate)と鍵は ansy(yoshi)の `~/.ssh/config`/
 # `~/.ssh/id_claude_investigate_quory` 側で定義済みのものを使う。この
 # リポジトリの管理下には無い(Phase 3 で配備した roles/dev_investigate は
-# quory側の受け口のみを作る)。dev-investigate 鍵を使うため Phase 4(ann鍵の
-# 削除)後も切れない。
+# quory側の受け口のみを作る)。
 knowledge_review_incident_dispatch_ssh_bin: /usr/bin/ssh
 knowledge_review_incident_dispatch_alias: quory-investigate
 
@@ -87,3 +65,12 @@ knowledge_review_incident_dispatch_connect_timeout_s: 15
 # タイムアウト(秒)。いずれも軽いread-only操作であり、55件規模(2026-08-03
 # 実測)のbundle-list出力でも数秒で返ることを前提にした値。
 knowledge_review_incident_dispatch_timeout_s: 30
+
+# 保持期間(日)。証拠喪失の警告(IC-043)に使う。
+# roles/incident_capture/defaults/main.yml の incident_capture_retention_days
+# (2026-08-03時点90日)と実値を一致させること。値をここへ複製している理由:
+# 本roleはansy専用、incident_captureはquory専用で依存関係を持たず、
+# defaultsを読み込む経路が無い。通知は人への目安であり、一時的な不一致が
+# 起きても実害(証拠の誤削除等)は無い(削除の実処理は roles/incident_capture
+# 側が持つ実値で行われ、ここは表示専用)。
+knowledge_review_incident_retention_days: 90

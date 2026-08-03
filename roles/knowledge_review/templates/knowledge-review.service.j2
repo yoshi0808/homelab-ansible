@@ -7,17 +7,10 @@ Wants=network-online.target
 Type=oneshot
 User={{ knowledge_review_run_user }}
 WorkingDirectory={{ knowledge_review_repo_dir }}
-# claude -p を2本走らせる。先に振り返り本体(上限 knowledge_review_timeout)、
-# 続けて障害の自動評価(上限 knowledge_review_incident_timeout)の順で、
-# 予算が尽きたときに犠牲になるのは後から足した評価の側になるようにしてある。
-# 式は2本の上限の合計に、preflight・auto-memoryスナップショット・git status・
-# prompt描画・Slack送信の余裕を足したもの。Type=oneshot の TimeoutStartSec は
-# 既定90秒のため、明示的に伸ばさないと2本が終わる前に kill される。
-#
-# 式末尾の "+ 900" はこの余裕分であり、knowledge_review_incident_timeout の
-# 既定値(900)とは無関係の別の値である(U6独立レビューSuggestion #2)。
-# 現状はどちらも900だが偶然の一致であり、どちらか一方だけを変更しても
-# もう一方は追随しない。knowledge_review_incident_timeout を変える場合は、
-# この余裕分(900)を別途見直す必要がないか確認すること。
-TimeoutStartSec={{ knowledge_review_timeout + knowledge_review_incident_timeout + 900 }}
+# 2026-08-03(Yoshinobu決定): claude -p の起動2本を廃止した。ここで走るのは
+# quoryへのdispatch(SSH、コネクト{{ knowledge_review_incident_dispatch_connect_timeout_s }}秒+呼び出し
+# {{ knowledge_review_incident_dispatch_timeout_s }}秒を最大2往復)とファイル書き込み・Slack送信のみで、
+# 既定90秒の TimeoutStartSec でも収まる規模だが、quory側の遅延・再送を
+# 吸収する余裕として明示的に伸ばしておく。
+TimeoutStartSec=300
 ExecStart=/usr/bin/flock -n /run/lock/ansible-knowledge-review.lock {{ knowledge_review_playbook_bin }} playbooks/knowledge_review.yml

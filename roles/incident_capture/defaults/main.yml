@@ -56,7 +56,13 @@ incident_capture_recent_failed_batch: 50
 incident_capture_spool_correlation_tolerance_s: 180
 
 # バンドル保持日数(R7、P1)。reports/incidents/<bundle>/ ディレクトリのmtime基準。
-incident_capture_retention_days: 30
+#
+# 2026-08-03、30 → 90 へ延長(Yoshinobu決定)。`incident_sync` の退役により
+# ansy側ミラーが無くなり、**証拠は quory のこの1コピーだけ**になった。保持期間の
+# 満了がそのまま証拠の喪失であり、担保するのは「保持期間内に人が見直すこと」
+# だけである(incident_capture_policy.md IC-043)。見直しは月次なので、30日では
+# 余裕がほとんど無い。**この値を短くするときは見直しの周期も併せて見ること。**
+incident_capture_retention_days: 90
 
 # 現況スナップショット対象(ADR-003 (d) d-2)。
 # 基礎セット: 新規イベントがある周期は常に pve1/pve2 のクラスタ/HA状態を取る

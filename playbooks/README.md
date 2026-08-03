@@ -85,8 +85,7 @@ playbook の入口を置く。処理本体は原則として `roles/` に実装�
 | [`incident_investigate_setup.yml`](incident_investigate_setup.yml) | `quory` | 一次調査本体(バンドル走査・LLM呼び出し・成果物書き出し・同期起動鍵生成)のsystemd timer/oneshotを配備。有効化オプション時のみtimerをenable+start | `check-mode-native` | `incident_investigate` |
 | [`incident_investigate_notify.yml`](incident_investigate_notify.yml) | `localhost` | 一次調査1件完了ごとに`#alerts`へプレーンテキストで通知(incident-investigate.pyから起動される) | `check-mode-native` | playbook内tasks(`community.general.slack`直接呼び出し) |
 | [`incident_sync_teardown.yml`](incident_sync_teardown.yml) | `dev_nodes`, `quory` | **一度きりの後始末。** 退役した`incident_sync`(quory→ansy証拠バンドルのミラー同期)が残したsystemd unit・専用ユーザー・状態ディレクトリ・quory側鍵material を除去する。timerには載せない | `check-mode-native` | playbook内tasks |
-| [`incident_evaluation.yml`](incident_evaluation.yml) | `localhost` | 障害の自動評価工程だけを`knowledge_review.yml`本体を経由せず手動で個別に実行(検証・対話セッション用。timerには載せない) | `check-mode-native` | `knowledge_review` incident evaluation tasks |
-| [`knowledge_review.yml`](knowledge_review.yml) | `localhost`（ansy専用） | 月次Knowledge振り返りを`claude -p`で無人実行し、続けて障害の自動評価を行う | `check-mode-native` | `knowledge_review` |
+| [`knowledge_review.yml`](knowledge_review.yml) | `localhost`（ansy専用） | 月次Knowledge見直しの**きっかけ**をSlackへ通知する(障害バンドルの滞留件数と最古バンドルの残り日数を添える)。無人LLMセッションは起動しない | `check-mode-native` | `knowledge_review` |
 | [`knowledge_review_timer.yml`](knowledge_review_timer.yml) | `dev_nodes` | 月次Knowledge振り返り用systemd timerを配置 | `check-mode-native` | `knowledge_review` timer tasks |
 
 ## ホスト保守・定期運用

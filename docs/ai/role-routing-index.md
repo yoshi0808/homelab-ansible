@@ -37,23 +37,6 @@
 
 **agent定義の作成・編集は、次のセッションから効く前提で扱う。** 変更した直後の同一セッションで起動したsubagentへは、変更前の定義が渡ることがある。定義を作成・編集したら、それに依存する案件へ組み込む前に一度subagentを起動し、**渡された定義本文を書き出させて現物と照合する。**
 
-### 無人実行されるCoordinator
-
-上表のCoordinatorは対話セッションだが、**対話相手を持たないCoordinatorが1つだけ存在する**。ansyのsystemd timer `ansible-knowledge-review.timer`が毎月26日に`playbooks/knowledge_review.yml`を起動し、`claude -p`が月次Knowledge振り返り(仕分け・昇格判断)を無人で実行する。手順の正本は`docs/ai/memory-classification.md`「月次振り返りの対象と手順」。
-
-この実行形態には読み書き範囲を絞る技術的な制約が課してある。本節は現在の許可範囲だけを述べる。この節を読む必要があるのは、`roles/knowledge_review`の権限プロファイルを変更するとき、または無人実行の挙動を調べるときに限る。Role文書の整合性を点検するときは、この形態も対象に含めること。
-
-| 項目 | 無人Coordinator |
-|---|---|
-| 起動 | systemd timer(ansy専用。auto-memoryがansyにしか無いため) |
-| 判断の委譲先 | 無し。subagentを起動せず単独で完結する |
-| 書込可(allowlist方式) | `docs/ai/memory/`、`docs/ai/context/`、`skills/` の3つ**のみ**(実装: `roles/knowledge_review/templates/job-settings.json.j2`) |
-| 読取可 | `docs/`、`skills/`、`roles/`、`playbooks/`、`inventories/homelab/`(`inventories/vars/`は不可)、`--add-dir`で渡したauto-memoryのみ。それ以外は拒否 |
-| Bash | 禁止 |
-| auto-memory | **読み取りのみ**。repo外への書込はこの構成では許可できない。縮約が必要な項目は報告に列挙し、後で対話セッションかYoshinobuが行う |
-| commit/push | しない。差分は作業ツリーに残しYoshinobuがcommitする |
-| 中止条件 | 作業ツリーが汚れているとき(起動側のAnsibleが判定) |
-
 ## 証跡の扱い
 
 実質的な証跡は、subagentとのやりとりそのものではなく`docs/ai/reviews/<target>/`配下のファイル(requirement / plan / implement / review / test_result / audit、該当すれば`docs/ai/adr/`)である。subagentを使う案件では、要求分解・実装差分・レビュー所見・検証結果を必ずこれらのファイルとして残す。subagent自身の思考過程・対話ログは永続化されない前提とし、判断の根拠は成果物ファイルに書き切る。

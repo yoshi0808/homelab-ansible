@@ -1,164 +1,94 @@
 ---
-# 障害の自動評価: 決定論的メトリクスの算出(評価の前段)。
-# 設計の正本: docs/ai/reviews/incident_auto_capture_step2/2026-07-28_007_step2_plan.md
-#             §2.6・§3 I-3(indexのschema。実装判断ではなく契約)。
-# Policy: docs/ai/policies/incident_capture_policy.md(IC-021・IC-022・IC-031〜IC-033)
+# 障害バンドルの滞留状況: 決定論的メトリクスの算出。月次のきっかけ通知の
+# 中身になる(playbooks/knowledge_review.yml post_tasks)。
+# Policy: docs/ai/policies/incident_capture_policy.md(IC-021, IC-043, IC-044)
 #
-# 2026-08-03(Phase 4 Step 3、`incident_sync` 退役に伴う移設。
-# docs/ai/reviews/dev_prod_boundary/2026-08-03_017_implement_phase4_step2_3.md):
-# 以前は roles/incident_sync が周期同期していたローカルミラー
-# (reports/incidents/quory/)の中の `find` + 全バンドル `summary.json` の
-# slurp でmirror_bundle_total等を計算していたが、その同期機構ごと退役した。
-# 代わりに quory の dev-investigate dispatch(roles/dev_investigate、Phase 3)
-# を `ssh` 経由で叩き、**バンドルID(`semaphore-<job_id>`)の数列**で
-# 「新着」を判定する(以前は summary.json の generated_at 比較だった)。
-# 理由: Semaphoreのjob idは単調増加であり(実測: 2026-08-03時点で55件、
-# 常に新しいジョブほど大きいidを持つ)、「前回評価時点で見た最大id」より
-# 大きいidだけを数えれば「新着」と一致する。この方式なら、全バンドル分の
-# summary.jsonを毎回取得する必要がなく(bundle-grepに相当する横断走査は
-# Phase 3 カタログが初期リリースから意図的に外している — R14c)、
-# 「bundle-list 1回 + 最古の新着1件だけ bundle-show」の計 最大2往復で
-# 済む。
+# 2026-08-03(Yoshinobu決定、claude -p 2本の廃止に伴う再設計): 以前は本ファイルの
+# 出力(incident_eval_index)を2本目の claude -p(障害の自動評価)へ渡し、
+# 評価結果と合わせて `_evaluations/<date>-index.json` へ書いていた。評価段
+# 自体が無くなったため、本ファイルが直接すべてを完結させる — 出力は
+# incident_notify_index / incident_notify_summary の2fact(Slack通知が直接
+# 読む)であり、次回実行のための最小限の状態(knowledge_review_incident_notify_
+# state_file)も本ファイル自身が末尾で書く。
 #
-# heartbeat(mirror_heartbeat_age_seconds / mirror_stale)は「ミラー自身が
-# 生きているか」を見る指標だったため、ミラーごと削除した(代替なし。
-# plan §4 Step 3 の指示どおり)。
+# 新着判定はバンドルID(`semaphore-<job_id>`)の数列で行う(Semaphoreのjob idは
+# 単調増加。実測: 2026-08-03時点で55件、常に新しいジョブほど大きいidを持つ)。
+# 「前回見た最大id」より大きいidだけを数えれば「新着」と一致する。
 #
-# 呼び出し元は2経路ある。どちらも knowledge_review_started_at /
-# knowledge_review_incident_eval_dir が本ファイルの前に定義済みであることを
-# 前提にする。
-#   1. roles/knowledge_review/tasks/main.yml(月次本体。Save reportの直後、
-#      本ファイルが Run incident evaluation より先に呼ばれる)
-#   2. playbooks/incident_evaluation.yml(手動専用。include_role: tasks_from
-#      で直接呼ばれる)
+# IC-043(証拠喪失の警告)は、新着かどうかに関わらず**現存する全バンドルのうち
+# 最古のもの**を対象にする。保持期間はバンドルごとの年齢だけで決まり、
+# 既に見直し済みかどうかとは無関係に失われるため。
 #
-# 生成するfact incident_eval_index は I-5 が定める契約上の名前(実装判断で
-# 変更しない)。evaluation_rc / evaluation_artifact の2キーはここでは埋めない
-# — incident_evaluation.yml(評価本体)の実行後に incident_index_write.yml が
-# 合わせて書き出す(I-3「このファイルは2段階で作られる」)。
-#
-# schema_version は 1→2(2026-08-03)。削除: mirror_heartbeat_age_seconds /
-# mirror_stale。追加: last_bundle_id_seen(次回比較の基準)/
-# bundle_fetch_error(V3: 取得失敗と「取得できて0件」を区別する)/
-# oldest_bundle_summary_parse_error / new_bundle_detection。
-# `mirror_bundle_total` フィールド名自体は変更していない(requirement /
-# plan がこの名前で指標を指しているため、データの出所が変わったことを
-# 理由に改名すると参照が食い違う。「mirror」という語自体は今や比喩に近い
-# — 実データはquory原本へのライブ問い合わせであり、ansy側のコピーでは
-# ない)。
+# 呼び出し元は roles/knowledge_review/tasks/main.yml のみ。knowledge_review_started_at / knowledge_review_state_dir が
+# 本ファイルの前に定義済みであることを前提にする。
 #
 # 本ファイル内部だけで使う中間factは knowledge_review_incident_metrics_ を
-# 接頭辞にし、契約上の名前(incident_eval_index)と衝突しないようにする。
+# 接頭辞にし、契約上の名前(incident_notify_index / incident_notify_summary)と
+# 衝突しないようにする。
 
-- name: Ensure incident evaluation output directory exists
-  ansible.builtin.file:
-    path: "{{ knowledge_review_incident_eval_dir }}"
-    state: directory
-    owner: "{{ ansible_user_id }}"
-    mode: "0750"
-  # incident_evaluation.yml(U3)も同じディレクトリを同じ設定で確保するが、
-  # 本タスクは「前回indexを探す」ために本ファイル自身が先に必要とする
-  # (実行順は metrics → evaluation → index_write)。file モジュールは冪等
-  # であり二重に置いても害は無い。--check でも実ディレクトリを作る
-  # (既存 main.yml の「Ensure state directory exists」と同じ扱い)。
-  check_mode: false
-
-# --- 1. previous_evaluation_date(_evaluations/ 内の既存indexのうち最新の日付) ---
+# --- 1. 前回状態(knowledge_review_incident_notify_state_file)を読む ---
 #
-# ファイル名の日付だけを見る。中身(schema_version等)は問わない — 中身が
-# 壊れていても「その日付のindexが存在した」という事実だけで前回評価日を
-# 決められる決定論的な設計にするため。
+# 前回本roleが自分で書いたものだが、手動編集・部分書き込み等で壊れている
+# 可能性を排除しないため block/rescue で防御する。ファイルが存在しない
+# (初回)場合と、存在するが壊れている場合を区別する。
 
-- name: Find existing incident evaluation index files
-  ansible.builtin.find:
-    paths: "{{ knowledge_review_incident_eval_dir }}"
-    patterns: "*-index.json"
-    file_type: file
-  register: knowledge_review_incident_metrics_existing_indexes
-  # find はpathが存在しない/空でも failed にならず files: [] を返す
-  # (自己検証で確認済み。_evaluations/ が無い初回でもここで落ちない)。
+- name: Check for an existing incident notify state file
+  ansible.builtin.stat:
+    path: "{{ knowledge_review_incident_notify_state_file }}"
+  register: knowledge_review_incident_metrics_state_stat
 
-- name: Extract candidate dates from existing index filenames
-  ansible.builtin.set_fact:
-    knowledge_review_incident_metrics_previous_dates: >-
-      {{ knowledge_review_incident_metrics_existing_indexes.files
-         | map(attribute='path')
-         | map('basename')
-         | map('regex_replace', '^(\d{4}-\d{2}-\d{2})-index\.json$', '\1')
-         | select('match', '^\d{4}-\d{2}-\d{2}$')
-         | list }}
-  # 命名規約に一致しないファイル名(regex_replaceが素通りした場合)は直後の
-  # select('match', ...) で除外される。壊れたファイル名が紛れ込んでも
-  # previous_evaluation_date の誤判定にはつながらない(自己検証済み)。
-
-- name: Determine previous_evaluation_date (null on first run)
-  ansible.builtin.set_fact:
-    knowledge_review_incident_metrics_previous_date: >-
-      {{ (knowledge_review_incident_metrics_previous_dates | sort | last)
-         if (knowledge_review_incident_metrics_previous_dates | length > 0)
-         else None }}
-  # 初回(既存indexが無い)は None(JSON化で null)。自己検証で
-  # type_debug=NoneType であることを確認済み(空文字列との混同を避ける)。
-
-# --- 2. 前回indexの内容から last_bundle_id_seen を読む(新着判定の基準) ---
-#
-# previous_evaluation_date から前回indexのパスを再構成する(find結果の
-# パスをそのまま使わず既知の命名規則で組み立てる — incident_index_write.yml
-# が書くパスと完全に同じ組み立て方にすることで、二重管理を避ける)。
-# 前回indexの内容(last_bundle_id_seen)は本roleが毎月自分で書いたものだが、
-# 手動編集・部分書き込み等で壊れている可能性を排除しないため、
-# heartbeat解析(旧finalize.yml)と同様にblock/rescueで防御する。
-
-- name: Determine previous index file path (reconstructed; same convention as incident_index_write.yml)
-  ansible.builtin.set_fact:
-    knowledge_review_incident_metrics_previous_index_path: >-
-      {{ (knowledge_review_incident_eval_dir ~ '/' ~ knowledge_review_incident_metrics_previous_date ~ '-index.json')
-         if knowledge_review_incident_metrics_previous_date is not none else None }}
-
-- name: Read previous last_bundle_id_seen from the prior index (safe against a corrupt/partial file)
+- name: Read previous incident notify state (safe against a corrupt/partial file)
   block:
-    - name: Read previous index file content
+    - name: Read previous state file content
       ansible.builtin.slurp:
-        src: "{{ knowledge_review_incident_metrics_previous_index_path }}"
-      register: knowledge_review_incident_metrics_previous_index_raw
-      when: knowledge_review_incident_metrics_previous_date is not none
+        src: "{{ knowledge_review_incident_notify_state_file }}"
+      register: knowledge_review_incident_metrics_state_raw
+      when: knowledge_review_incident_metrics_state_stat.stat.exists
 
-    - name: Parse previous last_bundle_id_seen
+    - name: Parse previous state
       ansible.builtin.set_fact:
+        knowledge_review_incident_metrics_previous_generated_at: >-
+          {{ (knowledge_review_incident_metrics_state_raw.content | b64decode | from_json).get('generated_at') }}
         knowledge_review_incident_metrics_previous_last_bundle_id: >-
-          {{ (knowledge_review_incident_metrics_previous_index_raw.content | b64decode | from_json).get('last_bundle_id_seen') }}
-      when: knowledge_review_incident_metrics_previous_date is not none
+          {{ (knowledge_review_incident_metrics_state_raw.content | b64decode | from_json).get('last_bundle_id_seen') }}
+      when: knowledge_review_incident_metrics_state_stat.stat.exists
   rescue:
-    - name: Fall back to "no known previous bundle id" after a parse failure
+    - name: Fall back to "no known previous state" after a parse failure
       ansible.builtin.set_fact:
+        knowledge_review_incident_metrics_previous_generated_at:
         knowledge_review_incident_metrics_previous_last_bundle_id:
-        knowledge_review_incident_metrics_previous_index_parse_error: >-
-          {{ ansible_failed_result.msg | default('previous index file could not be parsed', true) }}
+        knowledge_review_incident_metrics_state_parse_error: >-
+          {{ ansible_failed_result.msg | default('previous incident notify state file could not be parsed', true) }}
 
-# ブロック内でも rescue でも一度も set_fact されない経路(previous_date が
-# 最初から null)を埋める。`default(None, true)` は使わない —
-# last_bundle_id_seen は正当な値として 0 を取りうる整数であり、
-# `default(x, true)` は「偽と評価される値」も置換対象にするため、
-# 実在する0を巻き戻してしまう(2026-07-26 None/Undefined混同事故と同種の
-# 罠)。代わりに `is defined` で明示的に判定する。
-- name: Default previous_last_bundle_id and its parse-error flag when unset
+# previous_last_bundle_id は正当な値として 0 を取りうる整数であり、
+# `default(x, true)` は「偽と評価される値」も置換対象にするため実在する0を
+# 巻き戻してしまう(2026-07-26 None/Undefined混同事故と同種の罠)。代わりに
+# `is defined` で明示的に判定する(ブロック内でも rescue でも一度も
+# set_factされない経路 = 初回・ファイル無しを埋める)。
+- name: Default previous state facts and parse-error flag when unset
   ansible.builtin.set_fact:
+    knowledge_review_incident_metrics_previous_generated_at: >-
+      {{ knowledge_review_incident_metrics_previous_generated_at
+         if knowledge_review_incident_metrics_previous_generated_at is defined else None }}
     knowledge_review_incident_metrics_previous_last_bundle_id: >-
       {{ knowledge_review_incident_metrics_previous_last_bundle_id
          if knowledge_review_incident_metrics_previous_last_bundle_id is defined else None }}
-    knowledge_review_incident_metrics_previous_index_parse_error: >-
-      {{ knowledge_review_incident_metrics_previous_index_parse_error | default('', true) }}
+    knowledge_review_incident_metrics_state_parse_error: >-
+      {{ knowledge_review_incident_metrics_state_parse_error | default('', true) }}
 
-# --- 3. quoryへのdispatch経由でバンドル一覧を取得する ---
+- name: Derive previous_notify_date (date portion of previous generated_at, or null)
+  ansible.builtin.set_fact:
+    knowledge_review_incident_metrics_previous_notify_date: >-
+      {{ knowledge_review_incident_metrics_previous_generated_at[:10]
+         if knowledge_review_incident_metrics_previous_generated_at is not none else None }}
+
+# --- 2. quoryへのdispatch経由でバンドル一覧を取得する ---
 #
-# --check では実行しない(check_mode: falseにしない) — ローカルの
-# git status/systemctl list-timers等と違い、これは実本番ホスト(quory)への
-# 実ネットワーク接続を伴う。「--checkは実ホストへ副作用ゼロで完走する」
-# という本roleの他タスクとの一貫性を優先し、既存のclaude -p呼び出し
-# (main.yml「Run monthly knowledge review」)と同じ `not ansible_check_mode`
-# ゲートに揃えた。
+# --check では実行しない(check-mode-native) — これは実本番ホスト(quory)への
+# 実ネットワーク接続を伴う。main.ymlの他タスクとの一貫性のため、同じ
+# `not ansible_check_mode` ゲートに揃える。
 
-- name: Query bundle list from quory via dispatch (must return real data — 55+ bundles observed 2026-08-03, V2)
+- name: Query bundle list from quory via dispatch (must return real data — 55+ bundles observed 2026-08-03)
   ansible.builtin.command:
     argv:
       - "{{ knowledge_review_incident_dispatch_ssh_bin }}"
@@ -178,18 +108,16 @@
   ansible.builtin.set_fact:
     knowledge_review_incident_metrics_bundle_list_raw: "{{ knowledge_review_incident_metrics_bundle_list_raw | default({}) }}"
 
-# V3(取得失敗と「取得できて0件」を区別する): rc を直接見る。--check で
-# skip された場合は rc が未定義になり default(-1) で非0側へ倒れる —
-# これは「未実施」であって「失敗」ではないため、下のエラー詳細で
-# --checkの場合を明示的に別扱いする(main.ymlの既存タスク群と同じ
-# 「--checkでFAILED相当を見ても障害ではない」という既知の無害な挙動)。
+# 取得失敗と「取得できて0件」を区別する(V3・IC-011)。--check で skip
+# された場合は rc が未定義になり default(-1) で非0側へ倒れる — これは
+# 「未実施」であって「失敗」ではないため、下のエラー詳細で明示的に別扱いする。
 - name: Determine whether the bundle-list dispatch call produced usable output
   ansible.builtin.set_fact:
     knowledge_review_incident_metrics_bundle_list_ok: >-
       {{ (not ansible_check_mode)
          and ((knowledge_review_incident_metrics_bundle_list_raw.rc | default(-1) | int) == 0) }}
 
-- name: Build bundle-list fetch error detail (empty string when the call succeeded — V3)
+- name: Build bundle-list fetch error detail (empty string when the call succeeded)
   ansible.builtin.set_fact:
     knowledge_review_incident_metrics_bundle_fetch_error: >-
       {{ '' if knowledge_review_incident_metrics_bundle_list_ok | bool
@@ -207,7 +135,7 @@
           | list)
          if knowledge_review_incident_metrics_bundle_list_ok | bool else [] }}
 
-- name: Compute mirror_bundle_total (null when the fetch failed — distinguishable from a genuine zero, V3)
+- name: Compute bundle_total (null when the fetch failed — distinguishable from a genuine zero)
   ansible.builtin.set_fact:
     knowledge_review_incident_metrics_bundle_total: >-
       {{ (knowledge_review_incident_metrics_bundle_ids | length | int) if knowledge_review_incident_metrics_bundle_list_ok | bool else None }}
@@ -215,7 +143,7 @@
 # 次回比較の基準として持ち越すid。今回取得できた最大idがあればそれを使い、
 # 取得できなかった(失敗/0件)場合は前回値をそのまま引き継ぐ(基準を
 # 失わない — 0件やエラーで巻き戻ると、次回に本来「新着でない」ものまで
-# 新着扱いしてしまう)。
+# 新着扱いしてしまう。IC-044)。
 - name: Determine last_bundle_id_seen to persist for next run
   ansible.builtin.set_fact:
     knowledge_review_incident_metrics_last_bundle_id_seen: >-
@@ -223,12 +151,11 @@
          if (knowledge_review_incident_metrics_bundle_list_ok | bool and (knowledge_review_incident_metrics_bundle_ids | length > 0))
          else knowledge_review_incident_metrics_previous_last_bundle_id }}
 
-# --- 4. bundles_new_since_last_eval(バンドルID比較。旧: generated_at比較) ---
+# --- 3. bundles_new_since_last_notify(バンドルID比較) ---
 #
-# 初回(previous_last_bundle_id が null)はミラー全件を新着として扱う
-# (旧実装のI-3「初回はbundles_new_since_last_evalはミラー全件」と同じ
-# 意図)。取得失敗時は空リスト(bundle_fetch_errorで別途表現する)。
-- name: Compute bundles newly observed since last evaluation (by bundle id)
+# 初回(previous_last_bundle_id が null)は現存する全バンドルを新着として扱う。
+# 取得失敗時は0件(bundle_fetch_errorで別途表現する)。
+- name: Compute bundles newly observed since last notification (by bundle id)
   ansible.builtin.set_fact:
     knowledge_review_incident_metrics_new_bundle_ids: >-
       {{ (knowledge_review_incident_metrics_bundle_ids | select('gt', knowledge_review_incident_metrics_previous_last_bundle_id) | list)
@@ -237,25 +164,25 @@
                if (knowledge_review_incident_metrics_bundle_list_ok | bool and knowledge_review_incident_metrics_previous_last_bundle_id is none)
                else []) }}
 
-- name: Compute bundles_new_since_last_eval count (null when the fetch failed)
+- name: Compute bundles_new_since_last_notify count (null when the fetch failed)
   ansible.builtin.set_fact:
     knowledge_review_incident_metrics_bundles_new_count: >-
       {{ (knowledge_review_incident_metrics_new_bundle_ids | length | int) if knowledge_review_incident_metrics_bundle_list_ok | bool else None }}
 
-# --- 5. oldest_unreviewed_bundle(最小id = 最古。idは単調増加のため
-#        時系列の最古と一致する) ---
+# --- 4. oldest_bundle(現存する全バンドルのうち最古。IC-043) ---
+#
+# 新着かどうかに関わらず、現存する全バンドルの中で最小id = 最古(idは
+# 単調増加のため時系列の最古と一致する)を対象にする。
 
-- name: Determine the oldest new bundle id (smallest new id, or null if there are none)
+- name: Determine the globally oldest bundle id (smallest id among all currently listed bundles, or null)
   ansible.builtin.set_fact:
-    knowledge_review_incident_metrics_oldest_new_id: >-
-      {{ (knowledge_review_incident_metrics_new_bundle_ids | min) if (knowledge_review_incident_metrics_new_bundle_ids | length > 0) else None }}
+    knowledge_review_incident_metrics_oldest_bundle_id: >-
+      {{ (knowledge_review_incident_metrics_bundle_ids | min) if (knowledge_review_incident_metrics_bundle_ids | length > 0) else None }}
 
-# 追加で1往復だけ dispatch を叩き、最古の新着バンドルの generated_at を
-# 得る(age_days算出に要る)。それ以外の新着バンドルのsummary.jsonは
-# 取得しない — 全件取得(旧実装の挙動)は件数が増えるほど往復が増える
-# ため、IC-021が求める「滞留の検知」に必要な最小限(件数+最古の年齢)に
-# 絞った。
-- name: Fetch the oldest new bundle's summary.json via dispatch (single extra round trip)
+# 追加で1往復だけ dispatch を叩き、最古バンドルの generated_at を得る
+# (age_days・保持期限までの残り日数の算出に要る)。他のバンドルのsummary.json
+# は取得しない(IC-021が求める「滞留の検知」に必要な最小限に絞る)。
+- name: Fetch the oldest bundle's summary.json via dispatch (single extra round trip)
   ansible.builtin.command:
     argv:
       - "{{ knowledge_review_incident_dispatch_ssh_bin }}"
@@ -264,60 +191,65 @@
       - "-o"
       - "ConnectTimeout={{ knowledge_review_incident_dispatch_connect_timeout_s }}"
       - "{{ knowledge_review_incident_dispatch_alias }}"
-      - "bundle-show semaphore-{{ knowledge_review_incident_metrics_oldest_new_id }} summary.json"
+      - "bundle-show semaphore-{{ knowledge_review_incident_metrics_oldest_bundle_id }} summary.json"
   register: knowledge_review_incident_metrics_oldest_summary_raw
   changed_when: false
   failed_when: false
   timeout: "{{ knowledge_review_incident_dispatch_timeout_s }}"
   when:
     - not ansible_check_mode
-    - knowledge_review_incident_metrics_oldest_new_id is not none
+    - knowledge_review_incident_metrics_oldest_bundle_id is not none
 
-# summary.json はrecovery-execが書く非信頼データ(IC-016)であり、
-# 内容が壊れていてもここで機構全体を止めない(finalize.ymlのheartbeat解析
-# と同じ防御)。
-- name: Parse the oldest new bundle's generated_at and compute its age (defensive — non-trusted data, IC-016)
+# summary.json はrecovery-execが書く非信頼データ(IC-016)であり、内容が
+# 壊れていてもここで機構全体を止めない。
+- name: Parse the oldest bundle's generated_at and compute age / retention remaining (defensive — non-trusted data, IC-016)
   block:
-    # V3/IC-011の精神をここにも適用する: bundle-show自体が非0終了した場合
-    # (denied・接続不可等)を、単に「値が取れなかった」ではなく明示的な
-    # 失敗として fail させ、rescue で理由付きの記録に変える。この
-    # ansible.builtin.fail が無いと、rc!=0のケースは「JSONが壊れていた」
-    # のと見分けが付かないまま黙って null に落ちる(自己検証で発見・修正)。
+    # bundle-show自体が非0終了した場合(denied・接続不可等)を、単に
+    # 「値が取れなかった」ではなく明示的な失敗として fail させ、rescue で
+    # 理由付きの記録に変える。この fail が無いと、rc!=0のケースは「JSONが
+    # 壊れていた」のと見分けが付かないまま黙って null に落ちる。
     - name: Fail explicitly if the oldest bundle's summary.json fetch itself did not succeed
       ansible.builtin.fail:
         msg: >-
-          bundle-show for semaphore-{{ knowledge_review_incident_metrics_oldest_new_id }} summary.json
+          bundle-show for semaphore-{{ knowledge_review_incident_metrics_oldest_bundle_id }} summary.json
           failed rc={{ knowledge_review_incident_metrics_oldest_summary_raw.rc | default('n/a') }}
           stderr={{ knowledge_review_incident_metrics_oldest_summary_raw.stderr | default('(no stderr)') | trim }}
       when:
-        - knowledge_review_incident_metrics_oldest_new_id is not none
+        - knowledge_review_incident_metrics_oldest_bundle_id is not none
         - not ansible_check_mode
         - (knowledge_review_incident_metrics_oldest_summary_raw.rc | default(-1) | int) != 0
 
-    - name: Extract generated_at from the oldest new bundle's summary.json
+    - name: Extract generated_at from the oldest bundle's summary.json
       ansible.builtin.set_fact:
         knowledge_review_incident_metrics_oldest_generated_at: >-
           {{ (knowledge_review_incident_metrics_oldest_summary_raw.stdout | from_json).generated_at }}
       when:
-        - knowledge_review_incident_metrics_oldest_new_id is not none
+        - knowledge_review_incident_metrics_oldest_bundle_id is not none
         - not ansible_check_mode
         - (knowledge_review_incident_metrics_oldest_summary_raw.rc | default(-1) | int) == 0
 
-    - name: Compute oldest new bundle age in days
+    - name: Compute oldest bundle age in days and retention remaining (IC-043)
       ansible.builtin.set_fact:
         knowledge_review_incident_metrics_oldest_age_days: >-
           {{ (((knowledge_review_started_at | to_datetime('%Y-%m-%dT%H:%M:%S%z'))
                - (knowledge_review_incident_metrics_oldest_generated_at | to_datetime('%Y-%m-%dT%H:%M:%S%z'))).days) }}
       when: knowledge_review_incident_metrics_oldest_generated_at | default(None) is not none
+
+    - name: Compute retention days remaining (may be negative if past the retention window)
+      ansible.builtin.set_fact:
+        knowledge_review_incident_metrics_oldest_remaining_days: >-
+          {{ knowledge_review_incident_retention_days | int - knowledge_review_incident_metrics_oldest_age_days | int }}
+      when: knowledge_review_incident_metrics_oldest_age_days | default(None) is not none
   rescue:
     - name: Fall back to unknown age after a parse failure (non-trusted data — IC-016)
       ansible.builtin.set_fact:
         knowledge_review_incident_metrics_oldest_generated_at:
         knowledge_review_incident_metrics_oldest_age_days:
+        knowledge_review_incident_metrics_oldest_remaining_days:
         knowledge_review_incident_metrics_oldest_summary_parse_error: >-
-          {{ ansible_failed_result.msg | default('oldest new bundle summary.json could not be parsed', true) }}
+          {{ ansible_failed_result.msg | default('oldest bundle summary.json could not be parsed', true) }}
 
-# age_days は正当な値として 0(今日作られたバンドル)を取りうるため、
+# age_days / remaining_days は正当な値として 0 やマイナスを取りうるため、
 # 上と同じ理由で `default(x, true)` は使わない — `is defined` で判定する。
 - name: Default oldest-bundle facts and parse-error flag when the block above never set them
   ansible.builtin.set_fact:
@@ -327,62 +259,65 @@
     knowledge_review_incident_metrics_oldest_age_days: >-
       {{ knowledge_review_incident_metrics_oldest_age_days
          if knowledge_review_incident_metrics_oldest_age_days is defined else None }}
+    knowledge_review_incident_metrics_oldest_remaining_days: >-
+      {{ knowledge_review_incident_metrics_oldest_remaining_days
+         if knowledge_review_incident_metrics_oldest_remaining_days is defined else None }}
     knowledge_review_incident_metrics_oldest_summary_parse_error: >-
       {{ knowledge_review_incident_metrics_oldest_summary_parse_error | default('', true) }}
 
-- name: Build final oldest_unreviewed_bundle (dict, or null if there are no new bundles)
+- name: Build final oldest_bundle (dict, or null if there are no bundles / age could not be determined)
   ansible.builtin.set_fact:
-    knowledge_review_incident_metrics_oldest_unreviewed_bundle: >-
-      {{ ({'id': 'semaphore-' ~ (knowledge_review_incident_metrics_oldest_new_id | string),
+    knowledge_review_incident_metrics_oldest_bundle: >-
+      {{ ({'id': 'semaphore-' ~ (knowledge_review_incident_metrics_oldest_bundle_id | string),
            'generated_at': knowledge_review_incident_metrics_oldest_generated_at,
-           'age_days': knowledge_review_incident_metrics_oldest_age_days})
-         if knowledge_review_incident_metrics_oldest_new_id is not none else None }}
+           'age_days': knowledge_review_incident_metrics_oldest_age_days,
+           'retention_days': knowledge_review_incident_retention_days | int,
+           'remaining_days': knowledge_review_incident_metrics_oldest_remaining_days})
+         if (knowledge_review_incident_metrics_oldest_bundle_id is not none
+             and knowledge_review_incident_metrics_oldest_age_days is not none) else None }}
 
-# --- 6. incidents_added_since_last_eval (unchanged — local filesystem, not mirror-dependent) ---
-#
-# docs/ai/memory/incidents/ のIncidentは「ファイル名の日付」で数える。mtimeは
-# checkoutで壊れるため使わない(要求仕様。skills/incident-recording/SKILL.md
-# が定める <YYYY-MM-DD>_<slug>.md 形式)。README.md 等、命名規約に合わない
-# ファイルは find の patterns で最初から除外する。
+# --- 5. 通知が直接読む契約を確定させる ---
 
-- name: Find Incident record files by filename convention
-  ansible.builtin.find:
-    paths: "{{ knowledge_review_repo_dir }}/docs/ai/memory/incidents"
-    patterns: "????-??-??_*.md"
-    file_type: file
-  register: knowledge_review_incident_metrics_incident_files
-
-- name: Compute incidents_added_since_last_eval
+- name: Build incident_notify_index
   ansible.builtin.set_fact:
-    knowledge_review_incident_metrics_incidents_added: >-
-      {{ knowledge_review_incident_metrics_incident_files.files | default([])
-         | map(attribute='path') | map('basename')
-         | map('regex_replace', '^(\d{4}-\d{2}-\d{2})_.*$', '\1')
-         | select('ge', knowledge_review_incident_metrics_previous_date if knowledge_review_incident_metrics_previous_date is not none else '0000-00-00')
-         | list | length | int }}
-  # previous_evaluation_dateがnull(初回)の場合はどの日付も '0000-00-00' 以降
-  # になるため既存Incident全件を数える。bundlesの初回扱いと同じ考え方。
-
-# --- 7. I-3の素材を確定させる(evaluation_rc/evaluation_artifact以外の全て) ---
-#
-# ここで確定させる incident_eval_index は契約上のfact名(I-5)。
-# evaluation_rc/evaluation_artifact は評価後にincident_index_write.ymlが
-# 合わせて書き出す(I-3)。
-
-- name: Build incident_eval_index (partial — without evaluation_rc/evaluation_artifact)
-  ansible.builtin.set_fact:
-    incident_eval_index: >-
+    incident_notify_index: >-
       {{ {
-           'schema_version': 2,
            'generated_at': knowledge_review_started_at,
-           'previous_evaluation_date': knowledge_review_incident_metrics_previous_date,
-           'time_source': 'quory dispatch (bundle-list/bundle-show, live) — oldest_unreviewed_bundle.generated_at is read from its summary.json',
-           'new_bundle_detection': 'bundle_id_sequence (Semaphore job ids increase monotonically; verified 2026-08-03)',
-           'mirror_bundle_total': knowledge_review_incident_metrics_bundle_total,
-           'bundles_new_since_last_eval': knowledge_review_incident_metrics_bundles_new_count,
-           'oldest_unreviewed_bundle': knowledge_review_incident_metrics_oldest_unreviewed_bundle,
-           'incidents_added_since_last_eval': knowledge_review_incident_metrics_incidents_added | int,
+           'previous_notify_date': knowledge_review_incident_metrics_previous_notify_date,
+           'bundle_total': knowledge_review_incident_metrics_bundle_total,
+           'bundles_new_since_last_notify': knowledge_review_incident_metrics_bundles_new_count,
+           'oldest_bundle': knowledge_review_incident_metrics_oldest_bundle,
            'last_bundle_id_seen': knowledge_review_incident_metrics_last_bundle_id_seen,
            'bundle_fetch_error': knowledge_review_incident_metrics_bundle_fetch_error,
            'oldest_bundle_summary_parse_error': knowledge_review_incident_metrics_oldest_summary_parse_error
          } }}
+
+# FETCH_ERROR(取得失敗。件数は不明であり0件と混同しない — V3・V4)を
+# NO_DATA(取得は成功したが実際に0件)より先に判定する。
+- name: Build incident_notify_summary
+  ansible.builtin.set_fact:
+    incident_notify_summary: >-
+      {{ 'FETCH_ERROR' if (incident_notify_index.bundle_fetch_error | trim | length > 0)
+         else ('NO_DATA' if ((incident_notify_index.bundle_total | default(0, true) | int) == 0)
+         else 'OK') }}
+
+# --- 6. 次回実行のための最小限の状態を持ち越す(IC-044) ---
+#
+# ここで持ち越すのは last_bundle_id_seen だけであり、判断結果(何が
+# 昇格されたか等)は一切含まない — 見直しの判断は人が行い、その記録の
+# 正本は docs/ai/memory/incidents/ 等repo内(IC-032)であってこの状態
+# ファイルではない。
+
+- name: Build incident notify state to persist
+  ansible.builtin.set_fact:
+    knowledge_review_incident_metrics_state_to_persist:
+      generated_at: "{{ knowledge_review_started_at }}"
+      last_bundle_id_seen: "{{ knowledge_review_incident_metrics_last_bundle_id_seen }}"
+
+- name: Persist incident notify state for next run's differencing
+  ansible.builtin.copy:
+    content: "{{ knowledge_review_incident_metrics_state_to_persist | to_nice_json }}\n"
+    dest: "{{ knowledge_review_incident_notify_state_file }}"
+    mode: "0640"
+  when: not ansible_check_mode
+  tags: [destructive]

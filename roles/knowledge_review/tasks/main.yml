@@ -1,17 +1,23 @@
 ---
-# 月次Knowledge振り返りを claude -p で無人実行する。
-# 手順の正本: docs/ai/memory-classification.md「月次振り返りの対象と手順」
+# 月次のきっかけ通知: 決定論的なメトリクス収集とMEMORY.md期日更新だけを行う。
+# 判断・仕分け(Incidentの分類、auto-memoryの昇格判断、Policy改訂の要否)は
+# このroleでは行わない — 2026-08-03、Yoshinobuが対話セッションと行う形へ変わった
+# (docs/ai/policies/incident_capture_policy.md IC-005)。
 #
-# 安全設計:
-#   - 作業ツリーが汚れていたら何もせず中止(進行中の変更へ書き込みを混ぜない)
-#   - 書込先は job-settings.json の allowlist に限定(docs/ai/memory, docs/ai/context, skills のみ)
-#   - Policy本文・core.md・roles・.claude 等は allowlist 外なので harness が拒否する
-#   - commit/push は Bash 全面禁止により実行手段そのものが無い
-#     (repo の .claude/settings.json は --setting-sources '' で読み込まないため、
-#      そちらの deny には依存していない)
+# 廃止した機構とその理由:
+#   - claude -p の起動2本(振り返り本体・障害の自動評価)。無人LLMセッションを
+#     ここでは使わない(IC-005)。
+#   - 作業ツリー清潔判定と中止(旧ABORTED_DIRTY)。無人LLMが作業ツリーへ書く
+#     ことが前提の安全弁であり、書き手が消えたことで前提ごと外れた(IC-025退番)。
+#   - auto-memoryスナップショット退避。無人セッションがauto-memoryを書き換える
+#     経路が無くなったため、退避対象の操作自体が無い。
+#   - 権限プロファイル(job-settings.json.j2 / incident-job-settings.json.j2)と
+#     prompt(review-prompt.md.j2 / incident-review-prompt.md.j2)。無人LLMの
+#     封じ込め機構であり、封じ込める対象が無い。
 #
-# git status / systemctl は状態照会であり ansible.builtin.git や systemd モジュールでは
-# 代替できないため command を使う(roles/ubuntu_vm_full_upgrade 等と同じ扱い)。
+# git status は状態照会であり ansible.builtin.git では代替できないため command を
+# 使う(roles/ubuntu_vm_full_upgrade 等と同じ扱い)。本ファイル自体はもう
+# git statusを見ない(上記の理由で中止判定が不要になったため)。
 
 - name: Ensure state directory exists
   ansible.builtin.file:
@@ -19,138 +25,15 @@
     state: directory
     owner: "{{ ansible_user_id }}"
     mode: "0750"
-  # 後続の prompt 描画が check_mode: false で実書き込みするため、
-  # --check でもディレクトリだけは実際に作る必要がある。
-  # (ansy 自身の ~/.local/state 配下であり副作用は無害)
   check_mode: false
-
-- name: Check working tree is clean
-  ansible.builtin.command:
-    cmd: git status --porcelain
-    chdir: "{{ knowledge_review_repo_dir }}"
-  register: knowledge_review_git_status
-  changed_when: false
-  check_mode: false
-
-# 中止は fail させない。素の fail はホストを失敗扱いにし、post_tasks の Slack 通知が
-# スキップされて「中止したこと自体」が誰にも伝わらない。この中止は先月分が未commitの
-# ときに正常運用でも起きるため、無通知にすると検出手段が失われる。
-- name: Decide whether to abort (working tree not clean)
-  ansible.builtin.set_fact:
-    knowledge_review_aborted: >-
-      {{ (knowledge_review_git_status.stdout | trim | length > 0)
-         and not (knowledge_review_allow_dirty | bool) }}
-
-- name: Report abort reason
-  ansible.builtin.debug:
-    msg: >-
-      作業ツリーに未commitの変更が {{ knowledge_review_git_status.stdout_lines | length }} 件あるため
-      振り返りを実行しない。進行中の変更へ書き込みを混ぜないための安全弁。
-      先月分の昇格結果が未commitの場合もここで止まる。commit 後に再実行する。
-      意図的に実行する場合は -e knowledge_review_allow_dirty=true を付ける。
-  when: knowledge_review_aborted | bool
-
-- name: Render review prompt
-  ansible.builtin.template:
-    src: review-prompt.md.j2
-    dest: "{{ knowledge_review_state_dir }}/review-prompt.md"
-    mode: "0644"
-  check_mode: false
-  when: not (knowledge_review_aborted | bool)
 
 - name: Record run start timestamp (JST)
   ansible.builtin.set_fact:
     knowledge_review_started_at: "{{ lookup('pipe', 'date +%Y-%m-%dT%H:%M:%S%:z') }}"
 
-# 通知経路の事前確認。vault復号が壊れていると振り返り本体の後の Slack 通知も
-# 同じ経路で失敗し、失敗そのものに気づけない(二重の沈黙)。30分の本体を走らせる前に
-# ここで落とす。
-- name: Preflight - verify vault-encrypted Slack vars can be decrypted
-  ansible.builtin.include_vars:
-    file: "{{ inventory_dir }}/../vars/slack.yml"
-    name: knowledge_review_slack_preflight
-  no_log: true
-  check_mode: false
-  register: knowledge_review_slack_check
-  # ignore_errors であって failed_when: false ではない。failed_when: false は register 結果の
-  # failed 属性を上書きするため、直後の `is failed` 判定が絶対に真にならず preflight が
-  # 空振りする(実測: failed_when:false→is failed=False / ignore_errors:true→is failed=True)。
-  ignore_errors: true
-  when: not (knowledge_review_aborted | bool)
-
-- name: Abort when Slack vars cannot be decrypted
-  ansible.builtin.fail:
-    msg: >-
-      Slack変数(vars/slack.yml)のvault復号に失敗したため、振り返り本体を実行せず中止した。
-      このまま進めても結果のSlack通知が同じ経路で失敗し、失敗そのものに気づけないため。
-      ansible.cfg の vault_password_file が systemd 実行時のHOMEから解決できているか確認する。
-  when:
-    - not (knowledge_review_aborted | bool)
-    - knowledge_review_slack_check is failed
-
-- name: Snapshot auto-memory before review
-  # auto-memory は repo 外・git 管理外で、誤った書き換えを戻す手段が他に無い。
-  # 振り返り本体を起動する前に必ず退避する。
-  ansible.builtin.command:
-    cmd: >-
-      cp -a {{ knowledge_review_automemory_dir }}
-      {{ knowledge_review_state_dir }}/automemory-snapshot-{{ knowledge_review_started_at[:10] }}
-    creates: "{{ knowledge_review_state_dir }}/automemory-snapshot-{{ knowledge_review_started_at[:10] }}"
-  when:
-    - not ansible_check_mode
-    - not (knowledge_review_aborted | bool)
-  tags: [destructive]
-
-- name: Render job permission profile
-  ansible.builtin.template:
-    src: job-settings.json.j2
-    dest: "{{ knowledge_review_state_dir }}/job-settings.json"
-    mode: "0644"
-  check_mode: false
-  when: not (knowledge_review_aborted | bool)
-
-# 実際の振り返り。--check では走らせない(check-mode-native)。
-#
-# 書込境界は prompt の指示文ではなく allowlist で技術的に強制する。詳細と、
-# 実測で確かめた必須条件3点は job-settings.json.j2 のコメントに書いてある。
-# denylist(--disallowedTools)方式は列挙漏れが素通りするため採用しない
-# (2026-07-27の独立レビューで CLAUDE.md / AGENTS.md 等9ファイルへの書込が
-#  実際に通ってしまうことが実証された)。
-- name: Run monthly knowledge review
-  ansible.builtin.command:
-    argv:
-      - "{{ knowledge_review_claude_bin }}"
-      - "-p"
-      - "--output-format"
-      - "text"
-      - "--model"
-      - "{{ knowledge_review_model }}"
-      - "--setting-sources"
-      - ""
-      - "--settings"
-      - "{{ knowledge_review_state_dir }}/job-settings.json"
-      - "--add-dir"
-      - "{{ knowledge_review_automemory_dir }}"
-    chdir: "{{ knowledge_review_repo_dir }}"
-    stdin: "{{ lookup('file', knowledge_review_state_dir + '/review-prompt.md') }}"
-  environment:
-    HOME: "/home/{{ ansible_user_id }}"
-  register: knowledge_review_run
-  changed_when: knowledge_review_run.rc | default(1) == 0
-  # failed_when: false だけでは足りない。ansible-core 2.20 では task レベル timeout:
-  # 超過が TaskTimeoutError(BaseException)として failed_when の評価経路の外で捕捉され、
-  # 致命的失敗になる。ignore_errors がないと以降の report 保存・summary・Slack 通知が
-  # すべてスキップされ、完全に無通知で終わる(実機で再現確認済み)。
-  failed_when: false
-  ignore_errors: true
-  timeout: "{{ knowledge_review_timeout }}"
-  when:
-    - not ansible_check_mode
-    - not (knowledge_review_aborted | bool)
-  tags: [destructive]
-
-# 期日の更新は LLM に任せず Ansible が確定的に行う。無人セッションは auto-memory へ
-# 書き込めない(allowlist が repo 内に限定されている)ため、そもそも自力では更新できない。
+# 期日の更新は LLM に任せず Ansible が確定的に行う。無人LLMセッションが
+# 無くなったため「実行が成功したら更新する」というガードも不要になり、
+# 常に更新する(--checkでは書かない)。
 - name: Compute next review date (JST)
   ansible.builtin.set_fact:
     knowledge_review_next_date: "{{ lookup('pipe', 'date -d \"+1 month\" +%Y-%m-26') }}"
@@ -163,82 +46,12 @@
       > **⏰ 次回のKnowledge月次振り返り: {{ knowledge_review_next_date }}**(前回:
       {{ knowledge_review_started_at[:10] }})
     backup: true
-  when:
-    - not ansible_check_mode
-    - not (knowledge_review_aborted | bool)
-    - knowledge_review_run is not failed
-    - knowledge_review_run is not skipped
-    - (knowledge_review_run.rc | default(1)) == 0
+  when: not ansible_check_mode
   failed_when: false
   tags: [destructive]
 
-- name: Save report
-  ansible.builtin.copy:
-    content: |
-      # Knowledge月次振り返り 実行ログ
-      開始: {{ knowledge_review_started_at }}
-      rc: {{ knowledge_review_run.rc | default('n/a') }}
-
-      ## 報告
-      {{ knowledge_review_run.stdout | default('(出力なし)') }}
-
-      ## stderr
-      {{ knowledge_review_run.stderr | default('') }}
-    dest: "{{ knowledge_review_state_dir }}/report-{{ knowledge_review_started_at[:10] }}.md"
-    mode: "0640"
-  when:
-    - not ansible_check_mode
-    - not (knowledge_review_aborted | bool)
-  tags: [destructive]
-
-# 障害の自動評価(incident_metrics → incident_evaluation → incident_index_write)。
-# 振り返り本体・期日更新・report保存がすべて完了したあとに続ける(計画
-# docs/ai/reviews/incident_auto_capture_step2/2026-07-28_007_step2_plan.md
-# §2.4・査読F-14が確定させた位置。新しい工程が失敗しても既存動作は1つも
-# 欠けない)。3ファイルは所有者が分かれる — incident_metrics.yml と
-# incident_index_write.yml は別の実装単位が書き、incident_evaluation.yml は
-# 本ファイルと同じ単位が書く。include_tasks(動的include)であるため、
-# incident_metrics.yml / incident_index_write.yml がまだ存在しない段階でも
-# --syntax-check は通る(実装順序が単位間で異なるため、意図的にこの形にした)。
-- name: Compute incident evaluation metrics
+# 障害バンドルの滞留状況(quoryへのdispatch経由でのライブ取得)。
+# 通知の中身になる(playbooks/knowledge_review.yml post_tasks)。
+- name: Compute incident notification metrics
   ansible.builtin.include_tasks: incident_metrics.yml
-  when:
-    - not (knowledge_review_aborted | bool)
-    - knowledge_review_incident_eval_enabled | bool
-
-- name: Run incident evaluation
-  ansible.builtin.include_tasks: incident_evaluation.yml
-  when:
-    - not (knowledge_review_aborted | bool)
-    - knowledge_review_incident_eval_enabled | bool
-
-- name: Write incident evaluation index
-  ansible.builtin.include_tasks: incident_index_write.yml
-  when:
-    - not ansible_check_mode
-    - not (knowledge_review_aborted | bool)
-    - knowledge_review_incident_eval_enabled | bool
-
-- name: Collect resulting diff
-  ansible.builtin.command:
-    cmd: git status --porcelain
-    chdir: "{{ knowledge_review_repo_dir }}"
-  register: knowledge_review_diff
-  changed_when: false
-  check_mode: false
-
-# rc が未定義になるケース(timeout で致命的失敗 → ignore_errors で継続)を確実に
-# FAILED 側へ倒す。default(0) だとタイムアウトが「正常終了・変更なし」に化ける。
-#
-# 既知の無害な挙動: --check かつ作業ツリーが清潔なとき、claude タスクが skip され
-# rc 未定義となるため summary は FAILED になる。通知も report も not ansible_check_mode で
-# ガードされているので外部影響は無い。--check で FAILED を見ても障害ではない。
-- name: Build summary
-  ansible.builtin.set_fact:
-    knowledge_review_summary: >-
-      {{ 'ABORTED_DIRTY' if (knowledge_review_aborted | bool)
-         else ('FAILED' if (knowledge_review_run is failed
-                            or knowledge_review_run.rc is not defined
-                            or knowledge_review_run.rc != 0)
-         else ('CHANGES' if (knowledge_review_diff.stdout | trim | length > 0) else 'NO_CHANGES')) }}
-    knowledge_review_changed_files: "{{ knowledge_review_diff.stdout_lines | default([]) | length }}"
+  when: knowledge_review_incident_notify_enabled | bool
