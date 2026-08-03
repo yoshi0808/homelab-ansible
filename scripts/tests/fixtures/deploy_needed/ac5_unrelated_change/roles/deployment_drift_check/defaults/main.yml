@@ -1,0 +1,10 @@
+---
+# Same catalog shape as ac4_catalog_file_changed/, but this fixture's
+# incident-investigate.py file is deliberately NOT included in the tree, so
+# the staged-path set never contains the catalog's `src`. Only the playbook
+# is present (so R5 still passes).
+deployment_drift_check_files:
+  - hosts: [quory]
+    src: roles/incident_investigate/files/incident-investigate.py
+    dest: /usr/local/sbin/incident-investigate.py
+    playbook: playbooks/incident_investigate_setup.yml

@@ -1,0 +1,5 @@
+---
+- name: Fixture placeholder
+  hosts: quory
+  gather_facts: false
+  tasks: []

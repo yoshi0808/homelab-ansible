@@ -18,28 +18,57 @@ deployment_drift_check_hosts: "control_nodes:dev_nodes:monitoring_servers:radius
 
 # --- ① copy 配備物の内容 -----------------------------------------------------
 # src: repo内の相対パス / dest: 配備先 / hosts: 対象(inventory_hostname と照合)
+# playbook: その状態を復元するplaybook(相対パス)。持たせるかどうかの判断根拠は
+# docs/ai/reviews/deploy_awareness/2026-08-04_002_implement.md。
+# run_host: `-l` に渡すべきホスト(省略時はfindingのhost自身を使う)。
+# delegate_toで配布するroleでは、配備を実行するhostは`hosts:`の対象(quory)で
+# あり、findingが立つhost(実際に配備物がずれているauthy/monnie/pve1/pve2)とは
+# 別である。`ansible-playbook <playbook> -l <findingのhost>` は play の hosts
+# パターンと交わらず何も配備しないため(`--list-hosts`実測)、そのケースだけ
+# 明示する(R9、2026-08-04追補。当初R8は「フィールドは増やさない」としたが、
+# これは`-l`の対象が常にfindingのhostと一致するという誤った前提に基づいており
+# 撤回された)。
 deployment_drift_check_files:
   - hosts: [quory]
     src: roles/recovery_probe/files/recovery-probe.py
     dest: /usr/local/sbin/recovery-probe.py
+    playbook: playbooks/recovery_probe_setup.yml
   - hosts: [quory]
     src: roles/incident_capture/files/incident-capture-collector.py
     dest: /usr/local/sbin/incident-capture-collector.py
+    playbook: playbooks/incident_capture_setup.yml
   - hosts: [quory]
     src: roles/incident_investigate/files/incident-investigate.py
     dest: /usr/local/sbin/incident-investigate.py
+    playbook: playbooks/incident_investigate_setup.yml
   - hosts: [quory]
     src: roles/recovery_push/files/recovery-push-dispatch.sh
     dest: /usr/local/sbin/recovery-push-dispatch.sh
+    playbook: playbooks/recovery_push_setup.yml
+  # R9(2026-08-04追補)。配備先はauthy/monnieだが、実際の配備は quory の play
+  # (hosts: quory)から roles/recovery_push/tasks/sender_setup.yml が
+  # delegate_to で行っている。run_host: quory を明示することで
+  # `ansible-playbook playbooks/recovery_push_setup.yml -l quory` を案内する
+  # (`-l authy`はplayのhostsパターンと交わらずhosts(0)になり何も配備しない
+  # ことを`--list-hosts`で実測済み。`-l quory`はhosts(1): quoryになることも
+  # 実測済み — 2026-08-04implement記録参照)。
   - hosts: [authy, monnie]
     src: roles/recovery_push/files/recovery-push.sh
     dest: /usr/local/sbin/recovery-push.sh
+    playbook: playbooks/recovery_push_setup.yml
+    run_host: quory
   - hosts: [authy, monnie]
     src: roles/recovery_push/files/recovery-trigger@.service
     dest: /etc/systemd/system/recovery-trigger@.service
+    playbook: playbooks/recovery_push_setup.yml
+    run_host: quory
+  # 同じ理由(delegate_to)。配備は roles/recovery_exec/tasks/target_setup.yml
+  # が quory の play から monnie へ delegate_to している。
   - hosts: [monnie]
     src: roles/recovery_exec/files/recovery-loki-helper
     dest: /usr/local/sbin/recovery-loki-helper
+    playbook: playbooks/recovery_exec_setup.yml
+    run_host: quory
   # --- Phase 3(dev_prod_boundary)で追加 ---
   # 調査面そのもの。Phase 4 は「配備物の版ずれを常時検出できること」を前提に
   # 開発側の鍵を捨てるため、**その検出を担う口と、検出のために読む口自身**が
@@ -47,40 +76,63 @@ deployment_drift_check_files:
   - hosts: [quory]
     src: roles/dev_investigate/files/recovery-investigate-dispatch-quory.sh
     dest: /usr/local/sbin/recovery-investigate-dispatch-quory.sh
+    playbook: playbooks/dev_investigate_setup.yml
   - hosts: [quory]
     src: roles/recovery_exec/files/incident-bundle-helper
     dest: /usr/local/sbin/incident-bundle-helper
+    playbook: playbooks/recovery_exec_setup.yml
   - hosts: [quory]
     src: roles/recovery_exec/files/homelab-incident-bundle
     dest: /usr/local/bin/homelab-incident-bundle
+    playbook: playbooks/recovery_exec_setup.yml
   # 以下3件は Phase 3 以前からの漏れ(2026-08-03 の独立レビュー S2 で判明)。
   # 同じ class の copy 配備物であり、1行で閉じられるためここで併せて塞ぐ。
   - hosts: [quory]
     src: roles/recovery_exec/files/recovery-reports-helper
     dest: /usr/local/sbin/recovery-reports-helper
+    playbook: playbooks/recovery_exec_setup.yml
   - hosts: [quory]
     src: roles/recovery_exec/files/homelab-reports
     dest: /usr/local/bin/homelab-reports
+    playbook: playbooks/recovery_exec_setup.yml
   - hosts: [quory]
     src: roles/recovery_exec/files/homelab-semaphore-query
     dest: /usr/local/bin/homelab-semaphore-query
+    playbook: playbooks/recovery_exec_setup.yml
 
 # --- ②③ systemd unit / timer の状態 -----------------------------------------
 # enabled / active は期待値。timer は on_calendar も見る(空なら検査しない)
+# playbook: R1-aの判断根拠は docs/ai/reviews/deploy_awareness/2026-08-04_002_implement.md。
 deployment_drift_check_units:
-  - { hosts: [quory], name: recovery-probe.service, enabled: enabled, active: active }
-  - { hosts: [quory], name: recovery-io.service, enabled: enabled, active: active }
-  - { hosts: [quory], name: homelab-incident-capture.timer, enabled: enabled, active: active }
-  - { hosts: [quory], name: homelab-incident-investigate.timer, enabled: enabled, active: active }
+  - { hosts: [quory], name: recovery-probe.service, enabled: enabled, active: active, playbook: playbooks/recovery_probe_setup.yml }
+  # R10(2026-08-04追補)で解消。recovery_io_service_enabled: true を
+  # inventories/homelab/host_vars/quory.yml へ置いたため、
+  # roles/recovery_io/tasks/main.yml の enable task が enabled/state を
+  # 無条件に enabled/started へ収束させる(以前はrole既定falseのままで
+  # `-l quory`だけでは直らなかった)。
+  - { hosts: [quory], name: recovery-io.service, enabled: enabled, active: active, playbook: playbooks/recovery_io_setup.yml }
+  # 同じくR10で解消。incident_capture_service_enabled: true を同ファイルへ置いた。
+  - { hosts: [quory], name: homelab-incident-capture.timer, enabled: enabled, active: active, playbook: playbooks/incident_capture_setup.yml }
+  - { hosts: [quory], name: homelab-incident-investigate.timer, enabled: enabled, active: active, playbook: playbooks/incident_investigate_setup.yml }
   # 作業ツリーの自動同期(2026-08-03新設)。**止まっても静かである** — 同期が
   # 走らなくなると quory は古いコードで動き続けるが、それ自体は通知を出さない
   # (通知は同期が「動いた」ときと「失敗した」ときに出るもので、「呼ばれなく
   # なった」ことは検出できない)。timerの生存を見るのはこの検査だけである。
   # service 本体は Type=oneshot で常時 inactive のため対象にしない。
-  - { hosts: [quory], name: worktree-sync.timer, enabled: enabled, active: active }
-  - { hosts: [ansy], name: ansible-knowledge-review.timer, enabled: enabled, active: active }
+  - { hosts: [quory], name: worktree-sync.timer, enabled: enabled, active: active, playbook: playbooks/worktree_sync_setup.yml }
+  # OQ2の答え: playbooks/systemd_timers.ymlではなくplaybooks/knowledge_review_timer.yml
+  # (roles/knowledge_review/tasks/install_timer.ymlが変数gateなしで
+  # enabled: true / state: startedを無条件に適用することを現物で確認済み)。
+  - { hosts: [ansy], name: ansible-knowledge-review.timer, enabled: enabled, active: active, playbook: playbooks/knowledge_review_timer.yml }
   # ansy では配置のみで起動しない(roles/recovery_probe の設計)。
-  # 「起動していないこと」も検査対象にする — 意図せず有効化されたら知りたい
+  # 「起動していないこと」も検査対象にする — 意図せず有効化されたら知りたい。
+  # playbookは持たせない(R1-a)。recovery-probe.serviceはenable/start task自体が
+  # `when: recovery_probe_service_enabled | bool` でgateされており、falseのとき
+  # 無効化task自体が存在しない。recovery-io.serviceはenabled: falseを明示的に
+  # 適用するが(こちらは無効化する)、state(active)は`omit`で管理しないため、
+  # activeへ意図せずドリフトしていた場合はplaybookを流しても止まらない。
+  # いずれも「実際にその状態を復元しない」ため書かない。R10(2026-08-04追補)は
+  # このansy側2件を明示的に対象外とし、上記判断をそのまま採用している。
   - { hosts: [ansy], name: recovery-probe.service, enabled: disabled, active: inactive }
   - { hosts: [ansy], name: recovery-io.service, enabled: disabled, active: inactive }
 
@@ -89,12 +141,20 @@ deployment_drift_check_units:
 # Phase 3(dev_prod_boundary)で Claude Code 用のエントリが1本ずつ増えた
 # (authy/monnie: Codex investigate + Codex action + Claude Code investigate、
 # pve1/pve2: Codex investigate + Claude Code investigate)。
+#
+# OQ1の答え: authy/monnie・pve1/pve2 とも authorized_keys の配備は `template`
+# (roles/recovery_exec/tasks/target_setup.yml)で、内容を丸ごと排他上書きする
+# — 追記型ではないので、エントリ数の食い違いは実行すれば直る(drift-safe)。
+# いずれも quory の play から delegate_to で配布しているため、R9の
+# run_host: quory を明示する(files欄の delegate_to エントリと同じ理由)。
 deployment_drift_check_forced_command_keys:
-  - { hosts: [authy, monnie], path: /home/recovery-exec/.ssh/authorized_keys, entries: 3 }
-  - { hosts: [pve1, pve2], path: /home/recovery-exec/.ssh/authorized_keys, entries: 2 }
+  - { hosts: [authy, monnie], path: /home/recovery-exec/.ssh/authorized_keys, entries: 3, playbook: playbooks/recovery_exec_setup.yml, run_host: quory }
+  - { hosts: [pve1, pve2], path: /home/recovery-exec/.ssh/authorized_keys, entries: 2, playbook: playbooks/recovery_exec_setup.yml, run_host: quory }
   # quory の read 専用受け口(Phase 3 で新設)。forced command 1本だけであること
   # が境界そのものなので、エントリが増えていないことを日次で見る。
-  - { hosts: [quory], path: /home/dev-investigate/.ssh/authorized_keys, entries: 1 }
+  # roles/dev_investigate/tasks/main.yml は quory 自身の play で直接
+  # (delegate_toなしで)templateを適用するため、上の2件と異なりrun_hostは不要。
+  - { hosts: [quory], path: /home/dev-investigate/.ssh/authorized_keys, entries: 1, playbook: playbooks/dev_investigate_setup.yml }
 
 # --- ④ reports/ 配下の所有権 --------------------------------------------------
 # 直下のディレクトリがすべて同一の所有者であること(値は指定せず、揃っているか

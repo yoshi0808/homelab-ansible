@@ -1,0 +1,5 @@
+---
+# AC8 fixture: empty catalog (R4/R5 have nothing to compare against). Only
+# R6 (template heuristic) is exercised here -- it does not consult the
+# catalog at all, only staged paths and playbooks/<role>_setup.yml existence.
+deployment_drift_check_files: []

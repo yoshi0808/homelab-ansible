@@ -1,0 +1,10 @@
+---
+# Minimal catalog fixture for AC4 (docs/ai/reviews/deploy_awareness/2026-08-04_001_requirement.md).
+# Only the section check-deploy-needed.py's R4 reads (deployment_drift_check_files)
+# is populated; the other sections are omitted (the script treats a missing
+# key the same as an empty list).
+deployment_drift_check_files:
+  - hosts: [quory]
+    src: roles/incident_investigate/files/incident-investigate.py
+    dest: /usr/local/sbin/incident-investigate.py
+    playbook: playbooks/incident_investigate_setup.yml

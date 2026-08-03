@@ -1,0 +1,10 @@
+---
+# AC6 fixture: the catalog's `playbook:` names a file that does not exist
+# anywhere in this fixture tree (deliberately -- no
+# playbooks/does_not_exist_setup.yml is created). R5 must name this entry
+# and block (non-zero exit).
+deployment_drift_check_files:
+  - hosts: [quory]
+    src: roles/incident_investigate/files/incident-investigate.py
+    dest: /usr/local/sbin/incident-investigate.py
+    playbook: playbooks/does_not_exist_setup.yml

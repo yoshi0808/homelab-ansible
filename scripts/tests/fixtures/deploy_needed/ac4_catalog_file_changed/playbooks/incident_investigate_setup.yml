@@ -1,0 +1,8 @@
+---
+# Fixture stand-in for the real playbooks/incident_investigate_setup.yml.
+# Only needs to exist (git ls-files) for R5 not to flag the catalog's
+# playbook: reference as missing.
+- name: Fixture placeholder
+  hosts: quory
+  gather_facts: false
+  tasks: []

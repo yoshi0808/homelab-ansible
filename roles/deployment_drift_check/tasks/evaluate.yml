@@ -2,7 +2,16 @@
 # 収集した実際値を、controller が repo から出した期待値と突き合わせる。
 # ホストごとに自分の分だけを評価する(全ホスト分をまとめて回すより式が単純になる)。
 #
-# finding の型: { category, item, expected, actual, detail }
+# finding の型: { category, item, expected, actual, detail, playbook, run_host }
+# playbook: そのfindingの状態を復元するplaybookの相対パス。持たないもの
+# (カタログのエントリにplaybookが無い、またはカタログ構造自体がplaybookを
+# 持たない report_dirs/hosts_file)は空文字列。report.yml はこれが空のとき
+# 「直し方」行を出さない(R1-a)。
+# run_host: `-l` に渡すべきホスト。カタログのエントリが run_host を持てば
+# それを使い(delegate_toで配布するエントリ、R9)、持たなければfinding自身の
+# host(= このtaskを実行しているinventory_hostname)を使う。playbookが空の
+# findingでもrun_hostは埋める(スキーマを揃えるだけで、report.yml側では
+# playbookが空のとき参照されない)。
 
 - name: Build findings for deployed files
   ansible.builtin.set_fact:
@@ -14,17 +23,23 @@
           {%- set _ = out.append({'category': 'file', 'item': r.item.dest,
                                   'expected': 'present (' ~ r.item.src ~ ')',
                                   'actual': 'missing',
-                                  'detail': '配備物が存在しない'}) -%}
+                                  'detail': '配備物が存在しない',
+                                  'playbook': r.item.playbook | default(''),
+                                  'run_host': r.item.run_host | default(inventory_hostname, true)}) -%}
         {%- elif want == '' -%}
           {%- set _ = out.append({'category': 'file', 'item': r.item.dest,
                                   'expected': 'repo側のハッシュ',
                                   'actual': 'repo側のsrcが読めない',
-                                  'detail': r.item.src ~ ' がcontroller上に無い'}) -%}
+                                  'detail': r.item.src ~ ' がcontroller上に無い',
+                                  'playbook': r.item.playbook | default(''),
+                                  'run_host': r.item.run_host | default(inventory_hostname, true)}) -%}
         {%- elif r.stat.checksum != want -%}
           {%- set _ = out.append({'category': 'file', 'item': r.item.dest,
                                   'expected': want,
                                   'actual': r.stat.checksum,
-                                  'detail': 'repo(' ~ r.item.src ~ ')と内容が異なる'}) -%}
+                                  'detail': 'repo(' ~ r.item.src ~ ')と内容が異なる',
+                                  'playbook': r.item.playbook | default(''),
+                                  'run_host': r.item.run_host | default(inventory_hostname, true)}) -%}
         {%- endif -%}
       {%- endfor -%}
       {{ out }}
@@ -43,19 +58,25 @@
           {%- set _ = out.append({'category': 'unit', 'item': r.item.name,
                                   'expected': 'loaded',
                                   'actual': kv.get('LoadState', '(取得できず)'),
-                                  'detail': 'unitが配備されていない可能性(setup playbookの流し忘れ)'}) -%}
+                                  'detail': 'unitが配備されていない可能性(setup playbookの流し忘れ)',
+                                  'playbook': r.item.playbook | default(''),
+                                  'run_host': r.item.run_host | default(inventory_hostname, true)}) -%}
         {%- else -%}
           {%- if kv.get('UnitFileState', '') != r.item.enabled -%}
             {%- set _ = out.append({'category': 'unit', 'item': r.item.name,
                                     'expected': r.item.enabled,
                                     'actual': kv.get('UnitFileState', ''),
-                                    'detail': 'enable状態が期待と異なる'}) -%}
+                                    'detail': 'enable状態が期待と異なる',
+                                    'playbook': r.item.playbook | default(''),
+                                    'run_host': r.item.run_host | default(inventory_hostname, true)}) -%}
           {%- endif -%}
           {%- if kv.get('ActiveState', '') != r.item.active -%}
             {%- set _ = out.append({'category': 'unit', 'item': r.item.name,
                                     'expected': r.item.active,
                                     'actual': kv.get('ActiveState', ''),
-                                    'detail': '稼働状態が期待と異なる'}) -%}
+                                    'detail': '稼働状態が期待と異なる',
+                                    'playbook': r.item.playbook | default(''),
+                                    'run_host': r.item.run_host | default(inventory_hostname, true)}) -%}
           {%- endif -%}
         {%- endif -%}
       {%- endfor -%}
@@ -70,7 +91,9 @@
           {%- set _ = out.append({'category': 'forced_command', 'item': r.item.path,
                                   'expected': 'readable',
                                   'actual': 'read failed',
-                                  'detail': 'authorized_keysが読めない(未配備か権限)'}) -%}
+                                  'detail': 'authorized_keysが読めない(未配備か権限)',
+                                  'playbook': r.item.playbook | default(''),
+                                  'run_host': r.item.run_host | default(inventory_hostname, true)}) -%}
         {%- else -%}
           {%- set lines = (r.content | b64decode).splitlines()
                           | map('trim') | reject('equalto', '') | list -%}
@@ -79,13 +102,17 @@
             {%- set _ = out.append({'category': 'forced_command', 'item': r.item.path,
                                     'expected': '全エントリが command= で始まる',
                                     'actual': bad | length | string ~ '件が forced command なし',
-                                    'detail': 'forced commandの無い鍵は無制限の実行を許す'}) -%}
+                                    'detail': 'forced commandの無い鍵は無制限の実行を許す',
+                                    'playbook': r.item.playbook | default(''),
+                                    'run_host': r.item.run_host | default(inventory_hostname, true)}) -%}
           {%- endif -%}
           {%- if lines | length != r.item.entries -%}
             {%- set _ = out.append({'category': 'forced_command', 'item': r.item.path,
                                     'expected': r.item.entries | string ~ ' entries',
                                     'actual': lines | length | string ~ ' entries',
-                                    'detail': 'エントリ数が期待と異なる'}) -%}
+                                    'detail': 'エントリ数が期待と異なる',
+                                    'playbook': r.item.playbook | default(''),
+                                    'run_host': r.item.run_host | default(inventory_hostname, true)}) -%}
           {%- endif -%}
         {%- endif -%}
       {%- endfor -%}
@@ -106,7 +133,8 @@
           {%- set _ = out.append({'category': 'ownership', 'item': r.item.path,
                                   'expected': '直下ディレクトリの所有者が一様',
                                   'actual': uniq | join(', '),
-                                  'detail': '所有者が混在している。書き込みに失敗する経路がありうる'}) -%}
+                                  'detail': '所有者が混在している。書き込みに失敗する経路がありうる',
+                                  'playbook': '', 'run_host': inventory_hostname}) -%}
         {%- endif -%}
       {%- endfor -%}
       {{ out }}
@@ -119,7 +147,7 @@
         {%- if r.content is not defined -%}
           {%- set _ = out.append({'category': 'hosts_file', 'item': r.item.path,
                                   'expected': 'readable', 'actual': 'read failed',
-                                  'detail': ''}) -%}
+                                  'detail': '', 'playbook': '', 'run_host': inventory_hostname}) -%}
         {%- else -%}
           {%- set body = r.content | b64decode -%}
           {%- set want = [] -%}
@@ -133,7 +161,8 @@
             {%- set _ = out.append({'category': 'hosts_file', 'item': r.item.path,
                                     'expected': 'inventoryの全ホスト名を含む',
                                     'actual': missing | join(', ') ~ ' が無い',
-                                    'detail': 'sophos-fw停止中はDNSが引けないため、ここに無い名前は障害時に解決できない'}) -%}
+                                    'detail': 'sophos-fw停止中はDNSが引けないため、ここに無い名前は障害時に解決できない',
+                                    'playbook': '', 'run_host': inventory_hostname}) -%}
           {%- endif -%}
         {%- endif -%}
       {%- endfor -%}

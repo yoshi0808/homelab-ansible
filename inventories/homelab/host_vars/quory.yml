@@ -27,6 +27,36 @@ recovery_probe_service_enabled: true
 # 起動していない」状態を作るため)。
 worktree_sync_service_enabled: true
 
+# incident_investigate (roles/incident_investigate/defaults/main.yml):
+# quory はこのpickerのtimerを実際に動かす唯一の本番ホストである。
+# recovery_probe_service_enabled / worktree_sync_service_enabled と同じ理由で
+# host_varsへ真実を置く(-eの渡し忘れが「timerがdisabledになっている」という
+# ドリフトに対し、deployment_drift_checkのplaybook案内(-lのみ、-eなし)を
+# 流しても直らない状態を作るため。
+# docs/ai/reviews/deploy_awareness/2026-08-04_001_requirement.md R2)。
+incident_investigate_service_enabled: true
+
+# recovery_io (roles/recovery_io/defaults/main.yml):
+# quory は recovery-io(Slack I/Oブリッジ)を常駐させる本番ホストである。
+# recovery_probe_service_enabled と同じ理由でhost_varsへ真実を置く
+# (roles/recovery_io/tasks/main.yml の enable task は
+# `enabled: "{{ recovery_io_service_enabled }}"` / `state: "{{ 'started' if
+# ... else omit }}"` で、role既定falseのままだと `-l quory` だけでは
+# enabled/activeへ収束しない)。
+# 期待状態がtrueであることの根拠: 2026-08-04 00:40 の日次ドリフト検査で
+# quoryのunit 5件すべてが期待どおりに揃っており(drift_count=1、該当はfile
+# カテゴリの1件のみ)、recovery-io.serviceは現に enabled/active だった。
+# docs/ai/reviews/deploy_awareness/2026-08-04_001_requirement.md R10。
+recovery_io_service_enabled: true
+
+# incident_capture (roles/incident_capture/defaults/main.yml):
+# quory はこのcollectorのtimerを実際に動かす唯一の本番ホストである。
+# incident_investigate_service_enabled と同じ理由・同じ流儀でhost_varsへ
+# 真実を置く。期待状態がtrueであることの根拠は recovery_io_service_enabled と
+# 同じ2026-08-04 00:40の日次ドリフト検査(該当unitも期待どおりだった)。
+# docs/ai/reviews/deploy_awareness/2026-08-04_001_requirement.md R10。
+incident_capture_service_enabled: true
+
 # ubuntu_vm_full_upgrade (roles/ubuntu_vm_full_upgrade/defaults/main.yml):
 # how Ansible itself is installed here, so the role's important-component
 # report/Slack output can say "apt管理: 判定対象" instead of leaving it

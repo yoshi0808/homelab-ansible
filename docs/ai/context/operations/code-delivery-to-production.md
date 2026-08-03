@@ -59,6 +59,16 @@ ssh quory-investigate "deployed-hash <name>"       # quory側
 
 **識別子や機構を撤廃する案件では、受入条件に「配備物側にも残っていないこと」を含める**(`skills/requirements-analysis/`)。
 
+### 気づくための2点(2026-08-04 新設)
+
+**commit する時点** — `roles/*/files/` 配下のうちドリフト検査のカタログに載っているものを stage すると、pre-commit が「**配備が要る**」と、流すべきplaybookを添えて出す(`scripts/check-deploy-needed.py`)。**commitはブロックしない** — 配備はcommitの後の工程だからである。`roles/*/templates/` の変更は「配備が要る可能性」として**推定で**別枠に出る(下記のとおり内容までは検査できないため)。
+
+**ドリフトが検出された時点** — 通知とJSONレポートの各findingに `直し方: ansible-playbook <playbook> -l <host>` が載る。
+
+この2つは**同じカタログ**(`roles/deployment_drift_check/defaults/main.yml`)を読む。対応表を二重に持たないための設計であり、片方だけを直さない。
+
+**「直し方」が載らないfindingがある。** 流しても直らないものには意図的に書いていない — playbookが `enabled` しか管理せず `active` を戻さない場合や、無効化のtask自体が存在しない場合である。**書いてあれば直る、書いていなければ自分で調べる**、と読むこと。判断根拠は `docs/ai/reviews/deploy_awareness/2026-08-04_002_implement.md`。
+
 ### 日次のドリフト検査が拾う範囲
 
 `playbooks/deployment_drift_check.yml`(`safe-readonly`、日次 00:40)が**自動で突合する**。対象カタログは `roles/deployment_drift_check/defaults/main.yml` が正本。

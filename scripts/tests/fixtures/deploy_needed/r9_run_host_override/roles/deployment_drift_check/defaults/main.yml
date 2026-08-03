@@ -1,0 +1,13 @@
+---
+# R9 fixture: this entry's `hosts:` (authy, monnie) is the affected host
+# list, but the deployment actually runs from quory via delegate_to (real
+# example: roles/recovery_push/files/recovery-push.sh). `run_host: quory`
+# must win over `hosts:` in check-deploy-needed.py's R4 output -- otherwise
+# the committer would be told to run `-l authy`/`-l monnie`, which matches
+# zero hosts in the real playbook's `hosts: quory` play.
+deployment_drift_check_files:
+  - hosts: [authy, monnie]
+    src: roles/recovery_push/files/recovery-push.sh
+    dest: /usr/local/sbin/recovery-push.sh
+    playbook: playbooks/recovery_push_setup.yml
+    run_host: quory

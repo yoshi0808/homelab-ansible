@@ -129,4 +129,18 @@ if ! python3 "$(dirname "${BASH_SOURCE[0]}")/check-doc-consistency.py"; then
   exit 1
 fi
 
+# 配備が要る変更の予告(R4: カタログ一致 / R6: template配備物の推定、いずれも
+# 警告のみでブロックしない)と、deployment_drift_checkカタログのplaybook:が
+# repoに実在することの検査(R5、ブロックする)。判定の性質が異なる2つを
+# 1つのスクリプトへまとめているが、pre-commitをブロックするかどうかは
+# スクリプト自身の終了コード(R5のみが非ゼロを返す)にそのまま従う。
+if ! command -v python3 >/dev/null 2>&1; then
+  echo "ERROR: python3 not found; cannot run deploy-needed check"
+  exit 1
+fi
+if ! python3 "$(dirname "${BASH_SOURCE[0]}")/check-deploy-needed.py"; then
+  echo "ERROR: deploy-needed catalog check failed (see above)"
+  exit 1
+fi
+
 echo "[pre-commit] OK"

@@ -93,6 +93,9 @@
           期待: {{ f.expected }}
           実際: {{ f.actual }}
           {{ f.detail }}
+      {% if f.playbook %}
+          直し方: ansible-playbook {{ f.playbook }} -l {{ f.run_host | default(f.host, true) }}
+      {% endif %}
       {% endfor %}
 
       レポート : {{ deployment_drift_check_report_dir }}/{{ deployment_drift_check_ts }}.json
