@@ -279,7 +279,7 @@ pveの`root`の`authorized_keys`から該当行が削除され、それがpve1�
 
 ---
 
-## Coordinator の追記(2026-08-03)— `Connection reset by peer` の原因は未特定
+## Coordinator の追記(2026-08-03)— `Connection reset by peer` の原因(**同日中に特定。下の「決着」を先に読むこと**)
 
 本記録は再掃引中に出た `Connection reset by peer` を「**急速な連続接続によるレート制限**」と記している。**この因果は確かめられていない。**
 
@@ -297,3 +297,33 @@ Yoshinobu から別の可能性が示された — **同時刻にスマートフ
 ### 拾った穴
 
 **現在の調査面は、境界そのものが乗っている transport(SSH)のログを見られない。** カタログ(`..._008_phase3_check_catalog.md`)を組んだとき、復旧・クラスタ系の unit だけを列挙し、SSH デーモンを入れていなかった。Phase 4 で ansy から保護対象ホストへ届かなくなった以上、**「なぜ SSH が切れたのか」を調べる手段は dispatch にしか無い**。`docs/ai/status.md` の Next へ起票した。
+
+### 決着(2026-08-03、`journal-ssh` 配備後)
+
+**原因は OpenSSH の PerSourcePenalties である。VPN 説は否定された。**
+
+カタログ §7 の `journal-ssh` を配備した直後、pve1 の SSH journal に次の形の行が並んでいた
+(送信元は ansy。IP は本リポジトリへ書かない)。
+
+```
+sshd[…]: drop connection #0 from [ansy]:… on [pve1]:22 penalty: failed authentication
+```
+
+同一秒に7件、数分後にもう一群。**OpenSSH 9.8 以降は、認証に失敗した送信元へ罰則を課し、
+以後の接続を認証が始まる前に切る。** クライアント側での見え方が
+`kex_exchange_identification: read: Connection reset by peer` である。
+
+**再掃引は「40通りすべてを `Permission denied (publickey)` にする」ことが目的であり、
+認証失敗を意図的に大量生成していた。** sshd は設計どおり反応したにすぎない。検査自身が
+引き起こした現象である。
+
+- **機構は確定。** 罰則メッセージが現物として存在し、送信元を ansy と名指ししている。
+  経路の揺れであれば送信元を特定した罰則メッセージは出ない。
+- **あの掃引への帰属は、時刻の一致による推定である。** 本記録に時刻が書かれておらず
+  突き合わせられなかった。ただし Phase 4 以降 ansy から失敗認証を出すものは掃引以外に無く、
+  同一秒7件という形も走査の形である。
+
+**§292 の表の1行目が言っていた「空であることは何の証明にもならない」は正しかった。**
+`journal-system` が沈黙していたのは事象が無かったからではなく、罰則メッセージが
+`-p warning..err` の外(info)で出ていたからである。**この行は、絞り込み条件つきの検査で
+空を得たときに何を結論してよいかの実例として残す。**
