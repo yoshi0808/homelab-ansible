@@ -119,6 +119,26 @@ journal-replication|journal-system|journal-cluster)
     esac
     run_remote "$check $p1 $p2"
     ;;
+  # --- Deployed artifact / unit introspection (Phase 3 catalog §3, P1/P2) ---
+  # Enums mirror recovery-investigate-dispatch-pve.sh.j2 exactly. Codex and
+  # Claude Code must reach the same checks (requirement R11) — the dispatch
+  # being identical is not enough if this wrapper denies the check first.
+  deployed-hash)
+    (( argc == 2 )) || deny_count
+    case "$p1" in
+      investigate-dispatch-pve|authorized-keys) ;;
+      *) deny_invalid name ;;
+    esac
+    run_remote "$check $p1"
+    ;;
+  unit-cat)
+    (( argc == 2 )) || deny_count
+    case "$p1" in
+      pvescheduler|pvestatd|pve-cluster|corosync|pvedaemon) ;;
+      *) deny_invalid unit ;;
+    esac
+    run_remote "$check $p1"
+    ;;
   *)
     echo "denied: unknown check '${check:-}'" >&2
     exit 1

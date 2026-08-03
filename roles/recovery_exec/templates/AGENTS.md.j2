@@ -46,6 +46,16 @@ System checks:
 - `journal-system` — recent OS-level warnings/errors
 - `dmesg` — last 50 kernel log lines (OOM killer etc., via journalctl -k)
 
+Deployed-artifact checks — use when a fix was supposedly applied but the
+behaviour has not changed, to tell "the repo was changed" from "the change
+reached this host":
+- `deployed-hash <name>` — sha256 of one deployed file. `<name>` is one of
+  `recovery-push`, `recovery-trigger-unit`, `investigate-dispatch`,
+  `action-script`, `authorized-keys` (monnie also has `loki-helper`).
+  Paths are fixed in the script; no path may be passed.
+- `unit-cat <unit>` — the unit file as systemd currently reads it. `<unit>`
+  is one of this host's service names above, or `recovery-trigger@.service`.
+
 Node-specific checks:
 - `radius-port` — RADIUS UDP port binding (1812/1813)
 - `radius-config-check` — freeradius config validation (-XC, read-only, safe to run alongside live daemon)
@@ -79,6 +89,16 @@ System checks:
 - `ports` — listening ports
 - `journal-system` — recent OS-level warnings/errors
 - `dmesg` — last 50 kernel log lines (OOM killer etc., via journalctl -k)
+
+Deployed-artifact checks — use when a fix was supposedly applied but the
+behaviour has not changed, to tell "the repo was changed" from "the change
+reached this host":
+- `deployed-hash <name>` — sha256 of one deployed file. `<name>` is one of
+  `recovery-push`, `recovery-trigger-unit`, `investigate-dispatch`,
+  `action-script`, `authorized-keys` (monnie also has `loki-helper`).
+  Paths are fixed in the script; no path may be passed.
+- `unit-cat <unit>` — the unit file as systemd currently reads it. `<unit>`
+  is one of this host's service names above, or `recovery-trigger@.service`.
 
 Node-specific checks:
 - `prometheus-targets` — Prometheus target health (HTTP API)
@@ -158,6 +178,11 @@ Recent logs (fixed sources, capped):
 - `journal-cluster` — recent logs for `pve-cluster` / `corosync` / `pvedaemon` (quorum/membership triage)
 - `journal-system` — recent node-wide warnings/errors (priority warning..err)
 - `journal-unit <unit> <window>` — up to 300 lines for one approved unit and window. Units: `pvescheduler`, `pvestatd`, `pve-cluster`, `corosync`, `pvedaemon`; windows: `30m`, `1h`, `2h`, `6h`, `12h`, `24h`
+
+Deployed artifact / unit introspection — use to tell "the repo was changed"
+from "the change reached this node":
+- `deployed-hash <name>` — sha256 of one deployed file. `<name>` is `investigate-dispatch-pve` or `authorized-keys`. Paths are fixed in the script; no path may be passed
+- `unit-cat <unit>` — the unit file as systemd currently reads it. Same unit list as `journal-unit`
 
 Parameterized checks reject extra arguments, options, shell metacharacters,
 and malformed identifiers before SSH and again at the pve forced-command
