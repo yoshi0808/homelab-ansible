@@ -151,7 +151,14 @@
 # itself is the hardcoded `quory` guard in main.yml/target_setup.yml's
 # inclusion, not this `when:`. This `when:` only controls the check-mode
 # dry-run/apply distinction; it does not relax or replace the quory guard.
-- name: Deploy authorized_keys on target nodes (exactly 2 keys, drift-safe)
+# Phase 3 (dev_prod_boundary) added a third entry — the Claude Code
+# investigate key (files/claude-investigate.pub, committed to the repo, read
+# directly with lookup('file', ...) inside authorized_keys.j2 rather than
+# slurped like the other two, since it is not generated per-run). It points
+# at the same forced-command dispatch script as the existing investigate
+# key; the two identities are distinguished only by which key they hold.
+# deployment_drift_check_forced_command_keys (entries: 3) tracks this count.
+- name: Deploy authorized_keys on target nodes (exactly 3 keys, drift-safe)
   ansible.builtin.template:
     src: authorized_keys.j2
     dest: "/home/{{ recovery_exec_user }}/.ssh/authorized_keys"
@@ -236,7 +243,12 @@
 # _investigate_pve_pubkey (slurped above), gated to skip together with it
 # under --check. The quory guard (main.yml) is the incident-prevention
 # mechanism; this `when:` only governs check-mode dry-run/apply.
-- name: Deploy authorized_keys on pve target nodes (investigate key only, drift-safe)
+# Phase 3 added a second entry — the Claude Code pve investigate key
+# (files/claude-investigate-pve.pub, committed to the repo, read via
+# lookup('file', ...) in authorized_keys-pve.j2), pointing at the same
+# forced-command dispatch script as the existing investigate-only key.
+# deployment_drift_check_forced_command_keys (entries: 2) tracks this count.
+- name: Deploy authorized_keys on pve target nodes (2 keys - Codex + Claude Code investigate, drift-safe)
   ansible.builtin.template:
     src: authorized_keys-pve.j2
     dest: "/home/{{ recovery_exec_user }}/.ssh/authorized_keys"

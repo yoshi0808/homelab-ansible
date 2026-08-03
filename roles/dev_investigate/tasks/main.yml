@@ -1,0 +1,121 @@
+---
+# dev_investigate: quory上のread専用SSH受け口(R13c)。
+#
+# ユーザー dev-investigate は sudo を1つも持たない — /etc/sudoers.d/ 配下へ
+# ファイルを作るtaskはこのroleに存在しない。それ自体が契約(sudoをまったく
+# 持たない)であり、後から緩める変更をここへ足す場合はカタログ
+# (docs/ai/reviews/dev_prod_boundary/2026-08-03_008_phase3_check_catalog.md)
+# の再承認を要する。
+#
+# journalctl -u/-k の読み取り(Q-C の journal-system/dmesg、Q9
+# journal-unit)は sudo を使わないため、systemd-journal グループへの所属で
+# 賄う — roles/recovery_exec/tasks/target_setup.yml が authy/monnie 向け
+# recovery-exec ユーザーへ同じ理由で同じグループを付けているのと同型。
+
+- name: Create dev-investigate user (no sudo; systemd-journal group for journalctl reads)
+  ansible.builtin.user:
+    name: "{{ dev_investigate_user }}"
+    shell: /bin/sh
+    create_home: true
+    home: "{{ dev_investigate_home }}"
+    password: "!"
+    comment: "Read-only development investigation SSH landing account (no sudo)"
+    groups: systemd-journal
+    append: true
+  become: true
+  when: not ansible_check_mode
+  tags: [destructive]
+
+- name: Create .ssh directory for dev-investigate
+  ansible.builtin.file:
+    path: "{{ dev_investigate_ssh_dir }}"
+    state: directory
+    owner: "{{ dev_investigate_user }}"
+    group: "{{ dev_investigate_user }}"
+    mode: "0700"
+  become: true
+  when: not ansible_check_mode
+  tags: [destructive]
+
+# copy であって template ではない。この script は Jinja 構文を1つも持たない
+# ため描画が要らず、**copy 配備物であることがドリフト検査 Tier 1 の適格条件で
+# ある**(roles/deployment_drift_check/defaults/main.yml 冒頭)。template のまま
+# だと期待値を得るのに描画が要り Tier 2 送りになる — Phase 4 は「配備物の版ずれ
+# を常時検出できること」を前提に鍵を捨てるので、この口こそ検査対象に入れる。
+# 将来ここへ Jinja を持ち込むと、その時点で検査から外れることに注意。
+- name: Deploy investigate dispatch script (20 read-only checks; catalog §1 class Q)
+  ansible.builtin.copy:
+    src: recovery-investigate-dispatch-quory.sh
+    dest: "{{ dev_investigate_dispatch_dest }}"
+    owner: root
+    group: root
+    mode: "0755"
+  become: true
+  when: not ansible_check_mode
+  tags: [destructive]
+
+# 公開鍵は roles/dev_investigate/files/dev-investigate.pub(ansy側で生成し
+# repoへcommit済み、秘密情報ではない)。recovery_exec/target_setup.ymlの
+# ようなリモート生成+slurpは不要 — この鍵はホスト固有ではなくrepo資産なので
+# lookup('file', ...)がroleのfiles/を直接読む(controller側でtemplate化される
+# 標準動作)。authorized_keysは1エントリのみで、他のoptionはrecovery_exec
+# templates/authorized_keys.j2 と同じ性質(no-agent-forwarding等)にする。
+- name: Deploy authorized_keys for dev-investigate (single forced-command entry)
+  ansible.builtin.template:
+    src: authorized_keys.j2
+    dest: "{{ dev_investigate_ssh_dir }}/authorized_keys"
+    owner: "{{ dev_investigate_user }}"
+    group: "{{ dev_investigate_user }}"
+    mode: "0600"
+  become: true
+  when: not ansible_check_mode
+  tags: [destructive]
+
+# ---------------------------------------------------------------------------
+# 読み取り専用ACL: recovery-exec / incident-inspect に既に付いているものと
+# 同一パス・同一権限(traverse only)。dev-investigateはsudoを持たないため、
+# 既存helper(recovery-reports-helper / incident-bundle-helper /
+# homelab-semaphore-query、いずれもroles/recovery_exec配備済み)を自分の
+# UIDで直接読むにはこのACLが要る。
+# ---------------------------------------------------------------------------
+
+- name: Install acl package (setfacl/getfacl; self-contained, idempotent even if already installed)
+  ansible.builtin.apt:
+    name: acl
+    state: present
+  become: true
+  when: not ansible_check_mode
+  tags: [destructive]
+
+- name: Grant dev-investigate ACL traverse on /home/yoshi (for reports/ read access, no sudo)
+  ansible.posix.acl:
+    path: "{{ dev_investigate_yoshi_home }}"
+    entity: "{{ dev_investigate_user }}"
+    etype: user
+    permissions: x
+    state: present
+  become: true
+  when: not ansible_check_mode
+  tags: [destructive]
+
+- name: Grant dev-investigate ACL traverse on /var/lib/semaphore (no sudo)
+  ansible.posix.acl:
+    path: "{{ dev_investigate_semaphore_dir }}"
+    entity: "{{ dev_investigate_user }}"
+    etype: user
+    permissions: x
+    state: present
+  become: true
+  when: not ansible_check_mode
+  tags: [destructive]
+
+- name: Grant dev-investigate ACL read on semaphore.db (no sudo; journal_mode=delete, no -wal/-shm to also grant)
+  ansible.posix.acl:
+    path: "{{ dev_investigate_semaphore_db }}"
+    entity: "{{ dev_investigate_user }}"
+    etype: user
+    permissions: r
+    state: present
+  become: true
+  when: not ansible_check_mode
+  tags: [destructive]

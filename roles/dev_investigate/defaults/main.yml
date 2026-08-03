@@ -1,0 +1,19 @@
+---
+# dev_investigate: quory上のread専用SSH受け口(R13c)。sudoを1つも持たない
+# 新規ユーザー dev-investigate 経由で、forced command 1本
+# (recovery-investigate-dispatch-quory.sh)だけを許す。
+# 契約の正本: docs/ai/reviews/dev_prod_boundary/2026-08-03_008_phase3_check_catalog.md
+
+dev_investigate_user: dev-investigate
+dev_investigate_home: /home/dev-investigate
+dev_investigate_ssh_dir: "{{ dev_investigate_home }}/.ssh"
+
+# 配備先は固定(依頼の契約どおり)。変数化しても呼び出し元から差し替えられて
+# しまうと forced command の対応先がずれるため、実体はここと
+# authorized_keys.j2 双方が同じ値を参照する1箇所にまとめる。
+dev_investigate_dispatch_dest: /usr/local/sbin/recovery-investigate-dispatch-quory.sh
+
+# 既存 recovery-exec / incident-inspect と同一パス・同一権限(traverse only)。
+dev_investigate_yoshi_home: /home/yoshi
+dev_investigate_semaphore_dir: /var/lib/semaphore
+dev_investigate_semaphore_db: /var/lib/semaphore/semaphore.db

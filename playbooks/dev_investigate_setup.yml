@@ -1,0 +1,53 @@
+---
+# Deploy dev-investigate (Phase 3 Step 2 of「開発と運用の境界」, R13c/R14c):
+# a read-only SSH landing account on quory for Claude Code investigation,
+# holding zero sudo. This playbook creates the user, its ACL grants, its
+# forced-command dispatch script (recovery-investigate-dispatch-quory.sh,
+# the 20 read-only checks in the catalog below), and its single
+# authorized_keys entry. It does not deploy the action side, any Codex
+# identity, or any wrapper reachable by recovery-exec — see
+# docs/ai/reviews/dev_prod_boundary/2026-08-03_008_phase3_check_catalog.md §0
+# for the full list of things this must never expose.
+#
+# Prerequisite: roles/recovery_exec must already be deployed on quory
+# (playbooks/recovery_exec_setup.yml) — recovery-reports-helper,
+# incident-bundle-helper, and homelab-semaphore-query must already exist
+# under /usr/local/sbin/ and /usr/local/bin/ for Q1-Q7/Q11 to have anything
+# to call.
+# This playbook does not redeploy those; it only adds POSIX ACL grants for
+# dev-investigate's own UID on the same paths recovery-exec already reads
+# (semaphore.db, /home/yoshi traverse).
+#
+# Target: quory only (this identity and dispatch script exist nowhere else).
+#
+# Run:
+#   ansible-playbook playbooks/dev_investigate_setup.yml -l quory
+#
+# Authentication: the public key is committed at
+# roles/dev_investigate/files/dev-investigate.pub (not a secret). The
+# matching private key is held by the ansy-side Claude Code investigation
+# tooling (Phase 3 Step "ansy側:鍵生成 playbook + ~/.ssh/config marker
+# block", tracked separately — see 2026-08-03_007_plan_phase3.md §1.3/§2
+# Step 4).
+#
+# tester-gate: check-mode-native — TS-009 condition 1 holds (no destructive
+# operation on any host other than quory itself; dev-investigate is a landing
+# account, not a daemon, so no service restart is involved), but condition 2
+# does not (skipping the destructive body leaves nothing worth verifying):
+# user creation, .ssh directory, dispatch script deployment, authorized_keys
+# deployment, and the three POSIX ACL grants (`user` / `file` / `template` /
+# `apt` / `ansible.posix.acl`) are exactly the kind of change Ansible's
+# native check_mode can preview without applying — same shape as
+# playbooks/incident_inspect_setup.yml. All destructive tasks in
+# roles/dev_investigate/tasks/main.yml are gated with
+# `when: not ansible_check_mode` (TS-014; independent tasks, no
+# interdependent chain requiring TS-015 block gating). See
+# docs/ai/policies/ansible_test_safety_policy.md.
+- name: Deploy dev-investigate (read-only SSH landing account, no sudo)
+  hosts: quory
+  gather_facts: true
+  become: true
+  tasks:
+    - name: Run dev_investigate role
+      ansible.builtin.import_role:
+        name: dev_investigate

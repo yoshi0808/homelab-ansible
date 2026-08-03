@@ -40,6 +40,30 @@ deployment_drift_check_files:
   - hosts: [monnie]
     src: roles/recovery_exec/files/recovery-loki-helper
     dest: /usr/local/sbin/recovery-loki-helper
+  # --- Phase 3(dev_prod_boundary)で追加 ---
+  # 調査面そのもの。Phase 4 は「配備物の版ずれを常時検出できること」を前提に
+  # 開発側の鍵を捨てるため、**その検出を担う口と、検出のために読む口自身**が
+  # 検査対象から漏れていると前提が崩れる。
+  - hosts: [quory]
+    src: roles/dev_investigate/files/recovery-investigate-dispatch-quory.sh
+    dest: /usr/local/sbin/recovery-investigate-dispatch-quory.sh
+  - hosts: [quory]
+    src: roles/recovery_exec/files/incident-bundle-helper
+    dest: /usr/local/sbin/incident-bundle-helper
+  - hosts: [quory]
+    src: roles/recovery_exec/files/homelab-incident-bundle
+    dest: /usr/local/bin/homelab-incident-bundle
+  # 以下3件は Phase 3 以前からの漏れ(2026-08-03 の独立レビュー S2 で判明)。
+  # 同じ class の copy 配備物であり、1行で閉じられるためここで併せて塞ぐ。
+  - hosts: [quory]
+    src: roles/recovery_exec/files/recovery-reports-helper
+    dest: /usr/local/sbin/recovery-reports-helper
+  - hosts: [quory]
+    src: roles/recovery_exec/files/homelab-reports
+    dest: /usr/local/bin/homelab-reports
+  - hosts: [quory]
+    src: roles/recovery_exec/files/homelab-semaphore-query
+    dest: /usr/local/bin/homelab-semaphore-query
 
 # --- ②③ systemd unit / timer の状態 -----------------------------------------
 # enabled / active は期待値。timer は on_calendar も見る(空なら検査しない)
@@ -56,9 +80,15 @@ deployment_drift_check_units:
 
 # --- ⑥ forced command の構造検査 ---------------------------------------------
 # 全エントリが command= で始まること。entries は期待エントリ数。
+# Phase 3(dev_prod_boundary)で Claude Code 用のエントリが1本ずつ増えた
+# (authy/monnie: Codex investigate + Codex action + Claude Code investigate、
+# pve1/pve2: Codex investigate + Claude Code investigate)。
 deployment_drift_check_forced_command_keys:
-  - { hosts: [authy, monnie], path: /home/recovery-exec/.ssh/authorized_keys, entries: 2 }
-  - { hosts: [pve1, pve2], path: /home/recovery-exec/.ssh/authorized_keys, entries: 1 }
+  - { hosts: [authy, monnie], path: /home/recovery-exec/.ssh/authorized_keys, entries: 3 }
+  - { hosts: [pve1, pve2], path: /home/recovery-exec/.ssh/authorized_keys, entries: 2 }
+  # quory の read 専用受け口(Phase 3 で新設)。forced command 1本だけであること
+  # が境界そのものなので、エントリが増えていないことを日次で見る。
+  - { hosts: [quory], path: /home/dev-investigate/.ssh/authorized_keys, entries: 1 }
 
 # --- ④ reports/ 配下の所有権 --------------------------------------------------
 # 直下のディレクトリがすべて同一の所有者であること(値は指定せず、揃っているか

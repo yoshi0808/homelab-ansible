@@ -17,10 +17,20 @@ set -euo pipefail
 
 BASE=/home/yoshi/homelab-ansible/reports
 NAME_RE='^[a-zA-Z0-9_-]+$'
-FILE_RE='^[a-zA-Z0-9_-]+\.json$'
+# '+' is allowed (needed for JST timestamp names like
+# 20260803_053711+0900.json); '.' is deliberately NOT added even though it
+# would also match real filenames. Excluding '.' from the name part keeps
+# ".." structurally impossible to spell here, so traversal is ruled out by
+# the alphabet itself rather than by a runtime check. See G1 in
+# docs/ai/reviews/dev_prod_boundary/2026-08-03_007_plan_phase3.md §1.2.
+FILE_RE='^[a-zA-Z0-9_+-]+\.json$'
 
+# Every rejection path (bad subcommand, wrong arity, bad operand) prints
+# "denied: ..." and exits non-zero, matching catalog I-6 (Phase 3
+# 2026-08-03_008_phase3_check_catalog.md §0) and the sibling helpers
+# (incident-bundle-helper).
 usage() {
-  echo "usage: recovery-reports-helper <list-playbooks|list-reports <playbook> [target]|show-report <playbook> [target] <filename>>" >&2
+  echo "denied: usage: recovery-reports-helper <list-playbooks|list-reports <playbook> [target]|show-report <playbook> [target] <filename>>" >&2
   exit 1
 }
 

@@ -417,6 +417,28 @@
   when: not ansible_check_mode
   tags: [destructive]
 
+- name: Deploy homelab-incident-bundle wrapper (Codex-facing, validates then reads directly)
+  ansible.builtin.copy:
+    src: homelab-incident-bundle
+    dest: /usr/local/bin/homelab-incident-bundle
+    owner: root
+    group: root
+    mode: "0755"
+  become: true
+  when: not ansible_check_mode
+  tags: [destructive]
+
+- name: Deploy incident-bundle-helper (privileged, re-validates independently)
+  ansible.builtin.copy:
+    src: incident-bundle-helper
+    dest: /usr/local/sbin/incident-bundle-helper
+    owner: root
+    group: root
+    mode: "0755"
+  become: true
+  when: not ansible_check_mode
+  tags: [destructive]
+
 - name: Remove legacy homelab-mute-exec wrapper
   ansible.builtin.file:
     path: /usr/local/bin/homelab-mute-exec

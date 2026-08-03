@@ -1,0 +1,94 @@
+#!/usr/bin/env bash
+# incident-bundle-helper: read-only viewer for ~/homelab-ansible/reports/incidents/
+# (failure bundles captured by homelab-incident-capture + their investigation
+# write-ups). Runs as recovery-exec directly (no sudo/user-switch); the same
+# POSIX ACL that grants recovery-exec traverse (x) on /home/yoshi already
+# covers this path (see recovery-reports-helper for why sudo isn't used
+# here). Invoked only via homelab-incident-bundle; re-validates all
+# arguments independently rather than trusting the caller (§4.4). BASE is a
+# fixed constant, never taken from arguments (I-3 in
+# docs/ai/reviews/dev_prod_boundary/2026-08-03_008_phase3_check_catalog.md).
+#
+# _spool/ and _runs/ under BASE are consumption-only local inputs to the
+# capture pipeline, not investigation material, and are deliberately never
+# reachable through any subcommand here (I-3/catalog §1 Q-A note). Neither
+# subcommand below ever lists or opens them: list-bundles only matches
+# ID_RE (which requires the "semaphore-" prefix, so "_spool"/"_runs" never
+# match), and the two show- subcommands only ever open a path built from a
+# validated id/enum, never from a directory listing.
+set -euo pipefail
+
+BASE=/home/yoshi/homelab-ansible/reports/incidents
+ID_RE='^semaphore-[0-9]{1,9}$'
+
+# Every rejection path (bad subcommand, wrong arity, bad operand) must print
+# "denied: ..." and exit non-zero (catalog I-6); this also covers the usage
+# fallback, not just per-field validation below.
+usage() {
+  echo "denied: usage: incident-bundle-helper <list-bundles|show-bundle <id> <file>|list-investigations|show-investigation <id> <ext>>" >&2
+  exit 1
+}
+
+# Defense-in-depth: even though ID_RE/enum matching forbids '/' (so
+# traversal is structurally impossible), confirm the resolved path still
+# lives under BASE before reading anything.
+under_base() {
+  local resolved
+  resolved="$(realpath -e -- "$1")" || return 1
+  [[ "$resolved" == "$BASE" || "$resolved" == "$BASE"/* ]]
+}
+
+case "${1:-}" in
+  list-bundles)
+    [[ $# -eq 1 ]] || usage
+    # `grep -E` exits 1 when nothing matches (e.g. an empty/not-yet-populated
+    # BASE), and under pipefail that would make the whole pipeline — and
+    # therefore this script — exit non-zero on a legitimate empty result.
+    # The forced-command caller cannot tell that apart from `denied:`
+    # (no stderr, no "denied:" prefix either way), so the grep stage's exit
+    # status is neutralized here; a real `find` failure (e.g. BASE missing)
+    # still propagates because it is not inside this `|| true`.
+    find "$BASE" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' \
+      | { grep -E "$ID_RE" || true; } | sort
+    ;;
+  show-bundle)
+    [[ $# -eq 3 ]] || usage
+    id="${2:-}"
+    file="${3:-}"
+    [[ "$id" =~ $ID_RE ]] || { echo "denied: bad bundle id" >&2; exit 1; }
+    case "$file" in
+      summary.json|semaphore-log.log|semaphore-hosts.log|semaphore-errors.log) ;;
+      *) echo "denied: bad file name" >&2; exit 1 ;;
+    esac
+    path="$BASE/$id/$file"
+    [[ -f "$path" ]] || { echo "not found: $id/$file" >&2; exit 1; }
+    under_base "$path" || { echo "denied: path escapes reports/incidents/" >&2; exit 1; }
+    cat -- "$path"
+    ;;
+  list-investigations)
+    [[ $# -eq 1 ]] || usage
+    dir="$BASE/_investigations"
+    [[ -d "$dir" ]] || { echo "not found: _investigations" >&2; exit 1; }
+    under_base "$dir" || { echo "denied: path escapes reports/incidents/" >&2; exit 1; }
+    # Same pipefail/empty-match hazard as list-bundles above.
+    find "$dir" -mindepth 1 -maxdepth 1 -type f \( -name '*.md' -o -name '*.json' \) -printf '%f\n' \
+      | sed -E 's/\.(md|json)$//' | { grep -E "$ID_RE" || true; } | sort -u
+    ;;
+  show-investigation)
+    [[ $# -eq 3 ]] || usage
+    id="${2:-}"
+    ext="${3:-}"
+    [[ "$id" =~ $ID_RE ]] || { echo "denied: bad investigation id" >&2; exit 1; }
+    case "$ext" in
+      md|json) ;;
+      *) echo "denied: bad extension" >&2; exit 1 ;;
+    esac
+    path="$BASE/_investigations/$id.$ext"
+    [[ -f "$path" ]] || { echo "not found: _investigations/$id.$ext" >&2; exit 1; }
+    under_base "$path" || { echo "denied: path escapes reports/incidents/" >&2; exit 1; }
+    cat -- "$path"
+    ;;
+  *)
+    usage
+    ;;
+esac

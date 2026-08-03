@@ -203,6 +203,28 @@ case "$check" in
       *) deny_invalid unit ;;
     esac
     ;;
+  # --- Deployed artifact / unit introspection (Phase 3 catalog §3, P1/P2) ---
+  deployed-hash)
+    [[ -n "$p1" && -z "$p2" ]] || deny_count
+    case "$p1" in
+      investigate-dispatch-pve)
+        target_path=/usr/local/sbin/recovery-investigate-dispatch-pve.sh
+        ;;
+      authorized-keys)
+        target_path=/home/recovery-exec/.ssh/authorized_keys
+        ;;
+      *) deny_invalid name ;;
+    esac
+    /usr/bin/sha256sum -- "$target_path"
+    ;;
+  unit-cat)
+    [[ -n "$p1" && -z "$p2" ]] || deny_count
+    case "$p1" in
+      pvescheduler|pvestatd|pve-cluster|corosync|pvedaemon) ;;
+      *) deny_invalid unit ;;
+    esac
+    /usr/bin/systemctl cat "$p1"
+    ;;
   *)
     echo "denied: unknown command '${check:-}'" >&2
     exit 1

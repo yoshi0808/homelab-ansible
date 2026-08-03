@@ -223,6 +223,33 @@ homelab-semaphore-query task-time <id>
 - `task-time <id>` — id, template name, playbook, status, and **untruncated** `start`/`end` for that task id (whatever Semaphore actually stored, including any `Z`/`+09:00` suffix or lack of one). Use this instead of `recent-failed` when the exact stored timestamp format matters.
 - `<n>` / `<id>` must be plain integers; there is no free-form SQL access.
 
+### Incident bundle lookup (homelab-incident-bundle)
+
+Use to review past failure bundles captured from failed Semaphore tasks
+(`~/homelab-ansible/reports/incidents/semaphore-<id>/`) and their
+investigation write-ups (`_investigations/<id>.{md,json}`) — useful for
+checking whether a failure was already captured and investigated before
+acting again.
+
+```
+homelab-incident-bundle list-bundles
+homelab-incident-bundle show-bundle <id> <file>
+homelab-incident-bundle list-investigations
+homelab-incident-bundle show-investigation <id> <ext>
+```
+
+- `list-bundles` — list captured bundle ids (`semaphore-<n>`), one per failed
+  Semaphore task.
+- `show-bundle <id> <file>` — print one file from a bundle. `<file>` is one
+  of `summary.json`, `semaphore-log.log`, `semaphore-hosts.log`,
+  `semaphore-errors.log` — no other filename is accepted.
+- `list-investigations` — list ids (`semaphore-<n>`) that have a completed
+  investigation write-up.
+- `show-investigation <id> <ext>` — print the write-up for one id.
+  `<ext>` is `md` (human-readable) or `json` (structured).
+- `<id>` must match `semaphore-<digits>` exactly; anything else is denied
+  before any file is touched. There is no free-form search across bundles.
+
 ### Monitoring control (homelab-monitoring-*)
 
 Use when the user asks to pause or resume autonomous monitoring during planned work.
@@ -289,7 +316,7 @@ Restarts prometheus, grafana-server, loki, unpoller on monnie (no arguments).
 
 - Do NOT take recovery action without prior investigation confirming failure.
 - Do NOT run homelab-recover-* more than once per session on the same target. If re-investigation after recovery still shows failure, escalate immediately — do not restart again.
-- Do NOT call tools other than homelab-investigate-*, homelab-recover-*, homelab-monitoring-*, homelab-mute-*, homelab-reports, and homelab-semaphore-query.
+- Do NOT call tools other than homelab-investigate-*, homelab-recover-*, homelab-monitoring-*, homelab-mute-*, homelab-reports, homelab-semaphore-query, and homelab-incident-bundle.
 - Do NOT attempt any recovery/change action on pve1/pve2 (homelab-investigate-pve1/pve2 are read-only; there is no homelab-recover-pve1/pve2).
 - Wrappers have hardcoded hosts; never try to construct SSH commands manually.
 

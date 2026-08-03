@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+# homelab-incident-bundle: Codex-facing wrapper for read-only lookup of
+# failure bundles (reports/incidents/semaphore-<id>/) and their
+# investigation write-ups (reports/incidents/_investigations/<id>.{md,json}).
+#
+# Same access model as homelab-reports: reports/incidents/ lives under
+# /home/yoshi, owned by yoshi. recovery-exec is not in yoshi's group, so a
+# POSIX ACL grants it direct traverse (x) on /home/yoshi (see
+# roles/recovery_exec/tasks/main.yml); reports/incidents/ and its files are
+# already world-readable below that point. No sudo/setuid elevation is used:
+# Codex invokes this wrapper inside a sandbox with no_new_privileges set,
+# which unconditionally blocks sudo regardless of sudoers config (confirmed
+# via a live Slack investigation run that failed with "sudo: The 'no new
+# privileges' flag is set..."). ACL-based direct read has no such problem
+# because it grants recovery-exec's own UID a permission bit rather than
+# escalating to another identity.
+#
+# This wrapper validates arguments, then calls the privileged-format helper
+# directly (no user switch); the helper re-validates everything
+# independently before touching the filesystem (§4.4: no single layer is
+# trusted blindly; no eval/variable expansion of unvalidated input). This is
+# the same two-layer shape as homelab-reports -> recovery-reports-helper.
+set -euo pipefail
+
+ID_RE='^semaphore-[0-9]{1,9}$'
+
+# Every rejection here must print "denied: ..." and exit non-zero (catalog
+# I-6), matching incident-bundle-helper's own fallback so the observable
+# behavior is the same regardless of which of the two layers rejects first.
+usage() {
+  echo "denied: usage: homelab-incident-bundle <list-bundles|show-bundle <id> <file>|list-investigations|show-investigation <id> <ext>>" >&2
+  exit 1
+}
+
+case "${1:-}" in
+  list-bundles)
+    [[ $# -eq 1 ]] || usage
+    ;;
+  show-bundle)
+    [[ $# -eq 3 ]] || usage
+    [[ "$2" =~ $ID_RE ]] || usage
+    case "$3" in
+      summary.json|semaphore-log.log|semaphore-hosts.log|semaphore-errors.log) ;;
+      *) usage ;;
+    esac
+    ;;
+  list-investigations)
+    [[ $# -eq 1 ]] || usage
+    ;;
+  show-investigation)
+    [[ $# -eq 3 ]] || usage
+    [[ "$2" =~ $ID_RE ]] || usage
+    case "$3" in
+      md|json) ;;
+      *) usage ;;
+    esac
+    ;;
+  *)
+    usage
+    ;;
+esac
+
+exec /usr/local/sbin/incident-bundle-helper "$@"

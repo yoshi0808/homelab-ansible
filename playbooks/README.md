@@ -81,6 +81,7 @@ playbook の入口を置く。処理本体は原則として `roles/` に実装�
 | --- | --- | --- | --- | --- |
 | [`incident_capture_setup.yml`](incident_capture_setup.yml) | `quory` | 障害証拠バンドル収集器(collector)を配備。有効化オプション時のみtimerをenable+start | `check-mode-native` | `incident_capture` |
 | [`incident_inspect_setup.yml`](incident_inspect_setup.yml) | `dev_nodes:control_nodes` | 一次調査専用ユーザー(incident-inspect)とCodex起動口(wrapper)のみを配備。検出・調査本体・成果物書き出しは持たない | `check-mode-native` | `incident_inspect` |
+| [`dev_investigate_setup.yml`](dev_investigate_setup.yml) | `quory` | 開発環境(Claude Code)向けread専用SSHランディングアカウント(dev-investigate、sudoなし)を配備。障害バンドル/レポート/quory自身の状態を読む20チェックのforced command dispatchのみ | `check-mode-native` | `dev_investigate` |
 | [`incident_investigate_setup.yml`](incident_investigate_setup.yml) | `quory` | 一次調査本体(バンドル走査・LLM呼び出し・成果物書き出し・同期起動鍵生成)のsystemd timer/oneshotを配備。有効化オプション時のみtimerをenable+start | `check-mode-native` | `incident_investigate` |
 | [`incident_investigate_notify.yml`](incident_investigate_notify.yml) | `localhost` | 一次調査1件完了ごとに`#alerts`へプレーンテキストで通知(incident-investigate.pyから起動される) | `check-mode-native` | playbook内tasks(`community.general.slack`直接呼び出し) |
 | [`incident_sync.yml`](incident_sync.yml) | `control_nodes`, `localhost` | quory→ansy証拠バンドルの定期ミラー同期(pull-only) | `check-mode-native` | `incident_sync` |
