@@ -201,3 +201,93 @@ pve 側の配備物は dispatch と sudoers と authorized_keys しか無く、�
 | P(pve1 / pve2) | +2 | +3(X2 / X3 / X4) | +5 |
 
 **新しく露出する語彙は `getfacl` / `getent` / `systemctl list-unit-files` の3種のみ。いずれも read である。**
+
+---
+
+# 7. 追加チェック(D7、2026-08-03 承認)— `journal-ssh`
+
+**Yoshinobu が承認した。** 起票の根拠は `2026-08-03_023_test_result_phase4.md` の Coordinator 追記 —
+再掃引中に出た `kex_exchange_identification: read: Connection reset by peer` の原因を、
+レート制限か経路の揺れかで**判定できなかった**。**現在の調査面は、境界そのものが乗っている
+transport(SSH)のログを1行も見られない。** Phase 4 で ansy から保護対象ホストへ届かなくなった
+以上、調べる手段は dispatch にしか無い。
+
+§0 の不変条件 I-1〜I-7 はそのまま適用される。**書込語彙は1つも増えない**(`journalctl -u` は既出)。
+
+| # | check | class | operand と検証 | 実行内容 |
+|---|---|---|---|---|
+| S1 | `journal-ssh <window>` | Q / G / P | `window`: 既存 `journal-unit` と**同一 enum**(`30m`\|`1h`\|`2h`\|`6h`\|`12h`\|`24h`)。**unit は operand に取らない** | 下表(class で異なる) |
+
+## 7.1 なぜ `journal-unit` の enum への追加ではないのか
+
+**当初案は「enum に `sshd` を足す」だった。実機を測って取り下げた。**
+
+`unit-files`(X3)で5ホストを実測した結果(2026-08-03):
+
+| ホスト | `ssh.service` | `ssh.socket` | 接続ごとのログの出先 |
+|---|---|---|---|
+| pve1 / pve2 | enabled | **disabled** | `ssh.service`(古典的な常駐デーモン) |
+| quory / monnie | enabled | **enabled** | **`sshd@<N>.service` の個別インスタンス** |
+| authy | **disabled** | **enabled** | 同上(socket activation のみ) |
+
+**全ホストで `sshd.service` は alias であり、実体は `ssh.service` である。** したがって素朴に
+`journalctl -u sshd` を引くと、socket activation のホストでは接続ログがほぼ空で返る。
+**これは本項目の起票理由そのもの**(「`journal-system` は `-p warning..err` で絞るため、
+空であることは何の証明にもならない」)**と同じクラスの欠陥**で、しかも空振りしたことが
+呼んだ側に分からない。
+
+専用チェックにした理由はもう2つある。
+
+- **3つの class は unit の持ち方が違う。** P は `case` 直書き、Q は `_is_valid_unit` の共有配列、
+  G は inventory 由来の Jinja ループである。既存 enum へ混ぜると3箇所で別々の壊れ方をする。
+- **class Q の unit enum は `unit-cat` と共有されている。** `sshd@*` のようなグロブを enum へ
+  入れると `systemctl cat` 側が壊れる。グロブはあの enum に入れられない。
+
+## 7.2 class ごとの実行内容(意図的に同一ではない)
+
+| class | 実行内容 | sudo |
+|---|---|---|
+| Q(quory) / G(authy・monnie) | `journalctl -u ssh.service -u ssh.socket -u 'sshd@*' --since <window> -n 300 --no-pager` | 不要(`systemd-journal` グループ) |
+| P(pve1 / pve2) | `sudo -n /usr/bin/journalctl -u ssh.service -u ssh.socket --since <window> -n 300 --no-pager` | **要。sudoers に1行追加** |
+
+**チェック名・operand・契約は3 class で同一であり、R11 はそこで満たしている。** 実行内容が
+割れるのは、ホストの SSH 起動方式が実際に割れているためである。**同一に揃える方を選ぶと、
+socket activation のホストで空振りする。**
+
+- **P で `sshd@*` を外すのは意図的である。** `ssh.socket` が disabled であり個別インスタンスが
+  存在しない。加えて sudo の fnmatch は `*` が空白をまたぐため、引数側にグロブを持ち込むと
+  許可が実質的に広がる(sudoers ファイル自身が既にこの性質を警告している)。
+- **pve が socket activation へ移ったら、このチェックは盲になる。** 気づく手段は「`journal-ssh`
+  が常に空で返る」ことだけである。その旨を dispatch と sudoers の両方へコメントで残した。
+  直すときは `-u 'sshd@*'` を**両方**へ足し、sudoers 側ではアスタリスクを `sshd@\*` と
+  エスケープすること。
+
+## 7.3 unit 選択子を operand にしない理由
+
+`ssh.service` / `ssh.socket` / `sshd@*` はいずれも**スクリプト内のリテラル**である。
+operand は window 1つだけで、既存 enum で検証する。I-3(operand からパスを組み立てない)と
+同じ理由 — 選択子を呼び手に選ばせると、上の「どれを引けばよいか」の知識が呼び手側へ移り、
+**間違ったものを引いて空を得た**という失敗が再び可能になる。
+
+## 7.4 あわせて追加 — `deployed-hash` の class Q 対応表(1件)
+
+| name | パス |
+|---|---|
+| `worktree-sync` | `/usr/local/sbin/worktree-sync.sh` |
+
+commit `58fc343` が「単独では足さず、**次に dispatch を触る機会にまとめる**」と申し送っていた件
+(配備に commit → pull → Semaphore の一巡が要るため。Phase 4 D6 と同じ判断)。
+パスは `unit-cat worktree-sync.service` の `ExecStart` で実測した。
+
+**timer の生存は日次ドリフト検査が見ているが、スクリプト本体の内容は template 由来で repo 側に
+期待値が無い(Tier 2)。** このハッシュは「配備物が変わったか」を追える唯一の手段である。
+
+## 7.5 総数の更新
+
+| class | §1〜§3 | §6 | §7 | 計 |
+|---|---|---|---|---|
+| Q(quory) | 20 | +4 | **+1** | **25** |
+| G(authy / monnie) | +2 | +3 | **+1** | +6 |
+| P(pve1 / pve2) | +2 | +3 | **+1** | +6 |
+
+**新しく露出する語彙はゼロ。** `journalctl -u` は §1〜§3 で既に露出しており、read である。

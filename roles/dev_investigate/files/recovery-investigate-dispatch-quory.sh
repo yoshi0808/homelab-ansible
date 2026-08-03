@@ -243,6 +243,33 @@ case "$check" in
     esac
     journalctl -u "$p1" --since "$since_value" -n 300 --no-pager
     ;;
+  # --- journal-ssh (catalog §7, D7, 2026-08-03) ---
+  # Deliberately NOT an entry in the unit enum above. Three reasons:
+  #   1. `sshd.service` on this host is an *alias*; the real unit is
+  #      `ssh.service`. Asking for "sshd" and getting nothing back would look
+  #      like "no SSH problems" when it means "wrong unit name".
+  #   2. `ssh.socket` is enabled here, so per-connection sessions are logged
+  #      under `sshd@<N>.service` instances, not under `ssh.service`. Querying
+  #      only one of the three returns an empty result that proves nothing —
+  #      the same trap `journal-system -p warning..err` already fell into.
+  #   3. The unit enum is shared with `unit-cat`, and `systemctl cat 'sshd@*'`
+  #      is not a thing. A glob cannot live in that enum.
+  # All three unit selectors are literals in this file; the only operand is
+  # the window, validated against the same fixed enum as journal-unit.
+  journal-ssh)
+    [[ -n "$p1" && -z "$p2" && -z "$p3" ]] || deny_count
+    case "$p1" in
+      30m) since_value="-30 min" ;;
+      1h) since_value="-1 hours" ;;
+      2h) since_value="-2 hours" ;;
+      6h) since_value="-6 hours" ;;
+      12h) since_value="-12 hours" ;;
+      24h) since_value="-24 hours" ;;
+      *) deny_invalid window ;;
+    esac
+    journalctl -u ssh.service -u ssh.socket -u 'sshd@*' \
+      --since "$since_value" -n 300 --no-pager
+    ;;
   unit-cat)
     [[ -n "$p1" && -z "$p2" && -z "$p3" ]] || deny_count
     _is_valid_unit "$p1" || deny_invalid unit
@@ -267,6 +294,11 @@ case "$check" in
       reports-helper) target_path=/usr/local/sbin/recovery-reports-helper ;;
       bundle-helper) target_path=/usr/local/sbin/incident-bundle-helper ;;
       semaphore-query) target_path=/usr/local/bin/homelab-semaphore-query ;;
+      # Added 2026-08-03 (catalog §7). The timer's liveness is covered by the
+      # daily drift check, but the script's *contents* are template-derived
+      # and have no repo-side expected value (Tier 2) — this hash is the only
+      # way to tell "the deployed copy changed" from "it did not".
+      worktree-sync) target_path=/usr/local/sbin/worktree-sync.sh ;;
       investigate-dispatch-quory) target_path=/usr/local/sbin/recovery-investigate-dispatch-quory.sh ;;
       *) deny_invalid name ;;
     esac

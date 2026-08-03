@@ -120,6 +120,16 @@ users|unit-files|forced-command-keys)
     esac
     run_remote "$check $p1 $p2"
     ;;
+  # journal-ssh (catalog §7, D7, 2026-08-03). Takes only a window — the unit
+  # selectors are literals inside the dispatch, deliberately not operands.
+  journal-ssh)
+    (( argc == 2 )) || deny_count
+    case "$p1" in
+      30m|1h|2h|6h|12h|24h) ;;
+      *) deny_invalid window ;;
+    esac
+    run_remote "$check $p1"
+    ;;
   # --- Deployed artifact / unit introspection (Phase 3 catalog §3, P1/P2) ---
   # Enums mirror recovery-investigate-dispatch-pve.sh.j2 exactly. Codex and
   # Claude Code must reach the same checks (requirement R11) — the dispatch

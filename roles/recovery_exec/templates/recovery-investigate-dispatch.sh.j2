@@ -85,6 +85,37 @@ case "$cmd" in
     journalctl -k -n 50 --no-pager
     ;;
 
+  # --- journal-ssh (catalog §7, D7, 2026-08-03) ---
+  # The SSH transport is what every other check here rides on, and until now
+  # it was the one thing this dispatch could not look at. Three unit selectors,
+  # all literals in this file:
+  #   ssh.service  — the real unit ('sshd.service' is only an alias)
+  #   ssh.socket   — enabled on this host, so socket-level refusals land here
+  #   sshd@*       — per-connection sessions under socket activation
+  # Querying only one of the three returns an empty result that proves nothing.
+  # The single operand is the window, on the same enum the other classes use.
+  journal-ssh|journal-ssh\ *)
+    read -r _ window extra <<<"$cmd"
+    if [[ -z "$window" || -n "$extra" ]]; then
+      echo "denied: invalid parameter count for 'journal-ssh'" >&2
+      exit 1
+    fi
+    case "$window" in
+      30m) since_value="-30 min" ;;
+      1h) since_value="-1 hours" ;;
+      2h) since_value="-2 hours" ;;
+      6h) since_value="-6 hours" ;;
+      12h) since_value="-12 hours" ;;
+      24h) since_value="-24 hours" ;;
+      *)
+        echo "denied: invalid window for 'journal-ssh'" >&2
+        exit 1
+        ;;
+    esac
+    journalctl -u ssh.service -u ssh.socket -u 'sshd@*' \
+      --since "$since_value" -n 300 --no-pager
+    ;;
+
   # --- Deployed artifact / unit introspection (Phase 3 catalog §2, G1/G2) ---
   deployed-hash|deployed-hash\ *)
     read -r _ name extra <<<"$cmd"

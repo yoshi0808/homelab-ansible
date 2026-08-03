@@ -203,6 +203,31 @@ case "$check" in
       *) deny_invalid unit ;;
     esac
     ;;
+  # --- journal-ssh (catalog §7, D7, 2026-08-03) ---
+  # The SSH transport is what every other check here rides on. 'sshd.service'
+  # on this node is only an alias; the real unit is 'ssh.service', so asking
+  # for "sshd" would return nothing and look like "no SSH problems".
+  #
+  # NOTE: 'ssh.socket' is *disabled* on pve1/pve2 (measured 2026-08-03 via
+  # unit-files), so per-connection 'sshd@<N>.service' instances do not exist
+  # here and are not queried. Classes Q/G do query them because socket
+  # activation is enabled there. **If this node is ever switched to socket
+  # activation, this check goes blind** — add -u 'sshd@*' here AND to the
+  # sudoers rule, and note that sudo's fnmatch treats '*' as spanning spaces,
+  # so the literal asterisk must be escaped there.
+  journal-ssh)
+    [[ -n "$p1" && -z "$p2" ]] || deny_count
+    case "$p1" in
+      30m) since_value="-30 min" ;;
+      1h) since_value="-1 hours" ;;
+      2h) since_value="-2 hours" ;;
+      6h) since_value="-6 hours" ;;
+      12h) since_value="-12 hours" ;;
+      24h) since_value="-24 hours" ;;
+      *) deny_invalid window ;;
+    esac
+    sudo -n /usr/bin/journalctl -u ssh.service -u ssh.socket --since "$since_value" -n 300 --no-pager
+    ;;
   # --- Deployed artifact / unit introspection (Phase 3 catalog §3, P1/P2) ---
   deployed-hash)
     [[ -n "$p1" && -z "$p2" ]] || deny_count

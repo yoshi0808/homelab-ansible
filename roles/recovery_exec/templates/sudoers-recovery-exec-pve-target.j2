@@ -6,6 +6,15 @@
 # narrowly scoped operand wildcards after fixed read-only verbs; the dispatch
 # independently validates each operand and builds argv positionally.
 #
+# Do NOT validate this file with `visudo -cf` on ansy. ansy runs **sudo-rs**,
+# which rejects wildcards in command arguments outright ("wildcards are not
+# allowed in command arguments") — it fails every Phase 2 line here, including
+# ones that have been working on the pve nodes for months. The target nodes run
+# classic sudo, which supports them. Measured 2026-08-03: ansy `sudo-rs 0.2.13`
+# rejects all 8 lines, while `journal-unit pve-cluster 24h` returns real entries
+# from pve1 through these very rules. Validate on a classic-sudo host or not at
+# all; a red visudo here is a wrong referent, not a broken file.
+#
 # On sudo argument matching: sudo compares the command's arguments as a single
 # space-joined string (fnmatch), NOT token-by-token. So the journalctl
 # `--since "-2 hours"` invocation in the dispatch script (one argv element
@@ -76,3 +85,10 @@ recovery-exec ALL=(root) NOPASSWD: /usr/bin/journalctl -u pvestatd --since * -n 
 recovery-exec ALL=(root) NOPASSWD: /usr/bin/journalctl -u pve-cluster --since * -n 300 --no-pager
 recovery-exec ALL=(root) NOPASSWD: /usr/bin/journalctl -u corosync --since * -n 300 --no-pager
 recovery-exec ALL=(root) NOPASSWD: /usr/bin/journalctl -u pvedaemon --since * -n 300 --no-pager
+# journal-ssh (catalog §7, D7, 2026-08-03): both units are pinned literals.
+# 'ssh.service' is the real unit — 'sshd.service' is an alias. 'ssh.socket' is
+# disabled on this node, so no per-connection 'sshd@<N>' instances exist and no
+# glob is needed here. Do not add `-u sshd@*` to this line without escaping the
+# asterisk (`sshd@\*`): sudo's fnmatch spans spaces, so an unescaped one would
+# widen the rule far past one unit selector.
+recovery-exec ALL=(root) NOPASSWD: /usr/bin/journalctl -u ssh.service -u ssh.socket --since * -n 300 --no-pager

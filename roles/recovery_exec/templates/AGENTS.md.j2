@@ -45,6 +45,14 @@ System checks:
 - `ports` — listening ports (ss -ltnup)
 - `journal-system` — recent OS-level warnings/errors
 - `dmesg` — last 50 kernel log lines (OOM killer etc., via journalctl -k)
+- `journal-ssh <window>` — up to 300 lines of SSH transport logs for one
+  window (`30m`, `1h`, `2h`, `6h`, `12h`, `24h`). Covers `ssh.service`,
+  `ssh.socket` and the per-connection `sshd@<N>.service` instances together,
+  because this host uses socket activation and querying only one of them
+  returns an empty result that proves nothing. Use when a connection was
+  refused or reset before authentication, not for "login failed" (that is a
+  successful transport). Unlike `journal-system` this is not filtered by
+  priority, so throttling messages logged at info level do appear.
 
 Deployed-artifact checks — use when a fix was supposedly applied but the
 behaviour has not changed, to tell "the repo was changed" from "the change
@@ -102,6 +110,14 @@ System checks:
 - `ports` — listening ports
 - `journal-system` — recent OS-level warnings/errors
 - `dmesg` — last 50 kernel log lines (OOM killer etc., via journalctl -k)
+- `journal-ssh <window>` — up to 300 lines of SSH transport logs for one
+  window (`30m`, `1h`, `2h`, `6h`, `12h`, `24h`). Covers `ssh.service`,
+  `ssh.socket` and the per-connection `sshd@<N>.service` instances together,
+  because this host uses socket activation and querying only one of them
+  returns an empty result that proves nothing. Use when a connection was
+  refused or reset before authentication, not for "login failed" (that is a
+  successful transport). Unlike `journal-system` this is not filtered by
+  priority, so throttling messages logged at info level do appear.
 
 Deployed-artifact checks — use when a fix was supposedly applied but the
 behaviour has not changed, to tell "the repo was changed" from "the change
@@ -204,6 +220,7 @@ Recent logs (fixed sources, capped):
 - `journal-cluster` — recent logs for `pve-cluster` / `corosync` / `pvedaemon` (quorum/membership triage)
 - `journal-system` — recent node-wide warnings/errors (priority warning..err)
 - `journal-unit <unit> <window>` — up to 300 lines for one approved unit and window. Units: `pvescheduler`, `pvestatd`, `pve-cluster`, `corosync`, `pvedaemon`; windows: `30m`, `1h`, `2h`, `6h`, `12h`, `24h`
+- `journal-ssh <window>` — up to 300 lines of SSH transport logs (`ssh.service` + `ssh.socket`) for one window, same window enum as `journal-unit`. Use when a connection was refused or reset before authentication. Unlike `journal-system` it is not filtered by priority, so throttling messages logged at info level do appear. These nodes do **not** use socket activation, so there are no per-connection `sshd@<N>` instances to read
 
 Deployed artifact / unit introspection — use to tell "the repo was changed"
 from "the change reached this node":
