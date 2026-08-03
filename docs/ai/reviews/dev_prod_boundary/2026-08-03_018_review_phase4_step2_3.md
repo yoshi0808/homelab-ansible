@@ -57,3 +57,41 @@ Step 2(`incident_sync`退役)とStep 3(滞留カウントのdispatch移設)は�
 ## Verdict
 
 **Request Changes**(Critical #1が理由)。Step 2/3のAnsible role・playbook本体(`incident_metrics.yml`、`incident_evaluation.yml`、`incident-investigate.py`等)とrequirement/planとの整合性は問題ない。`incident_sync_teardown.yml`の`become`修正のみを行えば、Step 4完了として次工程(plan §4 Step 5以降)へ進める状態になる。
+
+---
+
+## Coordinator の処置(2026-08-03)
+
+| finding | 処置 |
+|---|---|
+| **Critical**(`incident_sync_teardown.yml` の quory play が `become: false` のまま `/home/yoshi/.ssh/` 配下を削除しようとする。ansy 側 `_sync` 削除タスクも同型) | **指摘を現物で再現し、修正して実行した。** |
+
+### 再現(実測、2026-08-03)
+
+| 対象 | 実測 |
+|---|---|
+| ansy `reports/incidents` | `drwxr-xr-x yoshi:yoshi`。接続identityの `ann` は uid=1001 で yoshi グループに属さず、書込不可 |
+| quory `/home/yoshi/.ssh` | `drwx------ yoshi:yoshi`。`ann` からは**一覧すらできない**(`Permission denied`)。削除対象の3ファイルは実在した |
+
+**指摘のとおり、実行すれば確実に権限エラーで落ちる状態だった。** 原因は「ファイルの所有者が yoshi であること」と「SSH接続の identity が yoshi であること」の混同である。
+
+### 修正
+
+quory play を `become: true` へ、ansy 側 `_sync` 削除タスクから `become: false` を除去。**両方にその理由をコメントとして残した**(所有者と接続identityは別である旨)。
+
+### 実行と検証(Coordinator が実施)
+
+`--syntax-check` 通過後に実行。`ansy: ok=8 changed=6 / quory: ok=2 changed=2`、failed=0。
+
+| 確認項目 | 結果 |
+|---|---|
+| ansy の `ansible-incident-sync.timer` / `.service` | `not-found`。残る ansible timer は `knowledge-review` のみ |
+| ansy の `incident-sync-trigger` ユーザー | 削除済み(`getent passwd` で不在) |
+| ansy の `_sync/` / wrapper / sudoers | いずれも削除済み |
+| quory の `id_incident_sync_trigger{,.pub}` / `known_hosts_incident_sync_trigger` | 削除済み |
+
+**quory → ansy の逆方向到達経路は、両端で閉じている** — quory 側は鍵材が消え、ansy 側は受け口ユーザーごと消えた。**片端だけでは不十分なので両方を確認した。**
+
+**この検証は Phase 4 Step 5(鍵削除)より前に実施している。** Step 5 以降は `ssh quory` を失っており、dispatch のカタログにも `/home/yoshi/.ssh/` を読むチェックが無いため、**quory 側は今後この形で再検証できない。**
+
+**レビューを通してから実行した判断がそのまま効いた。** 先に流していれば権限エラーで中途半端に止まっていた。

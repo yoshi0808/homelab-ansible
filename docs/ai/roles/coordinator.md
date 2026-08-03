@@ -32,13 +32,15 @@ Yoshinobuとの対話窓口として要求と判断材料を整え、自ら実�
 |---|---|
 | `git commit`/`git push`、Policy本文の改訂、要件段階で未許可の破壊的操作、復旧不能なデータ削除、安全境界そのものの変更 | 常にYoshinobuへ上げる |
 | **保護対象ホスト**(`pve1` / `pve2` / `authy` / `sophos-fw` / UniFi機器)への非冪等操作でYoshinobu承認済みscope内のもの | Coordinatorが着手前に計画を確認し承認。scope外/不明なら停止してYoshinobuへ |
-| **保護対象ホスト以外**(`monnie` / `quory` / `ansy`)への非冪等操作 | **確認不要**。Coordinatorが判断し実施、事後報告 |
+| **到達手段が無いホスト**(`pve1` / `pve2` / `authy` / `quory` / `sophos-fw`) | **承認の対象ではない。届かない。** 配備・適用が要るときはquoryのSemaphore(Yoshinobu起動)へ回す |
+| **上記以外**(`monnie` / `ansy`)への非冪等操作 | **確認不要**。Coordinatorが判断し実施、事後報告 |
 | 冪等な操作カタログへの追加(allowlist等) | 事前承認不要。追加した事実と内容を事後報告。Codexからも呼べるカタログの場合はその旨明記 |
 | systemd timer/serviceの有効化・無効化等、**Policyに関わらず**逆操作で戻せる運用切替 | Coordinatorが判断し実施、事後報告 |
 | `soft_deny`/`hard_deny` に該当する操作 | Coordinatorの承認では通らない。harnessのブロックはYoshinobu本人のintentのみ解除可。発火したらYoshinobuへ上げる |
 
-- **境界はホストで引く。「書き込むかどうか」では引かない。** `monnie`(監視VM) / `quory`(QDevice・実行基盤) / `ansy`(開発VM)は家庭向けサービスを提供しておらず、内容はGitから再現可能か、失っても停止を招かない観測データである。**この境界は `.claude/settings.json` の `autoMode` と対応させて維持する**(片方だけ変えるとドリフトする)。
-- **状態を変えない操作(見るだけの確認)は、保護対象ホストであっても確認不要である。** 状態を変える操作は上の表に従う。**冪等であることは「変えない」の根拠にならない** — `systemctl stop` やAnsibleのapplyは何度実行しても同じ状態になるが、本番を止める。確認を制約で塞ぐと、確認の代わりに推測が入る。**これは意図された許可であり、実host ad-hoc禁止を撤廃したことの副作用ではない**(撤廃前の旧規範はホストを問わない全面禁止だった)。
+- **実効的な境界は、承認の規則ではなく能力の不在で作られている。** `pve1` / `pve2` / `authy` / `quory` / `sophos-fw` へは、ansyが認証情報を1つも持たない。届くのは read 専用の forced command dispatch だけで、そこに書込の語彙は1つも無い。**この表は、届く相手についてしか意味を持たない。**
+- **境界はホストで引く。「書き込むかどうか」では引かない。** `monnie`(監視VM) / `ansy`(開発VM)は家庭向けサービスを提供しておらず、内容はGitから再現可能か、失っても停止を招かない観測データである。**この境界は `.claude/settings.json` の `autoMode` と対応させて維持する**(片方だけ変えるとドリフトする)。
+- **状態を変えない確認は、どのホストに対しても確認不要である。** 状態を変える操作は上の表に従う。**冪等であることは「変えない」の根拠にならない** — `systemctl stop` やAnsibleのapplyは何度実行しても同じ状態になるが、本番を止める。確認を制約で塞ぐと、確認の代わりに推測が入る。**ただし届かないホストでは、確認の手段はdispatchが公開する名前付きチェックだけである** — 一覧は `docs/ai/reviews/dev_prod_boundary/2026-08-03_008_phase3_check_catalog.md`。そこに無いことは調べられない。
 - **提示不要**: 状態を変えない確認(healthcheck / `--syntax-check` / `--check`経由 / `ansible-lint`)、decoy inventoryでの検証、ansyリポジトリ作業ツリーと`/tmp`に閉じた操作、`hosts: localhost`+`connection: local`で副作用のない使い捨てplaybook(検証後削除し、実行事実を記録へ残す)。
 - 迷ったら上げてよい。ただし必ず推奨を添える。既に推奨済みの事項へ同意の再確認を求めない。
 
