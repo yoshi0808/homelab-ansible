@@ -19,7 +19,8 @@
 | `docs/ai/role-routing-index.md` | 起動時 | 起動時 | 起動時 | 起動時 |
 | `docs/ai/status.md`(現在地) | **起動時**(SessionStart hookが自動で載せる。更新責任もCoordinatorにある) | 不要 | 不要 | 不要 |
 | `docs/ai/context/system/overview.md` | 着手時 | 必要時 | 必要時 | 必要時 |
-| 対象領域System Context(`proxmox.md`/`radius.md`/`monitoring.md`/`semaphore.md`、該当するもののみ) | 着手時(詳細。Coordinatorが直接確認する) | 着手時(詳細) | 着手時(詳細) | 着手時(詳細) |
+| 対象領域のSystem Context(`docs/ai/context/system/`、該当するもののみ) | 着手時(詳細。Coordinatorが直接確認する) | 着手時(詳細) | 着手時(詳細) | 着手時(詳細) |
+| 該当するOperations Context(`docs/ai/context/operations/`) | 着手時(該当するもの) | 着手時(該当するもの) | 着手時(該当するもの) | 着手時(該当するもの) |
 | `docs/ai/context/ansible/repository-overview.md` | 着手時 | 必要時 | 必要時 | 必要時 |
 | 対象inventory(`inventories/homelab/hosts.yml`等)・playbook・role本体(現物を直接参照) | 着手時(対象特定に必須) | 着手時(対象特定に必須) | 着手時(対象特定に必須) | 着手時(対象特定に必須) |
 | Policy(`docs/ai/policies/`、対象分野のみ) | 着手時(該当分野) | 着手時(該当分野) | 着手時(該当分野) | 着手時(該当分野) |
@@ -27,6 +28,8 @@
 | PR / diff | 必要時 | 自分の実装(常時) | 着手時(必須、レビュー対象そのもの) | 着手時(必須、検証対象そのもの) |
 | Knowledge(`docs/ai/memory/`、Claude Memoryを含む) | 起動時(重要Decisionは常に前提とする) | 必要時(対象関連) | 必要時(対象関連) | 必要時(対象関連) |
 | 規範文書レビュー(`skills/document-norm-review/SKILL.md`) | 必要時(自ら規範を書き換えるとき) | 不要 | **着手時(レビュー対象が規範文書を含む場合は必須)** | 不要 |
+
+**どのファイルが在るかは、ディレクトリそのものが正本である。この表へ一覧を持たない** — 一覧を持つと、Contextが増えたときに必ずドリフトする。各分類の定義は `docs/ai/context-classification.md`。
 
 ## Auditorの参照範囲
 

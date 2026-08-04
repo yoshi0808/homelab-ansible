@@ -77,7 +77,7 @@ quory = Gitから取得した確定済みコードの本番実行基盤
 2. **自分のRole文書 `docs/ai/roles/<role>.md` を読む。** 対話セッションのCoordinatorは `docs/ai/roles/coordinator.md` が該当し、あわせて `docs/ai/status.md` で現在地を確認する(SessionStart hookが自動で載せる。載っていなければ読む)。
 3. `docs/ai/role-routing-index.md` で自分のRoleとその実現方式を確認する。
 4. requirement、review、test_planなど、依頼で指定された案件記録を読む。
-5. `docs/ai/core-migration-map.md` の該当行から、対象のSystem / Repository / Operations ContextとPolicyだけを辿る。
+5. 対象領域のSystem / Repository / Operations Contextと、対象業務のPolicyだけを辿る(分類の定義は `docs/ai/context-classification.md`、誰がいつ読むかは `docs/ai/role-context-matrix.md`)。
 6. 作業内容に一致するSkillを使う。
 7. 過去の経緯が判断に必要な場合だけKnowledgeを読む。
 8. 実装・レビュー・テストでは、コード、`git status`、diffで現状を再確認する。

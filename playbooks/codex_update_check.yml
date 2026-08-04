@@ -7,7 +7,7 @@
 # 対象ホスト: ansy, quory。実行元: quory。スケジュールはSemaphore UIで登録する
 # (17:30のProxmoxパッチドライランより前、金曜17:00を想定)。単なるモジュール
 # 更新でSemaphoreUIプロセス自体やジョブ実行環境には影響しないため、systemd
-# timerではなくSemaphoreUIのスケジュール機能を使う(docs/ai/core-migration-map.md C12-01/C12-02、2026-07-10)。
+# timerではなくSemaphoreUIのスケジュール機能を使う。
 #
 # tester-gate: check-mode-native — 2026-07-31 round2でrisk-acceptedから変換
 # (docs/ai/reviews/check_mode_semantics/2026-07-31_006_round2_requirement.md

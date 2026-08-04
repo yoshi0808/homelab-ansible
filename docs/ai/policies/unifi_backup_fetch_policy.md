@@ -60,7 +60,7 @@ CloudKey へは必ずホスト名で接続する（私設 CA + `Origin` ヘッ�
 systemd timer で**週次**実行する（Semaphore UI 導入後は Schedule へ移行）。
 
 - Ansible playbook 内で git pull はしない（core.md）。
-- 未確認コードを timer で自動実行しない（docs/ai/core-migration-map.md C12-01/C12-02）。確定済みコードのみ。
+- 未確認コードを timer で自動実行しない（`docs/ai/core.md`「開発と本番の境界」）。確定済みコードのみ。
 
 参考: 深夜帯は 01:00 UniFi Console / 02:00 UniFi Device / 03:00 quory / 03:30 authy・monnie が
 稼働するため、本取得はそれらと重ならない週次枠に置く。
