@@ -50,6 +50,19 @@
     - name: Fold the probe result into this host's findings (R9-a/R9-b)
       ansible.builtin.set_fact:
         deployment_drift_check_findings: "{{ deployment_drift_check_findings + deployment_drift_check_semaphore_findings }}"
+        # **finding が0件であることを、突合が走った証拠と読んではいけない。**
+        # 2026-08-05の初回本番実行で実際に困った点である — レポートには
+        # findings と checked_counts しか無く、Semaphoreの欄が無かったため、
+        # 「突合が通って0件」と「突合自体が走っていない」がレポートから
+        # 区別できず、Semaphoreのジョブログまで見て初めて判別できた。
+        # 突合が黙って消えても毎朝「異常なし」に見える状態だったので、
+        # **比較した実物の件数を陽性の証拠として残す**。
+        # 失敗時は 0 になる(rescue側も同じ)。成功して0件ということは
+        # 「Semaphore上にテンプレートが1つも無い」であり、その場合は
+        # カタログ43件分の new finding が同時に立つので取り違えは起きない。
+        deployment_drift_check_checked_counts: >-
+          {{ deployment_drift_check_checked_counts
+             | combine({'semaphore_templates': (semaphore_templates_observed | default([])) | length}) }}
       vars:
         # category設計(独立レビューCritical #2への対応): probe自体が
         # 失敗した(接続・認証・応答形式のいずれか)findingと、probeは
@@ -142,3 +155,8 @@
             'playbook': '',
             'run_host': inventory_hostname
           }] }}
+        # 成功側と同じ欄を必ず立てる。**欄が無いこと**が「走っていない」を
+        # 意味するようにしておくため、失敗しても欄自体は残す(値は0)。
+        deployment_drift_check_checked_counts: >-
+          {{ deployment_drift_check_checked_counts
+             | combine({'semaphore_templates': (semaphore_templates_observed | default([])) | length}) }}
