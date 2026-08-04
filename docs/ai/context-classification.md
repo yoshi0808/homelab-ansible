@@ -26,7 +26,7 @@
 
 **例**: `healthcheck.md`(healthcheck系role共通のshell/Ansible責務分離、warning/critical二段階閾値の慣習、tester-gateマーカーと実guardの整合、reportの保存パターン、既知の落とし穴)。
 
-**作成条件**: 単一role/単一領域に閉じない、繰り返し現れるパターンが見つかった時に作る。1回しか使わない知見はContextでなくレビュー記録(`docs/ai/reviews/`)や[[Knowledge]]に留める。
+**作成条件**: 単一role/単一領域に閉じない、繰り返し現れるパターンが見つかった時に作る。1回しか使わない知見はContextでなくレビュー記録(`docs/ai/reviews/`)やKnowledge(`docs/ai/memory/`)に留める。
 
 ### Policy(`docs/ai/policies/`)
 
@@ -103,5 +103,5 @@ Context内で対象を指す必要がある場合は、inventory group名・変�
 
 ## 関連
 
-- [[role-context-matrix.md]](誰がいつ何を読むか)
+- `docs/ai/role-context-matrix.md`(誰がいつ何を読むか)
 - `docs/ai/context/operations/healthcheck.md`(Operations Contextの先行実装)
