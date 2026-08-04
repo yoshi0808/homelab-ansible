@@ -1,0 +1,8 @@
+---
+# Deliberately has NO entry for playbooks/existing_thing.yml. If R1 used the
+# broader ACMR staged set instead of Added-only, this fixture would
+# (wrongly) fire the advisory on a commit that only *modifies* the
+# playbook's content — that is exactly what AC3 checks it does not do.
+semaphore_templates_catalog:
+  - playbook: playbooks/unrelated_existing.yml
+    class: SAFE

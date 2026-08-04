@@ -1,0 +1,5 @@
+---
+- name: Fixture placeholder — existing playbook, version 2 (content changed, not renamed)
+  hosts: quory
+  gather_facts: false
+  tasks: []

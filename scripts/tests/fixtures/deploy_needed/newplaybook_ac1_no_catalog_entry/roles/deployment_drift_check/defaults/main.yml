@@ -1,0 +1,5 @@
+---
+# Empty catalog: this fixture exercises R1 only (roles/semaphore_templates
+# catalog advisory), not R4/R5/R6, which read this file instead. An empty
+# mapping is enough for load_catalog() to succeed with zero entries.
+{}

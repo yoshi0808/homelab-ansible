@@ -53,10 +53,34 @@ Reads catalog and tracked-file state from the git INDEX (`git show
 scripts/check-doc-consistency.py and scripts/check-staged-yaml.py: what gets
 committed is the index.
 
-Usage: check-deploy-needed.py [--repo-root PATH]
+A third, unrelated job was added 2026-08-05 (requirement
+docs/ai/reviews/precommit_checks_extension/2026-08-05_001_requirement.md,
+R1). It shares this script's git-index plumbing and "advisory, never
+blocks" pattern but reads a different catalog entirely
+(`roles/semaphore_templates/defaults/main.yml`'s `semaphore_templates_catalog`,
+not the `deployment_drift_check` catalog R4/R5/R6 read) and answers a
+different question ("does this new playbook have a Semaphore template?" not
+"was a deployment-tracked file just changed?"):
+
+  R1 (advisory, never blocks): a newly *added* `playbooks/*.yml` (git status
+     A, not M — an existing playbook being edited already has its button
+     situation decided, per the requirement's non-goal) has no catalog entry
+     naming it under `playbook:` -> warn, and say what fixes it. Deliberately
+     Added-only: including renames would need extra logic to avoid
+     double-warning on an entry the catalog already has under the old name
+     (OQ1), so renames are out of scope. No exclude list is kept for
+     import_playbook-only / one-off playbooks that legitimately have no
+     button (OQ2) — advisory-only means the cost of a false positive here is
+     low, and an exclude list would itself rot.
+
+R2 of the same requirement (staged-list retrieval unification) also touches
+this file: see git_staged_paths() below.
+
+Usage: check-deploy-needed.py [--repo-root PATH] [--staged-paths PATH|-]
 Exit status: 0 unless R5 finds a catalog playbook: reference that does not
 exist among tracked files (then 1). 2 on a setup/analysis problem (not a
-git working tree, catalog unreadable/unparsable).
+git working tree, catalog unreadable/unparsable, a quoted/unsafe staged
+path when this script derives the staged list itself).
 """
 import argparse
 import re
@@ -116,16 +140,59 @@ def git_ls_files(repo_root):
     return {line for line in result.stdout.split("\n") if line}
 
 
-def git_staged_paths(repo_root):
-    """Paths staged as added/copied/modified/renamed, per the index vs HEAD."""
+def git_staged_paths(repo_root, given=None):
+    """Paths staged as added/copied/modified/renamed, per the index vs HEAD.
+
+    R2 (docs/ai/reviews/precommit_checks_extension/2026-08-05_001_requirement.md):
+    "staged とは何か" used to have two independent implementations — this
+    function re-running `git diff --cached`, and
+    scripts/git-pre-commit-check.sh's own `git -c core.quotepath=false diff
+    --cached --name-only --diff-filter=ACMR`, whose fail-closed handling of
+    still-quoted paths (a name containing a literal newline/quote/backslash)
+    the Python side never shared. That gate now has one definition.
+
+    When `given` is not None (the normal pre-commit path: the shell script
+    passes its own already-computed, already-quoted-path-checked list via
+    `--staged-paths`), it is used as-is — this function does not ask git
+    again, so there is exactly one place that decides what "staged" means
+    for that run.
+
+    When `given` is None (this script invoked standalone, as the fixture
+    harness in scripts/tests/fixtures/deploy_needed/ does), fall back to
+    asking git directly, but with the identical safety handling: `-c
+    core.quotepath=false` (so non-ASCII paths are not octal-escaped and
+    hidden from every consumer below — see the same comment in
+    git-pre-commit-check.sh) and fail-closed if a path still comes back
+    quoted despite that setting.
+    """
+    if given is not None:
+        return list(given)
     result = _run_git(
-        repo_root, ["diff", "--cached", "--name-only", "--diff-filter=ACMR"]
+        repo_root,
+        [
+            "-c",
+            "core.quotepath=false",
+            "diff",
+            "--cached",
+            "--name-only",
+            "--diff-filter=ACMR",
+        ],
     )
     if result.returncode != 0:
         raise RuntimeError(
             "git diff --cached failed: {}".format(result.stderr.strip())
         )
-    return [line for line in result.stdout.split("\n") if line]
+    paths = [line for line in result.stdout.split("\n") if line]
+    quoted = [p for p in paths if p.startswith('"')]
+    if quoted:
+        raise RuntimeError(
+            "staged path(s) cannot be safely checked (still quoted after "
+            "core.quotepath=false): {}. These names likely contain a "
+            "newline, quote, or backslash. Rename before committing.".format(
+                ", ".join(quoted)
+            )
+        )
+    return paths
 
 
 def read_index_content(repo_root, path):
@@ -219,6 +286,109 @@ def check_r6(staged_paths, tracked_paths):
 
 
 # ---------------------------------------------------------------------------
+# R1 (2026-08-05 requirement, unrelated to R4/R5/R6 above): a newly added
+# playbooks/*.yml with no roles/semaphore_templates catalog entry -> advisory
+# ---------------------------------------------------------------------------
+
+SEMAPHORE_TEMPLATES_CATALOG_PATH = "roles/semaphore_templates/defaults/main.yml"
+
+
+def git_added_playbooks(repo_root):
+    """Newly staged (git status Added only) `playbooks/*.yml` paths.
+
+    Deliberately narrower than git_staged_paths()'s ACMR: --diff-filter=A
+    excludes Modified (an existing playbook's button situation is already
+    decided, non-goal per the requirement) and Renamed (OQ1 — including
+    renames would need extra logic to avoid double-warning on an entry the
+    catalog already has under the old name; out of scope here).
+
+    The rename exclusion only holds when git *detects* the change as a
+    rename. A rename combined with a large enough content rewrite in the
+    same commit falls under git's rename-detection similarity threshold
+    (50% by default) and is reported as Deleted + Added, so the new path
+    arrives here as genuinely added and the advisory fires even though the
+    old name had a catalog entry (independent review, 2026-08-05,
+    reproduced). That false positive is accepted: this check never blocks,
+    and raising the recall of a rename heuristic is not worth the extra
+    logic. Do not "fix" it by widening --diff-filter — that reintroduces
+    the double-warning this exclusion exists to avoid.
+
+    Applies the same `-c core.quotepath=false` convention as
+    git-pre-commit-check.sh, but unlike git_staged_paths()'s fail-closed
+    behavior, a path that still comes back quoted is simply skipped: this
+    whole check is advisory-only and must never block a commit (requirement
+    §3 non-goal), and in the real pre-commit flow the shell wrapper has
+    already refused to commit any quoted path before this script ever runs.
+    """
+    result = _run_git(
+        repo_root,
+        [
+            "-c",
+            "core.quotepath=false",
+            "diff",
+            "--cached",
+            "--name-status",
+            "--diff-filter=A",
+            "--",
+            "playbooks/*.yml",
+        ],
+    )
+    if result.returncode != 0:
+        return []
+    added = []
+    for line in result.stdout.split("\n"):
+        if not line:
+            continue
+        status, _, path = line.partition("\t")
+        if status != "A" or not path or path.startswith('"'):
+            continue
+        added.append(path)
+    return added
+
+
+def load_semaphore_templates_catalog(repo_root):
+    """The set of `playbook:` values in semaphore_templates_catalog.
+
+    Returns None (not an empty set) when the catalog cannot be read or
+    parsed. The caller must treat that as "cannot judge, say nothing" — not
+    "catalog is empty, warn about every added playbook" (noise) and not
+    "block the commit" (this check never blocks, unlike R5's handling of the
+    unrelated deployment_drift_check catalog).
+    """
+    content = read_index_content(repo_root, SEMAPHORE_TEMPLATES_CATALOG_PATH)
+    if content is None:
+        return None
+    try:
+        data = yaml.safe_load(content)
+    except yaml.YAMLError:
+        return None
+    if not isinstance(data, dict):
+        return None
+    entries = data.get("semaphore_templates_catalog")
+    if not isinstance(entries, list):
+        return None
+    return {
+        entry.get("playbook")
+        for entry in entries
+        if isinstance(entry, dict) and entry.get("playbook")
+    }
+
+
+def check_new_playbook_catalog_advisory(repo_root):
+    """R1: newly added playbooks/*.yml with no matching catalog entry.
+
+    Advisory only, never blocks (requirement §3 non-goal) — a playbook that
+    is only ever import_playbook'd, or a one-off manual tool, legitimately
+    has no template, and this script cannot tell the two cases apart (OQ2).
+    """
+    catalog_playbooks = load_semaphore_templates_catalog(repo_root)
+    if catalog_playbooks is None:
+        return []
+    added = git_added_playbooks(repo_root)
+    return sorted(p for p in added if p not in catalog_playbooks)
+
+
+# ---------------------------------------------------------------------------
 # entrypoint
 # ---------------------------------------------------------------------------
 
@@ -239,6 +409,17 @@ def main(argv):
         "directory). Must be a git working tree (git ls-files/git show/"
         "git diff --cached are used to read the index).",
     )
+    parser.add_argument(
+        "--staged-paths",
+        default=None,
+        metavar="PATH|-",
+        help="Newline-separated list of staged paths to use as-is (R2: "
+        "'staged' 一覧の取得を1箇所にする), read from PATH or, if '-', from "
+        "stdin. This is how scripts/git-pre-commit-check.sh passes its own "
+        "already-computed, already-quoted-path-checked staged list so this "
+        "script does not re-derive it. When omitted, falls back to asking "
+        "git directly (used by the standalone fixture harness).",
+    )
     args = parser.parse_args(argv)
     repo_root = args.repo_root.resolve() if args.repo_root else _default_repo_root()
 
@@ -249,8 +430,20 @@ def main(argv):
         print("ERROR: {} has no .git (not a git working tree)".format(repo_root))
         return 2
 
+    given_staged_paths = None
+    if args.staged_paths is not None:
+        try:
+            if args.staged_paths == "-":
+                raw = sys.stdin.read()
+            else:
+                raw = Path(args.staged_paths).read_text(encoding="utf-8")
+        except OSError as exc:
+            print("ERROR: could not read --staged-paths {}: {}".format(args.staged_paths, exc))
+            return 2
+        given_staged_paths = [line for line in raw.split("\n") if line]
+
     try:
-        staged_paths = git_staged_paths(repo_root)
+        staged_paths = git_staged_paths(repo_root, given_staged_paths)
         tracked_paths = git_ls_files(repo_root)
         catalog = load_catalog(repo_root)
     except RuntimeError as exc:
@@ -292,6 +485,27 @@ def main(argv):
         for err in r5_errors:
             print("  ERROR: " + err)
         exit_code = 1
+
+    # R1 (2026-08-05 requirement, unrelated catalog): advisory, never blocks
+    # — does not touch exit_code. Uses its own git call, not staged_paths
+    # above, since it needs Added-only status (ACMR does not distinguish).
+    new_playbook_hits = check_new_playbook_catalog_advisory(repo_root)
+    if new_playbook_hits:
+        print(
+            "[check-deploy-needed] 新規playbookにSemaphoreボタンがありません"
+            "(助言、commitは通ります):"
+        )
+        for pb in new_playbook_hits:
+            print("  `{}`".format(pb))
+        print(
+            "  → roles/semaphore_templates/defaults/main.yml の "
+            "semaphore_templates_catalog へ playbook: エントリを足し、"
+            "reconcile(semaphore_templates roleの適用)を流すとボタンになります。"
+        )
+        print(
+            "  他のplaybookからimport_playbookされるだけ、または単発の手動用で"
+            "ボタンが不要なら、このまま無視して構いません。"
+        )
 
     return exit_code
 

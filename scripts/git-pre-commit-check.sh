@@ -130,15 +130,21 @@ if ! python3 "$(dirname "${BASH_SOURCE[0]}")/check-doc-consistency.py"; then
 fi
 
 # 配備が要る変更の予告(R4: カタログ一致 / R6: template配備物の推定、いずれも
-# 警告のみでブロックしない)と、deployment_drift_checkカタログのplaybook:が
-# repoに実在することの検査(R5、ブロックする)。判定の性質が異なる2つを
-# 1つのスクリプトへまとめているが、pre-commitをブロックするかどうかは
-# スクリプト自身の終了コード(R5のみが非ゼロを返す)にそのまま従う。
+# 警告のみでブロックしない)、deployment_drift_checkカタログのplaybook:が
+# repoに実在することの検査(R5、ブロックする)、新規playbookにSemaphore
+# templateが無いことの予告(R1、2026-08-05追加、警告のみでブロックしない)。
+# 判定の性質が異なる複数の検査を1つのスクリプトへまとめているが、
+# pre-commitをブロックするかどうかはスクリプト自身の終了コード
+# (R5のみが非ゼロを返す)にそのまま従う。
+#
+# `staged_files`(冒頭で `-c core.quotepath=false` 付きで取得し、引用符が
+# 残るパスはこの時点で既に exit 1 済み)をそのまま渡す — check-deploy-needed.py
+# が自前で `git diff --cached` を叩き直さないようにするための一本化(R2)。
 if ! command -v python3 >/dev/null 2>&1; then
   echo "ERROR: python3 not found; cannot run deploy-needed check"
   exit 1
 fi
-if ! python3 "$(dirname "${BASH_SOURCE[0]}")/check-deploy-needed.py"; then
+if ! printf '%s\n' "$staged_files" | python3 "$(dirname "${BASH_SOURCE[0]}")/check-deploy-needed.py" --staged-paths -; then
   echo "ERROR: deploy-needed catalog check failed (see above)"
   exit 1
 fi

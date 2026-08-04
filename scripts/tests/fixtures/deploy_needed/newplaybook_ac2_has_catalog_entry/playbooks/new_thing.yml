@@ -1,0 +1,5 @@
+---
+- name: Fixture placeholder — newly added playbook that already has a catalog entry
+  hosts: quory
+  gather_facts: false
+  tasks: []

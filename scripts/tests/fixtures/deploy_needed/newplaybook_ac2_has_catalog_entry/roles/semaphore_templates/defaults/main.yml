@@ -1,0 +1,5 @@
+---
+# AC2: the staged playbook IS in the catalog -> advisory must not fire.
+semaphore_templates_catalog:
+  - playbook: playbooks/new_thing.yml
+    class: SAFE

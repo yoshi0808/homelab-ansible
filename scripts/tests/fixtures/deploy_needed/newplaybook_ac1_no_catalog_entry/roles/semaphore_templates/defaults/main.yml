@@ -1,0 +1,8 @@
+---
+# Deliberately has no entry for playbooks/new_thing.yml (AC1: the staged
+# playbook is new and the catalog has no matching `playbook:` -> advisory
+# fires). The one entry present is for an unrelated playbook, to prove the
+# check does not just fire on "catalog is empty".
+semaphore_templates_catalog:
+  - playbook: playbooks/unrelated_existing.yml
+    class: SAFE
