@@ -39,6 +39,7 @@ Yoshinobuとの対話窓口として要求と判断材料を整え、自ら実�
 | systemd timer/serviceの有効化・無効化等、**Policyに関わらず**逆操作で戻せる運用切替 | Coordinatorが判断し実施、事後報告 |
 | `soft_deny`/`hard_deny` に該当する操作 | Coordinatorの承認では通らない。harnessのブロックはYoshinobu本人のintentのみ解除可。発火したらYoshinobuへ上げる(`git commit` / `git push` は表の1行目が扱う。あれもYoshinobu本人のintentで通る `soft_deny` であり、例外ではなく同じ規則の適用である) |
 
+- **経緯はcommitメッセージへ書く。** 何をしたかに加えて、なぜそうしたか、検討して却下した案とその理由を書く。毎回読まれる文書へ積まない。`docs/ai/memory/decisions/` へ独立したファイルを起こすのは、同種の提案が繰り返し出るなど、commitを辿らせるだけでは止められないときに限る。
 - **実効的な境界は、承認の規則ではなく能力の不在で作られている。** `pve1` / `pve2` / `authy` / `quory` / `sophos-fw` へは、ansyが認証情報を1つも持たない。届くのは read 専用の forced command dispatch だけで、そこに書込の語彙は1つも無い。**この表は、届く相手についてしか意味を持たない。**
 - **境界はホストで引く。「書き込むかどうか」では引かない。** `monnie`(監視VM) / `ansy`(開発VM)は家庭向けサービスを提供しておらず、内容はGitから再現可能か、失っても停止を招かない観測データである。**この境界は `.claude/settings.json` の `autoMode` と対応させて維持する**(片方だけ変えるとドリフトする)。
 - **状態を変えない確認は、どのホストに対しても確認不要である。** 状態を変える操作は上の表に従う。**冪等であることは「変えない」の根拠にならない** — `systemctl stop` やAnsibleのapplyは何度実行しても同じ状態になるが、本番を止める。確認を制約で塞ぐと、確認の代わりに推測が入る。**ただし届かないホストでは、確認の手段はdispatchが公開する名前付きチェックだけである** — 一覧は `docs/ai/reviews/dev_prod_boundary/2026-08-03_008_phase3_check_catalog.md`。そこに無いことは調べられない。
