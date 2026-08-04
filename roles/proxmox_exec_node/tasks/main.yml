@@ -10,6 +10,21 @@
 # 呼び出し規約: このroleは「候補ノード全体を hosts: に持つ Play」から呼ぶこと。
 #       role自身はPlayを作れないため、この前提はT1でassertする。
 #
+# **T1が厳密一致であるのは意図であり、姉妹role(roles/proxmox_reachable_nodes)
+# に合わせて部分集合へ緩めてはならない。** 両者は見た目が同じassertを持つが、
+# 役割が違う — あちらは到達性を「観測」するだけなので、対象が絞られても
+# 観測結果が絞られるだけである。こちらは「**変更をどのノードで実行するか
+# を選ぶ**」ため、候補集合が狭まると**選択そのものが変わる**(`--limit pve2`
+# なら、pve1を選ぶべき場面でもpve2しか選べない)。同じ緩和が同じ意味を
+# 持たない。
+#
+# `--limit` を要する呼び出しは現時点で1つも無い(2026-08-05にCoordinatorが
+# 全6呼び出しと Policy を確認)。Policyが `--limit` を許可しているのは
+# healthcheck(SB-021)とpatch dry-run(SB-023)で、**どちらもこのroleを
+# 使わない**。呼び出し側6本は対象をsurvey変数(`target` / `target_node`)で
+# 受けており、Semaphoreのテンプレートは全て `arguments: []` である。
+# 一次記録: docs/ai/reviews/proxmox_exec_node_limit/2026-08-05_001_analysis.md
+#
 # 出力:
 #   - dynamic group {{ pen_target_group }} に、選定された1ノードだけが登録される。
 #   - 全候補ノードに per-host fact pen_reachable(bool)が立つ。到達不能ノードにも
