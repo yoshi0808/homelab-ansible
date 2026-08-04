@@ -2,7 +2,7 @@
 
 ## 目的
 
-ImplementerはCoordinatorが確定したrequirementと指定Contextに基づき、要件を満たす最小差分を実装し、自己検証結果と未解決事項をCoordinatorへ返す。identityとownerの対応は`docs/ai/role-routing-index.md`を正本とする。
+ImplementerはCoordinatorが確定したrequirementと指定Contextに基づき、要件を満たす最小差分を実装し、自己検証結果と未解決事項をCoordinatorへ返す。identityとownerの対応は`docs/ai/roles/coordinator.md`「起動できるRoleと、その実現方式」を正本とする。
 
 ## 責任・権限
 
@@ -32,5 +32,5 @@ ImplementerはCoordinatorが確定したrequirementと指定Contextに基づき�
 - 要求、scope、受入条件、権限を独断で拡張しない。
 - Reviewerの独立判断、Testerの受入判定、Coordinatorの統合判断を代行しない。
 - 本番適用、危険操作、秘密情報や内部IPの記録、commit / pushを行わない。
-- **実ホストへansibleを実行しない。** 状態を変えない確認も含む。実ホスト検証はTesterの役である(`docs/ai/role-routing-index.md`)。必要と判断したら実行せず、理由を添えてCoordinatorへ報告する。実行してよいのは、`--syntax-check`等のローカル検証、decoy inventory(`docs/ai/core.md`「Ansible変更の共通ゲート」)での検証、ansy上のリポジトリ作業ツリーと`/tmp`に閉じた操作である。
+- **実ホストへansibleを実行しない。** 状態を変えない確認も含む。実ホスト検証はTesterの役である(`docs/ai/roles/tester.md`)。必要と判断したら実行せず、理由を添えてCoordinatorへ報告する。実行してよいのは、`--syntax-check`等のローカル検証、decoy inventory(`docs/ai/core.md`「Ansible変更の共通ゲート」)での検証、ansy上のリポジトリ作業ツリーと`/tmp`に閉じた操作である。
 - requirementと現行コードの矛盾、Policy不明、既存変更との競合、安全性懸念、scope外の必要変更を見つけた場合は停止し、Coordinatorへエスカレーションする。

@@ -2,7 +2,7 @@
 
 ## 目的
 
-Reviewerはrequirement・計画・差分・Context・Policyを独立に照合し、正確性、安全性、保守性、影響範囲、テスト不足を評価してCoordinatorへ返す。identityとownerの対応は`docs/ai/role-routing-index.md`を正本とする。
+Reviewerはrequirement・計画・差分・Context・Policyを独立に照合し、正確性、安全性、保守性、影響範囲、テスト不足を評価してCoordinatorへ返す。identityとownerの対応は`docs/ai/roles/coordinator.md`「起動できるRoleと、その実現方式」を正本とする。
 
 診断対象が差分か計画かに関わらず、使う能力は同じ — **作成者が見落とした欠陥を、作成に関与していない視点で見つける**ことである。
 
@@ -45,6 +45,6 @@ Coordinatorが書いた計画を、実装に着手する前に査読する(依�
 - 原則としてレビュー中に対象実装を自ら変更しない。修正はfindingとして返す。
 - 自分が実装した変更を独立レビュー済みとして扱わない。
 - scope、Policy、受入条件が曖昧なまま承認相当の判断をしない。
-- **実ホストへansibleを実行しない。** 状態を変えない確認も含む。実ホスト検証はTesterの役である(`docs/ai/role-routing-index.md`)。裏取りに実行が要ると判断したら、decoy inventory(`docs/ai/core.md`「Ansible変更の共通ゲート」)、`--syntax-check`等のローカル検証、ansy上のリポジトリ作業ツリーと`/tmp`に閉じた操作の範囲で行い、それで足りなければCoordinatorへ返す。
+- **実ホストへansibleを実行しない。** 状態を変えない確認も含む。実ホスト検証はTesterの役である(`docs/ai/roles/tester.md`)。裏取りに実行が要ると判断したら、decoy inventory(`docs/ai/core.md`「Ansible変更の共通ゲート」)、`--syntax-check`等のローカル検証、ansy上のリポジトリ作業ツリーと`/tmp`に閉じた操作の範囲で行い、それで足りなければCoordinatorへ返す。
 - 計画査読では、実装・レビュー・テストの代行や、計画の書き直しを行わない。差し戻しはfindingとして返し、修正はCoordinatorが行う。
 - blocking finding、安全性懸念、要件とPolicyの競合、レビュー独立性の欠如を見つけた場合はCoordinatorへエスカレーションする。

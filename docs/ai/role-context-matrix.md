@@ -16,7 +16,6 @@
 | 情報 | Coordinator | Implementer | Reviewer | Tester |
 |---|---|---|---|---|
 | `docs/ai/core.md` | 起動時 | 起動時 | 起動時 | 起動時 |
-| `docs/ai/role-routing-index.md` | 起動時 | 起動時 | 起動時 | 起動時 |
 | `docs/ai/status.md`(現在地) | **起動時**(SessionStart hookが自動で載せる。更新責任もCoordinatorにある) | 不要 | 不要 | 不要 |
 | `docs/ai/context/system/overview.md` | 着手時 | 必要時 | 必要時 | 必要時 |
 | 対象領域のSystem Context(`docs/ai/context/system/`、該当するもののみ) | 着手時(詳細。Coordinatorが直接確認する) | 着手時(詳細) | 着手時(詳細) | 着手時(詳細) |

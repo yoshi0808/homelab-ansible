@@ -1,6 +1,6 @@
 # Note (fixture: check3 broken link)
 
-See [role routing](role-routing-index.md) and the [catalog](../../playbooks/README.md).
+See [role routing](roles/coordinator.md) and the [catalog](../../playbooks/README.md).
 
 This one is deliberately broken for `scripts/check-doc-consistency.py`
 check3: [nonexistent doc](./this-file-does-not-exist.md) does not resolve

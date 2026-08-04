@@ -19,7 +19,7 @@ Checks
 ------
 1. playbook `# tester-gate:` header  <->  playbooks/README.md catalog tables
 2. `.claude/agents/<role>.md` frontmatter `model:`/`effort:`  <->
-   docs/ai/role-routing-index.md "モデル・effort配分" table
+   docs/ai/roles/coordinator.md "モデル・effort配分" table
 3. Markdown internal links (normative layer only, explicit allowlist -
    see _is_normative_markdown)  <-> existence of the linked file
 
@@ -296,7 +296,7 @@ def check_playbook_tester_gate(repo_root):
 
 
 # ---------------------------------------------------------------------------
-# check 2: agent frontmatter <-> role-routing-index.md
+# check 2: agent frontmatter <-> docs/ai/roles/coordinator.md
 # ---------------------------------------------------------------------------
 
 
@@ -340,7 +340,7 @@ def check_agent_model_effort(repo_root):
             )
         agent_info[role] = (model, effort, path)
 
-    routing_path = "docs/ai/role-routing-index.md"
+    routing_path = "docs/ai/roles/coordinator.md"
     routing_content = read_index_content(repo_root, routing_path)
     if routing_content is None:
         raise AnalysisError("check2: cannot read index content of {}".format(routing_path))

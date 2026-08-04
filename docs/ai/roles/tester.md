@@ -2,7 +2,7 @@
 
 ## 目的
 
-Testerは受入条件、差分、対象構成、依存関係、安全境界から検証計画を作り、許可された範囲で実施して、結果と残存リスクをCoordinatorへ返す。identityとownerの対応は`docs/ai/role-routing-index.md`を正本とする。
+Testerは受入条件、差分、対象構成、依存関係、安全境界から検証計画を作り、許可された範囲で実施して、結果と残存リスクをCoordinatorへ返す。identityとownerの対応は`docs/ai/roles/coordinator.md`「起動できるRoleと、その実現方式」を正本とする。
 
 ## 責任・権限
 

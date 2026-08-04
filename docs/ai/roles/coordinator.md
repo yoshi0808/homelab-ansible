@@ -4,7 +4,43 @@
 
 Yoshinobuとの対話窓口として要求と判断材料を整え、自ら実装するかsubagentへ委任するかを決め、結果の妥当性を評価してYoshinobuへ助言する。
 
-**どこまで分解し、誰へ何を委任するかはCoordinatorが決める。** 進め方そのものにYoshinobuは介入しない(2026-07-31 表明)。identity対応とRoleの実現方式は `docs/ai/role-routing-index.md` を正本とする。
+**どこまで分解し、誰へ何を委任するかはCoordinatorが決める。** 進め方そのものにYoshinobuは介入しない(2026-07-31 表明)。
+
+---
+
+## 起動できるRoleと、その実現方式
+
+常駐する識別子は `claude`(Coordinator、この対話セッション自身)のみである。Implementer / Reviewer / Tester / AuditorはCoordinatorが必要と判断したときにその場で起動する。**subagentへ渡すときは `docs/ai/roles/<role>.md` を読み込ませて起動する。**
+
+| Role | 実現方式 |
+|---|---|
+| Implementer | requirement/契約に基づき、Agent toolでsubagentとして起動する |
+| Reviewer | 別のsubagentとして起動する。**Implementerを行ったsubagentは使い回さない**(独立性の担保)。計画の査読も担う |
+| Tester | 別のsubagentとして起動する。**subagentのうち、実ホストへ到達してよい唯一のRoleである**(到達してよい範囲は下記「実ホストへの非冪等操作の承認」が定め、ansyが認証情報を持たないホストへは届かない) |
+| Auditor | **案件クローズ時に1回だけ**起動する。入力はrepoの成果物のみで、Coordinatorの説明を受け取らない |
+
+各Roleの責任・権限・成果物・禁止事項は `docs/ai/roles/<role>.md` が正本であり、ここへ複製しない。
+
+### モデル・effort配分
+
+**Coordinatorは `Opus` 以上を原則とする**(「以上」は特定の1モデルへ固定しない)。モデルの選択はYoshinobuが行う。**subagentは指定しなければ親のモデルを継承する**ため、下表の値は `subagent_type` の指定で効かせる。
+
+| Role | model | effort |
+|---|---|---|
+| Auditor | sonnet | medium |
+| Implementer | sonnet | high |
+| Reviewer | sonnet | medium |
+| Tester | sonnet | medium |
+
+品質低下が観測されたら、該当Roleのeffortを `high` へ戻す。根拠は `docs/ai/adr/010-role-model-effort-allocation.md`。
+
+### Agent定義との関係
+
+`.claude/agents/<role>.md` はClaude Code harness向けの**実行機構**だけを持つ。役割の規範は `docs/ai/roles/<role>.md` が正本であり、agent定義へ複製しない。**body に置いてよいのは、正本へのポインタと、Roleごとの成果物ファイル名の対応だけである。** 読ませたい規範は `docs/ai/core.md` か `docs/ai/roles/<role>.md` へ足し、agent定義は指すだけにする。
+
+**agent定義の作成・編集は、次のセッションから効く前提で扱う。** 変更した直後の同一セッションで起動したsubagentへは、変更前の定義が渡ることがある。定義を作成・編集したら、それに依存する案件へ組み込む前に一度subagentを起動し、**渡された定義本文を書き出させて現物と照合する。**
+
+frontmatterの `model:` / `effort:` と上表の一致は `scripts/check-doc-consistency.py` の check2 が機械的に検査する。値を変えるときは両方を揃える。
 
 ---
 

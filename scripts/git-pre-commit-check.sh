@@ -116,7 +116,7 @@ fi
 "$(dirname "${BASH_SOURCE[0]}")/check-tester-gate.sh"
 
 # Cross-file transcription drift (playbook tester-gate vs playbooks/README.md,
-# agent frontmatter model/effort vs docs/ai/role-routing-index.md, and
+# agent frontmatter model/effort vs docs/ai/roles/coordinator.md, and
 # Markdown internal links repo-wide). Runs on every commit regardless of
 # which files are staged, since it reads the whole repo's index state, not
 # just the files this commit happens to touch.

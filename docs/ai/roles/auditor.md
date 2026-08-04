@@ -56,7 +56,7 @@ Coordinatorの申告を点検対象にすると、**Coordinator自身の記録�
 
 ## 必須ContextとSkill
 
-- **起動時に `docs/ai/core.md` を読む**(全Role共通の安全境界)。次に `docs/ai/role-routing-index.md` で自分のRoleと実現方式を確認する。
+- **起動時に `docs/ai/core.md` を読む**(全Role共通の安全境界)。次に `docs/ai/roles/auditor.md`(本ファイル)で自分の責務を確認する。
 - 本Role固有: `docs/ai/status.md`(状態の正本とその規律)、対象の案件フォルダ。
 - **読まないもの**: System Context / Ansible Context / 実装Skill。**技術的な正否は判定しない。** ただし**記録どうしの矛盾**は、技術的な内容であっても指摘してよい(読解だけで判別できるため)。
 - **Policy / ADRは、案件の記録が参照している箇所に限って読んでよい**(上表「差分の外側の陳腐化」の検査に要るため)。見るのは**記録・実装と食い違っていないか**だけであり、Policyの内容が妥当かは判定しない。参照されていないPolicyを網羅的に読みに行かない。

@@ -8,10 +8,12 @@
 
 - Git管理されたリポジトリ内容をコードと文書の正本とする。
 - `docs/ai/core.md` は全Role共通原則の正本とする。
-- `docs/ai/status.md` は**現在地**(進行中の作業、観測待ち、着手候補)の正本とする。規範は書かない。
+- `docs/ai/status.md` は**現在地**(進行中の作業、観測待ち、着手候補)の正本とする。規範は書かない。Coordinatorのauto-memoryは正本ではない。
+- Role本文(責任・権限・成果物・禁止事項)は `docs/ai/roles/<role>.md` を正本とする。**identity名だけから責務や権限を推測しない。**
 - 案件固有の要求と工程記録は、Coordinatorからの依頼文と `docs/ai/reviews/<target>/` の成果物を正本とする。
 - 現在の変更内容は作業ツリーとdiffを正本とし、説明文だけで変更済みと判断しない。
 - 対象システム固有の判断は `docs/ai/policies/*_policy.md` を正本とする。
+- **競合したときは、Yoshinobuの当該案件に対する最新の明示指示が常に最優先である。**
 
 ## 人間の権限と安全境界
 
@@ -75,12 +77,11 @@ quory = Gitから取得した確定済みコードの本番実行基盤
 
 1. 本ファイルで共通原則を確認する。
 2. **自分のRole文書 `docs/ai/roles/<role>.md` を読む。** 対話セッションのCoordinatorは `docs/ai/roles/coordinator.md` が該当し、あわせて `docs/ai/status.md` で現在地を確認する(SessionStart hookが自動で載せる。載っていなければ読む)。
-3. `docs/ai/role-routing-index.md` で自分のRoleとその実現方式を確認する。
-4. requirement、review、test_planなど、依頼で指定された案件記録を読む。
-5. 対象領域のSystem / Repository / Operations Contextと、対象業務のPolicyだけを辿る(分類の定義は `docs/ai/context-classification.md`、誰がいつ読むかは `docs/ai/role-context-matrix.md`)。
-6. 作業内容に一致するSkillを使う。
-7. 過去の経緯が判断に必要な場合だけKnowledgeを読む。
-8. 実装・レビュー・テストでは、コード、`git status`、diffで現状を再確認する。
+3. requirement、review、test_planなど、依頼で指定された案件記録を読む。
+4. 対象領域のSystem / Repository / Operations Contextと、対象業務のPolicyだけを辿る(分類の定義は `docs/ai/context-classification.md`、誰がいつ読むかは `docs/ai/role-context-matrix.md`)。
+5. 作業内容に一致するSkillを使う。
+6. 過去の経緯が判断に必要な場合だけKnowledgeを読む。
+7. 実装・レビュー・テストでは、コード、`git status`、diffで現状を再確認する。
 
 関連しそうなContextやreviewsを無差別に探索しない。
 
@@ -92,7 +93,7 @@ quory = Gitから取得した確定済みコードの本番実行基盤
 - Policyは対象業務の許可、禁止、停止条件を定義する。
 - KnowledgeはIncident、Lesson、Decisionを記録する。一時的な失敗を直ちに恒久ルールへ昇格させない。
 
-identity名だけから責務や権限を推測しない。identityとRoleの対応、Roleの実現方式は `docs/ai/role-routing-index.md` を正本とする。
+Roleの実現方式(誰がどのモデルで、どう起動されるか)は `docs/ai/roles/coordinator.md` を正本とする。起動を決めるのはCoordinatorであり、他のRoleはこれを判断に使わない。
 
 ## Ansible変更の共通ゲート
 
@@ -113,7 +114,7 @@ identity名だけから責務や権限を推測しない。identityとRoleの対
 
 Role間の連携はCoordinatorを起点とするsubagentの起動と、その最終報告で行う。subagentの対話ログは永続しない前提とする。
 
-- 成果物本文と監査証跡は必ずリポジトリ内へ保存する。判断の根拠を最終報告だけに残さない。
+- 成果物本文と監査証跡は必ずリポジトリ内へ保存する。判断の根拠を最終報告だけに残さない。**実質的な証跡は `docs/ai/reviews/<target>/` 配下のファイル**(requirement / plan / implement / review / test_result / audit、該当すれば `docs/ai/adr/`)であり、subagentとのやりとりそのものではない。
 - 報告には対象パス、短い結果、判断、未解決事項を載せる。中間ログや長い引用を報告本文へ貼らない。
 - 受信側は報告の説明だけを信頼せず、指定されたファイルと現在のdiffを読む。
 - 不一致や競合を見つけた場合は勝手に統合せず、停止してCoordinatorへ返す。

@@ -30,7 +30,7 @@ for each fixture, which check fails and why.
 | --- | --- | --- |
 | `clean_baseline/` | Nothing broken | `exit 0`, all three checks OK |
 | `check1_tester_gate_mismatch/` | AC3 / check1 | `exit 1`; `playbooks/sample.yml` says `safe-readonly`, `playbooks/README.md` says `risk-accepted` |
-| `check2_model_effort_mismatch/` | AC3 / check2 | `exit 1`; `.claude/agents/sample.md` says `effort: high`, `docs/ai/role-routing-index.md` says `medium` |
+| `check2_model_effort_mismatch/` | AC3 / check2 | `exit 1`; `.claude/agents/sample.md` says `effort: high`, `docs/ai/roles/coordinator.md` says `medium` |
 | `check3_broken_link/` | AC3 / check3 | `exit 1`; `docs/ai/note.md` links to a file that does not exist |
 | `empty_playbooks/` | AC4 | `exit 2`; `playbooks/` has no `*.yml`, so check1's input set is empty and must error, not PASS |
 

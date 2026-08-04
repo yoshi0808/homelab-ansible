@@ -1,3 +1,3 @@
 # Note (fixture)
 
-See [role routing](role-routing-index.md).
+See [role routing](roles/coordinator.md).

@@ -2,6 +2,8 @@
 
 **Status:** Accepted
 
+> **表の置き場が変わった(2026-08-04)。** `docs/ai/role-routing-index.md` は解体・削除され、「モデル・effort配分」表は `docs/ai/roles/coordinator.md` へ移した。**決定そのもの(値と選定理由)は変えていない。** 以下で同索引を指している箇所は、すべて現在の `docs/ai/roles/coordinator.md` と読み替えること。`scripts/check-doc-consistency.py` の check2 も同じ移設に追随している。
+
 ## Context
 
 `docs/ai/role-routing-index.md`「モデル・effort配分」表は、各Roleに割り当てる`model:`/`effort:`の値を`.claude/agents/<role>.md`のfrontmatterへ固定し、Coordinatorが`subagent_type`で指定すれば配分が自動的に守られる仕組みになっている。表自体は値だけを持ち、値を選んだ根拠は本ADRに置く(索引側は「いま守るべき値」だけを持ち、根拠の経緯は持たない方針。索引の非ゴールは他文書へ広げないことであり、本ADRはその受け皿として新設した)。

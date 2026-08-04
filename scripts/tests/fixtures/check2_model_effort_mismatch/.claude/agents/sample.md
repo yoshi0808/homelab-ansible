@@ -5,5 +5,5 @@ model: sonnet
 effort: high
 ---
 
-fixture本文。この定義は effort: high だが、role-routing-index.md側は
+fixture本文。この定義は effort: high だが、docs/ai/roles/coordinator.md側は
 medium のままなので check2 が不一致を検出するはず。
