@@ -1,0 +1,70 @@
+---
+# tester-gate: check-mode-native — read-only部分(token読取・project/
+# inventory/repositoryの名前解決・API GET・diff計算・レポート保存)は
+# --check の有無にかかわらず常に本実行し、Semaphore APIへの書き込み
+# (POST/PUT)だけを ansible_check_mode でゲートする
+# (roles/semaphore_templates/tasks/main.yml の apply.yml include を参照)。
+# 側ファイル(state.json)は2026-08-04追補(R11)で廃止した — 同定情報は
+# Semaphoreオブジェクト自身の`description`に持つため、読み書きするローカル
+# 状態はもう無い。
+#
+# Testerは実行しない。実ホスト(quory)へは到達できないため検証できない。
+# **ansy(project id=2)のSemaphoreは2026-08-04にAPI動作検証専用として
+# 利用可能になったが、この事実はquoryへの到達可否を変えない** — 要求
+# docs/ai/reviews/semaphore_templates_as_code/2026-08-04_001_requirement.md
+# §8・追補のとおり、quoryでの実地の最初の観測はYoshinobuの実行によって得る。
+#
+# semaphore_templates_setup.yml
+#
+# 目的: Semaphoreの「押せるボタン」の定義をこのリポジトリの正本にする。
+#       roles/semaphore_templates/defaults/main.yml のカタログを、
+#       Semaphore REST API へ冪等にreconcileする(R3)。
+#
+# 使用方法:
+#   確認(必ず先に実行し、差分を読んでから適用する — R6):
+#     ansible-playbook playbooks/semaphore_templates_setup.yml --check
+#   適用(quory向け、既定):
+#     ansible-playbook playbooks/semaphore_templates_setup.yml
+#   ansy向け(検証用。id=4ほか既存templateを変更・削除しないこと):
+#     ansible-playbook playbooks/semaphore_templates_setup.yml --check \
+#       -e semaphore_templates_api_base_url=https://ansy.internal:3000/api \
+#       -e semaphore_templates_project_name=homelab-ansible \
+#       -e semaphore_templates_token_path=~/.semaphore-api-token-ansy
+#
+# 実行元: quory自身(既定)。本playbookは hosts: quory で、Semaphore APIを
+# quory上のlocalhost経由で呼ぶ。ansyからquoryのSemaphoreを操作する経路は
+# 作らない(非ゴール§3、requirement R4「ansy側にtokenを置かない」)。上記の
+# ansy向け実行は、hosts自体は変わらずquoryのまま、`-e`でAPI接続先だけを
+# ansyへ向ける形で行う(ansyがquoryを操作する経路にはならない)。
+#
+# OQ1: 2026-08-04追補により、テンプレート定義のAPI操作についてはansyでの
+# 実測が得られている(エンドポイント形、認証ヘッダ、argumentsの文字列化)。
+# ただし**quoryそのものの実測ではない**。roles/semaphore_templates/tasks/
+# read.yml のGETが最初の到達性・応答形式の確認になり、失敗すればここで
+# 停止する(推測で書き込みへ進まない)。詳細は
+# docs/ai/reviews/semaphore_templates_as_code/2026-08-04_003_implement.md。
+#
+# OQ3(このImplementerの判断、変更なし): 本playbookを起動するSemaphore
+# テンプレート自体は、このカタログに含めない。含めると「自分を実行する
+# ボタンの定義を、自分の実行結果が書き換える」自己参照になり、誤った定義を
+# 適用してしまったときに直す手段が、直したいテンプレートそのものに依存
+# してしまう。このテンプレートの新規作成・以後の編集はUIでの手作業のまま
+# とする(OQ2のtoken発行と同じく、一度きりの人手)。
+#
+# R11/R12/R13(2026-08-04追補): 同定情報はSemaphoreオブジェクト自身の
+# `description`へ埋め込む(R11、旧OQ4を含む「固定project_id」前提は崩れ、
+# 名前解決に置き換えた・R12)。PUTは取得したオブジェクトへ管理フィールドを
+# 上書きしてまるごと送り返す(R13、フルリプレース仕様でも安全)。いずれも
+# ansyでの実測に基づく再設計であり、詳細と自己検証の記録は
+# docs/ai/reviews/semaphore_templates_as_code/2026-08-04_003_implement.md
+# の追補を参照。
+
+- name: Reconcile Semaphore templates from the repo catalog
+  hosts: quory
+  gather_facts: false
+  become: false
+
+  tasks:
+    - name: Load the semaphore_templates catalog and reconcile against the API
+      ansible.builtin.include_role:
+        name: semaphore_templates

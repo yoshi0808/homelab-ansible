@@ -21,6 +21,17 @@ SemaphoreはAnsible playbookをGUIから手動またはschedule実行し、job�
 - `cert_renew.yml`は`quory`から実行するSemaphore向けの変更系playbookで、`ansy`のSemaphore、Proxmox UI、`monnie`のGrafanaへ証明書を配布し、必要なserviceをrestartする。CAの秘密情報は一時領域にだけ展開し、cleanupを行う設計である。
 - `quory`自身のSemaphore証明書更新は、SemaphoreをrestartするためSemaphore jobから実行せず、`cert_renew_quory.yml`をsystemd timerから実行する。制御平面自身を自分で停止させないための分離である。
 
+## ansy の Semaphore(検証用インスタンス、2026-08-04)
+
+**ansy にも Semaphore が動いており、quory とは別インスタンスである。** 素性は**quory のバックアップからの復元**で、quory が VM でないため Semaphore のバックアップが必要になり、その復元手順を ansy で検証した経緯による(Yoshinobu 談、2026-08-04)。そのため project 名・inventory 名・repository 名は quory と同じだが、**id は異なる**(ansy=2 / quory=1)。**id を固定値として扱わない。**
+
+- 接続は `https://ansy.internal:3000`。**HTTPS である**(httpで叩くと400が返る)。証明書は `homelab_cert_renew` が配っている。
+- **2026-08-04 に SSH 鍵を2本(サーバ群向け / github)削除した。** 残るのは `type=none` の1本のみで、inventory と repository はそれを指す。**したがってこのインスタンスは、どのホストへも到達できず、リポジトリを clone することもできない。**
+- この「鍵が無いことによる無害さ」は、**API の実挙動を本番へ触れずに確かめられる**という価値を持つ。実際、2026-08-04 に id の固定値・`arguments` の型・API と DB スキーマの差という3つの誤った前提が、本番へ入る前にここで判明した。
+- **鍵を再登録しない。** 登録した瞬間にこの性質は失われる。
+
+**quory 側の鍵を、ansy と同じ判断で消してはならない。** Semaphore は inventory の `ssh_key_id` を通じて ansible へSSH鍵を渡すため、quory 側の鍵は本番の認証経路そのものでありうる。ansy で消して無害だったのは、ansy が本番ジョブを走らせないからにすぎない。
+
 ## ジョブ結果の読み取り(2026-07-27 実測)
 
 Semaphoreのジョブ結果はSQLite(`semaphore.db`)にあり、read-onlyのSELECTで読める。AIが読む経路は名前付き操作 `homelab-semaphore-query`(`recovery_exec` が配備)に限る。

@@ -1,0 +1,390 @@
+---
+# Semaphoreテンプレート定義カタログ。
+#
+# **正本はこのファイル。** Semaphore UI上のテンプレートは、このカタログを
+# roles/semaphore_templates/tasks/ がSemaphore REST API へreconcileした結果
+# である。UIでの手編集は次回適用時に上書きされる(R2「人が命名するとドリフト
+# の元になる」)。
+#
+# 転記元: docs/ai/reviews/semaphore_templates_as_code/2026-08-04_002_observed_templates.md
+# (2026-08-04, `semaphore-query template-list` による read-only 観測)。
+#
+# **観測データは34行だった。** requirement文中の「36本」という記述と、実際に
+# 読めた project__template の行数(34、id 1-36のうち13と18が欠番)は食い違う。
+# SQLiteのAUTOINCREMENTは削除後のidを再利用しないため、13と18はこの観測より
+# 前に削除された2件のテンプレートの痕跡である可能性が高いが、Semaphore側の
+# 削除履歴を見る手段が無く確認できていない(未確認。
+# docs/ai/reviews/semaphore_templates_as_code/2026-08-04_003_implement.md参照)。
+# このカタログは実際に観測できた34件だけを転記し、存在しない2件を作らない。
+#
+# **2026-08-04追補(R1の読み方が1点変わった):** 「実スキーマに存在する列だけを
+# 扱う」は、project__templateのDBスキーマではなく**Semaphore APIの応答形式**を
+# 指すものとして読む。ansy(project id=2)での実測で、APIは`environment_id` /
+# `environment_ids`という、DBスキーマ実測(2026-08-04時点)には無い列も返す
+# ことが分かったため。このカタログ自体は引き続きplaybook/class/variant/
+# title/arguments/survey_vars/class_reasonだけを持ち、`environment_id`等を
+# 新しいカタログフィールドとして追加してはいない — R13の「取得→マージ→送信」
+# (roles/semaphore_templates/tasks/apply.yml)が、カタログが関知しない列を
+# 観測値のまま素通しするため、カタログ側に追加の列を持たせる必要が無い。
+#
+# --- class の決め方(2026-08-04 Yoshinobu確認) -----------------------------
+#
+# **軸は「押したときにサービスが受ける影響の大きさ」ひとつである。**
+# 元に戻しやすいかどうかは決め手にしない — 戻すのが大変でも、サービスが
+# 止まらないなら SEMI-SAFE である(実例: codex update check)。
+#
+#   SAFE       押しても本番の状態が変わらない。観測・診断・シミュレーション
+#   SEMI-SAFE  状態は変わるが、サービスへの影響が小さい。大きくトラブらない
+#   UN-SAFE    サービスに大きく影響しうる。停止・再起動・移行・パッチ適用
+#   SANDBOX    対象が sandbox に固定されており、本番へ触れない
+#
+# **この class は `tester-gate` とは別の軸であり、一致検査はしない。**
+# `tester-gate` は「Testerがどう実行してよいか」を表す。両者が食い違う
+# エントリには `class_reason` を1行持たせる(R8)。
+#
+# 新しいplaybookを足す人へ: このカタログにエントリを足す差分そのものが、
+# 分類の提案である。**分類の承認はcommitの承認、ボタンになるのはreconcileを
+# 流したとき**の2段階で、どちらもYoshinobuが行う。
+#
+# --- フィールドの意味 -----------------------------------------------------
+# playbook:     playbooks/*.yml の相対パス(必須)
+# class:        SAFE / SEMI-SAFE / UN-SAFE / SANDBOX のいずれか(必須)
+# variant:      同じplaybookに複数テンプレートがあるときのラベル。
+#               playbook単位で一意であること(reconcileの同定キー、R3)
+# title:        表題の上書き。省略時は playbook のbasenameから機械変換する
+#               (.yml除去、_を空白へ、先頭大文字。R2)
+# arguments:    CLI引数の配列。既定は空
+# survey_vars:  SemaphoreのSurvey Variables定義。観測値をそのまま転記
+# class_reason: class と tester-gate が食い違うエントリにだけ持たせる1行理由
+#               (R8。一致検査はしない)
+# legacy_name:  2026-08-04観測時点でSemaphore上にあった手作業の名前。
+#               R1のスキーマ表には無いフィールドだが、reconcile role の
+#               ブートストラップ照合(R3/R11)にだけ使う内部データで、現在
+#               存在しない9件(R7で新規追加)には持たせない。存在する34件は
+#               このフィールドで初回だけ既存テンプレートと対応付けられる。
+#               2026-08-04追補(R11): 以後の追跡はSemaphoreオブジェクト
+#               自身の`description`列に書き込む識別マーカーで行う(側ファイル
+#               を廃止した)。初回適用でmarkerが書き込まれた後は、この
+#               フィールドは参照されなくなる(vestigialだが監査証跡として残す)。
+
+semaphore_templates_catalog:
+  # --- 監視・healthcheck系(既存、単一template) ---------------------------
+  - playbook: playbooks/proxmox_healthcheck.yml
+    class: SAFE
+    legacy_name: "SAFE: Proxmox healthcheck"
+
+  # R2の実例そのもの: ファイル名(radius)と対象ホスト名(Authy)が食い違うため
+  # title上書きを使う。
+  - playbook: playbooks/radius_healthcheck.yml
+    class: SAFE
+    title: "Authy healthcheck"
+    legacy_name: "SAFE: Authy healthcheck"
+
+  - playbook: playbooks/monitoring_healthcheck.yml
+    class: SAFE
+    legacy_name: "SAFE: Monitoring healthcheck"
+
+  - playbook: playbooks/proxmox_hw_check.yml
+    class: SAFE
+    legacy_name: "SAFE: Proxmox hardware check"
+
+  - playbook: playbooks/ubuntu_nightly.yml
+    class: SEMI-SAFE
+    legacy_name: "SEMI-SAFE: Ubuntu nightly reboot if required"
+
+  # R8既知の食い違い1/2: apt-get updateでパッケージリストを更新するため
+  # 厳密にはread-onlyではないが、パッケージ状態は変わらない
+  # (tester-gate: safe-readonly)。2026-08-04 Yoshinobu判断済み。
+  # 現在のSemaphore上はSEMI-SAFEだが、このカタログではSAFEへ是正する
+  # (次回適用でclassが変わる — R6の差分に現れる)。
+  - playbook: playbooks/proxmox_patch_dryrun.yml
+    class: SAFE
+    class_reason: >-
+      apt-get updateでパッケージリストを更新するため厳密にはread-onlyでは
+      ないが、パッケージ状態は変わらない(tester-gate: safe-readonly)。
+      Policy §7「分類名から副作用ゼロを推定しない」の範囲内。R8既知の食い違い
+    legacy_name: "SEMI-SAFE: Proxmox patch dry-run"
+
+  # --- Proxmoxパッチ・退避系 ------------------------------------------------
+  - playbook: playbooks/proxmox_patch_weekly_full.yml
+    class: UN-SAFE
+    legacy_name: "UN-SAFE:Proxmox Weekly Full Patch"
+
+  - playbook: playbooks/proxmox_patch_apply_node.yml
+    class: UN-SAFE
+    legacy_name: "UN-SAFE:Proxmox patch apply (Manual)"
+    survey_vars:
+      - { name: target_node, title: target_node, required: true, type: enum, description: "pve1 or pve2",
+          values: [{ name: pve1, value: pve1 }, { name: pve2, value: pve2 }] }
+      - { name: proxmox_patch_apply_mode, title: proxmox_patch_apply_mode, required: true, default_value: manual }
+      - { name: proxmox_patch_apply_manual_confirm, title: proxmox_patch_apply_manual_confirm, required: true, type: enum,
+          default_value: MAJOR_UPGRADE_DETECTED,
+          values: [{ name: MAINTENANCE_REQUIRED, value: MAINTENANCE_REQUIRED }, { name: MAJOR_UPGRADE_DETECTED, value: MAJOR_UPGRADE_DETECTED }] }
+
+  - playbook: playbooks/proxmox_evacuate_node.yml
+    class: UN-SAFE
+    legacy_name: "UN-SAFE:Proxmox evacuate node(Manual)"
+    survey_vars:
+      - { name: target_node, title: target_node, required: true, type: enum,
+          values: [{ name: pve1, value: pve1 }, { name: pve2, value: pve2 }] }
+
+  - playbook: playbooks/proxmox_restore_vm_placement.yml
+    class: UN-SAFE
+    legacy_name: "UN-SAFE:Proxmox restore vm placement(Manual)"
+    survey_vars:
+      - { name: target_node, title: target_node, required: true, type: enum,
+          values: [{ name: pve1, value: pve1 }, { name: pve2, value: pve2 }] }
+
+  # --- 証明書・CA ------------------------------------------------------------
+  - playbook: playbooks/cert_renew.yml
+    class: SEMI-SAFE
+    legacy_name: "SEMI-SAFE:Cert_renew (only on Quory)"
+    survey_vars:
+      - { name: force_renew, title: force_renew, default_value: "true" }
+
+  - playbook: playbooks/sophos_trim.yml
+    class: SEMI-SAFE
+    legacy_name: "SEMI-SAFE:Sophos trim"
+
+  - playbook: playbooks/cloudkey_cert_deploy.yml
+    class: SEMI-SAFE
+    legacy_name: "SEMI-SAFE:Cloudkey_cert_deploy"
+
+  # R8既知の食い違い2/2: 復元先VMIDは999に固定(assertで他の値を拒否)、
+  # NIC切断で起動し判定後に破棄する。既存VMには影響しない
+  # (tester-gate: risk-accepted)。2026-08-04 Yoshinobu判断済み。classは既に
+  # SAFEで一致しているため、ここではclass_reasonだけを持たせる(class自体は
+  # 変えない)。
+  - playbook: playbooks/proxmox_backup_restore_verify.yml
+    class: SAFE
+    class_reason: >-
+      復元先VMIDは999に固定(assertで他の値を拒否)、NIC切断で起動し判定後に
+      破棄する。既存VMには影響しない(tester-gate: risk-accepted)。R8既知の食い違い
+    legacy_name: "SAFE:Proxmox backup restore verify"
+
+  - playbook: playbooks/unifi_backup_fetch.yml
+    class: SEMI-SAFE
+    legacy_name: "SEMI-SAFE:Unifi backup fetch"
+
+  - playbook: playbooks/proxmox_snapshot_check.yml
+    class: SAFE
+    legacy_name: "SAFE:Proxmox snapshot check"
+
+  - playbook: playbooks/time_sync_check.yml
+    class: SAFE
+    legacy_name: "SAFE: Time sync check"
+
+  # --- 自律復旧: 承認された手動実行(apply) / sandbox の2template ------------
+  # 同じplaybookを共有する2テンプレートは、class(UN-SAFE/SANDBOX)に加えて
+  # variantで一意化する(R3の同定キー)。
+  - playbook: playbooks/recovery_ha_failover.yml
+    class: UN-SAFE
+    variant: apply
+    legacy_name: "UN-SAFE:Recovery ha failover(Manual)"
+    survey_vars:
+      - { name: target, title: target, required: true, type: enum,
+          values: [{ name: authy, value: authy }, { name: sophos-fw, value: sophos-fw }] }
+
+  - playbook: playbooks/recovery_service_restart.yml
+    class: UN-SAFE
+    variant: apply
+    legacy_name: "UN-SAFE:Recovery service restart(Manual)"
+    survey_vars:
+      - { name: target, title: target, required: true, type: enum,
+          values: [{ name: authy, value: authy }, { name: monnie, value: monnie }] }
+
+  - playbook: playbooks/recovery_vm_reboot.yml
+    class: UN-SAFE
+    variant: apply
+    legacy_name: "UN-SAFE:Recovery vm reboot(Manual)"
+    survey_vars:
+      - { name: target, title: target, required: true, type: enum,
+          values: [{ name: authy, value: authy }, { name: monnie, value: monnie }, { name: sophos-fw, value: sophos-fw }] }
+
+  - playbook: playbooks/codex_update_check.yml
+    class: SEMI-SAFE
+    legacy_name: "SEMI-SAFE:Codex update check(Only on Quory)"
+
+  # --- Ubuntu VM full upgrade: dry-run / apply の2template -------------------
+  - playbook: playbooks/ubuntu_vm_full_upgrade.yml
+    class: SEMI-SAFE
+    variant: dry-run
+    legacy_name: "SEMI-SAFE:Ubuntu vm full upgrade(dry_run=true)"
+    survey_vars:
+      - { name: dry_run, title: dry_run, required: true, description: "アップグレードせずに情報収集を行います", default_value: "true" }
+
+  - playbook: playbooks/ubuntu_vm_full_upgrade.yml
+    class: UN-SAFE
+    variant: apply
+    legacy_name: "UN-SAFE:Ubuntu vm full upgrade(Manual)"
+    survey_vars:
+      - { name: dry_run, title: dry_run, required: true, description: "実際にアップグレードを適用します", default_value: "false" }
+      - { name: node, title: node, required: true, type: enum, description: "対象ノードを指定します",
+          values: [{ name: ansy, value: ansy }, { name: monnie, value: monnie }, { name: authy, value: authy }, { name: quory, value: quory }] }
+      - { name: ubuntu_vm_full_upgrade_confirm, title: ubuntu_vm_full_upgrade_confirm, required: true, description: "アップグレードの対象ノードを指定します" }
+
+  # --- Prometheus update/rollback: apply / check / rollback の3template -----
+  # AC3の実例そのもの(variant: rollback)。titleは3件とも省略時の機械変換
+  # ("Prometheus update check")に揃う — 手作業では"Prometheus update"と
+  # "Prometheus update check"の2表記が混在していたのが解消される。
+  - playbook: playbooks/prometheus_update_check.yml
+    class: UN-SAFE
+    variant: apply
+    legacy_name: "UN-SAFE:Prometheus update(Manual)"
+    survey_vars:
+      - { name: dry_run, title: dry_run, required: true, description: update適用, default_value: "false" }
+
+  - playbook: playbooks/prometheus_update_check.yml
+    class: SAFE
+    variant: check
+    legacy_name: "SAFE:Prometheus update check"
+    survey_vars:
+      - { name: dry_run, title: dry_run, required: true, description: チェックのみ, default_value: "true" }
+
+  # legacy_nameの "UNSAFE:" は表記ゆれ。UN-SAFE として扱う(依頼文の指示どおり)。
+  - playbook: playbooks/prometheus_update_check.yml
+    class: UN-SAFE
+    variant: rollback
+    legacy_name: "UNSAFE:Prometheus rollback(Manual)"
+    survey_vars:
+      - { name: dry_run, title: dry_run, required: true, description: ロールバック実行, default_value: "false" }
+      - { name: rollback, title: rollback, description: ロールバック指定, default_value: "true" }
+      - { name: rollback_to, title: rollback_to, description: 指定バージョンへのRollback }
+
+  - playbook: playbooks/recovery_monitoring_check.yml
+    class: SAFE
+    legacy_name: "SAFE:Recovery monitoring check"
+
+  # --- sandbox版(recovery_*系のapplyと同じplaybookを共有) -------------------
+  - playbook: playbooks/recovery_vm_reboot.yml
+    class: SANDBOX
+    variant: sandbox
+    legacy_name: "SANDBOX: Recovery vm reboot"
+    survey_vars:
+      - { name: target, title: target, type: enum, default_value: sandbox, values: [{ name: sandbox, value: sandbox }] }
+
+  - playbook: playbooks/recovery_ha_failover.yml
+    class: SANDBOX
+    variant: sandbox
+    legacy_name: "SANDBOX: Recovery ha failover (check)"
+    survey_vars:
+      - { name: target, title: target, type: enum, default_value: sandbox, values: [{ name: sandbox, value: sandbox }] }
+
+  - playbook: playbooks/recovery_service_restart.yml
+    class: SANDBOX
+    variant: sandbox
+    legacy_name: "SANDBOX: Recovery service restart"
+    survey_vars:
+      - { name: target, title: target, type: enum, default_value: sandbox, values: [{ name: sandbox, value: sandbox }] }
+
+  - playbook: playbooks/deployment_drift_check.yml
+    class: SAFE
+    legacy_name: "SAFE: Deployment drift check"
+
+  # --- setup系: 既にtemplateがある3本(R7の対象外、既存の転記) ---------------
+  # このエントリだけ、転記ではなく **意図的に既存値を捨てている**
+  # (Coordinator判断、2026-08-04)。観測時点の実物は arguments: ["-l quory"]
+  # だったが、
+  #   1. `-l quory` は無効果である。playbookのplayが `hosts: quory` 単独であり、
+  #      `--list-hosts` で付けても付けなくても hosts(1): quory になることを実測した
+  #   2. 2026-08-04にCoordinatorの誤った助言で当日設定されたものであり、
+  #      積み上がった運用ではない
+  #   3. 他の全テンプレートは arguments: [] で、パラメータはsurvey側に持つ。
+  #      これがこの環境の既存の流儀である
+  # したがって空へ揃える。転記の原則の例外はこの1件のみで、他は観測値のまま。
+  - playbook: playbooks/incident_investigate_setup.yml
+    class: SEMI-SAFE
+    legacy_name: "SEMI-SAFE:Incident investigate setup"
+
+  - playbook: playbooks/recovery_exec_setup.yml
+    class: SEMI-SAFE
+    legacy_name: "SEMI-SAFE:Recovery exec setup"
+
+  - playbook: playbooks/dev_investigate_setup.yml
+    class: SEMI-SAFE
+    legacy_name: "SEMI-SAFE:Dev investigate setup"
+
+  # --- setup系: R7で新たにボタンを与える9本 ----------------------------------
+  # 引数は空、対象は各playbookの hosts: に委ねる(R7。2026-08-04に -l を巡る
+  # 混乱があったため)。classは既存3本のsetup系templateに倣いSEMI-SAFEで揃える
+  # (tester-gateは全9本ともcheck-mode-native — configure/deployするが破壊的
+  # ではない、という既存3本と同じ性質のため。R8のとおりclass≠tester-gateの
+  # 一致検査はしないが、選定の理由としてここに書く)。
+  - playbook: playbooks/alloy_setup.yml
+    class: SEMI-SAFE
+  - playbook: playbooks/incident_capture_setup.yml
+    class: SEMI-SAFE
+  - playbook: playbooks/incident_inspect_setup.yml
+    class: SEMI-SAFE
+  - playbook: playbooks/recovery_io_setup.yml
+    class: SEMI-SAFE
+  - playbook: playbooks/recovery_probe_sandbox_setup.yml
+    class: SEMI-SAFE
+  - playbook: playbooks/recovery_probe_setup.yml
+    class: SEMI-SAFE
+  - playbook: playbooks/recovery_push_drill_setup.yml
+    class: SEMI-SAFE
+  - playbook: playbooks/recovery_push_setup.yml
+    class: SEMI-SAFE
+  - playbook: playbooks/worktree_sync_setup.yml
+    class: SEMI-SAFE
+
+# --- API接続設定 -------------------------------------------------------------
+# 2026-08-04追補: ansy の Semaphore(project id=2)で実測できたことにより、
+# OQ1は「テンプレート定義のAPI操作」に関する範囲では解消した(§8を参照)。
+# ただしこれは quory 向けの値そのものを確定させたわけではない —
+# ansyとquoryは別インスタンスであり、この既定値は**quory(本番)向けの
+# 未確認の仮定のまま**である。実測できたのはURLのスキーム要件
+# (HTTPSでないと400。ansyで実測)と、エンドポイント・認証ヘッダ・
+# ボディ形状(下記各taskのコメント参照)。quoryが同じHTTPS要件を持つかは
+# 未確認だが、姉妹インスタンスであることから合わせた(以前のhttp仮定より
+# 確度は上がったが、実測ではない)。誤っていれば
+# roles/semaphore_templates/tasks/read.yml の最初のGETが失敗し、推測で
+# 書き込みへ進まず停止する。
+#
+# **接続先はホスト名で書く。IPアドレスにしない。** このリポジトリは証明書に
+# IPのSANを一切入れない(`roles/homelab_cert_renew/defaults/main.yml` の
+# `san_ip: []`)ため、IPで接続すると `validate_certs: true` のもとで
+# ホスト名検証が必ず失敗する。使う名前は inventory がそのホストへ与えている
+# 名前(`inventories/homelab/hosts.yml` の `ansible_host`)に揃える。
+#
+# ansy(検証用)へ向けるときの上書き例:
+#   -e semaphore_templates_api_base_url=https://ansy.internal:3000/api
+#   -e semaphore_templates_project_name=homelab-ansible
+#   -e semaphore_templates_token_path=~/.semaphore-api-token-ansy
+semaphore_templates_api_base_url: "https://quory.internal:3000/api"
+semaphore_templates_api_validate_certs: true
+
+# R12(2026-08-04追補): project_id / inventory_id / repository_id は固定値を
+# 持たない。ansyで project_id=2, quoryで project_id=1 と実測され(旧OQ4の
+# 「全て1」という前提が崩れた)、固定値では通用しないことが確定したため。
+# 名前で解決する(roles/semaphore_templates/tasks/resolve.yml、
+# GET /api/projects → GET /api/project/{id}/inventory → .../repositories)。
+# 名前そのものはこのhomelabで安定していると仮定した既定値であり、
+# ansyでの実測は project_name=homelab-ansible / inventory_name=homelab /
+# repository_name=homelab-ansible。**quoryが同じ名前を使っているかは
+# 未確認**(read.yml以前のresolve.ymlが失敗すれば、ここでも推測で先に
+# 進まず停止する)。
+semaphore_templates_project_name: homelab-ansible
+semaphore_templates_inventory_name: homelab
+semaphore_templates_repository_name: homelab-ansible
+semaphore_templates_app: ansible
+
+# --- tokenの置き場(R4) --------------------------------------------------------
+# トークンはrepoに置かない。quory上のroot専用ファイルから読む
+# (roles/recovery_push の push-key と同じ /etc/homelab-recovery/ 配下の
+# 慣例に倣う)。読めない・空のときは推測せず停止する(R4/AC6)。
+# ansy検証時は `-e semaphore_templates_token_path=~/.semaphore-api-token-ansy`
+# で上書きする(root所有0600のquory向けチェックは通らないファイルなので、
+# ansyでの実測はこのrole経由ではなく別途curl等で行うことを想定している —
+# 詳細はimplement記録の追補を参照)。
+semaphore_templates_token_path: /etc/homelab-recovery/semaphore-templates-api-token
+
+# R11(2026-08-04追補): 同定情報の永続はSemaphoreオブジェクト自身の
+# `description`列に持たせる(playbook_state.json等の側ファイルは廃止)。
+# 側ファイルが失われても、Semaphoreへ問い合わせれば同定情報自体が返ってくる
+# ため、Critical #1(state file喪失時の重複作成)の構造そのものが無くなる。
+# ここに置く変数は無い(state fileが要らなくなったため)。
+
+# レポート保存先(deployment_drift_checkと同じ reports_base_dir 配下)
+semaphore_templates_report_dir: "{{ reports_base_dir }}/semaphore-templates"

@@ -1,0 +1,103 @@
+---
+# R3: reconcile role。実行順序が安全境界そのもの — 書き込み(apply.yml)は
+# 読み取り(token/resolve/read/reconcile)がすべて終わり、diffが報告された後
+# にしか走らない。OQ1の指示(まず読み取り系だけで到達性と応答形式を確かめて
+# から書き込みへ進む)をtaskの並び自体で強制する。
+#
+# 2026-08-04追補: state.ymlは廃止した(R11 — 側ファイルによる同定を、
+# Semaphoreオブジェクト自身の`description`に置き換えたため、読み込む
+# ローカル状態が無くなった)。resolve.ymlを新設した(R12 — project_id等の
+# 名前解決)。
+#
+# 2026-08-04追補2(Tester `2026-08-04_005_test_result.md` §4): このrole最初の
+# API呼び出し(resolve.yml)からapply.ymlまでをblock/rescueで包んでいる。
+# 目的はTLS証明書検証エラーを分かりやすくすること**だけ**であり、
+# `semaphore_templates_api_validate_certs`の既定値(true)を弱める意図は
+# 無い。
+#
+# **rescueの文面で原因を断定しない。** 証明書検証の失敗はホスト名/SAN不一致・
+# KeyUsage拡張の欠如・期限切れ・信頼チェーンの欠落のいずれでも起こり、Pythonの
+# sslモジュールはすべてを同じ`certificate verify failed`の接頭辞で報告する。
+# 読み手を、Pythonが返す具体的な理由文言(`_semaphore_templates_scrubbed_failure`
+# に含まれる)へ誘導する。
+#
+# **rescue内のtoken漏えいに注意して書いてある**: `no_log: true`が付いた
+# taskが失敗しても、コンソール出力は隠されるが`ansible_failed_result.msg`
+# 自体はrescueブロック内から読める(実測確認済み — no_logはコンソール表示
+# を隠すだけで、rescue変数までは隠さない)。このrole内のuri taskの失敗
+# メッセージにAuthorizationヘッダの値が含まれることは通常想定しにくい
+# (TLSハンドシェイク失敗はHTTPリクエスト送信より前に起きる)が、
+# 2026-08-04にTesterが`curl -v`でtokenを対話ログへ露出させた実インシデント
+# (docs/ai/memory/incidents/2026-08-04_ansy-semaphore-api-token-exposed-in-transcript.md)
+# を踏まえ、**万一含まれていても表示前に確実に取り除く**ため、rescue内で
+# 表示するメッセージは必ずtoken文字列を`regex_replace`で置換してから出す。
+
+- name: Load the Semaphore API token (fails closed if missing/unreadable — R4/AC6)
+  ansible.builtin.import_tasks: token.yml
+
+- name: Resolve, read, reconcile, report, and (optionally) apply
+  block:
+    - name: Resolve project_id / inventory_id / repository_id by name (R12)
+      ansible.builtin.import_tasks: resolve.yml
+
+    - name: Read the current templates from the Semaphore API (read-only — OQ1)
+      ansible.builtin.import_tasks: read.yml
+
+    - name: Compute the diff between the catalog and the observed state (R3/R11)
+      ansible.builtin.import_tasks: reconcile.yml
+
+    - name: Report the diff (always runs, even under --check — R6/AC2)
+      ansible.builtin.import_tasks: report.yml
+
+    - name: Apply create/update requests (skipped under --check — AC1/AC2)
+      ansible.builtin.import_tasks: apply.yml
+      when: not ansible_check_mode
+
+  rescue:
+    - name: Build a token-scrubbed copy of the failure message (defense in depth)
+      ansible.builtin.set_fact:
+        _semaphore_templates_scrubbed_failure: >-
+          {{ (ansible_failed_result.msg | default('(取得できず)'))
+             | regex_replace((semaphore_templates_token | regex_escape), '***REDACTED-TOKEN***')
+             if (semaphore_templates_token | default('') | length) > 0
+             else (ansible_failed_result.msg | default('(取得できず)')) }}
+      no_log: true
+
+    - name: Detect a TLS certificate verification failure and explain it (does not weaken validate_certs)
+      ansible.builtin.fail:
+        msg: >-
+          Semaphore APIへのHTTPS接続で証明書検証に失敗しました。
+          「元のエラー」に含まれる具体的な理由文言(コロンの後ろ)を読んで
+          原因を特定してください — 証明書検証の失敗は複数の独立した原因を
+          同じ接頭辞("certificate verify failed")で報告するため、
+          このメッセージだけでは原因を1つに決め付けられません。
+          既知の原因の例(いずれか1つとは限らない):
+          (a) 接続先のホスト名/IPが証明書のSAN(Subject Alternative Name)
+          と一致しない — 例えばIPアドレスで接続すると、このrepoの証明書は
+          IPのSANを持たない方針(`roles/homelab_cert_renew/defaults/main.yml`
+          の全エントリが`san_ip: []`)のため必ず失敗する。
+          (b) CA証明書にKeyUsage拡張が無い(2026-08-04にTesterがansyで
+          実際に踏んだ原因。role実行環境のPython sslモジュールはcurlより
+          厳格に検証する)。
+          (c) 証明書の期限切れ、信頼チェーンの欠落など、その他の一般的な
+          TLS trust issue。
+          いずれもrole自体の不具合ではなくPKI証明書・接続設定側の事実であり、
+          この役割はここで停止する以外の対応をしない。恒久対応は原因に応じて
+          証明書側(homelab_cert_renew)または接続先設定側(defaults/main.yml
+          のapi_base_url)で行う。応急には
+          `-e semaphore_templates_api_validate_certs=false` で一時的に検証を
+          無効化できるが、既定値(true)は変更していない — 判断根拠は
+          docs/ai/reviews/semaphore_templates_as_code/2026-08-04_003_implement.md
+          の追補を参照。
+          元のエラー(task: {{ ansible_failed_task.name | default('不明') }}):
+          {{ _semaphore_templates_scrubbed_failure }}
+      when: >-
+        'certificate verify failed' in _semaphore_templates_scrubbed_failure
+        or 'CERTIFICATE_VERIFY_FAILED' in _semaphore_templates_scrubbed_failure
+
+    - name: Re-raise the original failure unchanged (not a TLS verification failure)
+      ansible.builtin.fail:
+        msg: >-
+          semaphore_templates task失敗
+          (task: {{ ansible_failed_task.name | default('不明') }}):
+          {{ _semaphore_templates_scrubbed_failure }}

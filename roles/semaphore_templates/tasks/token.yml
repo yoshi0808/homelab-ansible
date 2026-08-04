@@ -1,0 +1,40 @@
+---
+# R4: tokenはrepoに置かず、quory上のroot専用ファイルから読む。
+# AC6: 読めない(存在しない/root所有0600でない/空)ときは、推測や代替経路
+# には回らず、明確なメッセージで停止する(終了コード非ゼロ)。
+
+- name: Stat the Semaphore API token file
+  ansible.builtin.stat:
+    path: "{{ semaphore_templates_token_path }}"
+  register: _semaphore_templates_token_stat
+  become: true
+  check_mode: false  # safe-readonly: stat自体は状態を変えない
+
+- name: Fail closed if the token file is missing, not root-owned, or not 0600 (R4/AC6)
+  ansible.builtin.fail:
+    msg: >-
+      Semaphore APIトークンファイル {{ semaphore_templates_token_path }} が
+      読めません(存在しない/root所有でない/モードが0600でない)。
+      推測や代替経路には回らず停止します(R4)。
+  when: >-
+    not (_semaphore_templates_token_stat.stat.exists | default(false))
+    or (_semaphore_templates_token_stat.stat.pw_name | default('')) != 'root'
+    or (_semaphore_templates_token_stat.stat.mode | default('')) != '0600'
+
+- name: Read the Semaphore API token
+  ansible.builtin.slurp:
+    src: "{{ semaphore_templates_token_path }}"
+  register: _semaphore_templates_token_raw
+  become: true
+  no_log: true
+  check_mode: false  # safe-readonly: slurpも状態を変えない
+
+- name: Set the token fact (never logged — AC8)
+  ansible.builtin.set_fact:
+    semaphore_templates_token: "{{ _semaphore_templates_token_raw.content | b64decode | trim }}"
+  no_log: true
+
+- name: Fail closed if the token file was empty (R4/AC6)
+  ansible.builtin.fail:
+    msg: "Semaphore APIトークンファイル {{ semaphore_templates_token_path }} が空です。停止します(R4)。"
+  when: (semaphore_templates_token | length) == 0

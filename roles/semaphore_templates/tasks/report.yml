@@ -1,0 +1,81 @@
+---
+# R6/AC2: 新規・変更(前後つき)・定義に無い既存の3分類を、常に(--checkでも
+# 通常実行でも)出力する。これがYoshinobuの判断材料であり
+# 「一次情報 -> 検証意見 -> 判断」の一次情報にあたる(requirement §R6)。
+
+- name: Freeze the report timestamp (JST; repo規約でUTC/リテラルZは使わない)
+  ansible.builtin.set_fact:
+    semaphore_templates_ts_iso: "{{ lookup('pipe', \"TZ='Asia/Tokyo' date '+%Y-%m-%dT%H:%M:%S+09:00'\") }}"
+    semaphore_templates_ts: "{{ lookup('pipe', \"TZ='Asia/Tokyo' date '+%Y%m%d_%H%M%S+0900'\") }}"
+
+- name: Show the diff summary
+  ansible.builtin.debug:
+    msg:
+      - "mode           : {{ 'check (適用なし)' if ansible_check_mode else 'apply' }}"
+      - "新規作成       : {{ semaphore_templates_diff.new | length }} 件"
+      - "変更           : {{ semaphore_templates_diff.changed | length }} 件"
+      - "無変更         : {{ semaphore_templates_diff.unchanged | length }} 件"
+      - "定義に無い既存 : {{ semaphore_templates_diff.orphans | length }} 件(削除しない — R5)"
+
+- name: Show new template details
+  ansible.builtin.debug:
+    msg: "+ {{ item.key }} -> {{ item.target.name }}{{ ' [' ~ item.note ~ ']' if item.note is defined else '' }}"
+  loop: "{{ semaphore_templates_diff.new }}"
+  loop_control:
+    label: "{{ item.key }}"
+
+- name: Show changed template details (before -> after)
+  ansible.builtin.debug:
+    msg:
+      - "~ {{ item.key }} (id={{ item.id }})"
+      - "  name  : {{ item.before.name }}  ->  {{ item.after.name }}"
+      - "  args  : {{ item.before.arguments }}  ->  {{ item.after.arguments }}"
+      - "  survey: {{ item.before.survey_vars }}  ->  {{ item.after.survey_vars }}"
+      - "  desc  : {{ item.before.description | default('(なし)') }}  ->  {{ item.after.description }}"
+  loop: "{{ semaphore_templates_diff.changed }}"
+  loop_control:
+    label: "{{ item.key }}"
+
+- name: Show orphaned templates (defined nowhere in the catalog — R5, report only)
+  ansible.builtin.debug:
+    msg: "? id={{ item.id }} name={{ item.name }} playbook={{ item.playbook }} (このカタログに定義が無い。削除しない)"
+  loop: "{{ semaphore_templates_diff.orphans }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Ensure the report directory exists
+  ansible.builtin.file:
+    path: "{{ semaphore_templates_report_dir }}"
+    state: directory
+    mode: "0755"
+  become: false
+  check_mode: false
+  # safe-readonly: レポート保存は読み取り診断の一部であり、--checkでも実行する
+  # (deployment_drift_check/tasks/report.ymlと同じ扱い)
+
+- name: Save the diff report
+  ansible.builtin.copy:
+    content: "{{ semaphore_templates_report | to_nice_json }}"
+    dest: "{{ semaphore_templates_report_dir }}/{{ semaphore_templates_ts }}.json"
+    mode: "0644"
+  vars:
+    semaphore_templates_report:
+      generated_at: "{{ semaphore_templates_ts_iso }}"
+      mode: "{{ 'check' if ansible_check_mode else 'apply' }}"
+      new: "{{ semaphore_templates_diff.new }}"
+      changed: "{{ semaphore_templates_diff.changed }}"
+      unchanged_count: "{{ semaphore_templates_diff.unchanged | length }}"
+      orphans: "{{ semaphore_templates_diff.orphans }}"
+  become: false
+  check_mode: false
+  # safe-readonly: 上と同じ理由
+
+- name: Publish the latest report under a stable name
+  ansible.builtin.copy:
+    src: "{{ semaphore_templates_report_dir }}/{{ semaphore_templates_ts }}.json"
+    dest: "{{ semaphore_templates_report_dir }}/latest.json"
+    remote_src: true
+    mode: "0644"
+  become: false
+  check_mode: false
+  # safe-readonly: 上と同じ理由

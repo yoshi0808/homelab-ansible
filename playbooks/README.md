@@ -105,6 +105,7 @@ playbook の入口を置く。処理本体は原則として `roles/` に実装�
 
 | Playbook | 対象 | 用途 | `tester-gate` | 主な role / 実装 |
 | --- | --- | --- | --- | --- |
+| [`semaphore_templates_setup.yml`](semaphore_templates_setup.yml) | `quory` | Semaphoreの「押せるボタン」定義(名前・playbook・引数・survey vars)をリポジトリのカタログからSemaphore REST APIへ冪等にreconcile。削除はしない | `check-mode-native` | `semaphore_templates` |
 | [`systemd_timers.yml`](systemd_timers.yml) | `target_hosts`（既定`control_nodes`） | Ansible定期実行用systemd timerを管理 | `check-mode-native` | `systemd_timers` |
 | [`unifi_backup_fetch.yml`](unifi_backup_fetch.yml) | `pve1`（CloudKeyへ接続） | CloudKeyのUniFiバックアップを取得・保存 | `risk-accepted` | `unifi_backup_fetch` |
 | [`test_ca_env.yml`](test_ca_env.yml) | `localhost` | CA関連環境変数のローカル表示テスト | `safe-readonly` | playbook内tasks |

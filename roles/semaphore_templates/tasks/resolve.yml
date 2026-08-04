@@ -1,0 +1,91 @@
+---
+# R12(2026-08-04追補): project_id / inventory_id / repository_id を固定値
+# ではなく名前で解決する。ansy(project id=2)とquory(project id=1)で
+# 値が異なることが実測で確定したため(旧OQ4の「全て1」という前提は崩れた)。
+#
+# 未確認: 各エンドポイントが単一オブジェクトを返すか配列を返すかは、
+# ansy側の実測報告(project=配列、inventory=単一オブジェクトらしき記述、
+# repositories=同様)だけでは断定できない。両方の形に対応し、どちらでも
+# 無ければ推測せず停止する。
+
+- name: GET the list of Semaphore projects
+  ansible.builtin.uri:
+    url: "{{ semaphore_templates_api_base_url }}/projects"
+    method: GET
+    headers:
+      Authorization: "Bearer {{ semaphore_templates_token }}"
+    status_code: [200]
+    validate_certs: "{{ semaphore_templates_api_validate_certs }}"
+  register: _semaphore_templates_projects_raw
+  no_log: true
+  check_mode: false  # safe-readonly
+
+- name: Resolve the project id by name (R12)
+  ansible.builtin.set_fact:
+    semaphore_templates_project_id: >-
+      {%- set matches = _semaphore_templates_projects_raw.json
+          | selectattr('name', 'equalto', semaphore_templates_project_name)
+          | map(attribute='id') | list -%}
+      {{ (matches | first) | default('', true) }}
+
+- name: Fail closed if the named project could not be resolved (R12)
+  ansible.builtin.fail:
+    msg: >-
+      GET {{ semaphore_templates_api_base_url }}/projects の応答に
+      name={{ semaphore_templates_project_name }} のprojectが見つかりません。
+      固定値へは戻さず停止します(R12)。
+  when: (semaphore_templates_project_id | default('', true) | string | length) == 0
+
+- name: GET the inventory list for the resolved project
+  ansible.builtin.uri:
+    url: "{{ semaphore_templates_api_base_url }}/project/{{ semaphore_templates_project_id }}/inventory"
+    method: GET
+    headers:
+      Authorization: "Bearer {{ semaphore_templates_token }}"
+    status_code: [200]
+    validate_certs: "{{ semaphore_templates_api_validate_certs }}"
+  register: _semaphore_templates_inventory_raw
+  no_log: true
+  check_mode: false  # safe-readonly
+
+- name: Resolve the inventory id by name (R12; endpoint may return a list or a single object)
+  ansible.builtin.set_fact:
+    semaphore_templates_inventory_id: >-
+      {%- set body = _semaphore_templates_inventory_raw.json -%}
+      {%- set rows = body if body is sequence and body is not mapping and body is not string else [body] -%}
+      {{ (rows | selectattr('name', 'equalto', semaphore_templates_inventory_name) | map(attribute='id') | list | first) | default('', true) }}
+
+- name: Fail closed if the named inventory could not be resolved (R12)
+  ansible.builtin.fail:
+    msg: >-
+      GET {{ semaphore_templates_api_base_url }}/project/{{ semaphore_templates_project_id }}/inventory
+      の応答に name={{ semaphore_templates_inventory_name }} のinventoryが
+      見つかりません。固定値へは戻さず停止します(R12)。
+  when: (semaphore_templates_inventory_id | default('', true) | string | length) == 0
+
+- name: GET the repository list for the resolved project
+  ansible.builtin.uri:
+    url: "{{ semaphore_templates_api_base_url }}/project/{{ semaphore_templates_project_id }}/repositories"
+    method: GET
+    headers:
+      Authorization: "Bearer {{ semaphore_templates_token }}"
+    status_code: [200]
+    validate_certs: "{{ semaphore_templates_api_validate_certs }}"
+  register: _semaphore_templates_repositories_raw
+  no_log: true
+  check_mode: false  # safe-readonly
+
+- name: Resolve the repository id by name (R12; endpoint may return a list or a single object)
+  ansible.builtin.set_fact:
+    semaphore_templates_repository_id: >-
+      {%- set body = _semaphore_templates_repositories_raw.json -%}
+      {%- set rows = body if body is sequence and body is not mapping and body is not string else [body] -%}
+      {{ (rows | selectattr('name', 'equalto', semaphore_templates_repository_name) | map(attribute='id') | list | first) | default('', true) }}
+
+- name: Fail closed if the named repository could not be resolved (R12)
+  ansible.builtin.fail:
+    msg: >-
+      GET {{ semaphore_templates_api_base_url }}/project/{{ semaphore_templates_project_id }}/repositories
+      の応答に name={{ semaphore_templates_repository_name }} のrepositoryが
+      見つかりません。固定値へは戻さず停止します(R12)。
+  when: (semaphore_templates_repository_id | default('', true) | string | length) == 0

@@ -1,0 +1,73 @@
+---
+# OQ1: 2026-08-04追補により、テンプレート定義のAPI操作に関する範囲では
+# ansy(project id=2)での実測が得られている。GETのエンドポイント・認証・
+# 応答形式は下記コメントの実測に基づく。**quoryそのものでの実測ではない**
+# 点は変わらず未確認。read-onlyであり、--checkの有無にかかわらず常に実行
+# する(diffを出すための入力が要るため)。
+#
+# 実測(2026-08-04, ansy, https://ansy.internal:3000, project id=2):
+#   - GET /api/project/{id}/templates は配列を返す(既存想定どおり)
+#   - `arguments` は**文字列**("[]"のようなJSON文字列)で返る。配列では
+#     ない — 旧実装(初回パス)の「ネイティブ配列で送る」という想定は誤り
+#     だったため、apply.ymlの送信側も文字列化するよう修正した
+#   - 応答に `environment_id` / `environment_ids` が含まれる。
+#     project__templateのDBスキーマ(2026-08-04実測時点)には無い列だが、
+#     R1の読み方はAPIの応答形式を正本とするため、この列も含めて生の応答を
+#     そのまま保持する(下記 semaphore_templates_observed_raw_by_id)。
+#     R13の「取得→マージ→送信」がこの列を素通しする
+
+- name: GET the current Semaphore templates for the resolved project (OQ1)
+  ansible.builtin.uri:
+    url: "{{ semaphore_templates_api_base_url }}/project/{{ semaphore_templates_project_id }}/templates"
+    method: GET
+    headers:
+      Authorization: "Bearer {{ semaphore_templates_token }}"
+    status_code: [200]
+    validate_certs: "{{ semaphore_templates_api_validate_certs }}"
+  register: _semaphore_templates_api_list
+  no_log: true
+  check_mode: false  # safe-readonly: GETは--checkでも実行する(diffの入力)
+
+- name: Fail closed if the response does not look like a list of templates (OQ1)
+  ansible.builtin.assert:
+    that:
+      - _semaphore_templates_api_list.json is defined
+      - _semaphore_templates_api_list.json is sequence
+      - _semaphore_templates_api_list.json is not string
+      - _semaphore_templates_api_list.json is not mapping
+    fail_msg: >-
+      GET {{ semaphore_templates_api_base_url }}/project/{{ semaphore_templates_project_id }}/templates
+      の応答がテンプレートのJSON配列として読めません。OQ1(APIバージョン・
+      エンドポイントの形)がこの環境の実際のSemaphoreと一致していない可能性が
+      あります。推測して書き込みへ進まず、ここで停止します。
+    quiet: true
+
+# R13向け: PUTでの取得→マージ→送信のため、観測した行を id -> 生オブジェクト
+# のまま(正規化前)保持しておく。normalizeで読み捨てるフィールド
+# (environment_id等、カタログが関知しない列すべて)を、更新時にそのまま
+# 埋め戻せるようにするため。
+- name: Keep the raw observed rows indexed by id (for R13 get-then-merge-then-send)
+  ansible.builtin.set_fact:
+    semaphore_templates_observed_raw_by_id: >-
+      {%- set m = {} -%}
+      {%- for t in _semaphore_templates_api_list.json -%}
+        {%- set _ = m.update({t.id: t}) -%}
+      {%- endfor -%}
+      {{ m }}
+
+- name: Normalize the observed templates (id / name / playbook / arguments / survey_vars / description)
+  ansible.builtin.set_fact:
+    semaphore_templates_observed: >-
+      {%- set out = [] -%}
+      {%- for t in _semaphore_templates_api_list.json -%}
+        {%- set raw_args = t.arguments | default([]) -%}
+        {%- set args = (raw_args | from_json) if (raw_args is string and (raw_args | length) > 0)
+                        else ([] if raw_args is string else raw_args) -%}
+        {%- set raw_survey = t.survey_vars | default([]) -%}
+        {%- set survey = (raw_survey | from_json) if (raw_survey is string and (raw_survey | length) > 0)
+                          else ([] if raw_survey is string else raw_survey) -%}
+        {%- set _ = out.append({'id': t.id, 'name': t.name, 'playbook': t.playbook,
+                                'arguments': args, 'survey_vars': survey,
+                                'description': t.description | default('', true)}) -%}
+      {%- endfor -%}
+      {{ out }}

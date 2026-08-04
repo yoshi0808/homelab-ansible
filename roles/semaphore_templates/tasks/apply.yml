@@ -1,0 +1,158 @@
+---
+# R3: 冪等な作成/更新のみ。削除は行わない(R5)。呼び出し元(tasks/main.yml)が
+# `when: not ansible_check_mode` でこのファイル全体をゲートしているため、
+# --check ではここに到達しない(AC1/AC2)。
+#
+# 実測確定(2026-08-04, ansy, Tester `2026-08-04_005_test_result.md`):
+# `arguments` と `survey_vars` は**書き込み時の形が非対称**である。
+#   - `arguments` はAPI上で**文字列**("[]"のようなJSON文字列)として送る。
+#     `| to_json` する(§下記)。
+#   - `survey_vars` は書き込み時**ネイティブなJSON配列**として送る必要が
+#     ある。`| to_json`(文字列化)して送るとAPIが**HTTP 400**を返す
+#     (Testerが無改変コードで実測済み。fail-closed自体は機能しており、
+#     部分作成や重複は発生しない)。**このため`survey_vars`には`to_json`を
+#     付けない**(以前のパスでは両方に付けており、これが原因で書き込みが
+#     常に失敗していた)。
+# GET応答ではどちらも文字列に見える(read.ymlの正規化は両方とも
+# 文字列/配列いずれの形でも受理するようすでに書いてあるため、読み取り側の
+# 変更は不要)。この非対称性は書き込みを試すまで分からない、とTesterが
+# 報告している。
+#
+# R13: 実測確定(Tester、生curlで直接確認済み) — **PUTは全置換
+# (フルリプレース)である。** 最小のPUT(管理対象4フィールドのみ)を送ると
+# `description`/`arguments`/`environment_id`/`environment_ids`が消える/
+# 初期化されることを確認済み。このため`apply.yml`は「取得(read.ymlで
+# 既に取得済み)→マージ→送信」にしてある。`semaphore_templates_observed_raw_by_id`
+# (read.yml)は正規化前の生応答をid引きできる形で保持しており、
+# environment_id等カタログが関知しない列はここから素通しする。この
+# get→merge→send設計そのものも、全置換の実環境に対して正しく機能する
+# ことをTesterが実測済み(environment_idを手動設定→title変更で再適用→
+# environment_idが維持されたままnameだけ更新されることを確認)。
+#
+# R11: 実測確定(Tester) — **`description`はAPIで実際に往復する。**
+# 同定マーカー(semaphore_templates_build_marker、filter_plugins参照)を
+# `description`へ書く設計は成立している。下記の書き込み直後GET+assertは
+# 「往復するかどうかの実測手段」としての役目は終えたが、**将来API側の
+# 挙動が変わった場合に気づかないまま重複作成へ倒れないための恒久的な
+# 自己防御**として残す(コストは1テンプレートあたりGET1回のみ、jobは
+# 起動しない)。
+
+- name: Create templates that do not exist yet
+  ansible.builtin.uri:
+    url: "{{ semaphore_templates_api_base_url }}/project/{{ semaphore_templates_project_id }}/templates"
+    method: POST
+    headers:
+      Authorization: "Bearer {{ semaphore_templates_token }}"
+    body_format: json
+    body:
+      project_id: "{{ semaphore_templates_project_id }}"
+      inventory_id: "{{ semaphore_templates_inventory_id }}"
+      repository_id: "{{ semaphore_templates_repository_id }}"
+      app: "{{ semaphore_templates_app }}"
+      playbook: "{{ item.target.playbook }}"
+      name: "{{ item.target.name }}"
+      arguments: "{{ item.target.arguments | to_json }}"
+      survey_vars: "{{ item.target.survey_vars }}"
+      description: "{{ item.target.description }}"
+    status_code: [200, 201]
+    validate_certs: "{{ semaphore_templates_api_validate_certs }}"
+  loop: "{{ semaphore_templates_diff.new }}"
+  loop_control:
+    label: "{{ item.key }}"
+  register: _semaphore_templates_created
+  no_log: true
+
+- name: Fail closed if a create response did not return an id (OQ1)
+  ansible.builtin.assert:
+    that:
+      - item.json.id is defined
+    fail_msg: >-
+      POST {{ semaphore_templates_api_base_url }}/project/{{ semaphore_templates_project_id }}/templates
+      ({{ item.item.key }}) がidを返しませんでした。OQ1(応答形式)がこの
+      実装の想定と一致していない可能性があります。ここで停止します
+      (副作用のあるstate fileはもう無いが、Semaphore上には作成済みの可能性
+      があるため、次回実行時のreport.ymlのorphans/newの内訳を確認すること)。
+    quiet: true
+  loop: "{{ _semaphore_templates_created.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.key }}"
+  no_log: true
+
+- name: Update templates whose rendered definition differs (R13 get-then-merge-then-send)
+  ansible.builtin.uri:
+    url: "{{ semaphore_templates_api_base_url }}/project/{{ semaphore_templates_project_id }}/templates/{{ item.id }}"
+    method: PUT
+    headers:
+      Authorization: "Bearer {{ semaphore_templates_token }}"
+    body_format: json
+    body: >-
+      {{ semaphore_templates_observed_raw_by_id[item.id] | combine({
+        'name': item.after.name,
+        'playbook': item.after.playbook,
+        'arguments': item.after.arguments | to_json,
+        'survey_vars': item.after.survey_vars,
+        'description': item.after.description,
+        'project_id': semaphore_templates_project_id,
+        'inventory_id': semaphore_templates_inventory_id,
+        'repository_id': semaphore_templates_repository_id,
+        'app': semaphore_templates_app,
+      }) }}
+    status_code: [200, 201, 204]
+    validate_certs: "{{ semaphore_templates_api_validate_certs }}"
+  loop: "{{ semaphore_templates_diff.changed }}"
+  loop_control:
+    label: "{{ item.key }}"
+  register: _semaphore_templates_updated
+  no_log: true
+
+# --- R11自己検証: descriptionが実際に往復したかを、直後のGETで確認する ---
+# POST/PUTのレスポンス本体だけに頼らない(200/201/204のどれで返るか、本体に
+# 何を含めるかがOQ1の範囲で未確定なため)。作成・更新した全idを対象に、
+# 個別GETで読み戻す。GETはjobを起動しない(read-only)。
+
+- name: Build the list of ids just created or updated (for the round-trip check)
+  ansible.builtin.set_fact:
+    semaphore_templates_written_ids: >-
+      {{ (_semaphore_templates_created.results | default([]) | map(attribute='json') | map(attribute='id') | list)
+         + (semaphore_templates_diff.changed | map(attribute='id') | list) }}
+    semaphore_templates_written_descriptions: >-
+      {%- set m = {} -%}
+      {%- for r in (_semaphore_templates_created.results | default([])) -%}
+        {%- set _ = m.update({r.json.id: r.item.target.description}) -%}
+      {%- endfor -%}
+      {%- for c in semaphore_templates_diff.changed -%}
+        {%- set _ = m.update({c.id: c.after.description}) -%}
+      {%- endfor -%}
+      {{ m }}
+
+- name: Re-read each written template to verify description round-tripped (R11 self-check)
+  ansible.builtin.uri:
+    url: "{{ semaphore_templates_api_base_url }}/project/{{ semaphore_templates_project_id }}/templates/{{ item }}"
+    method: GET
+    headers:
+      Authorization: "Bearer {{ semaphore_templates_token }}"
+    status_code: [200]
+    validate_certs: "{{ semaphore_templates_api_validate_certs }}"
+  loop: "{{ semaphore_templates_written_ids }}"
+  loop_control:
+    label: "{{ item }}"
+  register: _semaphore_templates_verify
+  no_log: true
+  check_mode: false  # safe-readonly: 自己検証のGETであり、書き込みではない
+
+- name: Fail closed if description did not round-trip for any written template (R11)
+  ansible.builtin.assert:
+    that:
+      - (item.json.description | default('', true)) == (semaphore_templates_written_descriptions[item.json.id])
+    fail_msg: >-
+      id={{ item.json.id }} へ書き込んだ description
+      ({{ semaphore_templates_written_descriptions[item.json.id] | default('?') }}) が、
+      直後のGETで読み戻すと {{ item.json.description | default('(なし)') }}
+      になっていました。descriptionはAPIで往復しません(R11の前提が崩れた)。
+      同定情報の置き場を別のフィールドへ変更する必要があります。ここで
+      停止します — 気づかないまま次回実行で重複作成される経路には入りません。
+    quiet: true
+  loop: "{{ _semaphore_templates_verify.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item }}"
+  no_log: true

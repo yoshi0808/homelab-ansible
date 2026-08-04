@@ -1,0 +1,15 @@
+---
+# R3/R11: 既存テンプレートの同定は Semaphore オブジェクト自身の
+# `description` に埋め込んだマーカーで行う(playbook + variant を符号化した
+# もの)。name では行わない。ロジック本体は
+# roles/semaphore_templates/filter_plugins/semaphore_templates.py
+# (Ansibleを介さずローカルで単体テストできる。検証方針は
+# docs/ai/reviews/semaphore_templates_as_code/2026-08-04_003_implement.md)。
+#
+# 2026-08-04追補: 側ファイル(state.json)を渡す第3引数は廃止した。
+# 同定情報はSemaphore自身から読み取った semaphore_templates_observed の
+# 中(各行の description)にすでに含まれている。
+
+- name: Compute new / changed / unchanged / orphan template lists
+  ansible.builtin.set_fact:
+    semaphore_templates_diff: "{{ semaphore_templates_catalog | semaphore_templates_reconcile(semaphore_templates_observed) }}"
