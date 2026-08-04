@@ -198,6 +198,14 @@ deployment_drift_check_semaphore_api_validate_certs: false
 # (ブートストラップtemplate)が正常な状態であり、これを毎朝通知しない
 # (R9-a)。OQ3: 件数で持つ実装判断。1件消えて1件増えて件数が変わらない
 # 状態を見逃す既知の盲点があり、判断根拠はimplement記録に残す。
+#
+# **2026-08-04にquoryの実データで確認した**(`semaphore-query template-list`)。
+# 44テンプレート中43がこのroleの同定マーカーを持ち、マーカー無しは `id=37`
+# (playbooks/semaphore_templates_setup.yml)の1件だけである。カタログの
+# エントリ数43とも一致する。**この値を変えるときは、推定でなく同じ手段で
+# 数え直すこと** — カタログにエントリを足しても期待orphan数は変わらない
+# (足した分はマーカーを持つ側に入る)。増えるのは、カタログの管理外に
+# テンプレートを手で作ったときだけである。
 deployment_drift_check_semaphore_expected_orphans: 1
 
 # レポート保存先

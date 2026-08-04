@@ -1,6 +1,6 @@
 # レビュー(構造変更側 / R1)— core.mdの圧縮と、Knowledgeの渡し方
 
-2026-08-05 / Reviewer(独立subagent)。対象は未commitの `git diff` 全体(8ファイル)。担当範囲はCoordinatorの依頼どおり構造4点(規範の消失/宙ぶらりん参照/削らなかったことの妥当性/実装中の判断2件)のみ。I1/S1/R1/R2/T1/T2/A1/C1として追加された留意事項の中身の是非は範囲外とし、評価していない。
+2026-08-04 / Reviewer(独立subagent)。対象は未commitの `git diff` 全体(8ファイル)。担当範囲はCoordinatorの依頼どおり構造4点(規範の消失/宙ぶらりん参照/削らなかったことの妥当性/実装中の判断2件)のみ。I1/S1/R1/R2/T1/T2/A1/C1として追加された留意事項の中身の是非は範囲外とし、評価していない。
 
 ## Summary
 
@@ -27,7 +27,7 @@ Minor 1件のみ指摘する。blocking findingは無い。
 - `docs/ai/roles/coordinator.md` を全文読み、実ホストへの非冪等操作の承認境界節・quory到達不能の記述(L71-72, L79)が、分析§1の判定表の前提(能力4種の現存)と矛盾しないことを確認した。
 - `docs/ai/memory/incidents/2026-08-02_auditor-reverted-coordinator-uncommitted-edits.md` を読み、判定表項目#2(「自分が作った変更以外を元に戻さない」)が「2026-08-02に実際に踏まれている」という分析の主張の裏付けを確認した。
 - `docs/ai/reviews/norm_docs_post_phase4_sweep/2026-08-04_005_disposition.md` を参照し(implement記録・分析からの引用先)、`core.md` L52「quory上でコードを直接編集・commitしない」を残す判断が同日の先例と同型であることを確認した(該当ファイルの当該記述の存在のみ確認。ファイル全体は読んでいない)。
-- `docs/ai/reviews/knowledge_delivery_and_core_compression/2026-08-05_001_analysis.md`、`2026-08-05_002_implement.md` を全文読んだ。
+- `docs/ai/reviews/knowledge_delivery_and_core_compression/2026-08-04_001_analysis.md`、`2026-08-04_002_implement.md` を全文読んだ。
 
 ## 1. 規範の消失
 

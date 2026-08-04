@@ -78,7 +78,7 @@ def semaphore_templates_button_names(catalog, playbook):
     playbooks/knowledge_review_timer.yml, an ansy timer with no Semaphore
     counterpart), and more than 1 lists every candidate rather than guessing
     which variant the operator wants (R10-a, requirement
-    2026-08-05_008_requirement_p1.md).
+    2026-08-04_008_requirement_p1.md).
     """
     return [
         semaphore_templates_render_name(entry)

@@ -354,7 +354,7 @@ semaphore_templates_catalog:
 #   -e semaphore_templates_project_name=homelab-ansible
 #   -e semaphore_templates_token_path=~/.semaphore-api-token-ansy
 #
-# **2026-08-05実測**: この例は当初 `https://ansy.internal:3000/api` と
+# **2026-08-04実測**: この例は当初 `https://ansy.internal:3000/api` と
 # 既定の `validate_certs: true` を示していたが、その形では通らない
 # (CAがKeyUsage拡張を持たず、Pythonのsslが証明書検証に失敗する)。
 # 名前で引く形のまま検証だけ切らず、接続先をループバックへ寄せた上で切る。

@@ -3,7 +3,7 @@
 # 差分があるときだけ通知する。**正常時は無通知・終了コード0** で終える
 # (スケジューラが毎日赤くならないこと。AC7)。
 #
-# R10-a(2026-08-05): 「直し方」行はfindingの`playbook`から
+# R10-a(2026-08-04): 「直し方」行はfindingの`playbook`から
 # `semaphore_templates_catalog`(roles/semaphore_templates/defaults/main.yml)
 # を引き、一致するSemaphoreテンプレート名を案内する。カタログ変数と
 # `semaphore_templates_button_names`フィルタは、このplayの直前のtask
@@ -11,7 +11,7 @@
 # `tasks_from: noop`)が読み込む——このrole自体はSemaphore APIを一切
 # 叩かない(ロード対象は定義カタログとPythonのfilter_pluginsのみ)。
 # 一致0件のときは、従来どおり`ansible-playbook <playbook> -l <host>`の行に
-# フォールバックする(消さない — 2026-08-05_008_requirement_p1.md AC2)。
+# フォールバックする(消さない — 2026-08-04_008_requirement_p1.md AC2)。
 
 # lookup は参照のたびに再評価される。set_fact で一度だけ確定させないと、
 # 秒をまたいだ瞬間に「保存したファイル名」と「参照するファイル名」がずれる

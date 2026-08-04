@@ -1,6 +1,6 @@
 # Review: 蒸留内容(I1/S1/R1/R2/T1/T2/A1/C1)の正確性と、Knowledge非読の下での欠落
 
-対象: `docs/ai/reviews/knowledge_delivery_and_core_compression/2026-08-05_001_analysis.md` §2、`2026-08-05_002_implement.md`、および `git diff`(未commit)のうち I1/S1/R1/R2/T1/T2/A1/C1。構造変更(節統合・参照健全性)は別Reviewerの担当のため見ていない。
+対象: `docs/ai/reviews/knowledge_delivery_and_core_compression/2026-08-04_001_analysis.md` §2、`2026-08-04_002_implement.md`、および `git diff`(未commit)のうち I1/S1/R1/R2/T1/T2/A1/C1。構造変更(節統合・参照健全性)は別Reviewerの担当のため見ていない。
 
 ## Summary
 

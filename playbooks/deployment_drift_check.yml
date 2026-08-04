@@ -1,7 +1,7 @@
 ---
 # tester-gate: safe-readonly — 全taskが読み取りのみ(stat / systemctl show /
 # slurp / find / uri GET)であり、対象ホストの状態を一切変えない。R9-a
-# (2026-08-05)で加えたSemaphore API突合もGETのみで、書き込み(POST/PUT)へ
+# (2026-08-04)で加えたSemaphore API突合もGETのみで、書き込み(POST/PUT)へ
 # 到達する経路を持たない(roles/semaphore_templates/tasks/probe.ymlが
 # token/resolve/read/reconcileだけを通し、report.yml/apply.ymlをimportしない
 # ことで経路自体を作っていない)。書き込みは controller 上の

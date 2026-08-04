@@ -20,7 +20,7 @@
 # 自身のJinja式が例外を投げた場合**(現時点で確認した`semaphore_templates_
 # reconcile()`の返り値の形では発火しないが、将来APIの応答形状が変わる、
 # あるいはreconcileの返り値の形が変わると起こりうる)は、この失敗を
-# 保護するものが無かった(独立レビュー`2026-08-05_010_review.md` Critical #1)。
+# 保護するものが無かった(独立レビュー`2026-08-04_010_review.md` Critical #1)。
 # **このblock自身にrescueを持たせ、Fold taskの失敗も含めて捕まえる**
 # — これでtoken/resolve/read/reconcileの4段(probe.yml内部のrescue)と
 # Fold(このrescue)の両方が、どの段で例外が起きてもfindingへ変換されるよう
