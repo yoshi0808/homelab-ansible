@@ -46,7 +46,7 @@ Network アプリ単体バックアップ（`.unf`）は取得しない。OS バ
 | 取得元 | CloudKey Gen2 Plus（`cloudkey.internal`、私設 CA = Home-TLS-CA） |
 | 保存先 | `<backup destination>/`（pve1・pve2 双方に存在するProxmox cluster storage経由のNFSマウント） |
 | 実行ホスト | **pve1 優先・pve2 フェイルオーバー**（`connection: local` は使わず、選定されたホスト上で `become: true`/root で実行。preflightで到達可能な1ホストのみを選び、両方到達不能なら理由付きでfailする。詳細: `docs/ai/adr/001-unifi_backup_fetch-pve1-shutdown-target.md`） |
-| 実行元 | quory（本番・週次）/ ansy（開発・CLI） |
+| 実行元 | quory（本番・週次・手動とも） |
 | 安全度 | 変更系（CloudKey 上でバックアップ生成、Synology へ書込/削除） |
 
 選定されたホストで root 実行する理由は、NFS のアクセス権が root に絞られているため。

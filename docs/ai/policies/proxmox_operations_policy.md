@@ -72,7 +72,7 @@ control nodeがProxmox上のVMである場合、pve1 / pve2の連続自動patch�
 reboot影響を受けないcluster外control nodeからだけ、pve2、pve1、VM復帰までのfull flowを自動実行してよい。
 
 <!-- SB-090 -->
-Ansible実行端末はansyまたはquoryに限定する。管理対象host自身から実行せず、weekly fullはProxmox nodeからの実行をpreflightで拒否する。
+本番のProxmox nodeを対象とするAnsible実行端末はquoryに限定する。管理対象host自身から実行せず、weekly fullはProxmox nodeからの実行をpreflightで拒否する。ansyに閉じた実行(decoy inventory、`--syntax-check`、ansyのSemaphoreインスタンス)はテスト目的で可能である。
 
 ## 3. 対応するPlaybook
 

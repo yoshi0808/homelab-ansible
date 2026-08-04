@@ -13,7 +13,7 @@
 | Coordinator | **Opus以上を原則**(軽い直接実装に限りSonnet可) | `claude`。Yoshinobuとの対話窓口。要求分解・ADR・リスク整理・見積もり・分解方針の確定と、以下Roleの呼び出しおよび結果評価を自身で行う。**どこまで分解し誰へ委任するかはCoordinatorの裁量である** |
 | Implementer | **Sonnet** | Coordinatorがまとめたrequirement/契約に基づき、Agent toolでsubagentとして起動する。`docs/ai/roles/implementer.md`の範囲(最小差分実装、commit/push禁止、本番適用禁止)は不変 |
 | Reviewer | **Sonnet** | 別のsubagentとして起動する。Implementerを行ったsubagentとは別セッションとして起動し、独立性を保つ(`docs/ai/roles/reviewer.md`「自分が実装した変更を独立レビュー済みとして扱わない」を、同一subagentを使い回さないことで担保する)。計画の査読も担う |
-| Tester | **Sonnet** | 別のsubagentとして起動する。**subagentのうち、実ホストへ到達してよい唯一のRoleである** — Implementer / Reviewer / Auditorは実ホストへansibleを実行しない(Coordinator自身の到達範囲は`docs/ai/roles/coordinator.md`「実ホストへの非冪等操作の承認」が定める)。実ホストへの`--check`/dry-run実行を含め、`docs/ai/roles/tester.md`の禁止事項(本番適用、`--check`なしのcheck-mode-native実行等)がそのまま適用される |
+| Tester | **Sonnet** | 別のsubagentとして起動する。**subagentのうち、実ホストへ到達してよい唯一のRoleである**(**到達してよい範囲そのものは`docs/ai/roles/coordinator.md`「実ホストへの非冪等操作の承認」が定め、ansyが認証情報を持たないホストへは届かない**) — Implementer / Reviewer / Auditorは実ホストへansibleを実行しない。実ホストへの`--check`/dry-run実行を含め、`docs/ai/roles/tester.md`の禁止事項(本番適用、`--check`なしのcheck-mode-native実行等)がそのまま適用される |
 | **Auditor** | **Sonnet** | **Coordinatorが案件クローズ時に1回だけ**起動し、`docs/ai/roles/auditor.md`の範囲で「この記録から経緯を再構成できるか、辻褄は合っているか」を検査する。**入力はrepoの成果物のみで、Coordinatorの説明を受け取らない**(受け取ると自己申告の清書になる)。技術的な正否は判定しないが、**記録どうしの矛盾**は指摘する |
 
 ### モデル・effort配分

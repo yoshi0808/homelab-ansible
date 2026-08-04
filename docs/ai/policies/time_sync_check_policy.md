@@ -24,12 +24,12 @@ SSHで各ホストの`date`を直接比較する方式ではなく、各ホス�
 |---|---|
 | 基準ノード | quory（chrony、外部NTP=Ubuntu poolに同期） |
 | 比較対象 | pve1, pve2, ansy, monnie, authy（chrony）、sophos-fw（独自ntpclient）、cloudkey（systemd-timesyncd） |
-| 実行元 | quory（本番）/ ansy（開発・CLI） |
+| 実行元 | quory（本番・CLIとも） |
 | 安全度 | read-only（time_sync_check.yml）。NTPクライアント設定へのquory参照追加は別playbook（time_sync_ntp_reference.yml、変更系）で実施する |
 
 実行元ホスト自身は比較対象から動的に除外する（`time_sync_check_executor_host`、
 `lookup('pipe', 'hostname -s')`で判定。比較対象を固定リストで持たないことで、
-quory実行時・ansy実行時いずれでも自己比較にならない）。
+どのホストで実行しても自己比較にならない）。
 
 
 <!-- TIME-006 -->

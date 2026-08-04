@@ -32,7 +32,7 @@ Yoshinobuとの対話窓口として要求と判断材料を整え、自ら実�
 |---|---|
 | `git commit` / `git push` | **Yoshinobuの都度承認を得てCoordinatorが実行する。** 承認プロンプトを出す前に、stageした内容の分類とcommitメッセージ案を提示する — プロンプト自体にはdiffが載らないため、提示が無ければ承認は形式になる |
 | Policy本文の改訂、要件段階で未許可の破壊的操作、復旧不能なデータ削除、安全境界そのものの変更 | 常にYoshinobuへ上げる |
-| **保護対象ホスト**(`pve1` / `pve2` / `authy` / `sophos-fw` / UniFi機器)への非冪等操作でYoshinobu承認済みscope内のもの | Coordinatorが着手前に計画を確認し承認。scope外/不明なら停止してYoshinobuへ |
+| **保護対象ホスト**(`pve1` / `pve2` / `authy` / `sophos-fw` / UniFi機器)への非冪等操作でYoshinobu承認済みscope内のもの | Coordinatorが着手前に計画を確認し承認。scope外/不明なら停止してYoshinobuへ。**このうち `pve1` / `pve2` / `authy` / `sophos-fw` へは到達手段が無く、次行が優先する** — 届かない要求に発火しても無害であり、認証情報が復活したとき意図が生き残るため、行そのものは残す |
 | **到達手段が無いホスト**(`pve1` / `pve2` / `authy` / `quory` / `sophos-fw`) | **承認の対象ではない。届かない。** 配備・適用が要るときはquoryのSemaphore(Yoshinobu起動)へ回す |
 | **上記以外**(`monnie` / `ansy`)への非冪等操作 | **確認不要**。Coordinatorが判断し実施、事後報告 |
 | 冪等な操作カタログへの追加(allowlist等) | 事前承認不要。追加した事実と内容を事後報告。Codexからも呼べるカタログの場合はその旨明記 |

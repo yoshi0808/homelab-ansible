@@ -19,7 +19,7 @@ core VMのbackupを実際にrestoreしてbootできることをmonthlyに検証�
 restore先は`verify_restore_vmid`で定義された専用固定restore VMIDだけとし、検証後に使い捨てる。
 
 <!-- BRV-006 -->
-monthly productionは`quory`、development / manual CLIは`ansy`を実行元とする。
+実行元は`quory`に限定する(monthly schedule・手動のいずれも)。
 
 <!-- BRV-008 -->
 restoreには設定された専用storageを使用する。
@@ -55,7 +55,7 @@ monthlyは`quory`から固定時刻のsingle scheduleで実行する。
 
 この入口のtester-gateは`risk-accepted`である(判断基準は`docs/ai/policies/ansible_test_safety_policy.md` TS-009〜TS-011: 対象は専用固定restore VMIDに限定され本番VMへの実害がないこと、かつ実restoreを省略すると検証自体の意味が失われることの2条件を満たす)。`risk-accepted`は`--check`を安全な実行手段として提供しない(TS-030)。`--check`を指定すると`ansible_check_mode`を検査する停止assertでplayが止まり、指定しなければrestore / start / stop / destroyを含む本実行になる。
 
-この分類自体はYoshinobuが判断済みであり、monthly実行のたびに個別の実行判断を必要としない。`quory`からのmonthly schedule実行(BRV-042)、`ansy`からのmanual実行(BRV-006)のいずれも同じ扱いとする。
+この分類自体はYoshinobuが判断済みであり、monthly実行のたびに個別の実行判断を必要としない。`quory`からのmonthly schedule実行(BRV-042)と手動実行(BRV-006)のいずれも同じ扱いとする。
 
 ## 4. 判断軸
 
@@ -116,7 +116,7 @@ agent無しVMはboot後の規定settle期間を経過してもrunningである�
 同時実行禁止を補助するminimal lockを使用するが、完全なdistributed mutexとは扱わない。
 
 <!-- BRV-043 -->
-`ansy`からmanual実行する場合は、人間がmonthly実行と重複しないことを確認する。
+monthly schedule以外に手動で実行する場合は、人間がmonthly実行と重複しないことを確認する。
 
 <!-- BRV-044 -->
 pmxcfs上のofficial lockをatomic mkdirで取得する。

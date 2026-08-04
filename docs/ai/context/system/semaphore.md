@@ -15,7 +15,7 @@ SemaphoreはAnsible playbookをGUIから手動またはschedule実行し、job�
 ## 依存関係
 
 - Semaphore jobは、Gitから取得したplaybook、inventory、role、実行環境の名前解決、必要なsecret、対象ホストへの到達性に依存する。UI上のtemplate、inventory、repository、schedule、extra variablesの現在状態はGitだけでは完結しない。
-- **templateはUIで手作りされており、リポジトリに正本が無い。** Semaphoreを構成するroleはこのリポジトリに存在せず(`homelab_cert_renew` が証明書を配る箇所のみ)、**「本番で押せるボタン」の定義はGitの外にある**。2026-08-04 に `semaphore-query template-list` を追加し、**一覧を読むことだけはできる**ようにした(下記)。読めるようになったことと、正本がここにあることは別である。
+- **templateの正本は `roles/semaphore_templates/` にある**(2026-08-04)。同定は各templateの `description` に書いたマーカーで行い、`semaphore-query template-list` で実物の一覧を読める(下記)。**ただし schedule / inventory / environment は管理対象に含めていない** — 「いつ押されるか」の定義は依然としてGitの外にある。
 - `roles/systemd_timers/defaults/main.yml`では、RADIUS・Proxmox・monitoringのhealthcheck、Proxmox patch dry-run等がSemaphore UI scheduleへ移行済みとしてコメント化されている。ただし、UI上で現在有効かどうかと正確な時刻はSemaphore UIで確認する。
 - `proxmox_healthcheck`と`proxmox_hw_check`は、複数ホストの結果、次の対応、warnings/criticals、確認項目を1行のSemaphore summaryとして標準出力へ出す。job表示は概要、実行コントローラ上のJSON reportは詳細として使い分ける。
 - `cert_renew.yml`は`quory`から実行するSemaphore向けの変更系playbookで、`ansy`のSemaphore、Proxmox UI、`monnie`のGrafanaへ証明書を配布し、必要なserviceをrestartする。CAの秘密情報は一時領域にだけ展開し、cleanupを行う設計である。
