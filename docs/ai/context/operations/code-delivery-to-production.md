@@ -26,6 +26,35 @@ Semaphore schedule / systemd timer が実行
 
 **承認は `git push` の1回に畳まれている。** 「コードを確定してよい」と「いま本番へ入れてよい」を分けない判断(2026-08-03、`docs/ai/reviews/quory_worktree_sync/`)。pushした内容は次のtimer周期でquoryへ入る。
 
+## 1.1 日常の流れ — 変更1つに対して、人は何回押すか
+
+| # | 起きること | 誰が |
+|---|---|---|
+| 1 | ansyで修正してstage | AI |
+| 2 | **pre-commitが「配備が要る: `playbooks/X_setup.yml`」と予告する**(カタログに載る`copy`配備物を触った場合。§2) | 自動 |
+| 3 | `git commit` / `git push` | **人が承認**(AIが実行) |
+| 4 | quoryが作業ツリーをpull(1分間隔)。Semaphoreはジョブ実行時に`/opt`へ自分でcloneする(§3) | 自動 |
+| 5 | **配備物はまだ古い** | — |
+| 6 | Semaphoreで該当templateを押す | **人** |
+| 7 | 押し忘れた場合、翌00:40の日次ドリフト検査がSlackへ「食い違い + 直し方」を出す(§2) | 自動 |
+| 8 | 直すまで毎朝再通知される(エッジ抑止が無い) | 自動 |
+
+**打鍵が要るのは3と6だけで、どちらも「判断」である。** コマンドを組み立てる作業は残っていない — 状態を変えない確認はAIがdispatch経由で行い、本番への適用はSemaphoreのボタンが担う。
+
+**逆に、3と6を自動化してはならない。** そこが人間のゲートそのものである(`docs/ai/core.md`「人間の権限と安全境界」)。2026-08-04に、配備をansy側から起動できるようにする案を検討して**却下した** — ansyに本番へのroot適用を発火する能力を与えることになり、能力の不在で作った境界が消えるため。
+
+### 何が守られていて、何が守られていないか
+
+| 対象 | 日次検査 |
+|---|---|
+| `copy` 配備物の**内容** | ある(sha256で比較) |
+| systemd unit の enabled / active | ある。**timerが止められたことはここでしか分からない** |
+| forced command 鍵の構造(エントリ数・`command=`始まり) | ある |
+| `/etc/hosts` の網羅 / `reports/` の所有権 | ある |
+| **`template` 配備物の内容** | **無い**(Tier 2、未着手)。unit本体・sudoers・dispatch script等が該当 |
+| **Semaphore template の内容** | **無い**(未実装)。定義の正本は`roles/semaphore_templates/`だが、UIで書き換えられても次にreconcileを流すまで検出されない |
+| Semaphore の schedule / inventory / environment | 無い。**scheduleを触ると定期実行が止まりうる**ため管理対象から意図的に外している |
+
 ## 2. 最も重要な事実 — `git pull` は配備物を更新しない
 
 **作業ツリーが最新になっても、そこから配備されたものは古いままである。**
