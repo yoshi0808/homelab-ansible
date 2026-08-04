@@ -173,6 +173,33 @@ deployment_drift_check_hosts_file:
     path: /etc/hosts
     require_groups: [proxmox, radius_servers, monitoring_servers, control_nodes, dev_nodes, sophos]
 
+# --- ⑦ Semaphore テンプレート定義とSemaphore実物の突合(R9-a) -----------------
+# roles/semaphore_templates/tasks/probe.yml を実行するhost。Semaphore自身と
+# token(semaphore_templates_token_pathの既定)がこのhost上にある。
+deployment_drift_check_semaphore_probe_host: quory
+
+# R9-c: 恒久の既定として書かない。CAがKeyUsage拡張を持たずPythonの`ssl`が
+# 証明書検証に失敗する問題(docs/ai/status.md Watch、独立案件)が解消する
+# までの回避で、Semaphore上のブートストラップtemplateのsurvey既定値と
+# 同じ形を踏襲する — 接続先をループバックへ寄せた上で検証を切る。
+# **検証を切るだけの形にしない**のが要点(内部DNSはsophos-fw自身であり、
+# 名前で引く形のまま検証だけ切ると、DNSを取られたときにAPIトークンを
+# 奪える)。roles/semaphore_templates自体の既定
+# (semaphore_templates_api_base_url: https://quory.internal:3000/api,
+# semaphore_templates_api_validate_certs: true)は変えず、この2値は
+# roles/deployment_drift_check/tasks/semaphore_probe.ymlの呼び出しsiteだけで
+# 上書きに使う。恒久対応(CAの作り直しとquory自身のAPI接続設定の見直し)は
+# 独立案件が持つ — この回避はそれが終わるまでの間に合わせであり、それが
+# 終われば消してrole既定へ戻せる形にしてある。
+deployment_drift_check_semaphore_api_base_url: "https://localhost:3000/api"
+deployment_drift_check_semaphore_api_validate_certs: false
+
+# orphans(定義に無いSemaphoreテンプレート)の期待件数。現在1件
+# (ブートストラップtemplate)が正常な状態であり、これを毎朝通知しない
+# (R9-a)。OQ3: 件数で持つ実装判断。1件消えて1件増えて件数が変わらない
+# 状態を見逃す既知の盲点があり、判断根拠はimplement記録に残す。
+deployment_drift_check_semaphore_expected_orphans: 1
+
 # レポート保存先
 deployment_drift_check_report_dir: "{{ reports_base_dir }}/drift"
 

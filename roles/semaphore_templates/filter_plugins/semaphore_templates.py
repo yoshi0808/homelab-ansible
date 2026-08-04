@@ -66,6 +66,27 @@ def semaphore_templates_render_name(entry):
     return name
 
 
+def semaphore_templates_button_names(catalog, playbook):
+    """R10-a: rendered Semaphore template name(s) whose catalog entry's
+    ``playbook`` matches the given playbook path, in catalog order.
+
+    Returns a plain list — 0, 1, or more names. This filter only looks up
+    and renders; it makes no decision about what an empty or multi-item
+    result means. The caller (deployment_drift_check's report.yml) decides:
+    0 matches falls back to the pre-existing `ansible-playbook ... -l ...`
+    line (the finding's playbook has no Semaphore button at all — e.g.
+    playbooks/knowledge_review_timer.yml, an ansy timer with no Semaphore
+    counterpart), and more than 1 lists every candidate rather than guessing
+    which variant the operator wants (R10-a, requirement
+    2026-08-05_008_requirement_p1.md).
+    """
+    return [
+        semaphore_templates_render_name(entry)
+        for entry in catalog
+        if entry.get('playbook') == playbook
+    ]
+
+
 def _catalog_key(entry):
     """R3 identification key. '-' stands in for "no variant" so every
     catalog entry — shared-playbook or not — has a key of the same shape.
@@ -252,4 +273,5 @@ class FilterModule(object):
             'semaphore_templates_render_name': semaphore_templates_render_name,
             'semaphore_templates_reconcile': semaphore_templates_reconcile,
             'semaphore_templates_build_marker': semaphore_templates_build_marker,
+            'semaphore_templates_button_names': semaphore_templates_button_names,
         }

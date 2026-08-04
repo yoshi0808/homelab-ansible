@@ -1,0 +1,18 @@
+---
+# R10-a: entry point for callers that need this role's catalog data
+# (semaphore_templates_catalog, defaults/main.yml) and its filter_plugins
+# (semaphore_templates_render_name / semaphore_templates_button_names)
+# WITHOUT running tasks/main.yml (token -> resolve -> read -> reconcile ->
+# report -> apply). include_role always loads a role's defaults/main.yml
+# and registers its filter_plugins directory regardless of which
+# tasks_from file is used — only the *task list* changes with tasks_from.
+# This file's task list is deliberately a single no-op, so including this
+# role via tasks_from: noop has the loading side effects and none of the
+# API-calling ones.
+#
+# Used by deployment_drift_check's report play (playbooks/
+# deployment_drift_check.yml) to render Semaphore button names into the
+# "直し方" line — a read-only, no-network operation on a pure catalog +
+# pure Python filter, nothing here ever reaches the Semaphore API.
+- name: (no-op) load semaphore_templates defaults and filter_plugins only
+  ansible.builtin.meta: noop

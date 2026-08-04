@@ -1,0 +1,144 @@
+---
+# R9-a: Semaphore テンプレート定義と実物の突合を、配備物ドリフト検査と同じ
+# 1本の通知へ統合する。expected.yml/collect.yml/evaluate.ymlは「repoの
+# 現物 vs 配備先の実物」を比較するのに対し、これは「repoのカタログ vs
+# SemaphoreのAPI応答」という性質の異なる比較であるため、evaluate.ymlの
+# ロジックへは混ぜず、独立したtaskファイルに分けている。playbook側
+# (playbooks/deployment_drift_check.yml)からはevaluateの直後に呼ぶ
+# ——このtaskはevaluateが確定させた deployment_drift_check_findings に
+# 追記する形で動くため。
+#
+# deployment_drift_check_semaphore_probe_host(既定: quory)でだけ実行する
+# — Semaphoreとtoken(semaphore_templates_token_path)がそのhost上にある。
+# 他のhostではこのtask自体がwhenでスキップされ、findingsは変化しない。
+#
+# R9-b/AC6: roles/semaphore_templates/tasks/probe.yml は、token/resolve/
+# read/reconcileのいずれが失敗しても fail せず、失敗の事実を
+# semaphore_templates_probe_ok(bool)/semaphore_templates_probe_error
+# (token済み文字列)へ変換して返す。その1段下(include_role自体)はここまでで
+# 保護されているが、**その結果を読んで finding を組み立てる「Fold」task
+# 自身のJinja式が例外を投げた場合**(現時点で確認した`semaphore_templates_
+# reconcile()`の返り値の形では発火しないが、将来APIの応答形状が変わる、
+# あるいはreconcileの返り値の形が変わると起こりうる)は、この失敗を
+# 保護するものが無かった(独立レビュー`2026-08-05_010_review.md` Critical #1)。
+# **このblock自身にrescueを持たせ、Fold taskの失敗も含めて捕まえる**
+# — これでtoken/resolve/read/reconcileの4段(probe.yml内部のrescue)と
+# Fold(このrescue)の両方が、どの段で例外が起きてもfindingへ変換されるよう
+# 揃った。配備物側の検査 = evaluate.ymlは、このtaskより前に完了しているため、
+# どちらのrescueが発火してもSemaphore側の失敗に巻き込まれない(AC6)。
+
+- name: Probe Semaphore templates and fold the result into this host's findings (R9-a)
+  when: inventory_hostname == deployment_drift_check_semaphore_probe_host
+  block:
+    - name: Run the read-only Semaphore probe (token -> resolve -> read -> reconcile)
+      ansible.builtin.include_role:
+        name: semaphore_templates
+        tasks_from: probe
+      vars:
+        # R9-c: 恒久の既定として書かない。CAのKeyUsage拡張問題
+        # (docs/ai/status.md Watch、独立案件)が解消するまでの回避であり、
+        # Semaphore上のブートストラップtemplateのsurvey既定値と同じ形を
+        # 踏襲する(ループバックへ寄せた上で検証を切る。検証を切るだけに
+        # しない理由はdefaults/main.ymlのコメント参照 — 内部DNSが
+        # sophos-fw自身であるため、名前で引く形のまま検証だけ切ると
+        # DNSを取られたときにAPIトークンを奪われる)。semaphore_templates
+        # role自体の既定(quory.internal / validate_certs: true、本来の
+        # 恒久値)は変えず、この呼び出しsiteだけでvarsとして上書きする。
+        semaphore_templates_api_base_url: "{{ deployment_drift_check_semaphore_api_base_url }}"
+        semaphore_templates_api_validate_certs: "{{ deployment_drift_check_semaphore_api_validate_certs }}"
+
+    - name: Fold the probe result into this host's findings (R9-a/R9-b)
+      ansible.builtin.set_fact:
+        deployment_drift_check_findings: "{{ deployment_drift_check_findings + deployment_drift_check_semaphore_findings }}"
+      vars:
+        # category設計(独立レビューCritical #2への対応): probe自体が
+        # 失敗した(接続・認証・応答形式のいずれか)findingと、probeは
+        # 成功したがカタログとSemaphore実物が食い違っている(テンプレート
+        # drift)findingを、**別のcategoryに分ける**。
+        #   - semaphore_probe_error: 接続そのものが成立していない。
+        #     playbookを空にする — R10-a/R11-aのいずれの「直し方」機構にも
+        #     乗せない(report.ymlの既存ロジックは`f.playbook`が空のとき
+        #     「直し方」行を出さない。report_dirs/hosts_fileカテゴリと同じ
+        #     振る舞い)。ブートストラップtemplateを押しても接続不能自体は
+        #     直らないため、押させる案内をしない方が正しい。
+        #   - semaphore_template: テンプレートdrift(新規/変更/orphan件数
+        #     不一致)。こちらはブートストラップtemplateを押せば実際に
+        #     直るため、report.ymlのcategory分岐で固定文言(R11-a)を出す。
+        deployment_drift_check_semaphore_findings: >-
+          {%- set out = [] -%}
+          {%- if not (semaphore_templates_probe_ok | default(false)) -%}
+            {%- set _ = out.append({'category': 'semaphore_probe_error',
+                                    'item': 'Semaphore API probe',
+                                    'expected': '到達・認証・応答形式が正常',
+                                    'actual': '失敗',
+                                    'detail': semaphore_templates_probe_error | default('(詳細不明)'),
+                                    'playbook': '',
+                                    'run_host': inventory_hostname}) -%}
+          {%- else -%}
+            {%- for n in (semaphore_templates_diff.new | default([])) -%}
+              {%- set _ = out.append({'category': 'semaphore_template',
+                                      'item': n.target.name,
+                                      'expected': 'Semaphore上に存在',
+                                      'actual': '存在しない(定義のみ)',
+                                      'detail': ('カタログ(' ~ n.key ~ ')に一致するテンプレートがSemaphore上に無い'
+                                                 ~ ((' — ' ~ n.note) if n.note is defined else '')),
+                                      'playbook': 'playbooks/semaphore_templates_setup.yml',
+                                      'run_host': inventory_hostname}) -%}
+            {%- endfor -%}
+            {%- for c in (semaphore_templates_diff.changed | default([])) -%}
+              {%- set _ = out.append({'category': 'semaphore_template',
+                                      'item': c.after.name,
+                                      'expected': c.after.name,
+                                      'actual': c.before.name,
+                                      'detail': ('Semaphore実物(id=' ~ c.id ~ ')がカタログ定義と食い違っている'
+                                                 ~ '(UIでの手編集、または未反映の可能性)'),
+                                      'playbook': 'playbooks/semaphore_templates_setup.yml',
+                                      'run_host': inventory_hostname}) -%}
+            {%- endfor -%}
+            {%- set _orphans = (semaphore_templates_diff.orphans | default([])) -%}
+            {#- OQ3: 期待値は「件数」で持つ。1件消えて1件増えて件数が
+               変わらないケースは見逃す既知の盲点(実装判断の記録は
+               implement記録を参照)。 -#}
+            {%- if (_orphans | length) != deployment_drift_check_semaphore_expected_orphans -%}
+              {%- set _ = out.append({'category': 'semaphore_template',
+                                      'item': '定義に無いSemaphoreテンプレート',
+                                      'expected': deployment_drift_check_semaphore_expected_orphans | string ~ ' 件',
+                                      'actual': (_orphans | length) | string ~ ' 件',
+                                      'detail': ('削除はしない(R5)。現在の一覧: '
+                                                 ~ (_orphans | map(attribute='name') | join(', '))),
+                                      'playbook': 'playbooks/semaphore_templates_setup.yml',
+                                      'run_host': inventory_hostname}) -%}
+            {%- endif -%}
+          {%- endif -%}
+          {{ out }}
+
+  rescue:
+    # AC6 defense in depth(独立レビューCritical #1への対応): 上のblock内、
+    # 特に「Fold」taskのJinja式自身が例外を投げた場合(probe自体は成功した
+    # のにfinding組み立てで落ちる、という現時点では未発火だが将来ありうる
+    # 経路)も、ここで捕まえてfindingへ変換する。token scrubは
+    # roles/semaphore_templates/tasks/probe.ymlのrescueと同じロジックを
+    # 踏襲する(意図的な重複。implement記録§2.1のR9-c判断と同じ理由 —
+    # 目的が異なる箇所を間接化すると読む負荷が増す)。
+    - name: Build a token-scrubbed copy of the failure message (AC9 defense in depth)
+      ansible.builtin.set_fact:
+        _deployment_drift_check_semaphore_scrubbed: >-
+          {{ (ansible_failed_result.msg | default('(取得できず)'))
+             | regex_replace((semaphore_templates_token | regex_escape), '***REDACTED-TOKEN***')
+             if (semaphore_templates_token | default('') | length) > 0
+             else (ansible_failed_result.msg | default('(取得できず)')) }}
+      no_log: true
+
+    - name: Fold a probe-error finding instead of letting this host's task fail (AC6 defense in depth)
+      ansible.builtin.set_fact:
+        deployment_drift_check_findings: >-
+          {{ deployment_drift_check_findings + [{
+            'category': 'semaphore_probe_error',
+            'item': 'Semaphore API probe',
+            'expected': '到達・認証・応答形式が正常、かつfinding組み立てが例外なく完了する',
+            'actual': '失敗',
+            'detail': ('Semaphore probe処理 (task: ' ~ (ansible_failed_task.name | default('不明'))
+                       ~ ') が予期せず失敗しました: ' ~ _deployment_drift_check_semaphore_scrubbed),
+            'playbook': '',
+            'run_host': inventory_hostname
+          }] }}

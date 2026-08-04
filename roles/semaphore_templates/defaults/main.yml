@@ -349,9 +349,16 @@ semaphore_templates_catalog:
 # 名前(`inventories/homelab/hosts.yml` の `ansible_host`)に揃える。
 #
 # ansy(検証用)へ向けるときの上書き例:
-#   -e semaphore_templates_api_base_url=https://ansy.internal:3000/api
+#   -e semaphore_templates_api_base_url=https://localhost:3000/api
+#   -e semaphore_templates_api_validate_certs=false
 #   -e semaphore_templates_project_name=homelab-ansible
 #   -e semaphore_templates_token_path=~/.semaphore-api-token-ansy
+#
+# **2026-08-05実測**: この例は当初 `https://ansy.internal:3000/api` と
+# 既定の `validate_certs: true` を示していたが、その形では通らない
+# (CAがKeyUsage拡張を持たず、Pythonのsslが証明書検証に失敗する)。
+# 名前で引く形のまま検証だけ切らず、接続先をループバックへ寄せた上で切る。
+# 恒久対応(CAの作り直しとAPI接続設定の見直し)は独立案件が持つ。
 semaphore_templates_api_base_url: "https://quory.internal:3000/api"
 semaphore_templates_api_validate_certs: true
 

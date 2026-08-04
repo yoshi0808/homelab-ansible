@@ -1,6 +1,10 @@
 ---
 # tester-gate: safe-readonly — 全taskが読み取りのみ(stat / systemctl show /
-# slurp / find)であり、対象ホストの状態を一切変えない。書き込みは controller 上の
+# slurp / find / uri GET)であり、対象ホストの状態を一切変えない。R9-a
+# (2026-08-05)で加えたSemaphore API突合もGETのみで、書き込み(POST/PUT)へ
+# 到達する経路を持たない(roles/semaphore_templates/tasks/probe.ymlが
+# token/resolve/read/reconcileだけを通し、report.yml/apply.ymlをimportしない
+# ことで経路自体を作っていない)。書き込みは controller 上の
 # レポート保存だけである。異常時通知は common_slack 内の3条件
 # (skip_notifications / ansible_check_mode / AIエージェントセッション検出)で抑止する。
 # 詳細は docs/ai/policies/ansible_test_safety_policy.md。
@@ -51,6 +55,11 @@
         name: deployment_drift_check
         tasks_from: evaluate
 
+    - name: Probe Semaphore templates and fold the result into findings (R9-a)
+      ansible.builtin.include_role:
+        name: deployment_drift_check
+        tasks_from: semaphore_probe
+
     # 集約playは hosts: localhost のため、この play の対象一覧を controller へ渡す。
     # ansible_play_hosts は到達できたホストのみを含むので、_all との差が「未確認」になる
     # noqa: run-once[task] — strategy は既定(linear)であり、この play で
@@ -71,6 +80,12 @@
   vars_files:
     - ../inventories/vars/slack.yml
   tasks:
+    - name: Load the semaphore_templates catalog and filter_plugins (R10-a; no API calls)
+      ansible.builtin.include_role:
+        name: semaphore_templates
+        tasks_from: noop
+        public: true
+
     - name: Aggregate findings and report
       ansible.builtin.include_role:
         name: deployment_drift_check

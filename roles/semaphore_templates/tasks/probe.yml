@@ -1,0 +1,75 @@
+---
+# R9-a/R9-b: read-only entry point for deployment_drift_check's daily
+# Semaphore-templates drift probe. Chains token -> resolve -> read ->
+# reconcile only — never report.yml (writes this role's own report file;
+# the caller builds its own findings from the facts this file sets) and
+# never apply.yml (R9-a: "apply.yml へ到達する経路を作らない". There is no
+# `when: not ansible_check_mode` gate anywhere in this file because there
+# is no apply.yml import here to gate — the absence of the import *is* the
+# enforcement of R9-a, not a condition on top of it).
+#
+# Unlike tasks/main.yml (used by playbooks/semaphore_templates_setup.yml,
+# whose job is to surface failures loudly to the human running it via
+# `ansible.builtin.fail` in its rescue), this entry point converts every
+# failure into facts instead of raising past this file — the caller
+# (playbooks/deployment_drift_check.yml, tester-gate: safe-readonly) must
+# complete with exit code 0 even when Semaphore itself is unreachable
+# (R9-b/AC6). The token-scrub logic in this file's rescue is intentionally
+# a near-duplicate of tasks/main.yml's rescue rather than a shared
+# import: the two rescues serve opposite purposes (main.yml re-raises a
+# clearer `fail`; this one swallows into a fact and must never itself
+# fail), and collapsing them behind one indirection was judged, in this
+# implement session, to cost more clarity than the ~10 duplicated lines
+# save (recorded in the implement record, R9-c decision).
+#
+# Sets (always, both on success and on failure):
+#   semaphore_templates_probe_ok      - bool
+#   semaphore_templates_probe_error   - string, empty on success, a
+#                                        token-scrubbed message on failure
+#   semaphore_templates_diff          - {new, changed, unchanged, orphans},
+#                                        all empty lists on failure so the
+#                                        caller never has to special-case
+#                                        "the key doesn't exist" separately
+#                                        from "the key is empty"
+
+- name: Probe Semaphore templates read-only (token -> resolve -> read -> reconcile)
+  block:
+    - name: Load the Semaphore API token (fails closed if missing/unreadable — R4/AC6)
+      ansible.builtin.import_tasks: token.yml
+
+    - name: Resolve project_id / inventory_id / repository_id by name (R12)
+      ansible.builtin.import_tasks: resolve.yml
+
+    - name: Read the current templates from the Semaphore API (read-only)
+      ansible.builtin.import_tasks: read.yml
+
+    - name: Compute the diff between the catalog and the observed state (R3/R11)
+      ansible.builtin.import_tasks: reconcile.yml
+
+    - name: Record a successful probe
+      ansible.builtin.set_fact:
+        semaphore_templates_probe_ok: true
+        semaphore_templates_probe_error: ""
+
+  rescue:
+    - name: Build a token-scrubbed copy of the failure message (AC9 — never let the token past this task)
+      ansible.builtin.set_fact:
+        _semaphore_templates_probe_scrubbed: >-
+          {{ (ansible_failed_result.msg | default('(取得できず)'))
+             | regex_replace((semaphore_templates_token | regex_escape), '***REDACTED-TOKEN***')
+             if (semaphore_templates_token | default('') | length) > 0
+             else (ansible_failed_result.msg | default('(取得できず)')) }}
+      no_log: true
+
+    - name: Record the probe failure as a fact instead of re-raising (R9-b/AC6)
+      ansible.builtin.set_fact:
+        semaphore_templates_probe_ok: false
+        semaphore_templates_probe_error: >-
+          semaphore_templates probe失敗
+          (task: {{ ansible_failed_task.name | default('不明') }}):
+          {{ _semaphore_templates_probe_scrubbed }}
+        semaphore_templates_diff:
+          new: []
+          changed: []
+          unchanged: []
+          orphans: []
