@@ -17,10 +17,13 @@
 
 AIは実装、レビュー、テスト、調査、論点整理を支援する。最終判断者はYoshinobuである。
 
+**Yoshinobuは判断者であって実行者ではない。** リスクを理解して採否を決めるのが役目であり、コマンドを組み立てて流すことではない。人の手に残すのは判断だけになるよう設計する。
+
 - 運用上の採否、本番適用の可否、危険操作に踏み込む方針、確定、commitはYoshinobuが判断する。
 - patch、reboot、restart、migration、firewall変更、inventory変更など本番影響を生む操作を、暗黙の承認や推測で実行しない。Yoshinobuの明示的承認か、承認済みscope内であることを確認したCoordinatorの承認が要る。判断の3分類は `docs/ai/roles/coordinator.md`「実ホストへの非冪等操作の承認」を正本とする。
 - 許可の範囲が不明な場合、または安全性に懸念がある場合は停止し、根拠と未確認事項を示して確認する。
 - `git commit` / `git push` はYoshinobuが都度承認する。対話セッション(Coordinator)は承認を得てから実行してよく、承認なしには行わない。subagentは承認の有無にかかわらず行わない。
+- **打鍵を伴う承認の入口を増やさない。** ansyでYoshinobuに押させてよいのは `git` の確定だけとし、本番実行の承認はquory側で押す。承認面は能力の所在に従わせる。判断を要さない打鍵が混ざるとゲートは薄まり、この機構は確認プロンプトが希少であることで機能している。**方針・採否・安全境界の変更をYoshinobuへ確認することは、ここでいう入口に当たらない**(それらは打鍵ではなく対話で決まる)。
 - playbook自身にGit更新を行わせない。
 
 ### 安全機構がブロックしたとき
@@ -43,6 +46,7 @@ Git   = 確定済みコードと文書の正本
 quory = Gitから取得した確定済みコードの本番実行基盤
 ```
 
+- **ansyから本番へ届く唯一の経路(forced command dispatch)に何を持たせてよいかは、「quoryに触れるか」ではなく「本番の状態を変えるか」で決める。** 読み取り(情報共有)は持たせてよい。**状態を変えるものは、forced commandであっても持たせない。** dispatchへ動詞を1つ足す形の提案は、その動詞が情報を共有するのか状態を変えるのかで判定する。(到達できるホストどうしの承認の要否は別の軸で、`docs/ai/roles/coordinator.md` がホストで引く。)
 - quory上でコードを直接編集・commitしない。
 - **quoryのGit取得は自動だが、配備物(`/usr/local/` や `/etc/systemd/system/` へ配置したscript・unit)の更新は含まれない。** 経路と突合の手段は `docs/ai/context/operations/code-delivery-to-production.md`。
 - 未確認のコードをquoryの定期実行(timer / Semaphore schedule)へ載せない。
