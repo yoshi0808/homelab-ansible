@@ -109,17 +109,13 @@ Policy または Skill (該当業務のPolicyファイル新設・改訂、ま�
 
 **指摘は矛盾の指摘に留め、Context文書を自動で書き換えて「直す」ことは求めない。** Policyの技術的正否はこのチェックの範囲外である。
 
-## 4. Role別のKnowledge参照範囲
+## 4. Knowledgeを読むのはCoordinatorだけである
 
-| Role | 参照するKnowledge |
-|---|---|
-| Coordinator | 全`decisions/`(重要度問わず)、統合結果に関わる`incidents/`、対象領域の`lessons/`全般。着手時にCoordinator自身が確認する |
-| Auditor | **読まない。** 技術的な正否を判定しないため、Knowledgeを読んでも判断に使えない。参照範囲は`docs/ai/role-context-matrix.md`「Auditorの参照範囲」が正本 |
-| Implementer | 対象role/playbookに関連する`lessons/`(実装例外・落とし穴) |
-| Reviewer | 過去レビューで見つかった`lessons/`(見落としパターン) |
-| Tester | 障害・テスト関連の`lessons/`(検証手段の穴、rc規約等) |
+**`docs/ai/memory/`を読むのはCoordinatorに限る。** 全`decisions/`(重要度問わず)、統合結果に関わる`incidents/`、対象領域の`lessons/`を、着手時にCoordinator自身が確認する。起動時に全件を読み込むことはしない。
 
-全Roleとも起動時に`docs/ai/memory/`全件を読み込まない。案件と役割に関連するものだけを、Coordinatorの指定または各Roleの追加調査で参照する(`docs/ai/role-context-matrix.md`の原則と同じ)。
+**subagent(Implementer / Reviewer / Tester / Auditor)は読まない。** `docs/ai/memory/`はRole別に分かれておらず、subagentは毎回コールドスタートで、どれが対象に関連するかを判断する材料を持たない。「必要時に対象関連のものを読む」という以前の定め方は、実質「読まない」であった。
+
+**代わりに、蒸留して渡す。** 各Roleが常に持つべき型は`docs/ai/roles/<role>.md`へ、手順として一般化できるものは`skills/`へ、対象業務の許可・禁止は`docs/ai/policies/`へ落とす。昇格のラダーは3節が正本であり、**この昇格を行う機会が月次振り返りと、規範文書を見直す案件である。** 読ませる側ではなく渡す側で設計する。
 
 ## 関連
 

@@ -44,6 +44,17 @@ service recoveryの現行対象は、`authy`の`freeradius`と、`monnie`の`pro
 
 account間の権限分離、token / keyの保持禁止、forced command要件はPolicy §7を正本とする。
 
+## 検証用target(`sandbox`)
+
+ラダーを実targetへ当てずに検証するための専用VMとして `sandbox.internal` がある。`recovery_ha_failover.yml` と `recovery_service_restart.yml` は対象の許可リストに `sandbox` を含む。
+
+- probeは**検証用の第2インスタンス**として配備する(`playbooks/recovery_probe_sandbox_setup.yml`、unit `recovery-probe-sandbox`)。daemon本体は本番と共有し、分けるのは `state_dir` だけである — `ladder.lock` がtarget別でないため、共有すると検証中に本番の障害が起きたときラダーが見送られる。muteディレクトリは逆に**共有する**(targetごとに別ファイルで干渉せず、`homelab-mute sandbox <分>` が暴走時の安全弁になる)。
+- **既定でenableせず、常設もしない。** 検証したい窓の間だけ `systemctl enable --now recovery-probe-sandbox` で開き、終わったら閉じる。常駐させると週次パッチと衝突する — `proxmox_evacuate_node` は `prefer*` タグを持たない `sandbox` をPhase 6で停止するが、**週次パッチがmuteするのは authy / monnie / sophos-fw の3件だけで `sandbox` は含まれない**ため、probeが5分後にラダーを発火させ、パッチ中のノードでVMを起動しにいく。
+- **HAへ `state: ignored` で登録してあり、relocateを発行してもVMは動かない。** そのためprobeのtarget定義は `failover: false` とし、failover段は別テンプレート(`SANDBOX: Recovery ha failover (check)`、`--check`)で個別に検証する。
+- 標的が到達不能なまま起動しない。閾値到達のたびにラダーが発火し、flappingエスカレーションに至る。
+
+**AIからは窓を開けられない。** enable / disable も failover段のテンプレート起動も quory 上の操作であり、ansyはquoryへの到達手段を持たない(`docs/ai/core.md`「開発と本番の境界」)。検証にこの窓が要るときは、Coordinator経由でYoshinobuへ回す。
+
 ## 依存関係
 
 - pull経路はquoryからProxmox API / SSHと対象probe endpointへ到達する。

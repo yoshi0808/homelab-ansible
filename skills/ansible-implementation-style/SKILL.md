@@ -45,6 +45,17 @@ ansible-playbook p.yml --extra-vars '{"title":"検証 test","message":"本文 bo
 
 **空白を含みうる値はJSON形式の `--extra-vars` で渡す。** 2026-07-27に別々のTesterが同日中に2回踏み、うち1回は実際のSlack通知がタイトル・本文とも**値の中の最初の半角スペースで切断された状態**で本番チャンネルへ送信された(現物をYoshinobuが確認)。文字化けではなく切断であり、**送信自体は成功するため送り手側では気づきにくい**。実装・検証のどちらでも起こる。
 
+## 手動適用・ロールバック系playbookのCLI引数規約
+
+新規に「適用して、戻せる」形のplaybookを書くときは、既存に合わせる。
+
+- **CLI表面は `-e rollback=true` / `-e rollback_to=X.Y.Z` で統一する**(打ちやすさ優先の共通muscle memory)。
+- **role内部では必ず `<role>_rollback` / `<role>_rollback_to` へmapして参照する**(例: `prometheus_update_check_rollback: "{{ rollback | default(false) | bool }}"`)。`-e` はグローバル最優先で撒かれるため、汎用名のままroleロジックへ渡すと複数role読込時に衝突する。
+- **意味論も共通とする**: 無指定は直近backupへ復帰 / `rollback_to=X` は特定backupを選択(無ければfail-closed) / `--check` 併用は対象表示のみ。**戻す前に現物も退避する**(rollback自体も可逆にする)。backup不在はfail-closed。
+- **`-e` はコンマ区切り不可。** `-e rollback=true -e rollback_to=3.12.0`(別々)か `-e "rollback=true rollback_to=3.12.0"`(スペース)。`-e rollback=true,rollback_to=3.12.0` は `rollback` に文字列全体が入る誤りになる。
+
+既存の実装例は `roles/prometheus_update_check`(`upgrade.yml` / `manual_rollback.yml` / `discover_backups.yml`)。
+
 ## 時刻はJST(+09:00)で書く。オフセットの表記は必ず変換の結果であること
 
 このリポジトリが生成する時刻(Slack通知、レポートJSON、ファイル名、ログ)は**JST(`+09:00`)を正**とする。
@@ -96,7 +107,9 @@ task の `vars:` に `lookup('pipe', ...)` のような**副作用や時刻を�
 - `include_tasks` に `become` / `delegate_to` を付けると `'become' is not a valid attribute for a TaskInclude` でハードエラーになる
 - `block` に `changed_when` を付けると `'changed_when' is not a valid attribute for a Block` になる
 
-いずれも**include先またはblock配下の各taskへ個別に付ける**。動的includeのその他の制約(静的検査が届かない、構文エラーが`rescue`で捕捉できない)は `docs/ai/memory/lessons/dynamic-include-escapes-static-and-rescue.md` を参照。
+いずれも**include先またはblock配下の各taskへ個別に付ける**。
+
+あわせて、動的includeは**静的検査も実行時の`rescue`も届かない**。`--syntax-check`と`ansible-lint`はinclude先の中身を検証せず、include先のYAML構文エラーはパースがtask実行ループより前に失敗するため`rescue`で捕捉できない(playが即死する)。**ファイルが存在しない場合だけは`rescue`で捕捉できる**ので、この2つを混同しない。したがって**動的includeを1つ足すことは、include元の全呼び出し経路へハード依存を1つ足すこと**であり、予防の層はcommit前のゲート(`scripts/check-staged-yaml.py`)しか無い。追加する前にinclude元が何箇所から呼ばれるかを数える。
 
 ## check_mode の実装上の落とし穴
 
@@ -120,7 +133,8 @@ task の `vars:` に `lookup('pipe', ...)` のような**副作用や時刻を�
 
 - ガードを書いたら、**全ホストが失敗した状態をdecoy inventoryで再現して、実際に発火するかを確認する**。「書いてあること」を発火の根拠にしない。
 - 前段のホスト失敗を跨いでガードを効かせる必要がある場合、`meta: clear_host_errors`や、ガードを別playへ切り出す(`hosts: localhost`)といった設計が要る。いずれも採用前に上記のdecoy再現で発火を実測すること。
-- 関連する検証観点は`docs/ai/memory/lessons/verify-through-the-consuming-filter.md`(値の目視で終えず消費側まで通す)と同型で、対象がJinjaの値ではなくtaskの発火条件になったもの。
+- これは「値の目視で終えず、その値を消費する側まで通す」と同型の観点であり、対象がJinjaの値ではなくtaskの発火条件になったものである。
+- **防御・ガードを意図的に置かなかった箇所には、置かない理由をコメントに残す。** 書き忘れと区別が付かないと、後から善意で足される。逆に、既知の欠陥を直さないと判断した箇所も同じ扱いにする。
 
 根拠: 2026-07-26、`proxmox_patch_dryrun`単一ノード対応の実装中に、Implementer役がdecoy inventory(閉ポート/`ansible_connection: local`)で`ping`/`fail`/`debug`/`meta: clear_host_errors`のみを使った4パターンの検証を行って発見した。ADR-002で決めた0件ガードの実装が該当し、出荷前に潰している。
 

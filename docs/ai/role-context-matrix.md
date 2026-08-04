@@ -25,7 +25,7 @@
 | Policy(`docs/ai/policies/`、対象分野のみ) | 着手時(該当分野) | 着手時(該当分野) | 着手時(該当分野) | 着手時(該当分野) |
 | Issue / 受入条件(案件の依頼文) | 起動時点で自分が起点 | 着手時(必須) | 着手時(必須) | 着手時(必須) |
 | PR / diff | 必要時 | 自分の実装(常時) | 着手時(必須、レビュー対象そのもの) | 着手時(必須、検証対象そのもの) |
-| Knowledge(`docs/ai/memory/`、Claude Memoryを含む) | 起動時(重要Decisionは常に前提とする) | 必要時(対象関連) | 必要時(対象関連) | 必要時(対象関連) |
+| Knowledge(`docs/ai/memory/`、Claude Memoryを含む) | 着手時(重要Decisionは常に前提とする) | **不要**(読まない) | **不要**(読まない) | **不要**(読まない) |
 | 規範文書レビュー(`skills/document-norm-review/SKILL.md`) | 必要時(自ら規範を書き換えるとき) | 不要 | **着手時(レビュー対象が規範文書を含む場合は必須)** | 不要 |
 
 **どのファイルが在るかは、ディレクトリそのものが正本である。この表へ一覧を持たない** — 一覧を持つと、Contextが増えたときに必ずドリフトする。各分類の定義は `docs/ai/context-classification.md`。
@@ -56,4 +56,6 @@
 
 **対象領域のSystem/Ansible Contextは「着手時」に、Coordinator自身が読む**(上表)。Issue受理とKnowledge(重要Decision)は変わらず常時参照する。
 
-subagentは都度コールドスタートし、案件の依頼文で必要な文脈を受け取るため、進行中作業の一覧を読む必要がない(Knowledgeを全件読ませないのと同じ理由)。**subagentへ渡すべき状態は、Coordinatorが依頼文へ書く。**
+subagentは都度コールドスタートし、案件の依頼文で必要な文脈を受け取るため、進行中作業の一覧を読む必要がない(Knowledgeを読ませないのと同じ理由)。**subagentへ渡すべき状態は、Coordinatorが依頼文へ書く。**
+
+**Knowledgeを読むのはCoordinatorだけである。** subagentはコールドスタートするため、どれが対象に関連するかを判断する材料を持たない。**各Roleが常に持つべき型は、Knowledgeを読ませるのではなく`docs/ai/roles/<role>.md`と`skills/`へ蒸留して渡す**(`docs/ai/memory-classification.md` 4節)。
