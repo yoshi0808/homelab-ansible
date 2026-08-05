@@ -1,0 +1,5 @@
+---
+# ansy / quory の双方から `ann` 鍵で繋がる(Yoshinobu、2026-08-06)。
+# 他のグループと同じ接続方式であり、このホスト固有の事情は無い。
+ansible_user: ann
+ansible_ssh_private_key_file: ~/.ssh/id_ann

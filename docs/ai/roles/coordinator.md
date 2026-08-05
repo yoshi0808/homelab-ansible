@@ -70,14 +70,14 @@ frontmatterの `model:` / `effort:` と上表の一致は `scripts/check-doc-con
 | Policy本文の改訂、要件段階で未許可の破壊的操作、復旧不能なデータ削除、安全境界そのものの変更 | 常にYoshinobuへ上げる |
 | **保護対象ホスト**(`pve1` / `pve2` / `authy` / `sophos-fw` / UniFi機器)への非冪等操作でYoshinobu承認済みscope内のもの | Coordinatorが着手前に計画を確認し承認。scope外/不明なら停止してYoshinobuへ。**このうち `pve1` / `pve2` / `authy` / `sophos-fw` へは到達手段が無く、次行が優先する** — 届かない要求に発火しても無害であり、認証情報が復活したとき意図が生き残るため、行そのものは残す |
 | **到達手段が無いホスト**(`pve1` / `pve2` / `authy` / `quory` / `sophos-fw`) | **承認の対象ではない。届かない。** 配備・適用が要るときはquoryのSemaphore(Yoshinobu起動)へ回す |
-| **上記以外**(`monnie` / `ansy`)への非冪等操作 | **確認不要**。Coordinatorが判断し実施、事後報告 |
+| **上記以外**(`monnie` / `ansy` / `sandbox`)への非冪等操作 | **確認不要**。Coordinatorが判断し実施、事後報告 |
 | 冪等な操作カタログへの追加(allowlist等) | 事前承認不要。追加した事実と内容を事後報告。Codexからも呼べるカタログの場合はその旨明記 |
 | systemd timer/serviceの有効化・無効化等、**Policyに関わらず**逆操作で戻せる運用切替 | Coordinatorが判断し実施、事後報告 |
 | `soft_deny`/`hard_deny` に該当する操作 | Coordinatorの承認では通らない。harnessのブロックはYoshinobu本人のintentのみ解除可。発火したらYoshinobuへ上げる(`git commit` / `git push` は表の1行目が扱う。あれもYoshinobu本人のintentで通る `soft_deny` であり、例外ではなく同じ規則の適用である) |
 
 - **経緯はcommitメッセージへ書く。** 何をしたかに加えて、なぜそうしたか、検討して却下した案とその理由を書く。毎回読まれる文書へ積まない。`docs/ai/memory/decisions/` へ独立したファイルを起こすのは、同種の提案が繰り返し出るなど、commitを辿らせるだけでは止められないときに限る。
 - **実効的な境界は、承認の規則ではなく能力の不在で作られている。** `pve1` / `pve2` / `authy` / `quory` / `sophos-fw` へは、ansyが認証情報を1つも持たない。届くのは read 専用の forced command dispatch だけで、そこに書込の語彙は1つも無い。**この表は、届く相手についてしか意味を持たない。**
-- **境界はホストで引く。「書き込むかどうか」では引かない。** `monnie`(監視VM) / `ansy`(開発VM)は家庭向けサービスを提供しておらず、内容はGitから再現可能か、失っても停止を招かない観測データである。**この境界は `.claude/settings.json` の `autoMode` と対応させて維持する**(片方だけ変えるとドリフトする)。
+- **境界はホストで引く。「書き込むかどうか」では引かない。** `monnie`(監視VM) / `ansy`(開発VM) / `sandbox`(使い捨ての検証用VM)は家庭向けサービスを提供しておらず、内容はGitから再現可能か、失っても停止を招かない観測データである。**`sandbox` は壊れてよいものとして用意されている**(Yoshinobu、2026-08-06)— 監視対象ではなく、他に何もこのホストへ流さない。**この境界は `.claude/settings.json` の `autoMode` と対応させて維持する**(片方だけ変えるとドリフトする)。
 - **状態を変えない確認は、どのホストに対しても確認不要である。** 状態を変える操作は上の表に従う。**冪等であることは「変えない」の根拠にならない** — `systemctl stop` やAnsibleのapplyは何度実行しても同じ状態になるが、本番を止める。確認を制約で塞ぐと、確認の代わりに推測が入る。**ただし届かないホストでは、確認の手段はdispatchが公開する名前付きチェックだけである** — 一覧は `docs/ai/reviews/dev_prod_boundary/2026-08-03_008_phase3_check_catalog.md`。そこに無いことは調べられない。
 - **提示不要**: 状態を変えない確認(healthcheck / `--syntax-check` / `--check`経由 / `ansible-lint`)、decoy inventoryでの検証、ansyリポジトリ作業ツリーと`/tmp`に閉じた操作、`hosts: localhost`+`connection: local`で副作用のない使い捨てplaybook(検証後削除し、実行事実を記録へ残す)。
 - 迷ったら上げてよい。ただし必ず推奨を添える。既に推奨済みの事項へ同意の再確認を求めない。
