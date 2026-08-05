@@ -99,6 +99,17 @@ deployment_drift_check_files:
     src: roles/recovery_exec/files/homelab-semaphore-query
     dest: /usr/local/bin/homelab-semaphore-query
     playbook: playbooks/recovery_exec_setup.yml
+  # nonsemaphore_job_capture案件(2026-08-05)。OnFailureのlanding unitが起動
+  # するスクリプト本体。**配備直後にこの穴に気づいた** — 開発側からこの
+  # スクリプトの存在を確かめる手段が1つも無かった(`unit-cat`はunit名の
+  # 列挙外で拒否され、`deployed-hash`の対応表にも無い)。**捕捉の仕組み自体が
+  # 「壊れても静か」な側にあり**、次に失敗が起きるまで欠落に気づけない。
+  # landing unit本体(/etc/systemd/system/ansible-timer-failure-capture@.service)は
+  # `template`配備のためTier 2で、ここには載せられない(このファイル冒頭の但し書き)。
+  - hosts: [quory]
+    src: roles/systemd_timers/files/ansible-timer-failure-capture.sh
+    dest: /usr/local/sbin/ansible-timer-failure-capture.sh
+    playbook: playbooks/systemd_timers.yml
 
 # --- ②③ systemd unit / timer の状態 -----------------------------------------
 # enabled / active は期待値。timer は on_calendar も見る(空なら検査しない)

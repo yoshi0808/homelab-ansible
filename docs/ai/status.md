@@ -20,7 +20,7 @@
 
 | # | 項目 | 現在地 | 次にやること |
 |---|---|---|---|
-| 1 | **Semaphore外ジョブの失敗捕捉(R8)の配備** | repo側は完了(独立レビュー済み)。**quoryには未反映。** `docs/ai/reviews/nonsemaphore_job_capture/2026-08-05_004_disposition.md` | **Yoshinobuが Semaphore でボタンを2回押す。順序は入れ替えられない** — ①`semaphore_templates_setup` を押して `systemd_timers` のボタンを作る ②できた `systemd_timers` を押して `.service` の `OnFailure` と landing unit を配備する |
+| — | **進行中の案件は無い。** | | |
 
 ## Watch(観測待ち)
 
