@@ -38,7 +38,7 @@ nodeごとに方針1「計画的reboot」または方針2「自動reboot」を�
 `monnie`は方針1とし、`reboot_required`の場合だけ計画的にrebootしてhealthcheckする。
 
 <!-- UV-011 -->
-`ansy`は方針2とし、rebootをunattended-upgradesに任せ、Ansible healthcheckの対象にしない。
+`ansy`は方針2とし、rebootのタイミングを固定時刻で決めずunattended-upgradesに委ねる。`ubuntu_nightly.yml`の管理対象にしない。
 
 <!-- UV-012 -->
 `quory`は方針2とし、固定時刻に自動rebootさせ、`ubuntu_nightly.yml`の管理対象にしない。
