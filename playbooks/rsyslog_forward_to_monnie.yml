@@ -15,12 +15,54 @@
 # --check first. quory self-application also requires an immediate read-only
 # Ansible connectivity check after service restarts.
 #
+# target_hosts: optional (D3/D7, docs/ai/reviews/playbook_button_inventory/
+# 2026-08-06_001_requirement.md). Same pattern syntax as the `hosts:`
+# keyword. Omit it to keep targeting ansy:quory:authy unchanged (R1); this
+# is the established one-host-at-a-time rollout above and is unaffected by
+# target_hosts. target_hosts exists to re-apply this playbook to exactly
+# one of the hosts already configured above (ansy, quory, or authy) —
+# most usefully quory or authy, which ansy cannot reach directly and so
+# need the Semaphore button rather than a local `-l`. **It does not reach a
+# newly created VM.** roles/rsyslog_forward_to_monnie's own
+# rsyslog_forward_allowed_hosts (and the host-keyed
+# rsyslog_forward_stop_after_forward_by_host /
+# rsyslog_forward_required_snippets_by_host /
+# rsyslog_forward_allowed_snippets_by_host that key off it) reject any host
+# outside ansy/quory/authy before any real change is attempted (AC7) — the
+# per-node pre-deploy recon those variables encode has to happen and be
+# committed to this repo before a new host can be added there. If
+# target_hosts is given and does not resolve to at least one inventory host
+# at all, the first play below fails closed with a non-zero exit before the
+# main play would ever run (R2); that is a plain typo/not-in-inventory
+# check, independent of the allow-list above.
+#
 # tester-gate: check-mode-native — package/files use native check mode;
 # rsyslogd native validation, promotion, and service restarts are skipped in
 # check mode. APPLY changes the production logging path and is human-gated.
 
+- name: Validate target_hosts before the main play
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Resolve the requested target_hosts pattern against the inventory
+      ansible.builtin.set_fact:
+        rsyslog_forward_to_monnie_target_hosts_resolved: "{{ query('ansible.builtin.inventory_hostnames', target_hosts) }}"
+      when: target_hosts is defined
+
+    - name: Fail if target_hosts does not resolve to any inventory host
+      ansible.builtin.assert:
+        that:
+          - rsyslog_forward_to_monnie_target_hosts_resolved | length > 0
+        fail_msg: >-
+          target_hosts={{ target_hosts }} did not match any host in the
+          inventory (inventories/homelab/hosts.yml). Check for a typo —
+          target_hosts must name one of ansy/quory/authy (see the header;
+          this playbook does not reach a host outside that list, D7).
+        quiet: true
+      when: target_hosts is defined
+
 - name: Forward Ubuntu node journald logs to monnie
-  hosts: ansy:quory:authy
+  hosts: "{{ target_hosts | default('ansy:quory:authy') }}"
   gather_facts: false
   become: true
   serial: 1

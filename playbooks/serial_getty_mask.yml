@@ -5,9 +5,41 @@
 # Ubuntu nodes where ttyS0 has no usable UART backend. This suppresses the
 # agetty restart loop and its repeated terminal-attribute errors.
 #
-# Scope: ansy / monnie / quory / authy. pve1/pve2 and every other service or
+# Scope: ansy / monnie / quory / authy (the default target_hosts, unchanged
+# from before target_hosts existed). pve1/pve2 and every other service or
 # boot setting are out of scope. In particular, this playbook does not edit
 # GRUB, the kernel command line, getty.target, or the serial device itself.
+#
+# When to run this (D2, docs/ai/reviews/playbook_button_inventory/
+# 2026-08-06_001_requirement.md): this is not a periodic sweep over the
+# default four hosts above. The actual trigger is narrower — cloud-init
+# building a new VM hits the same unusable-ttyS0 agetty restart loop and
+# floods syslog with repeated terminal-attribute warnings. When that
+# happens, run this playbook once against that single new host by passing
+# `-e target_hosts=<new-host>` (or the Semaphore button's target_hosts
+# survey field). Omitting target_hosts keeps targeting the original
+# four-host default; a new host being added elsewhere does not by itself
+# mean this playbook needs to be re-run against the default set.
+#
+# target_hosts: optional. Same pattern syntax as the `hosts:` keyword (a
+# single hostname, or a colon-joined list). Omit it to keep the four-host
+# default above unchanged (R1). If it is given and does not resolve to at
+# least one inventory host, the first play below fails closed with a
+# non-zero exit before the main play would ever run (R2) — it does not
+# silently fall through to "no hosts matched, rc=0".
+#
+# target_hosts stays free text (D4/D6 — Yoshinobu: "hostname手打ちで良い
+# です") rather than an inventory-wide allow-list, because D2's whole point
+# is running this against a VM the very day it is created, before any repo
+# change would exist to add it to a list. What the first play below DOES
+# reject unconditionally is the fixed, small set of protected hosts
+# (pve1 / pve2 / sophos-fw / cloudkey — the docs/ai/roles/coordinator.md
+# "実ホストへの非冪等操作の承認" protected-host row (pve1/pve2/authy/
+# sophos-fw/UniFi機器), minus authy, which is already a legitimate member
+# of the four-host default above). That rejection happens in the
+# `hosts: localhost` play, before the main play below ever connects or
+# escalates privilege on the requested target — see AC9 in
+# docs/ai/reviews/playbook_button_inventory/2026-08-06_001_requirement.md.
 #
 # Safety workflow:
 #   1. Confirm no node depends on a real serial console (see implement note).
@@ -20,8 +52,64 @@
 # recovery mute is required; APPLY still requires a human decision because it
 # removes a possible console access path.
 
+- name: Validate target_hosts before the main play
+  hosts: localhost
+  gather_facts: false
+  vars:
+    # D6/AC9 (docs/ai/reviews/playbook_button_inventory/2026-08-06_001_requirement.md):
+    # sourced from docs/ai/roles/coordinator.md「実ホストへの非冪等操作の
+    # 承認」's protected-host row (pve1/pve2/authy/sophos-fw/UniFi機器),
+    # minus authy — authy is already a legitimate member of this playbook's
+    # own four-host default above, so rejecting it here would break AC1/R1.
+    # "UniFi機器" is represented by cloudkey, the only UniFi device this repo
+    # otherwise names as an Ansible target. That source document is prose,
+    # not a data file this role could read at runtime, so this list is a
+    # necessary literal copy, not a second independently-maintained one — if
+    # coordinator.md's protected-host row changes, this list must be updated
+    # to match by hand (see the implement record for the alternatives that
+    # were considered and rejected).
+    serial_getty_mask_protected_hosts:
+      - pve1
+      - pve2
+      - sophos-fw
+      - cloudkey
+  tasks:
+    - name: Resolve the requested target_hosts pattern against the inventory
+      ansible.builtin.set_fact:
+        serial_getty_mask_target_hosts_resolved: "{{ query('ansible.builtin.inventory_hostnames', target_hosts) }}"
+      when: target_hosts is defined
+
+    - name: Fail if target_hosts does not resolve to any inventory host
+      ansible.builtin.assert:
+        that:
+          - serial_getty_mask_target_hosts_resolved | length > 0
+        fail_msg: >-
+          target_hosts={{ target_hosts }} did not match any host in the
+          inventory (inventories/homelab/hosts.yml). Check for a typo, or
+          add the host there first if this is a newly created VM.
+        quiet: true
+      when: target_hosts is defined
+
+    # D6/AC9: this must run — and fail — before the main play below ever
+    # targets the requested host, because that play connects and escalates
+    # privilege (become: true) as soon as it has at least one host. Checking
+    # inside that play would be too late: the connection/become would
+    # already have happened by the time a task-level assert could run.
+    - name: Refuse protected hosts before the main play ever connects
+      ansible.builtin.assert:
+        that:
+          - (serial_getty_mask_target_hosts_resolved | intersect(serial_getty_mask_protected_hosts)) | length == 0
+        fail_msg: >-
+          target_hosts={{ target_hosts }} resolves to a protected host
+          ({{ serial_getty_mask_target_hosts_resolved | intersect(serial_getty_mask_protected_hosts) | join(', ') }}).
+          This playbook refuses pve1/pve2/sophos-fw/cloudkey unconditionally
+          (docs/ai/roles/coordinator.md「実ホストへの非冪等操作の承認」) —
+          no connection or privilege escalation toward it was attempted.
+        quiet: true
+      when: target_hosts is defined
+
 - name: Stop and mask unused ttyS0 serial getty
-  hosts: ansy:monnie:quory:authy
+  hosts: "{{ target_hosts | default('ansy:monnie:quory:authy') }}"
   gather_facts: false
   become: true
   serial: 1

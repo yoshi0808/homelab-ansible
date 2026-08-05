@@ -34,6 +34,20 @@
 #
 # 参照: docs/ai/reviews/time_sync_check/2026-06-25_002_implement.md
 #
+# target_hosts: 省略可(D3/D7、docs/ai/reviews/playbook_button_inventory/
+# 2026-08-06_001_requirement.md)。`hosts:`キーワードと同じパターン構文。
+# 省略時は下記の pve1:pve2:ansy:monnie:authy を変更せず対象とする(R1)。
+# 用途は、既に対象として構成済みのホスト(pve1/pve2/ansy/monnie/authy)へ
+# 1台だけ再適用すること — 特にansyから直接は届かないpve1/pve2/authyへ、
+# Semaphoreのボタン経由で再適用する場合に使う。**新しく作ったVMへ向ける
+# 用途ではない。** roles/time_sync_ntp_reference の
+# time_sync_ntp_reference_chrony_hosts に無いホストは、実際の変更に入る
+# 前にrole側のassertが拒否する(AC7)。新しいホストを対象に加えるには、
+# 先にrepo側でそのリストへ追記しcommitする必要がある。指定して
+# inventoryのどのホストにも解決しない場合は、下記の最初のplayが
+# main playの前にrc非0で停止する(R2。こちらは単なる「inventoryに
+# 存在しない/typo」の検査であり、上記のallow-listとは別の判定)。
+#
 # tester-gate: check-mode-native — TS-009 条件1(再起動してもchronyデーモンが
 # 一瞬再起動するだけで他サービス・接続には影響しない)は満たすが、条件2
 # (本体操作を省いた検証には価値がない)は満たさない。copyモジュールのcontent
@@ -47,8 +61,30 @@
 # risk-accepted ではなく check-mode-native が正しい分類(2026-07-06当時は
 # 条件1のみで判断していた)。詳細は docs/ai/policies/ansible_test_safety_policy.md。
 
+- name: Validate target_hosts before the main play
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Resolve the requested target_hosts pattern against the inventory
+      ansible.builtin.set_fact:
+        time_sync_ntp_reference_target_hosts_resolved: "{{ query('ansible.builtin.inventory_hostnames', target_hosts) }}"
+      when: target_hosts is defined
+
+    - name: Fail if target_hosts does not resolve to any inventory host
+      ansible.builtin.assert:
+        that:
+          - time_sync_ntp_reference_target_hosts_resolved | length > 0
+        fail_msg: >-
+          target_hosts={{ target_hosts }} did not match any host in the
+          inventory (inventories/homelab/hosts.yml). Check for a typo —
+          target_hosts must name one of pve1/pve2/ansy/monnie/authy (see
+          the header; this playbook does not reach a host outside that
+          list, D7).
+        quiet: true
+      when: target_hosts is defined
+
 - name: Add quory as an additional NTP reference on homelab nodes
-  hosts: pve1:pve2:ansy:monnie:authy
+  hosts: "{{ target_hosts | default('pve1:pve2:ansy:monnie:authy') }}"
   gather_facts: false
   become: true
   tasks:

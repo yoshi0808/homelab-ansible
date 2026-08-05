@@ -364,6 +364,84 @@ semaphore_templates_catalog:
   - playbook: playbooks/systemd_timers.yml
     class: SEMI-SAFE
 
+  # --- ボタンが無いplaybookの棚卸し(2026-08-06、requirement R1-R6、
+  # 独立レビュー2026-08-06_003_reviewを受けたD6/D7で訂正) ---------------------
+  # docs/ai/reviews/playbook_button_inventory/2026-08-06_001_requirement.md。
+  # D1: 4本にボタンを与える。3本(rsyslog_forward_to_monnie / serial_getty_mask
+  # / time_sync_ntp_reference)は対象ホストを target_hosts survey(自由入力
+  # 必須、D4 — enumにするとカタログ側の維持コストが用途と噛み合わない)で
+  # 受けるが、**用途は playbook ごとに異なる(D6/D7 で訂正済み)**:
+  #   - serial_getty_mask のみ「cloud-initで新しいVMを作ったら、その
+  #     ホストを指定して1回だけ流す」(D2)。新規ホスト名を自由入力で
+  #     受けるが、pve1/pve2/sophos-fw/cloudkeyは playbook 側の guard が
+  #     無条件に拒否する(D6、AC9/AC10)。
+  #   - rsyslog_forward_to_monnie / time_sync_ntp_reference は「ansyから
+  #     直接は届かない、既に構成済みのホストへ1台ずつ再適用する」(D7)。
+  #     新規VMへ向ける用途では**ない** — 対象はrole自身が持つallow-list
+  #     (rsyslog_forward_allowed_hosts / time_sync_ntp_reference_chrony_hosts)
+  #     に限られ、新しいホストを加えるにはrepo側の変更が先に要る(AC7)。
+  # grafana_provisioning は hosts: monnie 単独であり対象選択の余地が無い
+  # ため target_hosts を持たせない(D3)。classは4本ともSEMI-SAFE(押しても
+  # 停止は起きないが状態は変わる。軸はカタログ冒頭の定義に従う)。
+  - playbook: playbooks/grafana_provisioning.yml
+    class: SEMI-SAFE
+
+  - playbook: playbooks/rsyslog_forward_to_monnie.yml
+    class: SEMI-SAFE
+    survey_vars:
+      - { name: target_hosts, title: target_hosts, required: true,
+          description: "再適用先ホスト名(ansy/quory/authyのいずれか1台。新しいホストを増やすには先にrepo側の拡張が要る。D7)" }
+
+  - playbook: playbooks/serial_getty_mask.yml
+    class: SEMI-SAFE
+    survey_vars:
+      - { name: target_hosts, title: target_hosts, required: true,
+          description: "対象ホスト名(inventoryに登録済みの1台。例: 新規VM名。pve1/pve2/sophos-fw/cloudkeyは拒否される。D6)" }
+
+  - playbook: playbooks/time_sync_ntp_reference.yml
+    class: SEMI-SAFE
+    survey_vars:
+      - { name: target_hosts, title: target_hosts, required: true,
+          description: "再適用先ホスト名(pve1/pve2/ansy/monnie/authyのいずれか1台。新しいホストを増やすには先にrepo側の拡張が要る。D7)" }
+
+  # --- ボタンを持たない9本(D5、同案件) ---------------------------------------
+  # playbooks/*.yml 52本とこのカタログを突合すると、上記4本を加えても
+  # なお9本がカタログに無い。次に誰かが同じ棚卸しを繰り返さないための
+  # 記録であり、カタログへのエントリ(playbook:)は追加しない。理由が既に
+  # playbookヘッダにあるものは複製せずヘッダを参照するだけに留める(R5)。
+  #   - playbooks/semaphore_templates_setup.yml: ブートストラップの自己参照
+  #     回避で意図的にカタログ外(誤った定義を直す手段が壊れたボタン自身に
+  #     依存する事態を避ける)。ヘッダ、および
+  #     docs/ai/reviews/semaphore_templates_as_code/2026-08-04_003_implement.md
+  #     §6.2「OQ3(ブートストラップ) — 除外する」参照
+  #   - playbooks/cert_renew_quory.yml: quory自身のsystemd timerから実行。
+  #     ヘッダに「semaphore再起動を含むためsemaphoreからは実行しない」と明記
+  #   - playbooks/knowledge_review.yml: ansyのsystemd timerから実行。ヘッダに
+  #     「Semaphoreからは実行しない(Coordinatorのauto-memoryがansyにしか
+  #     無いため)」と明記
+  #   - playbooks/knowledge_review_timer.yml: ansy(dev_nodes)専用のunit配備。
+  #     ヘッダの「実行: ansible-playbook playbooks/knowledge_review_timer.yml」
+  #     のとおりansy自身から直接流す運用で、Semaphore経由の運用ではない
+  #     (Semaphoreから到達できるか自体は未確認だが、ansyから直接流せる以上
+  #     ボタンの要否には影響しない)
+  #   - playbooks/incident_investigate_notify.yml: incident-investigate.py
+  #     (quory)が `-e @<queue-file>.json` で呼ぶ。ヘッダの「Required extra
+  #     vars」(iv_semaphore_task_id / iv_report_path)を先頭taskがassertする
+  #     ため、ボタン化しても入力なしで押すと必ずfailする
+  #   - playbooks/recovery_probe_notify.yml: recovery-probeの通知キュー
+  #     flushが呼ぶ。ヘッダの「Required extra vars」(nt_status / nt_title /
+  #     nt_message / nt_queued_at)の理由は上記と同じ
+  #   - playbooks/worktree_sync_notify.yml: worktree-sync.sh(quory)が呼ぶ。
+  #     ヘッダの「Required extra vars」(sync_status / sync_title /
+  #     sync_message)の理由は上記と同じ
+  #   - playbooks/incident_sync_teardown.yml: 一度きりの撤去用。
+  #     2026-08-03に実行済み(docs/ai/reviews/dev_prod_boundary/
+  #     2026-08-03_018_review_phase4_step2_3.md「Coordinator の処置」に
+  #     実測あり)。再度押す対象ではない
+  #   - playbooks/test_ca_env.yml: ヘッダの「tester-gate: safe-readonly —
+  #     localhost で環境変数の長さを表示するのみ」のとおり、動作確認用の
+  #     debugのみでボタンにする運用上の必要が無い
+
 # --- API接続設定 -------------------------------------------------------------
 # 2026-08-04追補: ansy の Semaphore(project id=2)で実測できたことにより、
 # OQ1は「テンプレート定義のAPI操作」に関する範囲では解消した(§8を参照)。

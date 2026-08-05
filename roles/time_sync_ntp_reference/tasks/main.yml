@@ -4,6 +4,28 @@
 # /etc/systemd/timesyncd.conf on reboot / settings save), so a direct
 # Ansible file edit would conflict with that management path. The user
 # manages CloudKey's NTP servers manually via the GUI instead (2026-06-25).
+#
+# AC7 (docs/ai/reviews/playbook_button_inventory/2026-08-06_001_requirement.md):
+# playbooks/time_sync_ntp_reference.yml's target_hosts can point this role at
+# any host that resolves in the inventory, including one that is not in
+# time_sync_ntp_reference_chrony_hosts below. Without this assert, the only
+# task in this role is silently skipped by the `when:` on the next task and
+# the run reports ok/green with nothing done. This assert makes that failure
+# explicit instead. It intentionally references the same
+# time_sync_ntp_reference_chrony_hosts variable the `when:` below already
+# uses — not a second copy of the host list (docs/ai/status.md 規律4).
+- name: Refuse hosts outside the configured chrony reference host list
+  ansible.builtin.assert:
+    that:
+      - inventory_hostname in time_sync_ntp_reference_chrony_hosts
+    fail_msg: >-
+      {{ inventory_hostname }} is not in time_sync_ntp_reference_chrony_hosts
+      ({{ time_sync_ntp_reference_chrony_hosts | join(', ') }},
+      roles/time_sync_ntp_reference/defaults/main.yml). This role has no
+      quory chrony-reference task to run for it; add it to that list first
+      if this host should receive one.
+    quiet: true
+
 - name: Add quory as an additional chrony source
   ansible.builtin.include_tasks: chrony_hosts.yml
   when: inventory_hostname in time_sync_ntp_reference_chrony_hosts
