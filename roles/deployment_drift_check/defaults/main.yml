@@ -137,17 +137,11 @@ deployment_drift_check_units:
   # このtimerが対象だからで、対応する.serviceには対応するSemaphoreジョブ
   # 行が無い(そもそもSemaphoreを経由しない)——止まっても静かである点は
   # worktree-sync.timerと同じ理由。
-  # enabled/active の根拠: `unit-cat` で unit定義自体(OnCalendar/Persistent)は
-  # 確認済みだが、is-enabled/is-activeの直接照会はこの案件の範囲では未実施
-  # (Coordinator/Implementerとも実ホストへ到達しない)。roles/systemd_timers/
-  # tasks/main.ymlの「Enable and start timers」taskはカタログの全エントリへ
-  # 無条件に enabled: true / state: started を適用し、`when` によるgateを
-  # 持たない。加えて、このtimerが実際に月次(毎月01日 00:35)で発火している
-  # 事実(quoryのsemaphore.serviceがまさにその時刻に再起動している——
-  # requirement §2で確認済み)は、当時enabled/activeでなければ起こり得ない
-  # 間接証拠である。配備後の初回発火(または`systemctl is-enabled`/
-  # `is-active`の直接確認)で答え合わせが要る(AC4/AC5、Testerが実ホストで
-  # 確認できる範囲)。
+  # enabled/active の期待値は、当初は間接証拠(このtimerが毎月01日 00:35に
+  # 発火している事実)で置いたものだった。2026-08-06 00:40 の実行——このエントリを
+  # 含む最初の日次検査——で finding が立たなかったため、実値と一致していることが
+  # 確定している(AC5)。停止/無効化したときに finding が立つこと(AC4)は、
+  # timerを実際に止める必要があるため未検証のまま。
   - { hosts: [quory], name: ansible-cert-renew-quory.timer, enabled: enabled, active: active, playbook: playbooks/systemd_timers.yml }
   # OQ2の答え: playbooks/systemd_timers.ymlではなくplaybooks/knowledge_review_timer.yml
   # (roles/knowledge_review/tasks/install_timer.ymlが変数gateなしで
