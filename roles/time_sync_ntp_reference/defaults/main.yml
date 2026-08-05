@@ -1,9 +1,21 @@
 ---
 time_sync_ntp_reference_host: quory.internal
 
+# このroleを適用してよいホスト。playの対象(playbooks/time_sync_ntp_reference.yml
+# の `hosts:`)とは別軸で、**対象にされたホストのうち、実際にchronyの
+# drop-inを置く先**を決める。playの既定は pve1:pve2:ansy:monnie:authy であり、
+# ここにsandboxを足してもその既定は変わらない — sandboxへ向くのは
+# `-e target_hosts=sandbox` を明示したときだけである。
 time_sync_ntp_reference_chrony_hosts:
   - pve1
   - pve2
   - ansy
   - monnie
   - authy
+  # sandbox: chronyが稼働しtimesyncdはinactive、/etc/chrony/conf.d も在ることを
+  # 2026-08-06に実測した上で追加(このroleの前提を満たす)。目的は
+  # `docs/ai/status.md` の「変換した14本のうち12本で通常実行の不変が未検証」を
+  # 1本ぶん実測で閉じること — このroleの2つのtaskはどちらも
+  # `when: not ansible_check_mode` を持ち、通常実行で本当に走るかは
+  # 実ホストでしか確かめられない。sandboxはそのための使い捨てVMである。
+  - sandbox
