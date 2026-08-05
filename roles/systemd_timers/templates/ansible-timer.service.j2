@@ -2,9 +2,23 @@
 Description={{ timer.description }}
 After=network-online.target
 Wants=network-online.target
+# nonsemaphore_job_capture案件(requirement R8): このunitがfailedになったら
+# ansible-timer-failure-capture@.service を起動し、既存の障害捕捉
+# パイプライン(roles/incident_capture)へ乗せる。%n はこのunit自身の
+# 完全なunit名(例: ansible-cert-renew-quory.service)。テンプレートunit名に
+# `%n.service` を連結する形は systemd の確立された慣用句(例:
+# unit-status-mail@.service)であり、instance側に`.service`が二重に
+# 含まれても正しくパースされる(instanceにドットを含められるため)。
+# 生成先: ansible-timer-failure-capture@.service.j2。
+OnFailure=ansible-timer-failure-capture@%n.service
 
 [Service]
 Type=oneshot
 User={{ systemd_timers_run_user }}
 WorkingDirectory={{ systemd_timers_working_dir }}
-ExecStart=/usr/bin/flock -n /run/lock/ansible-{{ timer.name }}.lock {{ systemd_timers_playbook_bin }} {{ timer.playbook }}
+# -E 75: flock が多重起動を排他で見送った場合の終了コードを、通常の失敗
+# (既定は1)と区別できる値にする。SuccessExitStatus=75 と対にして、
+# 「見送り」を systemd の failed 状態に入れない(AC2) — 同種の区別は
+# roles/incident_investigate・roles/worktree_sync の同型unitに前例がある。
+ExecStart=/usr/bin/flock -n -E 75 /run/lock/ansible-{{ timer.name }}.lock {{ systemd_timers_playbook_bin }} {{ timer.playbook }}
+SuccessExitStatus=75

@@ -19,6 +19,43 @@
 # — roles/incident_capture・roles/incident_investigateと同型)。TS-010に照らし
 # risk-accepted ではなく check-mode-native が正しい分類(2026-07-06当時は
 # 条件1のみで判断していた)。詳細は docs/ai/policies/ansible_test_safety_policy.md。
+# nonsemaphore_job_capture案件(requirement R3)独立レビューSuggestion #1
+# (2026-08-05、docs/ai/reviews/nonsemaphore_job_capture/2026-08-05_003_review.md)
+# を受けて追加。playbooks/semaphore_templates_setup.yml のヘッダが自ら文書化
+# しているとおり、このリポジトリのSemaphoreカタログはquory本番だけでなく
+# ansy(検証用インスタンス)へも適用しうる。ansyのSemaphoreへ本playbookの
+# テンプレートを適用してボタンを押すと、Semaphoreの実行プロセス自体がansy
+# 上で動くため、`connection: local`(上のplay)が無条件にansy自身へ作用し、
+# quory向けのunit定義(既定のtarget_hosts=control_nodes)をansyへ配備して
+# しまう——ansyのSemaphoreインスタンスがSSH鍵を持たないこと(system context
+# doc参照)は`connection: local`を一切防がないため、この経路は「鍵が無い
+# ので無害」という既存の前提の外側にある。
+# codex_update_check.yml等の既存playbookが確立している「verify execution
+# host」guard(hosts: localhost + connection: local + assert）と同型で、
+# target_hosts(既定 control_nodes)が指す inventory group に、実際に
+# このplaybookを実行しているホスト自身が含まれるかを起動直後に確認する。
+# 含まれなければ即座に停止し、以降のtemplate/systemd操作には一切進まない。
+- name: systemd_timers - verify execution host
+  hosts: localhost
+  gather_facts: true
+  connection: local
+  tasks:
+    - name: Ensure this playbook is running on a host that belongs to target_hosts
+      ansible.builtin.assert:
+        that:
+          - ansible_facts['hostname'] in (groups[target_hosts | default('control_nodes')] | default([]))
+        fail_msg: >-
+          playbooks/systemd_timers.yml uses connection: local and must be run
+          FROM the host it configures (current host:
+          {{ ansible_facts['hostname'] }}; target_hosts=
+          {{ target_hosts | default('control_nodes') }} resolves to
+          {{ groups[target_hosts | default('control_nodes')] | default([]) }}).
+          Running this from any other host (e.g. a Semaphore instance on a
+          different machine applying the default target_hosts) would deploy
+          another host's systemd units onto the wrong machine. Pass the
+          matching target_hosts (e.g. -e "target_hosts=dev_nodes" when run
+          from ansy), or run it from the correct host.
+
 - name: Configure Ansible systemd timers
   hosts: "{{ target_hosts | default('control_nodes') }}"
   gather_facts: false

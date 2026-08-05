@@ -27,6 +27,30 @@
   when: not ansible_check_mode
   tags: [destructive]
 
+# nonsemaphore_job_capture案件(2026-08-05、requirement R8)。カタログの件数によらず1回だけ配備
+# する — ansible-timer.service.j2 側の OnFailure=...@%n.service が
+# 全生成serviceから共通で参照するテンプレートunitであり、カタログに
+# エントリを足した人が捕捉の配線を別途書く必要はない。
+- name: Deploy failure-capture handler script
+  ansible.builtin.copy:
+    src: ansible-timer-failure-capture.sh
+    dest: "{{ systemd_timers_failure_capture_script_path }}"
+    owner: root
+    group: root
+    mode: "0755"
+  when: not ansible_check_mode
+  tags: [destructive]
+
+- name: Deploy failure-capture handler unit (OnFailure= target, nonsemaphore_job_capture)
+  ansible.builtin.template:
+    src: "ansible-timer-failure-capture@.service.j2"
+    dest: /etc/systemd/system/ansible-timer-failure-capture@.service
+    owner: root
+    group: root
+    mode: "0644"
+  when: not ansible_check_mode
+  tags: [destructive]
+
 - name: Reload systemd daemon
   ansible.builtin.systemd:
     daemon_reload: true

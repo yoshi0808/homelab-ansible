@@ -329,6 +329,32 @@ semaphore_templates_catalog:
   - playbook: playbooks/worktree_sync_setup.yml
     class: SEMI-SAFE
 
+  # --- nonsemaphore_job_capture案件(2026-08-05、requirement R8。この案件の
+  # R8は上のclass_reason用R8とは無関係の別ファイルの別番号) -------------------
+  # quory自身のsystemd timer/serviceユニットを配備しenable+startする
+  # (roles/systemd_timers)。上のR7の9本と同じ理由でSEMI-SAFE・引数なし・
+  # survey無し(対象はplaybook自身のtarget_hosts既定値=control_nodesに委ねる。
+  # quoryはcontrol_nodesのメンバーなので、この1個のホストに絞る追加の
+  # survey/argumentは不要)。
+  #
+  # connection: local制約(playbooks/systemd_timers.ymlは「実行元ホスト自身を
+  # 設定する」設計で、対象ホストから起動する必要がある)は、この場合は
+  # Semaphore自身がquory上のOSプロセスとして動くことで自動的に満たされる —
+  # inventories/homelab/host_vars/quory.ymlの
+  # `ansible_connection: "{{ 'local' if lookup('pipe','hostname -s')=='quory'
+  # else 'ssh' }}"` が、quory上で実行されたときに同じ効果(local接続)を
+  # 生む前例であり、recovery_probe_setup.yml・incident_capture_setup.yml等の
+  # 既存SEMI-SAFEテンプレートは実際にこの前例のうえでquory上のsystemd unit
+  # 操作(become: true)を本番で成立させている。systemd_timers.ymlはこれを
+  # play-level `connection: local` として明示的に固定している点が異なる
+  # だけで、Semaphore実行環境がquory自身である以上、結果は同じになる。
+  # 実ホストでの動作確認(初回reconcile後の実クリック)はTester/Yoshinobuの
+  # 範囲であり、Implementerはこれを実ホストで確かめていない
+  # (docs/ai/reviews/nonsemaphore_job_capture/2026-08-05_002_implement.md
+  # 参照)。
+  - playbook: playbooks/systemd_timers.yml
+    class: SEMI-SAFE
+
 # --- API接続設定 -------------------------------------------------------------
 # 2026-08-04追補: ansy の Semaphore(project id=2)で実測できたことにより、
 # OQ1は「テンプレート定義のAPI操作」に関する範囲では解消した(§8を参照)。

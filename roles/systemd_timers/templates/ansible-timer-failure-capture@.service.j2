@@ -1,0 +1,13 @@
+[Unit]
+Description=Capture failure evidence for %i (nonsemaphore_job_capture, requirement R8)
+Documentation=file://{{ systemd_timers_working_dir }}/docs/ai/reviews/nonsemaphore_job_capture/2026-08-05_001_requirement.md
+
+[Service]
+# OnFailure=で直接起動されるだけのunitであり、timers.target等の依存経路には
+# 乗らない(enable/startは行わない — daemon-reloadでロードされていれば
+# systemdが失敗イベントごとに起動する)。
+Type=oneshot
+User={{ systemd_timers_run_user }}
+# %i には失敗したunitのフルネーム(例: ansible-cert-renew-quory.service)が
+# そのまま渡る(ansible-timer.service.j2側の OnFailure=...@%n.service 参照)。
+ExecStart={{ systemd_timers_failure_capture_script_path }} %i

@@ -3,6 +3,15 @@ systemd_timers_working_dir: /home/yoshi/homelab-ansible
 systemd_timers_run_user: yoshi
 systemd_timers_playbook_bin: /usr/bin/ansible-playbook
 
+# nonsemaphore_job_capture案件(2026-08-05、R8。ただしこの「R8」は障害捕捉
+# Step 1 requirement側の番号であり、semaphore_templatesのclass_reason用R8や
+# deployment_drift_checkのR8/R9とは無関係の別ファイルの別R8なので、以後は
+# 案件名で参照する)。roles/systemd_timers が生成する
+# 全serviceに効くOnFailure=ハンドラの配備先。ansible-timer.service.j2の
+# OnFailure=と、ansible-timer-failure-capture@.service.j2のExecStartの
+# 両方がこの値を参照する(値の重複を避ける)。
+systemd_timers_failure_capture_script_path: /usr/local/sbin/ansible-timer-failure-capture.sh
+
 systemd_ansible_timers:
   # 以下のエントリは Semaphore UI スケジュールに移行済み
   # - name: authy-healthcheck
