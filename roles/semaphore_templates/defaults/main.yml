@@ -142,6 +142,15 @@ semaphore_templates_catalog:
     survey_vars:
       - { name: force_renew, title: force_renew, default_value: "true" }
 
+  # 2026-08-05追加。ROOT CAの差し替え(root_ca_keyusage案件)に必要だが、
+  # そのときボタンが無いことが判明したため。押すと全ホストの信頼ストアへ
+  # ROOT CAを配り update-ca-certificates を走らせる。classは同じ証明書系の
+  # cert_renew / cloudkey_cert_deploy に揃えてSEMI-SAFE(状態は変わるが
+  # サービスは止まらない。誤った証明書を配った場合も、正しいものを置いて
+  # 押し直せば戻る)。引数・surveyは持たない — 対象はplaybookのhosts:が決める。
+  - playbook: playbooks/ca_trust_deploy.yml
+    class: SEMI-SAFE
+
   - playbook: playbooks/sophos_trim.yml
     class: SEMI-SAFE
     legacy_name: "SEMI-SAFE:Sophos trim"
