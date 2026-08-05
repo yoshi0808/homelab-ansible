@@ -136,11 +136,29 @@ semaphore_templates_catalog:
           values: [{ name: pve1, value: pve1 }, { name: pve2, value: pve2 }] }
 
   # --- 証明書・CA ------------------------------------------------------------
+  # 2026-08-06、既定を true から false へ変えた(Yoshinobu判断)。
+  #
+  # **狙いは「月1回の強制置き換え」から「週1回の、期限が近いときだけ置き換え」へ
+  # 移すこと。** 証明書は有効45日・残り15日で更新する設計
+  # (roles/homelab_cert_renew/defaults/main.yml)なので、更新猶予の窓は15日ある。
+  # 月次だとその窓に当たる機会が1回しかなく、**外すと次の機会は期限の後になる** —
+  # 2026-08-01に実際にそうなった(pve1が到達不能で4回連続中断し、pve2とmonnieが
+  # 更新されないまま8月中旬の期限へ向かっていた)。週次なら窓の中に2〜3回入る。
+  #
+  # **survey自体は残す。** 8/5の手動更新のように、期限に関係なく強制的に置き換えたい
+  # 場面がある(ROOT CA差し替え後の全ホスト再発行など)。既定をfalseにするだけで、
+  # 打てば従来どおりtrueにできる。
+  #
+  # **schedule側は repo の外にあり、ここを変えても自動では変わらない。**
+  # Semaphoreのscheduleが force_renew の値を自分で持っている場合、この既定値は
+  # 効かない。実行間隔(月次→週次)と曜日の調整とあわせて、Yoshinobuが
+  # Semaphore UI で確認する。**曜日は週末を選ぶこと** — pve1は夏季に平日
+  # シャットダウンされるため、平日に走らせると週次にしてもpve1だけ毎回外す。
   - playbook: playbooks/cert_renew.yml
     class: SEMI-SAFE
     legacy_name: "SEMI-SAFE:Cert_renew (only on Quory)"
     survey_vars:
-      - { name: force_renew, title: force_renew, default_value: "true" }
+      - { name: force_renew, title: force_renew, default_value: "false" }
 
   # 2026-08-05追加。ROOT CAの差し替え(root_ca_keyusage案件)に必要だが、
   # そのときボタンが無いことが判明したため。押すと全ホストの信頼ストアへ
