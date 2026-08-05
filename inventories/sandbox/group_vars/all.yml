@@ -1,0 +1,12 @@
+---
+# sandbox インベントリ用。`inventories/homelab/group_vars/` は別インベントリなので
+# 適用されない — 接続方法をここで持つ必要がある。値は homelab 側と同じ
+# (sandbox は ansy / quory の双方から同じ `ann` 鍵で繋がる)。
+ansible_user: ann
+ansible_ssh_private_key_file: ~/.ssh/id_ann
+
+# homelab 側の group_vars/all.yml と同じ値を置く。playbook のロジックを試すのが
+# 目的であり、パスの違いで挙動を変えたくないため。**このパスは sandbox 上には
+# 存在しない**ので、ここへ書き込む playbook を走らせるときは先にディレクトリが
+# 要る(その playbook を試す時点で分かる)。
+reports_base_dir: /home/yoshi/homelab-ansible/reports
