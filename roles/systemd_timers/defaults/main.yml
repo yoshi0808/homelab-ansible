@@ -49,8 +49,19 @@ systemd_ansible_timers:
   #   schedule: "Fri *-*-* 17:00:00"
   #   playbook: playbooks/codex_update_check.yml
   #   persistent: false
+  # persistent: true(2026-08-06にfalseから変更)。
+  # **月次かつ `Persistent=false` だと、00:35にquoryが停止していればその月の
+  # 更新が丸ごと飛び、飛んだことを知る手段も無かった。** 証明書は有効45日なので、
+  # 1回飛ぶと次の機会は期限のほぼ直前になる。`Persistent=true` は、発火時刻に
+  # 停止していた分をquory起動時に実行する。
+  #
+  # `cert_renew.yml`(Semaphore、週次)側は「対象ホストが落ちている」問題を
+  # 頻度と曜日で解いたが、**こちらは実行主体そのものが落ちている問題**であり、
+  # 頻度を上げても解けない。規範は docs/ai/policies/cert_renew_policy.md CERT-024。
+  #
+  # 副作用: quory起動直後に証明書更新とsemaphore再起動が走りうる。
   - name: cert-renew-quory
     description: Renew quory semaphore TLS certificate
     schedule: "*-*-01 00:35:00"
     playbook: playbooks/cert_renew_quory.yml
-    persistent: false
+    persistent: true
