@@ -34,18 +34,14 @@
       ansible.builtin.include_role:
         name: semaphore_templates
         tasks_from: probe
-      vars:
-        # R9-c: 恒久の既定として書かない。CAのKeyUsage拡張問題
-        # (docs/ai/status.md Watch、独立案件)が解消するまでの回避であり、
-        # Semaphore上のブートストラップtemplateのsurvey既定値と同じ形を
-        # 踏襲する(ループバックへ寄せた上で検証を切る。検証を切るだけに
-        # しない理由はdefaults/main.ymlのコメント参照 — 内部DNSが
-        # sophos-fw自身であるため、名前で引く形のまま検証だけ切ると
-        # DNSを取られたときにAPIトークンを奪われる)。semaphore_templates
-        # role自体の既定(quory.internal / validate_certs: true、本来の
-        # 恒久値)は変えず、この呼び出しsiteだけでvarsとして上書きする。
-        semaphore_templates_api_base_url: "{{ deployment_drift_check_semaphore_api_base_url }}"
-        semaphore_templates_api_validate_certs: "{{ deployment_drift_check_semaphore_api_validate_certs }}"
+      # 2026-08-05: CAのKeyUsage問題が解消したため、接続の上書きを撤去した。
+      # roles/semaphore_templates の既定(https://quory.internal:3000/api /
+      # validate_certs: true)をそのまま使う。**ループバックへ寄せていた理由も
+      # 同時に消えている** — 検証が有効なら、DNSを取られても攻撃者は
+      # quory.internal の正当な証明書を出せない。名前解決が落ちた場合も
+      # quoryの /etc/hosts に全inventoryホストが載っており(このroleの
+      # deployment_drift_check_hosts_file が日次で確認している)、DNS依存では
+      # 到達性を失わない。
 
     - name: Fold the probe result into this host's findings (R9-a/R9-b)
       ansible.builtin.set_fact:

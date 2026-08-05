@@ -44,6 +44,14 @@ Semaphoreのジョブ結果はSQLite(`semaphore.db`)にあり、read-onlyのSELE
 - `semaphore.db` は `recovery-exec` の権限でのみ読める(ACL)。ansyの接続ユーザーのままでは `unable to open database` になる。
 - ansy / quory ともSemaphoreのバージョンとサービス実行ユーザーは一致している(2026-07-27時点)。スキーマ調査は開発側(ansy)で先に行い、本番の読み取りを最小化する。
 
+## UIは新しいテンプレートを即座に表示しない(2026-08-05 Yoshinobu実測)
+
+**APIで作成したテンプレートは、一度ログアウトするまでUIの一覧に現れない。** 作成自体は成功しており、DBにもAPIにも入っている。
+
+**症状の出方が紛らわしい。** reconcileを流した本人が「ボタンが出ない」と見るため、ジョブの失敗・カタログの記述ミス・reconcileが走っていないこと、のいずれかを疑って実行ログ側を探しに行くことになる。実際には表示だけの問題である。
+
+**確かめ方**: `ssh quory-investigate "semaphore-query template-list <n>"` で実物を見る。ここに在ればUIの表示の問題で、無ければ本当に作られていない。**UIの見た目を、作成されたかどうかの判断に使わない。**
+
 ## 可用性
 
 - 本番Semaphoreの停止は、新しいGUI・schedule jobの起動と結果閲覧に影響する。すでに稼働中の管理対象serviceの可用性と、制御平面の可用性は分けて判断する。
