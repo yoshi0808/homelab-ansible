@@ -7,6 +7,17 @@ force_renew: false
 
 cert_renew_ca_src_crt: /home/yoshi/.cert/ca/home_tls_ca.crt
 cert_renew_root_ca_src_crt: /home/yoshi/.cert/ca/radius_ca.crt
+# **中間CAの秘密鍵は cert_renew_ca_host(quory)にしか置かない。ansy へ複製しない。**
+# 2026-08-05まで ansy にも残っていた — 中間CAをansyで生成し、テストが通ってから
+# quoryへ証明書を配った当時の名残である(Yoshinobu、同日削除)。
+# 消してよいと判断した根拠: repo内でこの鍵を参照するのは cert_renew_ca_host 上の
+# パスだけで、cert_renew.yml / cert_renew_quory.yml とも同ホストは localhost
+# (=quory上での実行)である。ansyを前提にした参照は1つも無い。quoryが鍵を持つ
+# ことは、quoryのleaf証明書の notBefore が月次timerの発火時刻(2026-08-01
+# 00:35:11 JST)と一致し、issuerが Home-TLS-CA であることで確認した。
+# **なぜ気にするか**: この鍵があれば内部のどんな名前でも、全ホストが信頼する
+# 証明書を発行できる。SSH鍵より強い。ansyはAIエージェントがシェルを持つホスト
+# であり、Phase 4 で開発側の認証情報を全廃した意味がここだけ抜けていた。
 cert_renew_ca_src_key: /home/yoshi/.cert/ca/home_tls_ca.key
 cert_renew_intermediate_ca_warn_days: 90
 
