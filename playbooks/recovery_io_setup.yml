@@ -3,7 +3,12 @@
 #
 # Development (ansy):
 #   ansible-playbook playbooks/recovery_io_setup.yml -l ansy
-#   # service is deployed but NOT enabled/auto-started; use systemctl start manually
+#   # unit は配備するが、起動はしない。手で systemctl start しても、次回このplaybookを
+#   # 流した時点で stopped へ戻される(2026-08-06 のIncident: ansy が起動したままだと
+#   # 本番トークンを持つ2つ目の Slack リスナーになり、イベントを quory と奪い合う。
+#   # docs/ai/memory/incidents/2026-08-06_codex-exec-wrapper-intermittent-enoent.md)。
+#   # ansy で常時動かしたい場合は -e recovery_io_service_enabled=true が要るが、
+#   # **本番と同じ app token を使う限り二重リスナーになる**ので、やらないこと。
 #
 # Production (quory):
 #   ansible-playbook playbooks/recovery_io_setup.yml -l quory \

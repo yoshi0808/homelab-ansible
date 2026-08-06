@@ -166,11 +166,17 @@
   when: not ansible_check_mode
   tags: [destructive]
 
+# 無効側を `omit`(状態を触らない)にしない。一度でも起動してしまうと playbook では
+# 二度と止められず、ansy が本番トークンを持つ2つ目の Slack リスナーとして走り続ける
+# (2026-08-06 のIncidentで実際に起きた。handlers/main.yml の但し書きを参照)。
+# `stopped` を明示すれば次の配備で自己修復する。deployment_drift_check が既に ansy を
+# `enabled: disabled` / `active: inactive` と期待しており、playbook 側をその期待に
+# 合わせる形でもある。
 - name: Enable recovery-io service (quory only)
   ansible.builtin.systemd:
     name: recovery-io
     enabled: "{{ recovery_io_service_enabled }}"
-    state: "{{ 'started' if recovery_io_service_enabled | bool else omit }}"
+    state: "{{ 'started' if recovery_io_service_enabled | bool else 'stopped' }}"
   become: true
   when: not ansible_check_mode
   tags: [destructive]

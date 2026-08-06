@@ -14,9 +14,23 @@
   become: true
   when: not ansible_check_mode
 
+# `systemctl restart` は disabled な unit も起動する(disabled が抑えるのは boot 時
+# の自動起動だけである)。この playbook は hosts: dev_nodes:control_nodes で ansy も
+# 対象に含むため、ガードが無いと env や unit が変わるたびに ansy が起動し、
+# **本番トークンを持つ2つ目の Slack リスナー**になる。Socket Mode は同一 app token
+# の複数接続を許し、イベントはどちらか一方へ配られるため、症状は「たまに失敗する」
+# という形で出る(2026-08-06 のIncident:
+# docs/ai/memory/incidents/2026-08-06_codex-exec-wrapper-intermittent-enoent.md)。
+#
+# recovery_probe の同名handlerは `_running_before` を OR で足しているが、ここでは
+# 足さない。あちらは「動いているなら新コードを反映したい」だが、こちらは ansy で
+# **動いていること自体が事故**であり、OR を足すと rogue インスタンスを生かしたまま
+# 再起動し続けることになる。止める側の担保は tasks/main.yml の `state: stopped`。
 - name: Restart recovery-io
   ansible.builtin.systemd:
     name: recovery-io
     state: restarted
   become: true
-  when: not ansible_check_mode
+  when:
+    - not ansible_check_mode
+    - recovery_io_service_enabled | bool
