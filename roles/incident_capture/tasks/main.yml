@@ -29,6 +29,26 @@
 # `mode:` 行を削除済み)。
 # ---------------------------------------------------------------------------
 
+# このroleは下の owner/group 強制で homelab-ansible グループを使うが、
+# **どのroleもそれを作っていなかった**(2026-08-06に発覚)。quory上では手作業で
+# 作られており、その手順はrepoにもNotionの構築手順書にも残っていない
+# (Yoshinobuが確認)。つまり**quoryを再構築すると、ここで必ず失敗する**。
+#
+# メンバーは追加しない。この直後のタスクが設定する mode は 0755 で、グループ権限は
+# r-x ——「その他」と同じであり、**メンバーであること自体は何も許可しない**。
+# 収集器(recovery-exec)の書き込みは後続のACLタスクが個別に与えている。
+# したがって空のグループで機能的に同じ状態になる。
+#
+# 既存ホスト(quory)では no-op である。`state: present` は既存グループの
+# gid もメンバーも変更しない。
+- name: Ensure the homelab-ansible group exists (owner group of reports/incidents/)
+  ansible.builtin.group:
+    name: homelab-ansible
+    state: present
+  become: true
+  when: not ansible_check_mode
+  tags: [destructive]
+
 - name: Ensure reports/incidents/ exists at 0755 (create-only, never re-chmod)
   ansible.builtin.command:
     cmd: mkdir -m 0755 -p "{{ incident_capture_bundle_dir }}"
