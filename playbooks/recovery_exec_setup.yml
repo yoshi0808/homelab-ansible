@@ -24,7 +24,10 @@
 #     -e recovery_exec_setup_targets=false
 #
 # Notes:
-# - vault_codex_openai_api_key must be added to inventories/vars/slack.yml
+# - Codex の認証は API キーではなくブラウザ OAuth で、トークンは recovery-exec の
+#   ~/.codex/auth.json に入る。vault には何も要らない(2026-08-06 に確認。
+#   以前ここには vault_codex_openai_api_key を追加せよと書いてあったが、
+#   その変数を参照する定義は repo に1つも無かった)
 # - Run this before recovery_io_setup.yml (creates codex-exec-wrapper)
 # - After first run, verify key permissions:
 #     ansible quory -m command -a "sudo -u nobody stat /home/recovery-exec/.ssh/id_recovery_investigate"
