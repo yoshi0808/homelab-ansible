@@ -75,6 +75,16 @@ fingerprint は `SHA256:ZXxEbgtlF/5bpVgin4kwj2LFljFLokh6ekCdQ/M/Gkg` で、**ans
 - authy / monnie: `getent passwd recovery-slack` が空
 - 照合に使った fingerprint は本ファイルに記録済み(公開鍵の指紋であり秘密ではない)
 
-## 残存リスク
+## `CLAUDE_CODE_OAUTH_TOKEN` の始末(完了)
 
-**`CLAUDE_CODE_OAUTH_TOKEN` の失効は未実施。** ファイルは削除したが、トークン自体が Anthropic 側で生きている可能性がある。2026-06-27 発行で、退役後は使われていない。
+3層すべてで閉じた。
+
+| 層 | 対応 |
+|---|---|
+| ansy 上の平文 | `/etc/recovery/slack-listener.env` ごと削除 |
+| vault の保管 | `vault_claude_code_oauth_token` を削除(commit `bc49625`)。**現行が参照する vault 変数はどれでもなかった** |
+| **Anthropic 側の失効** | **Yoshinobu が、対話中の1セッションを除く全セッションを削除**(2026-08-06) |
+
+**巻き添えは無い。** この環境に Claude の資格情報を使う定義は1つも無く、repo 内のヒット6件はすべて「2026-08-03 に `claude -p` 2本を廃止した」という経緯コメントである(無人の Claude セッションを1つも残さないという同日の決定どおり)。
+
+**ファイルを消すこととトークンを失効させることは別である。** 本件では前者を先に済ませたため、その間トークンは生きていた。順序としては失効が先が望ましい。
