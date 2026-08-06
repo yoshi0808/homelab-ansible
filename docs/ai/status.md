@@ -20,7 +20,7 @@
 
 | # | 項目 | 現在地 | 次にやること |
 |---|---|---|---|
-| 1 | **ansy に残る本番ランタイムの撤去** | **repo 側は完了**(commit `f7694af`。4 setup playbook から `dev_nodes` を外し、`deployment_drift_check` の ansy unit 期待2件も削除)。**`recovery-io` 一式と recovery-exec の秘密鍵3本も削除済み。** 残るのは ansy 上の wrapper・helper・probe script・sudoers・ユーザーで、**資格情報は含まない**(`codex-exec-wrapper` / `codex-investigate-wrapper` / `homelab-recover-*` / `homelab-investigate-*` / `homelab-monitoring-*` / `homelab-mute*` / `homelab-reports` / `homelab-semaphore-query` / `homelab-incident-bundle` / `recovery-probe.py` / `recovery-reports-helper` / `incident-bundle-helper` / `recovery-probe.service` / `/etc/sudoers.d/{incident-inspect,recovery-io}` / users `recovery-exec`・`incident-inspect`・`recovery-io`) | **現物を1つずつ確認しながら撤去手順を組む。** 一括で消す手順を先に書かない(2026-08-06 に同じ形で事故を起こした)。**ユーザー削除はファイル所有権の扱いを先に決める。** `reports_base_dir` は repo の `reports/` でこれらとは独立(確認済み)なので巻き込まない |
+| — | **進行中の案件は無い。** | | |
 
 ## Watch(観測待ち)
 

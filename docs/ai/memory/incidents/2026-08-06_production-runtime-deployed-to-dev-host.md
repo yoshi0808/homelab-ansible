@@ -66,7 +66,13 @@
 
 **handler ガードは不活性な backstop として残る。** ansy が対象でなくなったため実行経路が無く、**検証する手段も無い**。`hosts:` を戻したときにだけ意味を持つ。
 
-**未了 — ansy 上の残存物の撤去。** wrapper・helper・probe script・sudoers・ユーザーが残っている(**資格情報は含まない**)。`docs/ai/status.md` の Now が正本。**一括で消す手順を先に書かない** — 本件はまさにその形で起きた。
+**ansy 上の残存物の撤去(完了、2026-08-06)** — スクリプト21本(`/usr/local/{bin,sbin}`)、`recovery-probe.service`、`/etc/homelab-recovery`、`/var/lib/{homelab-recovery,recovery-exec,incident-inspect}`、sudoers 2件、ユーザー3件+home、グループ `recovery-exec`。
+
+撤去前に**依存を確認した** — 3ユーザーが所有するファイルは10件すべて撤去対象の中にあり(`/var/lib/incident-inspect/` はこの掃引で新たに見つかった)、cron や他の unit からの参照は無く、互いを参照し合っているだけだった。`reports_base_dir` は repo の `reports/` で独立している。
+
+**副作用が1件出た。** `recovery-exec` グループ(GID 1004)を削除したことで、repo 内 `reports/` 配下の 410 ファイルが `nogroup` になった。`chgrp yoshi` で是正済み。**ユーザー削除は、そのユーザー/グループが所有するファイルを先に数えてから行う。**
+
+**この撤去の掃引が、別の未発見を1件掘り出した** — `/etc/recovery/` に残っていた退役世代の資格情報。`docs/ai/memory/incidents/2026-08-06_retired-generation-credentials-survived-phase4.md` が正本。
 
 ## 確認方法
 
