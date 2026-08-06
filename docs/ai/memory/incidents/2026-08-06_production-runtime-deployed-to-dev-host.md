@@ -58,16 +58,15 @@
 
 **多重防御(実施済み、commit `614016f`)** — `roles/recovery_io/handlers/main.yml` の `Restart recovery-io` に `recovery_io_service_enabled | bool` を追加し、`Enable recovery-io service` の無効側 `state` を `omit` から `stopped` へ変更した。**これは原因の修正ではない。** 入り込んだ後に止める仕掛けであり、根治は playbook の対象から `dev_nodes` を外すことである。
 
-**未了 — repo 側の対象縮小。** 直さない限り、次の配備で撤去したものが平文トークンごと書き戻される。
+**根治(実施済み、commit `f7694af`)** — 4本の setup playbook から `dev_nodes` を外し、`hosts: control_nodes` とした。4本とも header に「Development (ansy)」を明示しており、**ansy が対象なのは開発・検証のためだった**。その役割は sandbox が引き受けられる。依存が無いことは確認した(ansy 唯一の現役 timer である `knowledge_review` はこれらを使っていない)。
 
-```
-recovery_io_setup.yml       hosts: dev_nodes:control_nodes
-recovery_exec_setup.yml     hosts: dev_nodes:control_nodes
-recovery_probe_setup.yml    hosts: dev_nodes:control_nodes
-incident_inspect_setup.yml  hosts: dev_nodes:control_nodes
-```
+あわせて `deployment_drift_check` から ansy の `recovery-probe.service` / `recovery-io.service` の期待を削除した。unit が存在しなくなるため、**残すと `LoadState != loaded` で finding が立ち、「setup playbookの流し忘れ」という detail と共に、事故を起こした playbook を流すよう案内してしまう。**
 
-ansy には現に `codex-exec-wrapper` / `codex-investigate-wrapper` / `recovery-probe.py` が残っている(資格情報は含まない)。**「開発機に何が要るか」の線引きを伴うため、Coordinator の一存で外さない。** `docs/ai/status.md` の Next へ起こした。
+**recovery-exec の秘密鍵3本も削除した**(`id_recovery_action` / `id_recovery_investigate` / `id_recovery_investigate_pve`)。なお **target への鍵配布は 2026-07-11 のハードコード guard で quory リテラル固定**であり(2026-07-08 に ansy 鍵が本番を3日間切断した事故の対策)、**「ansy の鍵が本番へ届く経路があった」わけではない** — 調査中に一度そう書いたが誤りで、実際に残っていたのは経路ではなく保管である。それでも開発機に本番系の秘密鍵を置く理由は無い。**Phase 4 の資格情報の数え上げがここを拾えていなかった**(`docs/ai/memory/lessons/enumerate-credentials-that-reach-you-not-those-you-placed.md`)。
+
+**handler ガードは不活性な backstop として残る。** ansy が対象でなくなったため実行経路が無く、**検証する手段も無い**。`hosts:` を戻したときにだけ意味を持つ。
+
+**未了 — ansy 上の残存物の撤去。** wrapper・helper・probe script・sudoers・ユーザーが残っている(**資格情報は含まない**)。`docs/ai/status.md` の Now が正本。**一括で消す手順を先に書かない** — 本件はまさにその形で起きた。
 
 ## 確認方法
 
