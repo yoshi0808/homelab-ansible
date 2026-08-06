@@ -1,22 +1,33 @@
 ---
-# Deploy recovery-exec (Codex runner) to ansy or quory,
+# Deploy recovery-exec (Codex runner) to quory,
 # and set up SSH landing accounts on target nodes (authy, monnie).
 #
-# Development (ansy):
-#   ansible-playbook playbooks/recovery_exec_setup.yml -l ansy
+# **ansy(dev_nodes)は対象にしない**(2026-08-06)。開発機へ本番ランタイムを配る
+# 設計をやめたため。検証が要るときは sandbox を使う
+# (docs/ai/context/operations/sandbox-vm.md)。
+# docs/ai/memory/incidents/2026-08-06_production-runtime-deployed-to-dev-host.md
+#
+# **target への鍵配布は、この変更とは別に既に quory 固定である**(下記 2026-07-11
+# 追記のハードコードguard)。したがって ansy を外すことで塞がるのは配布経路では
+# なく、**ansy 上で recovery-exec の秘密鍵が生成・保持され続けること**である。
+# 2026-08-06 時点で ansy に id_recovery_action / id_recovery_investigate /
+# id_recovery_investigate_pve が実在した。guard により target 側で認可されて
+# いないはずだが、**開発機に本番系の秘密鍵を置き続ける理由が無い。**
+# Phase 4 の資格情報の数え上げがここを拾えていなかった
+# (docs/ai/memory/lessons/enumerate-credentials-that-reach-you-not-those-you-placed.md)。
 #
 # Production (quory):
 #   ansible-playbook playbooks/recovery_exec_setup.yml -l quory
 #
 # Skip target node setup (e.g. when authy/monnie is unreachable):
-#   ansible-playbook playbooks/recovery_exec_setup.yml -l ansy \
+#   ansible-playbook playbooks/recovery_exec_setup.yml -l quory \
 #     -e recovery_exec_setup_targets=false
 #
 # Notes:
 # - vault_codex_openai_api_key must be added to inventories/vars/slack.yml
 # - Run this before recovery_io_setup.yml (creates codex-exec-wrapper)
 # - After first run, verify key permissions:
-#     ansible ansy -m command -a "sudo -u nobody stat /home/recovery-exec/.ssh/id_recovery_investigate"
+#     ansible quory -m command -a "sudo -u nobody stat /home/recovery-exec/.ssh/id_recovery_investigate"
 #   Expected: Permission denied
 #
 # tester-gate: check-mode-native — TS-009 条件1(recovery-exec自体はデーモンで
@@ -57,7 +68,7 @@
 # docs/ai/policies/ansible_test_safety_policy.md。
 
 - name: Deploy recovery-exec (Codex runner + SSH key generation)
-  hosts: dev_nodes:control_nodes
+  hosts: control_nodes
   gather_facts: true
   become: true
   vars:

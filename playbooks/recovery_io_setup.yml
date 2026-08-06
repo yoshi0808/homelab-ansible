@@ -1,14 +1,15 @@
 ---
-# Deploy recovery-io (Slack I/O bridge) to ansy or quory.
+# Deploy recovery-io (Slack I/O bridge) to quory.
 #
-# Development (ansy):
-#   ansible-playbook playbooks/recovery_io_setup.yml -l ansy
-#   # unit は配備するが、起動はしない。手で systemctl start しても、次回このplaybookを
-#   # 流した時点で stopped へ戻される(2026-08-06 のIncident: ansy が起動したままだと
-#   # 本番トークンを持つ2つ目の Slack リスナーになり、イベントを quory と奪い合う。
-#   # docs/ai/memory/incidents/2026-08-06_codex-exec-wrapper-intermittent-enoent.md)。
-#   # ansy で常時動かしたい場合は -e recovery_io_service_enabled=true が要るが、
-#   # **本番と同じ app token を使う限り二重リスナーになる**ので、やらないこと。
+# **ansy(dev_nodes)は対象にしない。** 2026-08-06 まで hosts: に dev_nodes を
+# 含めており、ansy が本番トークンを持つ2つ目の Slack リスナーになる事故が起きた。
+# Socket Mode は同一 app token の複数接続を許し、イベントはどちらか一方へ配られる
+# ため、症状は「たまに失敗する」形で出る。加えて、ansy を対象に含めると ansy 向けに
+# recovery-io.env が描画されるため **vault が復号され、本番トークンが開発機へ平文で
+# 置かれる**。docs/ai/memory/incidents/2026-08-06_production-runtime-deployed-to-dev-host.md
+#
+# 検証が要るときは sandbox を使う(docs/ai/context/operations/sandbox-vm.md)。
+# ここへ dev_nodes を戻すと、上の2つがそのまま復活する。
 #
 # Production (quory):
 #   ansible-playbook playbooks/recovery_io_setup.yml -l quory \
@@ -34,7 +35,7 @@
 # docs/ai/policies/ansible_test_safety_policy.md。
 
 - name: Deploy recovery-io (Slack I/O bridge)
-  hosts: dev_nodes:control_nodes
+  hosts: control_nodes
   gather_facts: true
   become: true
   tasks:

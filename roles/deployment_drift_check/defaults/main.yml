@@ -147,17 +147,19 @@ deployment_drift_check_units:
   # (roles/knowledge_review/tasks/install_timer.ymlが変数gateなしで
   # enabled: true / state: startedを無条件に適用することを現物で確認済み)。
   - { hosts: [ansy], name: ansible-knowledge-review.timer, enabled: enabled, active: active, playbook: playbooks/knowledge_review_timer.yml }
-  # ansy では配置のみで起動しない(roles/recovery_probe の設計)。
-  # 「起動していないこと」も検査対象にする — 意図せず有効化されたら知りたい。
-  # playbookは持たせない(R1-a)。recovery-probe.serviceはenable/start task自体が
-  # `when: recovery_probe_service_enabled | bool` でgateされており、falseのとき
-  # 無効化task自体が存在しない。recovery-io.serviceはenabled: falseを明示的に
-  # 適用するが(こちらは無効化する)、state(active)は`omit`で管理しないため、
-  # activeへ意図せずドリフトしていた場合はplaybookを流しても止まらない。
-  # いずれも「実際にその状態を復元しない」ため書かない。R10(2026-08-04追補)は
-  # このansy側2件を明示的に対象外とし、上記判断をそのまま採用している。
-  - { hosts: [ansy], name: recovery-probe.service, enabled: disabled, active: inactive }
-  - { hosts: [ansy], name: recovery-io.service, enabled: disabled, active: inactive }
+  # **ansy 側の2エントリ(recovery-probe.service / recovery-io.service)は
+  # 2026-08-06 に削除した。** 同日、ansy が本番トークンを持つ二重の Slack リスナー
+  # になる事故が起き、開発機へ本番ランタイムを配る設計そのものをやめた
+  # (recovery_io / recovery_exec / recovery_probe / incident_inspect の4 setup
+  # playbook から dev_nodes を外した)。ansy に unit は存在しなくなる。
+  # **残しておくと LoadState != loaded で finding が立ち、「setup playbookの
+  # 流し忘れ」という detail と共に、事故を起こした playbook を流すよう案内して
+  # しまう。**
+  # なお「ansy に unit が無いこと」自体は検査していない。この検査は `enabled` /
+  # `active` の期待値しか持たず、不在を期待値として書けない(evaluate.yml は
+  # LoadState != loaded を無条件に finding にする)。unit が再び現れうるのは
+  # playbook の hosts: を戻したときだけで、それはレビューを通る repo 変更である。
+  # docs/ai/memory/incidents/2026-08-06_production-runtime-deployed-to-dev-host.md
 
 # --- ⑥ forced command の構造検査 ---------------------------------------------
 # 全エントリが command= で始まること。entries は期待エントリ数。
