@@ -52,7 +52,7 @@ dpkg -l grafana | tail -1       # ii になること
 curl -sk https://localhost:3000/api/health   # Grafana は HTTPS。database:ok と version を確認
 ```
 
-**この落とし穴が次回も再現するかは観測点である**(`docs/ai/status.md` の Watch)。upstream が直せば再現しない。初出は2026-08-01の `ubuntu_vm_full_upgrade`(monnie、13.1.0 → 13.1.1)で、一次調査の成果物は `reports/incidents/_investigations/semaphore-512.*`。
+**この落とし穴が次回も再現するかは分からない。** upstream が直せば再現しない。初出は2026-08-01の `ubuntu_vm_full_upgrade`(monnie、13.1.0 → 13.1.1)で、一次調査の成果物は `reports/incidents/_investigations/semaphore-512.*`。
 
 ## Nightlyと朝healthcheck
 
