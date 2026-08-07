@@ -130,6 +130,36 @@ ARTIFACT_FIELD_ORDER = [
 # 限界)。
 FREE_TEXT_MAX_CHARS = 4000
 
+# 通知playbookが失敗したときに、その stdout の末尾から拾う文字数。ansible の
+# fatal 表示は末尾に近いところに出るため先頭ではなく末尾を取る。2000にしたのは
+# 上の FREE_TEXT_MAX_CHARS(4000)の半分に収め、成果物1件の大きさを1つの失敗理由
+# で支配させないため。切り詰めた事実は `stdout_tail=` という名前自体が示す。
+NOTIFY_OUTPUT_CAPTURE_CHARS = 2000
+
+# 通知playbookの出力から webhook URL を落とす。**`no_log: true` を安全の根拠に
+# しない。** 2026-08-07に実測して分かったこと: 送信taskに no_log を付けていても、
+# ansible は `[ERROR]: Task failed: Module failed: <モジュールのmsg>` という行を
+# stdout へ出す(censored になるのは `fatal:` の構造化出力だけ)。捕捉した出力は
+# ジャーナルにも成果物にも入るため、素通しにはしない。
+#
+# **現状この経路から実URLが出ることは確認できていない** — webhook形式トークンを
+# 使う本playbookの経路では、community.general.slack 自身が失敗msg内のURLを
+# `[obscured]` へ伏せてから `fail_json` する(12.1.0 の slack.py:449-452)。
+# それでもここで落とすのは多層防御であり、①その伏字化がモジュールの版に依存する
+# ②quory側の collection の版を確認していない ③`info['msg']` は素通しのテキストで
+# 中身を我々が決めていない、の3点による(2026-08-07 独立レビュー S5 で当初の
+# 「モジュールがURLを含むメッセージを出す」という記述を訂正した)。
+# 切り詰めより先に適用すること — 後に適用すると URL の断片が末尾に残りうる。
+WEBHOOK_URL_RE = re.compile(r"https://hooks\.slack\.com/services/\S+")
+WEBHOOK_URL_PLACEHOLDER = "<redacted-webhook-url>"
+
+
+def redact_webhook_urls(text):
+    """通知playbookの stdout / stderr から Slack webhook URL を落とす。"""
+    if not text:
+        return ""
+    return WEBHOOK_URL_RE.sub(WEBHOOK_URL_PLACEHOLDER, text)
+
 # ---------------------------------------------------------------------------
 # IPv4リテラルの機械的な除去(2026-07-31差し戻し、独立レビュー Critical #2)。
 #
@@ -735,8 +765,25 @@ def send_investigation_notification(cfg, task_id, artifact, codex_error, wait_er
             argv, cwd=cfg["repo_dir"], capture_output=True, text=True, timeout=cfg["notify_timeout_s"]
         )
         if result.returncode != 0:
+            # 失敗の中身は **stdout** にある。ansible-playbook は通常のtask失敗を
+            # callback 経由で stdout へ書き、プロセスの OS stderr は空のままに
+            # する(rc=2 は「1つ以上のhostが失敗」の意味)。stderr だけを載せると
+            # 記録は必ず `rc=2 stderr=''` になり、理由が1文字も残らない —
+            # 2026-08-07 の semaphore-607 で実際にそうなり、ジャーナルを読んでも
+            # 何が落ちたのか分からなかった。
+            #
+            # stdout を載せてよいことは実測で確かめてある: 通知playbookの送信task
+            # は `no_log: true` で、かつ `community.general.slack` の argspec 自身が
+            # `token` を no_log にしているため、失敗時の stdout に webhook URL も
+            # トークンも現れない(2026-08-07 の独立レビューが本番playbookを無変更で
+            # decoy実行して確認)。**この前提は notify.yml 側の no_log に依存する** —
+            # あちらから no_log を外すなら、ここも同時に見直すこと。
+            # redact してから切り詰める(順序が逆だと URL の断片が残りうる)。
+            tail = redact_webhook_urls(result.stdout).strip()[-NOTIFY_OUTPUT_CAPTURE_CHARS:]
+            err = redact_webhook_urls(result.stderr).strip()
             raise RuntimeError(
-                f"notify playbook rc={result.returncode} stderr={result.stderr.strip()!r}"
+                f"notify playbook rc={result.returncode} "
+                f"stderr={err!r} stdout_tail={tail!r}"
             )
     finally:
         try:

@@ -114,10 +114,42 @@
 
     # N2充足のためcommon_slack/tasks/notify.ymlを経由しない(ヘッダ参照)。
     # 唯一の破壊的task(TS-014と同じ形でゲート — 上のヘッダコメント参照)。
-    - name: "Send plain-text Slack notification to #alerts (N2 — no status/severity/color)"
-      community.general.slack:
-        token: "{{ _iv_slack_token }}"
-        msg: "{{ _iv_body }}"
-      no_log: true
-      when: not ansible_check_mode
-      tags: [destructive]
+    # 2026-08-07: 送信taskは `no_log: true` のため、失敗しても呼び出し元
+    # (incident-investigate.py)が受け取る出力は「このtaskが落ちた」までしか
+    # 伝えず、理由が残らなかった。semaphore-607 で実際にそうなり、ジャーナルに
+    # 残ったのは `rc=2 stderr=''` だけだった。rescue で理由を出し直す。
+    #
+    # **`ignore_errors: true` + 後続taskでの再送出、という形にしない。** その形だと
+    # 再送出taskを「冗長」と読んで消したときに `ignore_errors` だけが残り、
+    # 通知の失敗が rc=0(=送れた)として観測される — いま塞いでいる問題より悪い
+    # 状態を、壊れ方が危険側に倒れる形で作る。block/rescue なら rescue を消しても
+    # 失敗はそのまま伝播する(2026-08-07 独立レビュー S4)。
+    - name: "Send the notification, surfacing any failure with the webhook URL redacted"
+      block:
+        # 唯一の破壊的task(TS-014と同じ形でゲート — 上のヘッダコメント参照)。
+        - name: "Send plain-text Slack notification to #alerts (N2 — no status/severity/color)"
+          community.general.slack:
+            token: "{{ _iv_slack_token }}"
+            msg: "{{ _iv_body }}"
+          no_log: true
+          when: not ansible_check_mode
+          tags: [destructive]
+          register: _iv_send
+
+      rescue:
+        # register した結果の中身は no_log でも失われない(no_log が抑えるのは
+        # 表示だけ)。**この task には no_log を付けない** — 付けたら元の木阿弥。
+        #
+        # `regex_replace` は多層防御である。webhook形式トークンを使う本playbookの
+        # 経路では、モジュール自身が失敗msg内のURLを `[obscured]` へ伏せてから
+        # `fail_json` する(community.general 12.1.0 の slack.py:449-452。伏せない
+        # のは `use_webapi` が真、つまり xoxb 形式トークンを使う場合だけで、ここは
+        # 該当しない)。それでも落とすのは、①この伏字化がモジュールの版に依存する
+        # ②quory 側の collection の版を確認していない ③`info['msg']` は素通しの
+        # テキストであり中身を我々が決めていない、の3点による。
+        - name: "Re-raise the send failure with the webhook URL redacted"
+          ansible.builtin.fail:
+            msg: >-
+              slack send failed:
+              {{ _iv_send.msg | default('(no msg field)')
+                 | regex_replace('https://hooks\.slack\.com/services/\S+', '<redacted-webhook-url>') }}
