@@ -3,9 +3,20 @@
 # Does NOT send Slack notifications or fail — callers decide what to do with results.
 # Exports: monitoring_health, monitoring_criticals, monitoring_warnings, monitoring_report
 
+# src is an explicit path, not a bare filename. This task file has two
+# callers: playbooks/monitoring_healthcheck.yml invokes the role normally
+# (`roles:`), but playbooks/ubuntu_nightly.yml includes this file by path
+# (`include_tasks: {{ playbook_dir }}/../roles/monitoring_healthcheck/
+# tasks/check.yml`). A path include carries no role context, so Ansible
+# never searches roles/monitoring_healthcheck/files/ — it looks only beside
+# this task file and beside the playbook. A bare filename therefore resolves
+# under the role caller and fails under the path caller. Same form as
+# roles/recovery_push/tasks/drill_setup.yml, which is path-included only.
+# Broke Semaphore job 607 (2026-08-07), the first time monnie actually
+# rebooted through this branch.
 - name: Copy monitoring healthcheck script
   ansible.builtin.copy:
-    src: monitoring-healthcheck.sh
+    src: "{{ playbook_dir }}/../roles/monitoring_healthcheck/files/monitoring-healthcheck.sh"
     dest: /usr/local/sbin/monitoring-healthcheck.sh
     mode: "0755"
     owner: root

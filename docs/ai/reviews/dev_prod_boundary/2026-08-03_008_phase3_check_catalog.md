@@ -74,7 +74,7 @@ requirement: `2026-08-02_001_requirement.md` R11 / R12 / R13b / R14c、AC9
 | # | check | operand と検証 | 実行内容 |
 |---|---|---|---|
 | Q8 | `status` | 無し | 下表 unit 群の `systemctl status --no-pager -l`(失敗は `|| true` で飛ばす。既存 `status` と同型) |
-| Q9 | `journal-unit <unit> <window>` | `unit`: 下表 enum<br>`window`: `30m`\|`1h`\|`2h`\|`6h`\|`12h`\|`24h` | `journalctl -u <unit> --since ... -n 300 --no-pager` |
+| Q9 | `journal-unit <unit> <window> [lines]`(`[lines]` は D8、2026-08-07 追加。§8 を参照) | `unit`: 下表 enum<br>`window`: `30m`\|`1h`\|`2h`\|`6h`\|`12h`\|`24h`<br>`lines`(省略可): `^[0-9]{1,5}$` かつ `1〜10000`。省略時 300 | `journalctl -u <unit> --since ... -n <lines> --no-pager`(既定 `-n 300`) |
 | Q10 | `unit-cat <unit>` | 下表 enum | `systemctl cat <unit>`(配備された unit 本体の現物確認。R12 が例示) |
 | Q11 | `semaphore-query <query> <n>` | `query`: enum `recent-failed`\|`running`\|`task-errors`\|`task-hosts`\|`task-output`\|`task-time`\|**`template-list`**<br>`n`: `^[0-9]+$` | `homelab-semaphore-query <query> <n>` |
 
@@ -305,4 +305,45 @@ OpenSSH 9.8 以降の PerSourcePenalties である(詳細は `..._023_test_resul
 **限界: `-n 300` の上限に対し、調査のための接続自身が新しい行を積んで古い行を押し出す。**
 実際、続けて2回叩いたところ、1回目に見えていた約6時間前の行が2回目には窓から外れていた。
 **古い事象を追うときは窓を短く切る(`30m` / `1h`)ほうが確実である** — 長い窓を指定しても、
-返るのは常に「直近300行」であって「その窓の全体」ではない。この性質は `journal-unit` にも同じくある。
+返るのは常に「直近300行」であって「その窓の全体」ではない。この性質は `journal-unit` にも同じくあった
+(D8 で `journal-unit` は行数を可変にしたが、`journal-ssh` は今も `-n 300` 固定である)。
+
+---
+
+## 8. 追加(D8、2026-08-07 承認)
+
+requirement: `docs/ai/reviews/dev_prod_boundary/2026-08-07_001_requirement.md`
+
+**`journal-unit`(Q9)の改修であり、新規 check の追加ではない。** §4 / §6.3 / §7.5 の総数
+(quory 25、G/P 各 +6)は変わらない。§0 の不変条件 I-1〜I-7 はこの改修にもそのまま適用される。
+
+背景: `journal-unit <unit> <window>` は行数が `-n 300` に固定されており、`--since` で窓を
+広げても常に「直近300行」しか返らない。**壊れているときほどログ量が増えるため、必要な場面
+でだけ効かなくなる**穴だった。実害が2回出ている — 2026-08-06、`recovery-io.service` の
+Slack 再接続バーストで `_run_codex` の raw output に届かず人へ `journalctl` を打たせた
+(`docs/ai/memory/incidents/2026-08-06_slack-token-leak-via-environ-dump.md`)。2026-08-07、
+`homelab-incident-investigate.service`(1分timerで3行/分)の一次通知欠落調査で、300行
+≒ 直近100分にしか届かず約10時間前の行に到達できなかった。詳細は requirement §1。
+
+### 8.1 新しい形
+
+| # | check | operand と検証 | 実行内容 |
+|---|---|---|---|
+| Q9 | `journal-unit <unit> <window> [lines]` | `unit`: 下表 enum(変更なし)<br>`window`: 既存6値 enum(変更なし)<br>`lines`(**省略可**): `^[0-9]{1,5}$` かつ `1 <= lines <= 10000`。**省略時は 300**(後方互換) | `journalctl -u <unit> --since <since> -n <lines> --no-pager`(`<lines>` 以外は既存のまま) |
+
+- 拒否メッセージ: `denied: invalid lines for journal-unit`(既存 `deny_invalid` ヘルパーをそのまま再利用し、stderr へ出力・非ゼロ終了)
+- 検証順序: **unit → window → lines**。unit / window が不正なら lines を見る前に拒否する(既存の順序をそのまま保持)
+- 上限 10000 の根拠: `homelab-incident-investigate.service` が3行/分で24hあたり約4320行、`recovery-io.service` の再接続バーストはそれ以上。**24時間分の最も騒がしい unit を覆いつつ、1回の応答を有界に保つ**値として選んだ(requirement §5)
+
+### 8.2 変わらないこと
+
+- `read -r check p1 p2 p3 extra` の行(I-4 の arity 検査そのもの)は変更していない。4 operand 目(`extra`)が入るケースは従来どおりこの行が `denied: too many parameters` で弾く
+- `journal-unit` case 内の arity 検査は `p3` の必須(`-z "$p3"`)を外しただけで、`p1` / `p2` は引き続き必須のまま
+- 発行する `journalctl` のオプションは増えていない。`-u` / `--since` / `-n` / `--no-pager` のまま。operand 文字列を直接コマンドへ渡すのは `-n` の値だけで、数値検証(正規表現 + 範囲)を経ている
+- `journal-ssh`(D7)は対象外。行数は引き続き `-n 300` 固定
+- class G(`journal-1h` / `journal-1d` という窓別 check の形)・class P(`journal-unit` という形自体が無い)には元々この check が無いため、本改修の対象は class Q の1 check のみ
+
+### 8.3 次に問うこと(このカタログへ残すだけで、本案件はクローズする)
+
+- `journal-ssh` にも同じ `[lines]` operand を足すか(requirement OQ1)。承認された文言は `journal-unit` のみだったため今回は見送った
+- 行数を上げても journald 自身の保持量が上限になる(requirement OQ2)。保持設定を見る check は無く、今回も足さない

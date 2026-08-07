@@ -10,8 +10,10 @@
 # §1 (class Q, 20 checks: Q1-Q4 bundle/investigation, Q5-Q7 reports, Q-C
 # common system (8), Q8-Q12 quory-specific) plus §6 (D6, 4 checks: X1
 # acl-status is Q-only; X2/X3/X4 users/unit-files/forced-command-keys are
-# shared with classes G/P) — 24 total. Do not add checks beyond those
-# tables without Yoshinobu's approval.
+# shared with classes G/P) plus §7 (D7, 1 check: journal-ssh) — 25 total.
+# §8 (D8) changed journal-unit's operands but added no check, so the total
+# is unchanged. Do not add checks beyond those tables without Yoshinobu's
+# approval.
 #
 # All checks are read-only (I-1): no pvesh create/set/delete, no systemctl
 # start/stop/restart/enable, no qm start/stop, no redirection, no tee/rm/mv/cp.
@@ -230,7 +232,10 @@ case "$check" in
     done
     ;;
   journal-unit)
-    [[ -n "$p1" && -n "$p2" && -z "$p3" ]] || deny_count
+    # p3 (lines) is optional (catalog §8, D8) — arity only requires p1/p2
+    # here; the 4-operand case (a non-empty `extra`) is still rejected by the
+    # fixed-arity `read` guard above, before this case statement runs.
+    [[ -n "$p1" && -n "$p2" ]] || deny_count
     _is_valid_unit "$p1" || deny_invalid unit
     case "$p2" in
       30m) since_value="-30 min" ;;
@@ -241,7 +246,20 @@ case "$check" in
       24h) since_value="-24 hours" ;;
       *) deny_invalid window ;;
     esac
-    journalctl -u "$p1" --since "$since_value" -n 300 --no-pager
+    # Optional 3rd operand: number of lines (default 300, preserving prior
+    # behavior). Range 1-10000: upper bound covers the noisiest 24h unit
+    # observed (homelab-incident-investigate.service, ~3 lines/min * 1440min
+    # = ~4320 lines/day) while keeping a single response bounded (see
+    # docs/ai/reviews/dev_prod_boundary/2026-08-07_001_requirement.md §5).
+    # `10#` forces base-10 arithmetic so a leading zero (e.g. "0300") is
+    # never read as octal.
+    if [[ -z "$p3" ]]; then
+      lines_value=300
+    else
+      [[ "$p3" =~ ^[0-9]{1,5}$ ]] && (( 10#$p3 >= 1 && 10#$p3 <= 10000 )) || deny_invalid lines
+      lines_value=$((10#$p3))
+    fi
+    journalctl -u "$p1" --since "$since_value" -n "$lines_value" --no-pager
     ;;
   # --- journal-ssh (catalog §7, D7, 2026-08-03) ---
   # Deliberately NOT an entry in the unit enum above. Three reasons:

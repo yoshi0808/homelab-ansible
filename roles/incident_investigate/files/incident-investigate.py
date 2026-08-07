@@ -62,6 +62,20 @@ quory→ansyの同期即時起動(N5・N8・N9)も行っていたが、受け側
 退役したため削除した。通知本文(iv_report_path)は、ansy側ミラーの相対
 パスではなく、quoryのdispatch(roles/dev_investigate)を経由した取得
 コマンドを渡す形に変更している(build_notify_payload() 参照)。
+
+2026-08-07(通知の成否を成果物へ残す、
+docs/ai/reviews/incident_investigation_notify/2026-08-07_001_requirement.md
+R1〜R7): post_artifact_actions() の通知試行結果(試行したか・送れたか・
+送れなかった理由・時刻)を成果物JSON/MDの `notification` フィールドへ
+追記するようにした。**原因の修正ではなく計測の追加のみ**であり、通知の
+失敗・この記録処理自身の失敗のいずれも process_bundle() の戻り値と
+終了コードに影響しない(N4・R3、既存の例外握りつぶしの性質をそのまま
+踏襲)。record_notification_result() が write_artifact() と同じ
+tmp+os.replace の原子的更新を再利用するため、成果物ファイルが消えた・
+切れた・壊れた状態を経由することはない(R2)。**成功したときも記録が
+残ることがこの変更の要点である** — 失敗時だけ記録すると、次に読む人が
+「出たが見落とした」のか「出ていない」のかを区別できないままになる
+(2026-08-01_001_requirement.md以来の欠落そのもの)。
 """
 import json
 import os
@@ -100,6 +114,12 @@ ARTIFACT_FIELD_ORDER = [
     "status",
     "llm_rc",
     "notes",
+    # 2026-08-07(R1・R6): 通知の試行結果。schema_versionは上げていない —
+    # 既存の読み手(incident-bundle-helperのshow-investigationは生バイトを
+    # catするだけ、artifact_already_exists()はファイル存在しか見ない)に
+    # フィールド集合や版番号を厳密検証するものが見当たらなかった(調査範囲は
+    # 実装記録に記載)。追加フィールドであり既存キーの意味は変えていない。
+    "notification",
 ]
 
 # LLM応答由来の自由記述フィールドに掛ける長さ上限(2026-07-31、Implementer
@@ -557,10 +577,28 @@ def assemble_artifact(task_id, semaphore_meta, bundle_dir, llm_outcome, notes_ex
         "status": status,
         "llm_rc": llm_rc,
         "notes": notes,
+        # 2026-08-07(R1): 通知はこの後段(post_artifact_actions)でしか試みて
+        # いないため、この時点ではまだ結果が無い。Noneのまま成果物が読まれた
+        # 場合(記録処理自身がAC3のように失敗した場合を含む)は「試行結果を
+        # 記録できなかった」ことを意味し、「試行して成功した」と混同しない
+        # (record_notification_result() が実際の結果で上書きする)。
+        "notification": None,
     }
     # フィールド順を requirement.md §7 の記載順に固定する(人がdiffを読む
     # ときの一貫性のためだけの措置。JSON自体の意味には影響しない)。
     return {k: artifact[k] for k in ARTIFACT_FIELD_ORDER}
+
+
+def render_notification_line(notification):
+    """R5: JSON側と同じ通知試行結果を、人が読む.md側にも1行で出す
+    (成功したときも出る — R7、失敗時だけ出すと次に読む人が『届いた』のか
+    『記録自体がまだ無い』のかを区別できない)。
+    """
+    if notification is None:
+        return "(未記録 — 通知をまだ試みていない、またはこの記録処理自身が失敗した)"
+    if notification.get("sent"):
+        return f"送信成功({notification.get('at')})"
+    return f"送信失敗: {notification.get('error')}({notification.get('at')})"
 
 
 def render_markdown(artifact):
@@ -576,6 +614,7 @@ def render_markdown(artifact):
         f"- 確信度: {artifact['confidence']}",
         f"- 既知条件由来の疑い: {kc.get('suspected')}({kc.get('reason')})",
         f"- LLM呼び出し終了コード: {artifact['llm_rc']}",
+        f"- 通知: {render_notification_line(artifact.get('notification'))}",
         "",
         "## 所見",
         artifact["verdict"] or "(一次的な所見なし — 調査が完了しなかった)",
@@ -706,6 +745,56 @@ def send_investigation_notification(cfg, task_id, artifact, codex_error, wait_er
             pass
 
 
+def record_notification_result(cfg, task_id, artifact, sent, error):
+    """2026-08-07(R1・R2・R3・R7、
+    docs/ai/reviews/incident_investigation_notify/2026-08-07_001_requirement.md):
+    通知を試みた結果(送れたか・送れなかった理由・時刻)を成果物へ書き戻す。
+
+    **成功したときも呼ぶ**(R7 — 失敗時だけ記録すると、次に読む人が『出たが
+    見落とした』のか『出ていない』のかを区別できない。これが本変更の要点で
+    あり、縮めない)。
+
+    write_artifact() と同じ tmp+os.replace の原子的更新を再利用するため、
+    成果物ファイルが消えた・切れた・壊れた状態を経由しない(R2)。呼び出し元
+    (post_artifact_actions)がこの関数の例外も必ず捕捉するため、ここで例外を
+    投げてよい — 投げた場合、直前にwrite_artifact()で既に書かれている
+    (まだ`notification`更新前の)成果物ファイルはtmp書込前の状態のまま
+    残り、`json.load`で読める状態を保つ(AC3)。
+
+    R4: `error` は `send_investigation_notification()` が投げた例外の
+    `str()` であり、outbound(ansible-playbook)のstderrやPython例外の
+    メッセージに由来する。実測(本requirement着手時の decoy 検証、
+    実装記録に記録)では、community.general.slack の `token` は
+    モジュール引数仕様自体が `no_log=True` を持ち、かつ本playbookの送信task
+    自身も `no_log: true` であるため、失敗時のAnsible出力(stdout)は
+    "the output has been hidden..." に完全に censored される。ansible-
+    playbookプロセスのOS stderrは通常のtask失敗では空になる(fatal表示は
+    stdoutの callback 経由のため)。それでもこの文字列に内部IPアドレスの
+    実値が紛れ得る経路(接続エラーメッセージ等)を完全には否定できないため、
+    LLM由来テキストと同じ IPv4 除去(redact_ipv4、IC-040)をここにも適用する
+    — 二次防御であり、この関数自体が新たに秘密情報の経路を作らないことの
+    担保ではない。
+    """
+    notes = list(artifact.get("notes") or [])
+    redacted_error = error
+    if error:
+        redacted_error, ipv4_count = redact_ipv4(error)
+        if ipv4_count:
+            notes.append(
+                f"{ipv4_count} IPv4 literal(s) were redacted from the notification failure "
+                "reason before this artifact was updated"
+            )
+    updated = dict(artifact)
+    updated["notes"] = notes
+    updated["notification"] = {
+        "attempted": True,
+        "sent": sent,
+        "error": redacted_error,
+        "at": now_jst_str(),
+    }
+    write_artifact(cfg["artifact_dir"], task_id, updated)
+
+
 def post_artifact_actions(cfg, task_id, artifact, codex_error=None, wait_error=None):
     """N4・N6・N7・AC3・AC7: 成果物を書いた直後だけ呼ぶ。
 
@@ -721,12 +810,28 @@ def post_artifact_actions(cfg, task_id, artifact, codex_error=None, wait_error=N
     呼び出して失敗した経路は codex_error だけを渡し、Codexを一度も呼ばずに
     諦めた経路(give-up-waiting)は wait_error だけを渡す。両方Noneなら
     調査は正常完了しており、どちらの見出しも本文に出ない。
+
+    2026-08-07(R1・R3): 通知の試行結果を record_notification_result() で
+    成果物へ書き戻す。この記録処理自身の失敗も、通知そのものの失敗と同じく
+    ここで握りつぶし、process_bundle の戻り値・exit codeへ影響させない
+    (R3 — 「通知の失敗」と「記録処理自身の失敗」は別の失敗モードであり、
+    どちらも既存の握りつぶしの性質を継承する)。
     """
+    sent = False
+    error = None
     try:
         send_investigation_notification(cfg, task_id, artifact, codex_error, wait_error)
+        sent = True
     except Exception as e:
+        error = str(e)
         sys.stderr.write(
             f"incident-investigate: Slack notification failed for semaphore-{task_id} (non-fatal): {e}\n"
+        )
+    try:
+        record_notification_result(cfg, task_id, artifact, sent, error)
+    except Exception as e:
+        sys.stderr.write(
+            f"incident-investigate: failed to record notification result for semaphore-{task_id} (non-fatal): {e}\n"
         )
 
 
