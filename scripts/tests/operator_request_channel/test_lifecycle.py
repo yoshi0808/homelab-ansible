@@ -401,5 +401,114 @@ class WriteRejectionAndAcceptedTests(unittest.TestCase):
         self.assertEqual(audit_record["result"], "accepted")
 
 
+class DescribeFailureExceptionChainTests(unittest.TestCase):
+    """review differential (2026-08-08, `_013_review_event_mode.md`
+    follow-up): a single-innermost-exception walk (`_root_cause()`, since
+    removed) hid the real failure whenever a *new* exception was raised
+    while an `except` block was still handling an earlier, harmless
+    control-flow exception -- exactly `store.append_event()`'s
+    `except FileExistsError:` shape. `_exception_chain()`/
+    `_describe_failure()` must report every link, not just one. The
+    entry-point-level regression test for the exact production shape
+    lives in each `test_entrypoint_*.py` file
+    (`test_intermediate_exception_inside_a_control_flow_except_handler_is_not_hidden`);
+    these are the direct, whitebox-level tests of the chain-walking
+    functions themselves."""
+
+    def test_single_exception_with_no_chain(self):
+        exc = store.StoreError("x")
+        chain = lifecycle._exception_chain(exc)
+        self.assertEqual(chain, [exc])
+        self.assertEqual(lifecycle._describe_failure(exc), "StoreError")
+
+    def test_exception_raised_inside_an_except_handler_for_a_control_flow_exception_reports_both(self):
+        # Reproduces store.append_event()'s exact shape at the unit level:
+        # `except FileExistsError:` is not a failure, but the exception
+        # raised *inside* that handler chains to it via __context__.
+        try:
+            try:
+                raise FileExistsError(17, "File exists")
+            except FileExistsError:
+                try:
+                    raise PermissionError(13, "Permission denied")
+                except OSError as inner:
+                    raise store.StoreError("wrapped: {}".format(type(inner).__name__))
+        except store.StoreError as outer:
+            description = lifecycle._describe_failure(outer)
+            chain = lifecycle._exception_chain(outer)
+
+        class_names = [type(link).__name__ for link in chain]
+        self.assertEqual(class_names, ["StoreError", "PermissionError", "FileExistsError"])
+        self.assertIn("StoreError", description)
+        self.assertIn("PermissionError", description)
+        self.assertIn("errno=13", description)
+        self.assertIn("FileExistsError", description)
+        self.assertIn("errno=17", description)
+        self.assertNotIn("Permission denied", description)
+        self.assertNotIn("File exists", description)
+        self.assertNotIn("wrapped:", description)
+
+    def test_explicit_cause_is_preferred_over_implicit_context(self):
+        # Constructed directly (not via nested try/except) to isolate
+        # exactly the property under test: at a single link, an explicit
+        # `__cause__` must be preferred over an incidental `__context__` --
+        # without also asserting anything about *that* exception's own
+        # further context (a real chain naturally continues past it, which
+        # is covered by the other tests in this class).
+        unrelated_context = ValueError("unrelated context")
+        cause = PermissionError(13, "denied")
+        outer = store.StoreError("wrapped")
+        outer.__context__ = unrelated_context  # implicit chaining alone would point here
+        outer.__cause__ = cause  # explicit `raise ... from cause` must win instead
+        chain = lifecycle._exception_chain(outer)
+        class_names = [type(link).__name__ for link in chain]
+        self.assertEqual(class_names, ["StoreError", "PermissionError"])
+        self.assertNotIn("ValueError", class_names)
+
+    def test_cycle_does_not_hang(self):
+        a = ValueError("a")
+        b = ValueError("b")
+        a.__context__ = b
+        b.__context__ = a  # deliberate cycle
+        chain = lifecycle._exception_chain(a)
+        # Must terminate and must not contain unbounded repeats.
+        self.assertLessEqual(len(chain), lifecycle._MAX_CHAIN_LENGTH)
+        self.assertIn(a, chain)
+
+    def test_chain_length_is_capped(self):
+        # Build a chain deeper than _MAX_CHAIN_LENGTH and confirm the walk
+        # stops instead of growing unbounded ("出力の長さに上限があること
+        # (チェーンが長くても壊れない)").
+        exceptions = [ValueError("e{}".format(i)) for i in range(lifecycle._MAX_CHAIN_LENGTH + 5)]
+        for outer, inner in zip(exceptions, exceptions[1:]):
+            outer.__context__ = inner
+        chain = lifecycle._exception_chain(exceptions[0])
+        self.assertEqual(len(chain), lifecycle._MAX_CHAIN_LENGTH)
+        description = lifecycle._describe_failure(exceptions[0])
+        self.assertIn("truncated", description)
+
+    def test_description_string_length_is_capped(self):
+        # A chain of exceptions with deliberately long class names must not
+        # make the printed description grow without bound either.
+        class ThisIsADeliberatelyVeryLongExceptionClassNameToStressTheDescriptionLengthCapAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA(Exception):
+            pass
+
+        exceptions = [ThisIsADeliberatelyVeryLongExceptionClassNameToStressTheDescriptionLengthCapAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA() for _ in range(lifecycle._MAX_CHAIN_LENGTH)]
+        for outer, inner in zip(exceptions, exceptions[1:]):
+            outer.__context__ = inner
+        description = lifecycle._describe_failure(exceptions[0])
+        self.assertLessEqual(len(description), lifecycle._MAX_DESCRIPTION_LENGTH + len("...(truncated)"))
+
+    def test_non_oserror_links_carry_no_errno(self):
+        try:
+            try:
+                raise RuntimeError("boom")
+            except RuntimeError as inner:
+                raise store.StoreError("wrapped") from inner
+        except store.StoreError as outer:
+            description = lifecycle._describe_failure(outer)
+        self.assertNotIn("errno", description)
+
+
 if __name__ == "__main__":
     unittest.main()

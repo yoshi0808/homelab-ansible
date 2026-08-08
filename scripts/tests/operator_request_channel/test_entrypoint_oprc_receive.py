@@ -332,7 +332,7 @@ class UncaughtExceptionSafetyTests(OprcReceiveTestCase):
     the same value-free `error:` line every other failure path in this
     file produces."""
 
-    def test_root_cause_class_name_and_errno_survive_a_wrapped_exception(self):
+    def test_chain_reports_both_outer_and_wrapped_exception_class_name_and_errno(self):
         # Reproduces the exact production incident (2026-08-08 post-deploy
         # vertical test) at the entry point where a symmetric version of
         # the same bug is reachable: dev-investigate's lazy-expiry check
@@ -340,7 +340,9 @@ class UncaughtExceptionSafetyTests(OprcReceiveTestCase):
         # outbox entry (store.mark_expired_if_needed -> append_event), so
         # this file's entry point can hit the same wrapped-PermissionError
         # shape too. See test_entrypoint_operator_channel.py's identical
-        # test for the full incident description.
+        # test for the full incident description. The chain here has
+        # exactly two links (StoreError, PermissionError); the
+        # control-flow-handler test below covers a three-link chain.
         def raise_wrapped_permission_error(*_args, **_kwargs):
             try:
                 raise PermissionError(13, "Permission denied")
@@ -355,6 +357,44 @@ class UncaughtExceptionSafetyTests(OprcReceiveTestCase):
         self.assertIn("PermissionError", result.stderr)
         self.assertIn("errno=13", result.stderr)
         self.assertNotIn("Permission denied", combined)
+        self.assertNotIn("cannot open event log", combined)
+        self.assertNotIn("Traceback", combined)
+
+    def test_intermediate_exception_inside_a_control_flow_except_handler_is_not_hidden(self):
+        # See test_entrypoint_operator_channel.py's identical test for the
+        # full incident description and rationale (2026-08-08,
+        # `_013_review_event_mode.md` follow-up): `store.append_event()`'s
+        # `except FileExistsError:` branch is not itself a failure -- it
+        # means "someone else already created this file, append instead" --
+        # but if the code *inside* that handler then raises, Python's
+        # implicit exception chaining links the new exception's
+        # `__context__` to the `FileExistsError` being handled at the time.
+        # The previous single-innermost-exception walk (`_root_cause()`,
+        # since removed) landed on that harmless `FileExistsError` (errno
+        # 17, EEXIST) and silently dropped the real failure sitting one
+        # link closer to the surface -- exactly the shape of the quory
+        # incident this differential reports (`error: unexpected internal
+        # failure (StoreError, root=FileExistsError, errno=17)`).
+        def raise_from_within_a_control_flow_except_handler(*_args, **_kwargs):
+            try:
+                raise FileExistsError(17, "File exists")
+            except FileExistsError:
+                try:
+                    raise PermissionError(13, "Permission denied")
+                except OSError as exc:
+                    raise store.StoreError("cannot open event log: {}".format(type(exc).__name__))
+
+        with mock.patch.object(store, "check_capacity", side_effect=raise_from_within_a_control_flow_except_handler):
+            result = self._submit(self._valid_opreq())
+        self.assertNotEqual(result.exit_code, 0)
+        combined = result.stdout + result.stderr
+        self.assertIn("StoreError", result.stderr)  # outer wrapper
+        self.assertIn("PermissionError", result.stderr)  # the real failure -- must not be hidden
+        self.assertIn("errno=13", result.stderr)
+        self.assertIn("FileExistsError", result.stderr)  # the harmless control-flow exception may still appear...
+        self.assertIn("errno=17", result.stderr)  # ...but must not be the *only* thing reported
+        self.assertNotIn("Permission denied", combined)
+        self.assertNotIn("File exists", combined)
         self.assertNotIn("cannot open event log", combined)
         self.assertNotIn("Traceback", combined)
 

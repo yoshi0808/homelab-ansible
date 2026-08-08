@@ -13,8 +13,30 @@
 
 | # | 項目 | 現在地 | 次にやること |
 |---|---|---|---|
-| 1 | **Operator Request Channel MVP** | **初回配備済み(`ce68005` + `92e4e90`)。配備後検証で実バグ2件が出て、修正がreview済み・未commit。** ①`inbox` のACLが `wx` だけで上限検査の列挙が落ち、**submitが1件も通らなかった** ②未捕捉例外の生tracebackがstderrへ出た。現在312テスト通過。**正常messageはまだ1件も通っていない。** 案件記録は `docs/ai/reviews/operator_request_channel/`、運用の正本は `docs/ai/context/operations/operator-request-channel.md` | commit/push → **quory server setup と ansy client setup の両方を再実行**(変更された配備物の所有playbookで決まる。dispatcherは変更なしなので `Dev investigate setup` は不要)→ **実identityでの縦方向試験**(submit→accept→OPRES→取得、standalone DEVREQ、4検査点)。**3以降はquoryでOperatorセッションを起動しないと確認できない。** 項目一覧はquory側Operatorの提示(2026-08-08)にある10項目 |
-| 2 | **Operator Request Channel の後続2件**(着手はMVPの往復確認後) | ①**ID専用の通知**: 本文はDLP経路だけ、通知は `request_id` しか運ばない。自由記述・要約・target名・ログ断片を載せない。別Requirementで設計する ②**storeの簡素化**: 容量会計・イベントログ・conversation索引を削る案があるが、**一定期間使ってから判断する**(quory側Operatorの助言、2026-08-08。DLPが機密性、これらが完全性・可用性を守っており、作り直すとpermission・atomicity・再送・DLP統合の問題を再度作る) | MVPの縦方向試験が通ってから、①を先に検討する |
+| 1 | **Operator Request Channel MVP — `accept-request` が通らない。診断を直して再配備待ち** | **配備済みで、submit までは通る。`accept-request` から先は通らない。** 2026-08-08にYoshinobuの判断で一度休止したが、2026-08-09に**診断だけを仕上げて accept を再試験する**方針で再開した(4件目の原因が「診断が握りつぶしている」ためで、練り直しの前に原因が見えている必要がある)。**channelは止めていない** — 壊れているのは accept 以降だけで、submit は正常に動き、放置しても本番へ影響しないため。止めるなら root所有configの `channel_enabled` を false にする(既存25本の read-only 調査には影響しない) | ①commit ②quory再配備(Semaphore) ③Operator が `accept-request req-20260808T191118+0900-dd87c0e962a516ac` を再実行し、**出力に並ぶ例外チェーン全体**を共有 ④隠れていた例外から原因を特定して修正。**チェーン出力でも決まらなかったときにだけ**、診断サブコマンドの新設を検討対象へ上げる |
+
+### 分かっていること(Operator Request Channel)
+
+**配備後に実バグが4件出た。offline test 324件が全通過した状態で、いずれも実配備後に初めて現れた。**
+
+| # | 症状 | 原因 | 状態 |
+|---|---|---|---|
+| 1 | submit が1件も通らない | `inbox` のACLが `wx` だけで、上限検査の `listdir` が落ちた | 修正済み・**PASS確認済み** |
+| 2 | 未捕捉例外の生tracebackがstderrへ出る | 例外ハンドラ不在 | 修正済み |
+| 3 | `accept-request` が `StoreError` | イベントファイルの作成モード `0640` がACLの `mask` を `r--` へ切り下げた | 修正済み。**ACLは現物で `mask::rw-` を確認済み** |
+| 4 | `accept-request` が `StoreError, root=FileExistsError, errno=17` | **未特定。真の失敗が診断に握りつぶされている** | **未解決。診断側の是正はcommit待ち** |
+
+**4件目について**: 真の失敗は `store.append_event()` の `except FileExistsError:` の中で2回目の `os.open(O_WRONLY|O_APPEND)` が投げた例外。`FileExistsError` は正常な通過点で、`_root_cause()` がチェーンの最深部まで歩くためそれだけが報告されていた。**報告された例外チェーンは現在のコード構造と辻褄が合う**(`store.py:356-399`。前回書いた「辻褄が合わない」は誤り)。
+
+`O_CREAT|O_EXCL` は `b69948c` で初めて入ったので、**`FileExistsError` が出ていること自体が quory 側 `store.py` が `b69948c` である証拠**になる(縦方向試験で3回連続「未判定」だった項目)。
+
+**quory の調査手段は `operator-channel` CLI の出力だけである。** spool への直接アクセス(`ls` / `getfacl` / `os.open()` 等)は正本が禁じており、2026-08-09 に Operator が退けた。診断が足りないなら CLI 側を直す。
+
+**4件とも store と権限の層で、DLP では1件も出ていない。** DLPは4検査点・拒否・検出値の非漏洩が実配備で通っている。「芯はDLPで、残りは帳簿」(Yoshinobu、2026-08-08)という切り分けが実測で裏づけられた形であり、**計画を練り直すときの主要な材料になる。**
+
+**quoryのinboxに試験requestが2件残る**(`req-20260808T175324+0900-dc55ae91d0b8de0d` / `req-20260808T191118+0900-dd87c0e962a516ac`)。削除機能は設計上どこにも無く、消すならYoshinobuの明示操作。
+
+**練り直しの検討材料として挙がっていたもの**: ①**ID専用の通知**(本文はDLP経路だけ、通知は `request_id` しか運ばない) ②**storeの簡素化**(容量会計・イベントログ・conversation索引)。②はquory側Operatorが「一定期間使ってから判断」としていたが、**使う前に4件出た**ため読み直す余地がある。
 
 ## Next(着手候補) — 工程・体制
 
@@ -22,6 +44,7 @@
 |---|---|---|
 | **`docs/ai/roles/` 5本のプロンプト最適化(継続案件)** | Coordinator / Implementer / Reviewer / Tester / Auditorの各Role文書を、**実際に運用してみて出てきた歪みを持ち寄って協議しながら**直し続ける。対象は①**やること・やらないことの衝突**②**何を言われているのか読み取れない箇所**③**細かく指示するよりAIに任せた方が結果が良い箇所**の3クラス。一度に全部やる案件ではなく、気づいたものを溜めて定期的に議論する形を採る | Yoshinobu表明(2026-08-01)「ある程度最適化して随分良くなってきたが、まだ矛盾・不明瞭・非効率が残る」。**歪みの実例はCoordinatorが運用中に気づいた時点で書き溜める**(置き場は本行) |
 | **sandbox を検証環境として使い込む** | **inventory 登録と `serial_getty_mask` は2026-08-06に完了**(`b20c43d`。`NRestarts=20322` の agetty ループを停止、hostname も `ubuntu` から `sandbox` へ)。承認境界でも `monnie` / `ansy` と同じ「確認不要」側にある。**ここから先は使い道の話であって、必須の作業ではない。** Yoshinobu が挙げた候補は ①monnie のサービスの検証 ②**まだAnsibleへ移行していない FreeRADIUS**(`authy`)— ただしクライアント/サーバのテスト用公開鍵を一度置く必要があり、かつ RADIUS は設定をほとんど変えないため**費用対効果は未評価**。**この行の要点は「decoy より広く試せる実ホストが手に入った」ことで、個々の候補ではない。** 監視対象にはしない。`rsyslog_forward_to_monnie` を向けるには allow-list への追加とホストごとの recon が要る(未着手・急がない) | Yoshinobu表明(2026-08-06)。前提・使い方・限界・壊したときの扱いは `docs/ai/context/operations/sandbox-vm.md` が正本 |
+| **Codexプラグイン(`codex@openai-codex`)をレビュー工程へ組み込むか決める** | **2026-08-08に導入だけ済ませた**(v1.0.6、**userスコープ** `~/.claude/settings.json`。`claude plugin marketplace add openai/codex-plugin-cc` → `claude plugin install codex@openai-codex`。**Remote Controlでは `/plugin` が使えないため、CLIサブコマンドを使う**)。提供されるのは `/codex:review`(`--background` / `--base` / `--wait`)・`/codex:adversarial-review`・`/codex:rescue`・`/codex:status` / `result` / `cancel` と `codex:codex-rescue` エージェント。常時コストは約449 tok/セッション。**`docs/ai/roles/reviewer.md` は1文字も変えていない。工程は従来のまま。**<br>**未確認の要点**: Yoshinobuの想定は「**Reviewerの役割で `/codex:review --background` を呼ぶ**」だが、**`/codex:review` はCoordinatorのskill一覧に現れない**(`setup` / `rescue` 等は現れる)。ユーザーが打つスラッシュコマンド専用として登録されている可能性があり、その場合**Coordinatorが起動するReviewer subagentの中からは呼べない**。次にレビューを回すときに実際に試し、呼べなければ繋ぎ方(`codex:codex-rescue` エージェント経由 / Coordinatorが打つ / reviewer.md側の運用を変える)を決める。<br>**判断材料**: レビュー対象の差分は**OpenAIのAPIへ送られる**。このrepoは公開済みなのでcommit済みの内容は既に公開情報だが、**未commitの差分は送信が初出になる**。前提(Codex CLI `0.147.0` / `~/.codex/auth.json`)はansyに揃っている。**2026-08-09のレビュー1回は従来のReviewer subagentで回し、試していない** — 対象が未commitの差分で、送信が初出になる側だったため、Yoshinobuの判断を待つ | Yoshinobu指示(2026-08-08)「Reviewerの役割で呼べるので、これまでと使い勝手は変わらないと思います」 |
 | **ansy が monnie へも直接触らなくなる方向**(開発機の新設) | **Phase 4 は monnie への到達を残すが、それは終点ではなく途中段階である。** いずれ ansy の操作対象は本番の monnie ではなく開発機になる。`sandbox-mon`(requirement R19〜R21、D3 で別案件へ切り出し済み)がその受け皿になりうるが、当時の目的は「監視スタックのupgradeリハーサル」であり、**今回示された目的(ansy が本番へ触らないこと)の方が広い**。着手時期は未定 | Yoshinobu表明(2026-08-03、Phase 4 の D9 を決めた文脈)。`docs/ai/reviews/dev_prod_boundary/2026-08-03_015_plan_phase4.md` §3.1 |
 
 ## Next(着手候補) — システム・運用

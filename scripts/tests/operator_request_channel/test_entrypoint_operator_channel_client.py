@@ -256,12 +256,15 @@ class UncaughtExceptionSafetyTests(OperatorChannelClientTestCase):
     function's own docstring); this catch-all is what keeps that
     assumption true for local failures too."""
 
-    def test_root_cause_class_name_and_errno_survive_a_wrapped_exception(self):
+    def test_chain_reports_both_outer_and_wrapped_exception_class_name_and_errno(self):
         # See test_entrypoint_operator_channel.py's identical test for the
         # full incident description (2026-08-08 post-deploy vertical
         # test). This file has no direct spool access, but run_entrypoint()
         # is the same generic function regardless of what raised the
         # wrapped exception, so the mechanism is exercised the same way.
+        # The chain here has exactly two links (RuntimeError,
+        # PermissionError); the control-flow-handler test below covers a
+        # three-link chain.
         def raise_wrapped_permission_error(*_args, **_kwargs):
             try:
                 raise PermissionError(13, "Permission denied")
@@ -276,6 +279,39 @@ class UncaughtExceptionSafetyTests(OperatorChannelClientTestCase):
         self.assertIn("PermissionError", result.stderr)
         self.assertIn("errno=13", result.stderr)
         self.assertNotIn("Permission denied", combined)
+        self.assertNotIn("ssh failed", combined)
+        self.assertNotIn("Traceback", combined)
+
+    def test_intermediate_exception_inside_a_control_flow_except_handler_is_not_hidden(self):
+        # See test_entrypoint_operator_channel.py's identical test for the
+        # full incident description and rationale (2026-08-08,
+        # `_013_review_event_mode.md` follow-up: a single-innermost-exception
+        # walk lands on a harmless control-flow exception -- here a
+        # `FileExistsError` an `except FileExistsError:` handler was already
+        # handling -- and hides the real failure raised inside that
+        # handler). This file has no direct spool access, but
+        # `run_entrypoint()` is the same generic function regardless of
+        # what raised the chained exception.
+        def raise_from_within_a_control_flow_except_handler(*_args, **_kwargs):
+            try:
+                raise FileExistsError(17, "File exists")
+            except FileExistsError:
+                try:
+                    raise PermissionError(13, "Permission denied")
+                except OSError as exc:
+                    raise RuntimeError("ssh failed: {}".format(type(exc).__name__))
+
+        with mock.patch.object(self.module, "_run_ssh", side_effect=raise_from_within_a_control_flow_except_handler):
+            result = self._run(["submit"], self._valid_opreq_body())
+        self.assertNotEqual(result.exit_code, 0)
+        combined = result.stdout + result.stderr
+        self.assertIn("RuntimeError", result.stderr)  # outer wrapper
+        self.assertIn("PermissionError", result.stderr)  # the real failure -- must not be hidden
+        self.assertIn("errno=13", result.stderr)
+        self.assertIn("FileExistsError", result.stderr)  # the harmless control-flow exception may still appear...
+        self.assertIn("errno=17", result.stderr)  # ...but must not be the *only* thing reported
+        self.assertNotIn("Permission denied", combined)
+        self.assertNotIn("File exists", combined)
         self.assertNotIn("ssh failed", combined)
         self.assertNotIn("Traceback", combined)
 

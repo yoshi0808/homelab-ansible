@@ -310,7 +310,7 @@ class UncaughtExceptionSafetyTests(OperatorChannelTestCase):
     value-free `error:` line every other failure path here produces, never
     a raw traceback."""
 
-    def test_root_cause_class_name_and_errno_survive_a_wrapped_exception(self):
+    def test_chain_reports_both_outer_and_wrapped_exception_class_name_and_errno(self):
         # Reproduces the exact production incident (2026-08-08 post-deploy
         # vertical test): accept-request failed with `error: unexpected
         # internal failure (StoreError)` -- the *outer* wrapper's class
@@ -321,7 +321,10 @@ class UncaughtExceptionSafetyTests(OperatorChannelTestCase):
         # `store.append_event()` itself raises when `os.open()` fails
         # (`except OSError as exc: raise StoreError(...)`, which leaves
         # Python's implicit `__context__` chaining intact) so the test
-        # exercises the real chain-walking path, not a synthetic one.
+        # exercises the real chain-walking path, not a synthetic one. The
+        # chain here has exactly two links (StoreError, PermissionError);
+        # `test_intermediate_exception_inside_a_control_flow_except_handler_is_not_hidden`
+        # below covers a three-link chain where the middle link matters.
         request_id, _msg = self._seed_opreq()
 
         def raise_wrapped_permission_error(*_args, **_kwargs):
@@ -334,11 +337,52 @@ class UncaughtExceptionSafetyTests(OperatorChannelTestCase):
             result = self._run(["accept-request", request_id])
         self.assertNotEqual(result.exit_code, 0)
         combined = result.stdout + result.stderr
-        self.assertIn("StoreError", result.stderr)  # outer class, as before
-        self.assertIn("PermissionError", result.stderr)  # root cause class -- this is the fix
-        self.assertIn("errno=13", result.stderr)  # errno -- this is the fix
+        self.assertIn("StoreError", result.stderr)  # outer link of the chain
+        self.assertIn("PermissionError", result.stderr)  # inner link -- both must be reported
+        self.assertIn("errno=13", result.stderr)  # errno for the inner (OSError) link
         self.assertNotIn("Permission denied", combined)  # message body still never appears
         self.assertNotIn("cannot open event log", combined)  # nor the wrapper's own message
+        self.assertNotIn("Traceback", combined)
+
+    def test_intermediate_exception_inside_a_control_flow_except_handler_is_not_hidden(self):
+        # Differential review (2026-08-08, `_013_review_event_mode.md`'s
+        # own follow-up): `store.append_event()`'s `except FileExistsError:`
+        # branch is not itself a failure -- it means "someone else already
+        # created this file, append instead" -- but if the code *inside*
+        # that handler then raises (its own nested `os.open()` call),
+        # Python's implicit exception chaining links the new exception's
+        # `__context__` to the `FileExistsError` being handled at the time.
+        # The previous single-innermost-exception walk (`_root_cause()`,
+        # since removed) landed on that harmless `FileExistsError` (errno
+        # 17, EEXIST) and silently dropped the real failure sitting one
+        # link closer to the surface -- exactly the shape of the quory
+        # incident this differential reports (`error: unexpected internal
+        # failure (StoreError, root=FileExistsError, errno=17)`). This
+        # reproduces that exact nested-except shape (not a synthetic one)
+        # and checks that the intermediate exception now survives.
+        request_id, _msg = self._seed_opreq()
+
+        def raise_from_within_a_control_flow_except_handler(*_args, **_kwargs):
+            try:
+                raise FileExistsError(17, "File exists")
+            except FileExistsError:
+                try:
+                    raise PermissionError(13, "Permission denied")
+                except OSError as exc:
+                    raise store.StoreError("cannot open event log: {}".format(type(exc).__name__))
+
+        with mock.patch.object(store, "append_event", side_effect=raise_from_within_a_control_flow_except_handler):
+            result = self._run(["accept-request", request_id])
+        self.assertNotEqual(result.exit_code, 0)
+        combined = result.stdout + result.stderr
+        self.assertIn("StoreError", result.stderr)  # outer wrapper
+        self.assertIn("PermissionError", result.stderr)  # the real failure -- must not be hidden
+        self.assertIn("errno=13", result.stderr)
+        self.assertIn("FileExistsError", result.stderr)  # the harmless control-flow exception may still appear...
+        self.assertIn("errno=17", result.stderr)  # ...but must not be the *only* thing reported
+        self.assertNotIn("Permission denied", combined)
+        self.assertNotIn("File exists", combined)
+        self.assertNotIn("cannot open event log", combined)
         self.assertNotIn("Traceback", combined)
 
     def test_unexpected_exception_during_accept_does_not_leak_a_traceback(self):

@@ -390,45 +390,92 @@ def write_accepted(spool_dir: str, box: str, audit_log_path: str, request_id: st
     )
 
 
-def _root_cause(exc: BaseException) -> BaseException:
-    """Walk `__cause__`/`__context__` to the innermost exception in the
-    chain -- e.g. the `PermissionError` underneath a `store.StoreError`
-    that wrapped it (`except OSError as exc: raise StoreError(...)`
-    without `from None` leaves Python's implicit chaining intact, which is
-    what makes this walk possible). Cycle-safe (falls back to the last
-    exception seen if a chain ever looped, which should not happen but
-    must not hang this function if it somehow did).
+_MAX_CHAIN_LENGTH = 8
+_MAX_DESCRIPTION_LENGTH = 500
+
+
+def _exception_chain(exc: BaseException) -> "list[BaseException]":
+    """Walk `__cause__`/`__context__` from `exc` outward-to-innermost,
+    returning *every* exception in the chain, in that order -- not just
+    the last one.
+
+    2026-08-08 (review of quory's post-fix `accept-request` failure,
+    `error: unexpected internal failure (StoreError, root=FileExistsError,
+    errno=17)`): the previous version of this walk (`_root_cause()`, now
+    removed) returned only the innermost exception. That is wrong whenever
+    a chain contains an exception that is not itself a failure but a
+    normal control-flow branch -- exactly `store.append_event()`'s shape:
+    `except FileExistsError:` does not mean anything went wrong (it means
+    "someone else's earlier event already created this file, append
+    instead"), but Python's implicit chaining still links whatever new
+    exception is raised *while that handler is running* to the
+    `FileExistsError` being handled at the time (`__context__`), and links
+    of a chain do not know which of them is "the real one" -- only the
+    caller reading the whole chain can tell. An innermost-only walk landed
+    on that harmless `FileExistsError` (errno 17, EEXIST is not a failure
+    here, it is the expected outcome of the first `os.open()` call) and
+    silently dropped whatever exception actually made the *second*
+    `os.open()` call (or anything else running inside that handler) fail --
+    which is the one thing this diagnostic exists to surface. Reporting
+    every link, in order, means the real failure is always present in the
+    output even when it is not the last link in the chain.
+
+    Prefers `__cause__` over `__context__` at each step (an explicit
+    `raise ... from err` is a deliberate re-wrap; `__context__` is what
+    Python sets automatically and is used when there is no explicit
+    cause). Cycle-safe (stops instead of looping forever if a chain ever
+    referenced itself, which should not happen but must not hang this
+    function if it somehow did) and capped at `_MAX_CHAIN_LENGTH` entries
+    so a pathologically long or cyclic-looking chain cannot make the
+    output unbounded.
     """
-    current = exc
+    chain = []
+    current: Optional[BaseException] = exc
     seen = set()
-    while True:
-        nxt = current.__cause__ or current.__context__
-        if nxt is None or id(nxt) in seen:
-            return current
+    while current is not None and id(current) not in seen:
+        chain.append(current)
         seen.add(id(current))
-        current = nxt
+        if len(chain) >= _MAX_CHAIN_LENGTH:
+            break
+        current = current.__cause__ or current.__context__
+    return chain
 
 
 def _describe_failure(exc: BaseException) -> str:
-    """Build the value-free description `run_entrypoint()` prints:
-    the outer exception's class name, the root cause's class name (via
-    `_root_cause()`, omitted if identical to the outer one), and `errno`
-    if the root cause carries one (e.g. `PermissionError`/`OSError`
-    subclasses) -- never a message, path, or payload fragment.
+    """Build the value-free description `run_entrypoint()` prints: every
+    exception class name in `exc`'s chain (`_exception_chain()`, outermost
+    first), each followed by its `errno` if it carries one (e.g. an
+    `OSError` subclass) -- never a message, path, or payload fragment.
+
+    Reports the *whole* chain rather than a single "root cause" -- see
+    `_exception_chain()`'s docstring for the incident that showed a
+    single-exception walk can land on a harmless control-flow exception
+    and hide the actual failure sitting one link closer to the surface.
 
     Deliberately does not read `.filename`/`.filename2` -- `OSError`
     subclasses carry those, and they hold exactly the kind of path this
     module must never print (requirement §9.4/§16). `errno` alone (an
     integer, e.g. 13 for EACCES) carries no such information.
+
+    Output length is bounded two ways, so a long or cyclic-looking chain
+    cannot make this unusable: `_exception_chain()` caps the number of
+    links, and the assembled string is itself truncated (with a marker)
+    if it still exceeds `_MAX_DESCRIPTION_LENGTH`.
     """
-    root = _root_cause(exc)
-    parts = [type(exc).__name__]
-    if root is not exc:
-        parts.append("root=" + type(root).__name__)
-    errno = getattr(root, "errno", None)
-    if isinstance(errno, int):
-        parts.append("errno={}".format(errno))
-    return ", ".join(parts)
+    chain = _exception_chain(exc)
+    parts = []
+    for link in chain:
+        piece = type(link).__name__
+        errno = getattr(link, "errno", None)
+        if isinstance(errno, int):
+            piece += "(errno={})".format(errno)
+        parts.append(piece)
+    description = " <- ".join(parts)
+    if len(chain) >= _MAX_CHAIN_LENGTH:
+        description += ", ...(chain truncated)"
+    if len(description) > _MAX_DESCRIPTION_LENGTH:
+        description = description[:_MAX_DESCRIPTION_LENGTH] + "...(truncated)"
+    return description
 
 
 def run_entrypoint(dispatch, argv) -> None:
@@ -451,14 +498,14 @@ def run_entrypoint(dispatch, argv) -> None:
       not yet grant directory-level read; later, an ACL-mask cap on
       `events/<id>.jsonl` -- see `store._EVENT_FILE_MODE`'s comment).
     - No traceback is ever printed.
-    - The exception's own message (`str(exc)`) is never printed for
-      either the caught exception or its root cause -- only class names
-      and `errno` (see `_describe_failure()`), which cannot be derived
-      from payload content, unlike an arbitrary exception message might
-      be (an exception raised while processing a payload can and does
-      sometimes embed a fragment of what it was processing -- a bad key,
-      a truncated value -- in its own message; a class name or an errno
-      integer never can).
+    - The exception's own message (`str(exc)`) is never printed for the
+      caught exception or for any exception in its chain -- only class
+      names and `errno` (see `_describe_failure()`), which cannot be
+      derived from payload content, unlike an arbitrary exception message
+      might be (an exception raised while processing a payload can and
+      does sometimes embed a fragment of what it was processing -- a bad
+      key, a truncated value -- in its own message; a class name or an
+      errno integer never can).
     - No payload, path, or DLP-detected value is printed by this function
       -- it never touches any of those itself; it only ever receives the
       exception object `dispatch()` raised, and `_describe_failure()`
@@ -470,17 +517,30 @@ def run_entrypoint(dispatch, argv) -> None:
       path in these three files already follows for the failures it did
       anticipate.
 
-    The root-cause class name and `errno` were added after the ACL-mask
-    bug above took real debugging time to diagnose on quory: the outer
-    `StoreError`'s own message already safely named the inner
-    `PermissionError` (`"cannot open event log: {}".format(type(exc).
-    __name__)`), but this function was dropping that -- printing only
-    "StoreError" and discarding everything else, even though the wrapping
-    class's message here happened to be safe. Reading the root cause's
-    class name and errno directly off the exception object (rather than
-    parsing a wrapper's message string, which is not guaranteed to be
-    safe or present for every `StoreError`-like class) keeps the
-    value-free guarantee intact while restoring the diagnostic value.
+    Diagnostic history, two rounds: the chained class name(s) and `errno`
+    were added after the ACL-mask bug above took real debugging time to
+    diagnose on quory: the outer `StoreError`'s own message already safely
+    named the inner `PermissionError` (`"cannot open event log: {}".
+    format(type(exc).__name__)`), but this function was dropping that --
+    printing only "StoreError" and discarding everything else, even though
+    the wrapping class's message here happened to be safe. That first fix
+    (`_root_cause()`, since removed) walked to a single innermost
+    exception -- which then hid a *different* real failure on quory: a
+    `StoreError` produced by `store.append_event()`'s `except
+    FileExistsError:` branch (a normal, non-failure control-flow path --
+    it means "append instead of create") chains, via Python's implicit
+    `__context__`, to that harmless `FileExistsError` whenever a *new*
+    exception is raised while the handler is running -- and the
+    innermost-only walk reported exactly that harmless exception
+    (`root=FileExistsError, errno=17`) instead of whatever actually made
+    the handler's own `os.open()` call fail. `_describe_failure()` now
+    reports the *entire* chain (`_exception_chain()`), in order, precisely
+    so a real failure sitting in the middle of a chain -- not just at
+    either end -- cannot be silently dropped again. Reading class names
+    and `errno` directly off each exception object (rather than parsing a
+    wrapper's message string, which is not guaranteed to be safe or
+    present for every `StoreError`-like class) keeps the value-free
+    guarantee intact while restoring the diagnostic value.
 
     `SystemExit` (raised by every entry point's own `_deny()`/`_error()`
     calls) is deliberately not caught -- it is not an `Exception`
