@@ -342,16 +342,28 @@ deployment_drift_check_semaphore_expected_orphans: 1
 # defaults/main.ymlのACL定義とは独立に、実際に配備された属性を直接見る
 # ための値)。値を変えるときは、roles/operator_request_channel/defaults/
 # main.ymlのACL定義・server.ymlのfile/acl taskと同時に変える。
+#
+# **spool 4ディレクトリの mode が 1770 で、role の `file` task が置く 1700 と
+# 違うのは意図どおりである。** これらには名前付きACLエントリが付くため、
+# `stat` が返す group ビットは `group::` ではなく **ACLの mask** になる。
+# エントリは全て `etype: user`(roles/operator_request_channel/tasks/
+# spool_acl_entry.yml)で group エントリは1つも無いため、`group::` は `---`
+# のままであり、実効的な group アクセスは増えていない。role は 1700 を置いた
+# 直後にACLを付けるので、定常状態は 1770 になる。
+#
+# **この検査の盲点**: mode だけを見る限り、mask が rwx なのか `group::` に
+# rwx を与えたのかを区別できない。ACL本体はこの検査の対象外である。ここで
+# 拾えるのは owner ビット・sticky・other ビットの変化までである。
 deployment_drift_check_paths:
   - { hosts: [quory], path: /var/lib/operator-request-channel, owner: root, group: root, mode: "0755",
       playbook: playbooks/operator_request_channel_server_setup.yml }
-  - { hosts: [quory], path: /var/lib/operator-request-channel/inbox, owner: root, group: root, mode: "1700",
+  - { hosts: [quory], path: /var/lib/operator-request-channel/inbox, owner: root, group: root, mode: "1770",
       playbook: playbooks/operator_request_channel_server_setup.yml }
-  - { hosts: [quory], path: /var/lib/operator-request-channel/outbox, owner: root, group: root, mode: "1700",
+  - { hosts: [quory], path: /var/lib/operator-request-channel/outbox, owner: root, group: root, mode: "1770",
       playbook: playbooks/operator_request_channel_server_setup.yml }
-  - { hosts: [quory], path: /var/lib/operator-request-channel/events, owner: root, group: root, mode: "1700",
+  - { hosts: [quory], path: /var/lib/operator-request-channel/events, owner: root, group: root, mode: "1770",
       playbook: playbooks/operator_request_channel_server_setup.yml }
-  - { hosts: [quory], path: /var/lib/operator-request-channel/quarantine-metadata, owner: root, group: root, mode: "1700",
+  - { hosts: [quory], path: /var/lib/operator-request-channel/quarantine-metadata, owner: root, group: root, mode: "1770",
       playbook: playbooks/operator_request_channel_server_setup.yml }
   - { hosts: [quory], path: /var/log/operator-request-channel, owner: root, group: root, mode: "0755",
       playbook: playbooks/operator_request_channel_server_setup.yml }
