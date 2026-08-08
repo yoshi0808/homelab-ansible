@@ -6,8 +6,9 @@ Operatorはquory側で動作し、Yoshinobuによる本番環境の調査、判�
 
 ## 現在の状態
 
-Operatorの具体的な責務、権限、利用可能な機能および安全制約は設計中である。
-設計・実装済みであると明示された能力以外を、Operatorという名称から推測して使用しない。
+Operator Request Channelを介したOPREQの受領、OPRESの返却およびDEVREQの作成は実装済みである。
+
+それ以外の責務、権限、利用可能な機能および安全制約は設計中である。本番調査、Semaphore操作、サービス操作、リカバリ等の能力は、個別のRole・Policy・実効権限で実装済みと確認できたものに限る。Request Channelが利用可能であることから、それらの能力も利用可能だと推測しない。設計・実装済みであると明示された能力以外を、Operatorという名称から推測して使用しない。
 
 ## 基本境界
 
@@ -27,8 +28,3 @@ Operatorはquory上のlocal CLIを介して、開発側Coordinatorからの調�
 - message本文を編集・削除しない。
 - 観測した事実と未確認の事項を分けて渡す。真因の確定と修正方法の設計は開発側Coordinatorが主体となる。
 
-## 現在の状態
-
-Operator Request Channelを介したOPREQの受領、OPRESの返却およびDEVREQの作成は実装済みである。
-
-本番調査、Semaphore操作、サービス操作、リカバリ等の能力は、個別のRole・Policy・実効権限で実装済みと確認できたものに限る。Request Channelが利用可能であることから、それらの能力も利用可能だと推測しない。

@@ -86,7 +86,8 @@ frontmatterの `model:` / `effort:` と上表の一致は `scripts/check-doc-con
 - **経緯はcommitメッセージへ書く。** 何をしたかに加えて、なぜそうしたか、検討して却下した案とその理由を書く。毎回読まれる文書へ積まない。`docs/ai/memory/decisions/` へ独立したファイルを起こすのは、同種の提案が繰り返し出るなど、commitを辿らせるだけでは止められないときに限る。
 - **実効的な境界は、承認の規則ではなく能力の不在で作られている。** `pve1` / `pve2` / `authy` / `quory` / `sophos-fw` へは、ansyが認証情報を1つも持たない。届くのは read 専用の forced command dispatch だけで、そこに書込の語彙は1つも無い。**この表は、届く相手についてしか意味を持たない。**
 - **境界はホストで引く。「書き込むかどうか」では引かない。** `monnie`(監視VM) / `ansy`(開発VM) / `sandbox`(使い捨ての検証用VM)は家庭向けサービスを提供しておらず、内容はGitから再現可能か、失っても停止を招かない観測データである。**`sandbox` は壊れてよいものとして用意されている**(Yoshinobu、2026-08-06)— 監視対象ではなく、他に何もこのホストへ流さない。**この境界は `.claude/settings.json` の `autoMode` と対応させて維持する**(片方だけ変えるとドリフトする)。
-- **状態を変えない確認は、どのホストに対しても確認不要である。** 状態を変える操作は上の表に従う。**冪等であることは「変えない」の根拠にならない** — `systemctl stop` やAnsibleのapplyは何度実行しても同じ状態になるが、本番を止める。確認を制約で塞ぐと、確認の代わりに推測が入る。**ただし届かないホストでは、確認の手段はdispatchが公開する名前付きチェックだけである** — 一覧は `docs/ai/reviews/dev_prod_boundary/2026-08-03_008_phase3_check_catalog.md`。そこに無いことは調べられない。
+- **状態を変えない確認は、どのホストに対しても確認不要である。** 状態を変える操作は上の表に従う。**冪等であることは「変えない」の根拠にならない** — `systemctl stop` やAnsibleのapplyは何度実行しても同じ状態になるが、本番を止める。確認を制約で塞ぐと、確認の代わりに推測が入る。**ただし届かないホストでは、Coordinator自身が使える手段はdispatchが公開する名前付きチェックだけである** — 一覧は `docs/ai/reviews/dev_prod_boundary/2026-08-03_008_phase3_check_catalog.md`。
+- **カタログに無い事実が要るとき、検証の難易度が高いとき、本番でしか再現しないときは、Operator Request Channelで quory側Operatorへ調査を依頼する**(`operator-channel-client submit`。運用の正本は `docs/ai/context/operations/operator-request-channel.md`)。**カタログに無いことを理由に、自分で別の手段を組み立てない。** requestは情報交換だけを行い、本番操作の指示にはしない。
 - **提示不要**: 状態を変えない確認(healthcheck / `--syntax-check` / `--check`経由 / `ansible-lint`)、decoy inventoryでの検証、ansyリポジトリ作業ツリーと`/tmp`に閉じた操作、`hosts: localhost`+`connection: local`で副作用のない使い捨てplaybook(検証後削除し、実行事実を記録へ残す)。
 - 迷ったら上げてよい。ただし必ず推奨を添える。既に推奨済みの事項へ同意の再確認を求めない。
 

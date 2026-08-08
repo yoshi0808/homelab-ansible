@@ -13,30 +13,7 @@
 
 | # | 項目 | 現在地 | 次にやること |
 |---|---|---|---|
-| 1 | **Operator Request Channel MVP — 4件目まで原因特定済み。accept 以降の縦方向試験が未実施** | **配備済みで、submit までは通る。`accept-request` は4件目(EROFS)が塞がっていたが、2026-08-09にOperator側のsandbox設定で解消した。** 現在は spool と log が通常shellから read-only のまま、`/usr/local/bin/operator-channel` だけが承認付きでsandbox外実行される — **直接書き込みは禁止し、正規経路だけが書ける**形。**channelは止めていない**。止めるなら root所有configの `channel_enabled` を false にする(既存25本の read-only 調査には影響しない) | **縦方向試験のitem 2〜7が未判定のまま**(`2026-08-08_014_vertical_test_2.md` §6)。`req-20260808T191118+0900-dd87c0e962a516ac` に対して accept → reply-opres → ansy側 get、standalone DEVREQ、持ち出し前DLP(checkpoint 3)を通す |
-
-### 分かっていること(Operator Request Channel)
-
-**配備後に実バグが4件出た。offline test 324件が全通過した状態で、いずれも実配備後に初めて現れた。**
-
-| # | 症状 | 原因 | 状態 |
-|---|---|---|---|
-| 1 | submit が1件も通らない | `inbox` のACLが `wx` だけで、上限検査の `listdir` が落ちた | 修正済み・**PASS確認済み** |
-| 2 | 未捕捉例外の生tracebackがstderrへ出る | 例外ハンドラ不在 | 修正済み |
-| 3 | `accept-request` が `StoreError` | イベントファイルの作成モード `0640` がACLの `mask` を `r--` へ切り下げた | 修正済み。**ACLは現物で `mask::rw-` を確認済み** |
-| 4 | `accept-request` が `StoreError <- OSError(errno=30) <- FileExistsError(errno=17)` | Operatorのsandboxが spool を読み取り専用にしていた(EROFS)。**コードのバグではない** | Operator側の設定で解消済み(2026-08-09)。**accept の成功はまだ観測していない** |
-
-**4件目について**: `dev-investigate` は同じファイルシステム上にイベントファイルを作れていた(だから `O_CREAT|O_EXCL` が EEXIST を返す)。**同じパスに対して Operator のプロセスだけが EROFS を受けていた** — ホスト全体ではなくプロセス単位の読み取り専用ビューである。
-
-**この案件の設計は、書き込みの門が POSIX ACL だけだと仮定していた。** mount 層の制約は role のどこにも入っていない(`grep ProtectSystem\|ReadWritePaths\|bwrap\|writable_roots` が0件)。**練り直しの材料になる。** 同種の2層(bwrapの `writable_roots` と systemdの `ReadWritePaths` の両方が要る)は `recovery_exec` 経路で既に踏んでいる。
-
-**quory の調査手段は `operator-channel` CLI の出力だけである。** spool への直接アクセス(`ls` / `getfacl` / `os.open()` 等)は正本が禁じており、2026-08-09 に Operator が退けた。診断が足りないなら CLI 側を直す。
-
-**4件とも store と権限の層で、DLP では1件も出ていない。** DLPは4検査点・拒否・検出値の非漏洩が実配備で通っている。「芯はDLPで、残りは帳簿」(Yoshinobu、2026-08-08)という切り分けが実測で裏づけられた形であり、**計画を練り直すときの主要な材料になる。**
-
-**quoryのinboxに試験requestが2件残る**(`req-20260808T175324+0900-dc55ae91d0b8de0d` / `req-20260808T191118+0900-dd87c0e962a516ac`)。削除機能は設計上どこにも無く、消すならYoshinobuの明示操作。
-
-**練り直しの検討材料として挙がっていたもの**: ①**ID専用の通知**(本文はDLP経路だけ、通知は `request_id` しか運ばない) ②**storeの簡素化**(容量会計・イベントログ・conversation索引)。②はquory側Operatorが「一定期間使ってから判断」としていたが、**使う前に4件出た**ため読み直す余地がある。
+| — | (進行中の案件なし) | | |
 
 ## Next(着手候補) — 工程・体制
 
@@ -51,6 +28,7 @@
 
 | 項目 | 内容 | 根拠 |
 |---|---|---|
+| **Operator Request Channel の後続2件** | MVPは2026-08-09にクローズ。**残存リスク4件と設計上の申し送りは `docs/ai/reviews/operator_request_channel/2026-08-09_018_closeout.md` §4 が正本**(quory側ライブラリのhash照合手段が無いこと、checkpoint 4のreject方向が原理的に検証不能なこと、spoolに試験messageが4件残ること、**書き込みの門をPOSIX ACLだけと仮定していたこと**)。後続は①**ID専用の通知**(本文はDLP経路だけ、通知は `request_id` しか運ばない) ②**storeの簡素化**(容量会計・イベントログ・conversation索引)。②はquory側Operatorが「一定期間使ってから判断」としていた。**実バグ4件はいずれもstoreと権限の層で、DLPでは1件も出ていない** — 芯と帳簿の切り分けが実測で裏づいた形であり、②の設計入力になる | Yoshinobu決定(2026-08-09にクローズ)。案件記録は `docs/ai/reviews/operator_request_channel/` |
 | **`worktree-sync.sh` 本体の内容ドリフトが検査できない** | **timerの生存は2026-08-03に日次ドリフト検査へ入れた**(`deployment_drift_check_units`)。残るのは**スクリプト本体の内容**で、`template` 配備物であるため期待値を得るのに描画が要り、`deployment_drift_check` の Tier 2(未着手)に属する。同じ制約が dispatch script・sudoers・unit本体・authorized_keys・**`codex-exec-wrapper`** にもかかる**構造的な穴であり、`worktree_sync` 固有ではない**。あわせて `deployed-hash` の対応表(8件)にも無いため、手での突合もできない。**2026-08-06 の codex 調査で実際に詰まった** — 配備済み wrapper が repo と一致するかをCoordinatorから確認できず、Yoshinobuに `sed` を打っていただいた。**単独で追わず、Tier 2 に着手するときにまとめて閉じる** | `roles/deployment_drift_check/defaults/main.yml` 冒頭の但し書き、`docs/ai/reviews/dev_prod_boundary/2026-08-03_005_plan_phase2.md` |
 | **証明書の更新が、週次・期限駆動で実際に回るか** | **repo・Semaphore とも配備完了**(2026-08-06)。カタログの `force_renew` 既定値は `false` へ変更し reconcile 済み(`changed: cert_renew` を確認)、`cert_renew_quory.timer` は `Persistent=true` で quory に入り(`unit-cat` で実測)、`cert_renew.yml` の schedule も Yoshinobu が週次・週末へ調整済み。**残るのは観測だけ。** ①次の週次実行が緑で終わること(証明書は8/5に全ノード更新済みで残り45日なので、**当面は「更新せずに緑」が正しい**) ②**実際に更新が走るのは9月上旬**(残り15日を切る頃)で、そこが本番の答え合わせになる。規範は `docs/ai/policies/cert_renew_policy.md` CERT-024。**承知の上の残存リスク** — `prepare_ca_apply`(CA鍵のtmpfs展開)は `cert_needs_renewal` ではなく `not ansible_check_mode` だけでgateされているため、更新不要な週も毎回展開される(年12回→52回)。抑えるなら `issue_check` を全ホストで先に回す形になるが、playの順序組み替えを伴うので別案件 | Yoshinobu決定(2026-08-06)。数値は `roles/homelab_cert_renew/defaults/main.yml`(valid 45 / threshold 15) |
 | **一次調査成果物の保持期間と、滞留の検知** | `_investigations/` は消す仕組みを持たず、拾われないまま溜まった成果物を知る経路も無い(IC-021の一次調査への適用)。**Policy §8が「未決」として明示している項目のうち、一次調査が本番稼働に入ったことで実際に効き始めた2件**である。バンドル本体は `incident_capture_retention_days`(30日)で消えるため、成果物だけが残り続ける | `docs/ai/policies/incident_capture_policy.md` §8 |
