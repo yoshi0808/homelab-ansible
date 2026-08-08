@@ -113,3 +113,32 @@ server setup templateにscheduleを登録しない。git pull・template登録�
 `created_at` は受入口の時刻を使うため、**時刻同期が成立していないときは新規のsubmitとoutbound作成を拒否する**。判定できないときも拒否側へ倒す。
 
 **取得と状態照会は止めない。** 止めるのは新規採番を伴う操作だけである。
+
+## 9. Operatorの日常操作
+
+### request IDを指定された場合
+
+1. `operator-channel show-status <request-id>`
+2. `operator-channel show-request <request-id>`
+3. purpose、target、requested_information、unconfirmedを整理してYoshinobuへ提示する。
+4. 調査に必要なRole、Policy、実効権限を確認する。
+5. 対応する場合だけ`accept-request`を実行する。
+6. 対応しない場合は理由を整理して`reject-request`を実行する。
+
+### request IDを指定されていない場合
+
+`operator-channel list-pending`で未処理OPREQを確認する。requestを一覧表示しただけではacceptしない。
+
+### 調査結果を返す場合
+
+- OPREQがacceptedであることを確認する。
+- 事実は`observed_facts`、未確認事項は`unconfirmed`へ分ける。
+- 生ログ、秘密情報、内部IPを含めない。
+- `operator-channel reply-opres <request-id>`へJSONをstdinで渡す。
+- DLPに拒否された場合は直接spoolへ書かず、内容を安全に再構成する。
+
+### 開発修正を依頼する場合
+
+- OPREQに対応する修正依頼は返信DEVREQとする。
+- quoryで独立して発見した障害はstandalone DEVREQとする。
+- 修正方法を決め打ちせず、観測事実、影響、再現条件、未確認事項を渡す。

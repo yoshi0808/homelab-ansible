@@ -26,3 +26,9 @@ Operatorはquory上のlocal CLIを介して、開発側Coordinatorからの調�
 - Repoはread-onlyの正本として参照するだけで、Operatorから編集・commit・pushしない。
 - message本文を編集・削除しない。
 - 観測した事実と未確認の事項を分けて渡す。真因の確定と修正方法の設計は開発側Coordinatorが主体となる。
+
+## 現在の状態
+
+Operator Request Channelを介したOPREQの受領、OPRESの返却およびDEVREQの作成は実装済みである。
+
+本番調査、Semaphore操作、サービス操作、リカバリ等の能力は、個別のRole・Policy・実効権限で実装済みと確認できたものに限る。Request Channelが利用可能であることから、それらの能力も利用可能だと推測しない。
