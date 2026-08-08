@@ -240,10 +240,11 @@ def cmd_message_get(cfg, request_id):
 def cmd_request_status(cfg, request_id):
     if not ids.is_valid_request_id(request_id):
         _deny("invalid request-id")
-    # Try outbox first (dev-investigate has full read there); an inbox-only
-    # id (an OPREQ ansy itself submitted) falls back to the event-log-only
-    # path, since dev-investigate has no read on inbox/ message bodies
-    # (see lifecycle.py's module docstring and tasks/server.yml's header).
+    # Try outbox first; an inbox-only id (an OPREQ ansy itself submitted)
+    # falls back to the event-log-only path -- not because dev-investigate
+    # cannot read its own submission (it can; see lifecycle.py's module
+    # docstring), but because request-status only needs the state, and
+    # the event log alone answers that without touching message content.
     try:
         message, _meta, state = store.read_message(cfg["spool_dir"], "outbox", request_id)
     except store.StoreNotFound:
@@ -261,7 +262,7 @@ def cmd_request_status(cfg, request_id):
     print(json.dumps({"request_id": request_id, "state": state}))
 
 
-def main(argv):
+def _dispatch(argv):
     if len(argv) < 2:
         _deny("missing action")
     action = argv[1]
@@ -287,6 +288,16 @@ def main(argv):
         cmd_request_status(cfg, operand)
     else:
         _deny("unknown action '{}'".format(action))
+
+
+def main(argv):
+    """Entry point. Runs `_dispatch()` under the single shared exception
+    safety net all three entry points use -- `oprc.lifecycle.
+    run_entrypoint()`, see that function's docstring for the full
+    contract (2026-08-08 deploy verification item 2; consolidated from
+    three independent copies per Operator review on quory).
+    """
+    lifecycle.run_entrypoint(_dispatch, argv)
 
 
 if __name__ == "__main__":

@@ -40,25 +40,43 @@ own docstring has the full reasoning; review 2026-08-08_006 Suggestion
 2). This still touches no file store.py does not already touch, and adds
 no new file to the spool layout.
 
-`read_state_from_events()` exists because of an ACL asymmetry: `roles/
-operator_request_channel/tasks/server.yml` does not grant `dev-investigate`
-read access to `inbox/` message bodies (see that file's header for why,
-including a plan-prose-vs-table discrepancy this implementer resolved in
-favor of the narrower reading), only to `outbox/` and to the append-only
-`events/` directory. `oprc-receive`'s `request-status` on an *inbox* item
-(an OPREQ ansy itself submitted) therefore cannot open the message file to
-learn `expires_at`, so it cannot call `mark_expired_if_needed()` (which
-requires an already-read message). `read_state_from_events()` derives
-state purely from `events/<id>.jsonl`, which `dev-investigate` can fully
-read, and deliberately reuses `store.ALLOWED_TRANSITIONS` / `store.
-EVENT_TYPES` -- the one place the state machine is defined -- instead of
-re-encoding the transition table a second time here.
+`read_state_from_events()` exists because `oprc-receive`'s `request-status`
+on an *inbox* item (an OPREQ ansy itself submitted) only ever needs to
+answer "what state is this request in" -- a question `events/<id>.jsonl`
+alone answers exactly, without needing the message body at all. Deriving
+state from the event log (and deliberately reusing `store.
+ALLOWED_TRANSITIONS` / `store.EVENT_TYPES` -- the one place the state
+machine is defined -- instead of re-encoding the transition table a
+second time here) keeps `request-status` correct regardless of message-
+body readability, rather than depending on it.
+
+This is not, and was never accurately describable as, "dev-investigate
+cannot read inbox message bodies" -- `inbox/<id>.json` is created by
+`dev-investigate` itself (`store._atomic_create()` runs as the calling
+process's EUID), at mode `0440`, which includes the owner-read bit; the
+identity that wrote a file can always open it, independent of any ACL. An
+earlier version of this file's docstring (and the implement record,
+before review) claimed otherwise; see `docs/ai/reviews/
+operator_request_channel/2026-08-08_005_implement_channel.md` for the
+correction. The property `roles/operator_request_channel/defaults/
+main.yml`'s ACL actually establishes is narrower and still correct:
+`dev-investigate` cannot read content *another* identity wrote (Operator's
+`outbox` entries, root-owned config/schema/ruleset) -- and since `inbox`
+only ever receives messages `dev-investigate` itself submitted, there is
+no cross-identity content in `inbox` for that property to protect in the
+first place. `mark_expired_if_needed()`'s own docstring does not need this
+distinction (it is only ever called with a message the caller already has
+in hand), but `read_state_from_events()`'s reason for existing is a
+best-practice choice (read only what you need; do not build a fresh code
+path on an ownership detail the schema/ACL design did not set out to
+guarantee), not an access limitation.
 """
 
 import contextlib
 import fcntl
 import json
 import os
+import sys
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional
 
@@ -199,9 +217,12 @@ def mark_expired_if_needed(spool_dir: str, box: str, request_id: str, message: D
     unchanged.
 
     Precondition: caller already holds `message` (this never opens the
-    message file itself). Callers without message-file read access must
-    use `read_state_from_events()` instead and cannot mark expiry
-    themselves -- see module docstring.
+    message file itself). Callers that do not read the message file use
+    `read_state_from_events()` instead and do not mark expiry. That is a
+    design choice -- the status path has no need for the body -- not an
+    access limitation: the submitting identity owns what it wrote to
+    `inbox` and can read it through the owner bit regardless of the ACL
+    (see plan 2026-08-08_002 §2.3).
 
     Concurrency: serialized via `_events_file_lock()` -- see that
     function's docstring for the full reasoning (review 2026-08-08_006
@@ -367,3 +388,50 @@ def write_accepted(spool_dir: str, box: str, audit_log_path: str, request_id: st
             "result": "accepted",
         },
     )
+
+
+def run_entrypoint(dispatch, argv) -> None:
+    """The single shared exception safety net all three entry points
+    (`bin/oprc-receive`, `bin/operator-channel`, `bin/operator-channel-client`)
+    must use as their `main()`, instead of each defining its own
+    `try/except` (2026-08-08 deploy verification item 2, then consolidated
+    here per Operator review on quory: three independent copies is exactly
+    the kind of thing that drifts, and the day one of them drifts is the
+    day it starts leaking a traceback the other two don't).
+
+    Contract (`dispatch(argv)` may raise anything; this function
+    guarantees the following regardless of what it raises):
+
+    - `PermissionError` and `OSError` are caught -- both are `Exception`
+      subclasses, so the blanket `except Exception` below already covers
+      them; named explicitly here because `PermissionError` is exactly
+      the class the real-world bug that prompted this function was
+      (`store.count_and_size()`'s `os.listdir()` against an ACL that did
+      not yet grant directory-level read).
+    - No traceback is ever printed.
+    - The exception's own message (`str(exc)`) is never printed -- only
+      `type(exc).__name__` (the class name), which cannot be derived from
+      payload content, unlike an arbitrary exception message might be
+      (an exception raised while processing a payload can and does
+      sometimes embed a fragment of what it was processing -- a bad key,
+      a truncated value -- in its own message; the class name never can).
+    - No payload, path, or DLP-detected value is printed by this function
+      -- it never touches any of those itself; it only ever receives the
+      exception object `dispatch()` raised.
+    - Output is exactly one line, `error: unexpected internal failure
+      (<ExceptionClassName>)`, to stderr, and a non-zero exit -- fail
+      closed for anything unanticipated, the same discipline every other
+      failure path in these three files already follows for the failures
+      it did anticipate.
+
+    `SystemExit` (raised by every entry point's own `_deny()`/`_error()`
+    calls) is deliberately not caught -- it is not an `Exception`
+    subclass, so the normal `denied:`/`error:` exit paths those functions
+    already implement are completely unaffected; this function only ever
+    engages for something none of those paths anticipated.
+    """
+    try:
+        dispatch(argv)
+    except Exception as exc:  # noqa: BLE001 -- intentional catch-all, see docstring
+        print("error: unexpected internal failure ({})".format(type(exc).__name__), file=sys.stderr)
+        sys.exit(1)

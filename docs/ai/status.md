@@ -13,7 +13,8 @@
 
 | # | 項目 | 現在地 | 次にやること |
 |---|---|---|---|
-| 1 | **Operator Request Channel MVP** | **実装・review・test・auditまで完了、未配備。** 案件記録は `docs/ai/reviews/operator_request_channel/`、運用の正本は `docs/ai/context/operations/operator-request-channel.md`。requirement §19 の完了条件28項目のうち18件がTester検証済み、**10件が配備後へ繰り越し** | commit/push後、`docs/ai/context/operations/operator-request-channel.md` §3 の**順序どおりに**ボタンを押す。**`SEMI-SAFE: Operator request channel server setup` の後に、既存の `SEMI-SAFE:Dev investigate setup` を押すことが必須**(dispatcherの4本のarmはそちらでしか入らない)。その後、繰り越した10件をTesterが検証する |
+| 1 | **Operator Request Channel MVP** | **初回配備済み(`ce68005` + `92e4e90`)。配備後検証で実バグ2件が出て、修正がreview済み・未commit。** ①`inbox` のACLが `wx` だけで上限検査の列挙が落ち、**submitが1件も通らなかった** ②未捕捉例外の生tracebackがstderrへ出た。現在312テスト通過。**正常messageはまだ1件も通っていない。** 案件記録は `docs/ai/reviews/operator_request_channel/`、運用の正本は `docs/ai/context/operations/operator-request-channel.md` | commit/push → **quory server setup と ansy client setup の両方を再実行**(変更された配備物の所有playbookで決まる。dispatcherは変更なしなので `Dev investigate setup` は不要)→ **実identityでの縦方向試験**(submit→accept→OPRES→取得、standalone DEVREQ、4検査点)。**3以降はquoryでOperatorセッションを起動しないと確認できない。** 項目一覧はquory側Operatorの提示(2026-08-08)にある10項目 |
+| 2 | **Operator Request Channel の後続2件**(着手はMVPの往復確認後) | ①**ID専用の通知**: 本文はDLP経路だけ、通知は `request_id` しか運ばない。自由記述・要約・target名・ログ断片を載せない。別Requirementで設計する ②**storeの簡素化**: 容量会計・イベントログ・conversation索引を削る案があるが、**一定期間使ってから判断する**(quory側Operatorの助言、2026-08-08。DLPが機密性、これらが完全性・可用性を守っており、作り直すとpermission・atomicity・再送・DLP統合の問題を再度作る) | MVPの縦方向試験が通ってから、①を先に検討する |
 
 ## Next(着手候補) — 工程・体制
 

@@ -10,7 +10,7 @@ import _entrypoint_helpers as helpers
 import _fixtures
 import _path_setup  # noqa: F401
 
-from oprc import canonical, dlp, ids
+from oprc import canonical, dlp, ids, lifecycle
 
 JST = timezone(timedelta(hours=9))
 
@@ -244,6 +244,73 @@ class RunSshTests(OperatorChannelClientTestCase):
         self.assertEqual(argv[0], self.module.SSH_PATH)
         self.assertIn("quory-investigate-test", argv)
         self.assertIn("operator-outbound-list", argv)
+
+
+class UncaughtExceptionSafetyTests(OperatorChannelClientTestCase):
+    """deploy-verification 2026-08-08_010 item 2 -- see the identical test
+    class in test_entrypoint_oprc_receive.py for the full rationale. Any
+    exception `_dispatch()` did not anticipate must become the same
+    value-free `error:` line every other failure path here produces, never
+    a raw traceback -- this matters doubly here since `_run_ssh()` relays
+    quory's stderr on the assumption that it is value-free (see that
+    function's own docstring); this catch-all is what keeps that
+    assumption true for local failures too."""
+
+    def test_unexpected_exception_during_submit_does_not_leak_a_traceback(self):
+        marker = "SENSITIVE-MARKER-local-submit"
+        with mock.patch.object(self.module, "_run_ssh", side_effect=RuntimeError(marker)):
+            result = self._run(["submit"], self._valid_opreq_body())
+        self.assertNotEqual(result.exit_code, 0)
+        combined = result.stdout + result.stderr
+        self.assertNotIn(marker, combined)
+        self.assertNotIn("Traceback", combined)
+        self.assertIn("error:", result.stderr)
+        self.assertIn("RuntimeError", result.stderr)
+
+    def test_unexpected_exception_during_get_does_not_leak_a_traceback(self):
+        message, meta = self._sample_outbox_message()
+        response = {"message": message, "meta": meta, "state": "submitted"}
+        marker = "SENSITIVE-MARKER-local-get"
+        with mock.patch.object(self.module, "_run_ssh", return_value=json.dumps(response).encode("utf-8")):
+            with mock.patch("oprc.canonical.content_hash", side_effect=RuntimeError(marker)):
+                result = self._run(["get", message["request_id"]])
+        self.assertNotEqual(result.exit_code, 0)
+        combined = result.stdout + result.stderr
+        self.assertNotIn(marker, combined)
+        self.assertNotIn("Traceback", combined)
+
+    def test_exception_message_body_containing_a_pseudo_secret_is_not_leaked(self):
+        secret = _fixtures.password_keyvalue_text()
+        with mock.patch.object(self.module, "_run_ssh", side_effect=RuntimeError("failed handling request: " + secret)):
+            result = self._run(["submit"], self._valid_opreq_body())
+        self.assertNotEqual(result.exit_code, 0)
+        combined = result.stdout + result.stderr
+        self.assertNotIn(secret, combined)
+        self.assertNotIn("failed handling request", combined)
+        self.assertIn("error:", result.stderr)
+        self.assertIn("RuntimeError", result.stderr)
+
+    def test_permission_error_message_body_containing_a_pseudo_secret_is_not_leaked(self):
+        secret = _fixtures.slack_bot_token()
+        with mock.patch.object(self.module, "_run_ssh", side_effect=PermissionError(13, "denied near " + secret)):
+            result = self._run(["submit"], self._valid_opreq_body())
+        self.assertNotEqual(result.exit_code, 0)
+        combined = result.stdout + result.stderr
+        self.assertNotIn(secret, combined)
+        self.assertIn("PermissionError", result.stderr)
+
+    def test_uses_the_shared_run_entrypoint_safety_net(self):
+        with mock.patch.object(lifecycle, "run_entrypoint") as mock_run:
+            self._run(["list"])
+        mock_run.assert_called_once()
+        args, _kwargs = mock_run.call_args
+        self.assertIs(args[0], self.module._dispatch)
+
+    def test_systemexit_from_deny_is_not_swallowed_by_the_catch_all(self):
+        result = self._run(["totally-bogus-command"])
+        self.assertNotEqual(result.exit_code, 0)
+        self.assertIn("denied:", result.stderr)
+        self.assertNotIn("unexpected internal failure", result.stderr)
 
 
 if __name__ == "__main__":

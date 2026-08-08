@@ -378,7 +378,7 @@ def cmd_show_status(cfg, request_id):
     print(json.dumps({"request_id": request_id, "box": box, "state": state}))
 
 
-def main(argv):
+def _dispatch(argv):
     if len(argv) < 2:
         _deny("missing command")
     action = argv[1]
@@ -424,6 +424,16 @@ def main(argv):
         cmd_show_status(cfg, operand)
     else:
         _deny("unknown command '{}'".format(action))
+
+
+def main(argv):
+    """Entry point. Runs `_dispatch()` under the single shared exception
+    safety net all three entry points use -- `oprc.lifecycle.
+    run_entrypoint()`, see that function's docstring for the full
+    contract (2026-08-08 deploy verification item 2; consolidated from
+    three independent copies per Operator review on quory).
+    """
+    lifecycle.run_entrypoint(_dispatch, argv)
 
 
 if __name__ == "__main__":

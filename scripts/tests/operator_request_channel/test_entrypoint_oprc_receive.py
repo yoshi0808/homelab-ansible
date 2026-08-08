@@ -9,7 +9,7 @@ import _entrypoint_helpers as helpers
 import _fixtures
 import _path_setup  # noqa: F401
 
-from oprc import canonical, config as oprc_config, dlp, ids, store
+from oprc import canonical, config as oprc_config, dlp, ids, lifecycle, store
 
 JST = timezone(timedelta(hours=9))
 
@@ -321,6 +321,95 @@ class UnknownActionTests(OprcReceiveTestCase):
     def test_missing_action_is_denied(self):
         result = helpers.run_main(self.module, ["oprc-receive"])
         self.assertNotEqual(result.exit_code, 0)
+
+
+class UncaughtExceptionSafetyTests(OprcReceiveTestCase):
+    """deploy-verification 2026-08-08_010 item 2: an exception `_dispatch()`
+    did not anticipate (the real-world case was a `PermissionError` from
+    `store.count_and_size()`, item 1) must not leak a raw traceback -- or
+    any fragment of the exception's own message, which could in principle
+    echo payload-derived content -- to stdout or stderr. It must become
+    the same value-free `error:` line every other failure path in this
+    file produces."""
+
+    def test_unexpected_exception_during_submit_does_not_leak_a_traceback(self):
+        marker = "SENSITIVE-MARKER-should-never-reach-output"
+        with mock.patch.object(store, "check_capacity", side_effect=RuntimeError(marker)):
+            result = self._submit(self._valid_opreq())
+        self.assertNotEqual(result.exit_code, 0)
+        combined = result.stdout + result.stderr
+        self.assertNotIn(marker, combined)
+        self.assertNotIn("Traceback", combined)
+        self.assertNotIn("cmd_submit", combined)  # no stack frame text at all
+        self.assertIn("error:", result.stderr)
+        self.assertIn("RuntimeError", result.stderr)  # the exception class name alone is safe
+
+    def test_the_exact_permission_error_observed_in_deploy_verification_does_not_leak_a_traceback(self):
+        with mock.patch.object(store, "check_capacity", side_effect=PermissionError(13, "Permission denied")):
+            result = self._submit(self._valid_opreq())
+        self.assertNotEqual(result.exit_code, 0)
+        combined = result.stdout + result.stderr
+        self.assertNotIn("Traceback", combined)
+        self.assertNotIn("os.listdir", combined)
+        self.assertIn("PermissionError", result.stderr)
+
+    def test_unexpected_exception_during_message_get_does_not_leak_a_traceback(self):
+        marker = "SENSITIVE-MARKER-message-get"
+        with mock.patch.object(store, "read_message", side_effect=RuntimeError(marker)):
+            result = helpers.run_main(self.module, ["oprc-receive", "message-get", ids.generate_request_id()])
+        self.assertNotEqual(result.exit_code, 0)
+        combined = result.stdout + result.stderr
+        self.assertNotIn(marker, combined)
+        self.assertNotIn("Traceback", combined)
+
+    def test_exception_message_body_containing_a_pseudo_secret_is_not_leaked(self):
+        # Operator review: the earlier tests here only ever checked the
+        # exception *class name*'s absence/presence -- none put a
+        # secret-shaped string inside the exception's own *message*. An
+        # exception raised while processing a payload can plausibly embed
+        # a fragment of what it was processing in its own str(); this
+        # proves run_entrypoint() drops that message entirely, not just
+        # that it drops a generic marker.
+        secret = _fixtures.password_keyvalue_text()
+        with mock.patch.object(store, "check_capacity", side_effect=RuntimeError("failed handling request: " + secret)):
+            result = self._submit(self._valid_opreq())
+        self.assertNotEqual(result.exit_code, 0)
+        combined = result.stdout + result.stderr
+        self.assertNotIn(secret, combined)
+        self.assertNotIn("failed handling request", combined)
+        self.assertIn("error:", result.stderr)
+        self.assertIn("RuntimeError", result.stderr)
+
+    def test_permission_error_message_body_containing_a_pseudo_secret_is_not_leaked(self):
+        secret = _fixtures.slack_bot_token()
+        with mock.patch.object(store, "check_capacity", side_effect=PermissionError(13, "denied near " + secret)):
+            result = self._submit(self._valid_opreq())
+        self.assertNotEqual(result.exit_code, 0)
+        combined = result.stdout + result.stderr
+        self.assertNotIn(secret, combined)
+        self.assertIn("PermissionError", result.stderr)
+
+    def test_uses_the_shared_run_entrypoint_safety_net(self):
+        # Consolidation check (Operator review): main() must go through
+        # oprc.lifecycle.run_entrypoint(), not a locally-defined
+        # try/except -- patch run_entrypoint itself and confirm main()
+        # actually calls it (rather than merely producing the same
+        # observable behavior via a parallel implementation).
+        with mock.patch.object(lifecycle, "run_entrypoint") as mock_run:
+            helpers.run_main(self.module, ["oprc-receive", "outbound-list"])
+        mock_run.assert_called_once()
+        args, _kwargs = mock_run.call_args
+        self.assertIs(args[0], self.module._dispatch)
+
+    def test_systemexit_from_deny_is_not_swallowed_by_the_catch_all(self):
+        # Sanity check on the catch-all's own boundary: normal denied:
+        # exits (SystemExit, not a subclass of Exception) must still work
+        # exactly as before -- the safety net must not turn every denial
+        # into a generic "unexpected internal failure".
+        result = helpers.run_main(self.module, ["oprc-receive", "totally-bogus-action"])
+        self.assertNotEqual(result.exit_code, 0)
+        self.assertIn("denied:", result.stderr)
+        self.assertNotIn("unexpected internal failure", result.stderr)
 
 
 class ReachabilityBoundaryTests(unittest.TestCase):

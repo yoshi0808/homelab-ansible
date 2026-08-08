@@ -43,7 +43,7 @@ import sys
 
 sys.path.insert(0, "/usr/local/libexec/operator-request-channel")
 
-from oprc import canonical, config, dlp, ids, schema, wire  # noqa: E402
+from oprc import canonical, config, dlp, ids, lifecycle, schema, wire  # noqa: E402
 
 CONFIG_PATH = "/etc/operator-request-channel/config.json"
 SSH_PATH = "/usr/bin/ssh"
@@ -258,7 +258,7 @@ def cmd_status(cfg, request_id):
     print(json.dumps(response))
 
 
-def main(argv):
+def _dispatch(argv):
     if len(argv) < 2:
         _deny("missing command")
     action = argv[1]
@@ -284,6 +284,22 @@ def main(argv):
         cmd_status(cfg, operand)
     else:
         _deny("unknown command '{}'".format(action))
+
+
+def main(argv):
+    """Entry point. Runs `_dispatch()` under the single shared exception
+    safety net all three entry points use -- `oprc.lifecycle.
+    run_entrypoint()`, see that function's docstring for the full
+    contract (2026-08-08 deploy verification item 2; consolidated from
+    three independent copies per Operator review on quory). This matters
+    here specifically because `_run_ssh()` relays quory's stderr verbatim
+    on the assumption that it is value-free (see that function's own
+    docstring); this safety net is what keeps that assumption true on
+    quory's side too, and keeps it true here for anything that fails
+    locally before ever reaching quory. `SystemExit` (from `_deny()`/
+    `_error()`) is not caught -- it is not an `Exception` subclass.
+    """
+    lifecycle.run_entrypoint(_dispatch, argv)
 
 
 if __name__ == "__main__":

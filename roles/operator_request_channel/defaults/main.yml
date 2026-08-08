@@ -53,23 +53,36 @@ operator_request_channel_max_clock_offset_seconds: 60
 
 # --- ACL(plan §2.3) ------------------------------------------------------------
 #
-# **plan §2.3 と現物実装の食い違い(この実装者が発見・解決した点)**:
-# plan本文の表は inbox/ へ「default u:dev-investigate:r」を挙げているが、
-# 直後の説明文は「inbox に dev-investigate の read を与えない...default ACL
-# が付与するのは...yoshi の read だけである」と明記しており、両者は矛盾する。
-# **この実装は説明文(狭い方=より安全な方)を採用した** -- 提出側が自分の
-# 提出物を読み返す必要はなく(requirement §5.1の取得対象はOPRES/DEVREQのみ)、
-# 最小権限の原則に合致するため。この判断の帰結として、oprc-receiveの
-# request-status はinbox項目に対してメッセージ本文を読めず、
+# **inbox ディレクトリの dev-investigate 権限は rwx(2026-08-08、配備後検証で
+# 改訂)。** 当初は `wx` のみだったが、それでは `os.listdir()` によるディレクトリ
+# の**列挙**すらできず、容量検査(`store.count_and_size()`、submit前に必ず
+# 呼ばれる)が`PermissionError`で確定的に落ち、**submitが1件も通らなかった**
+# (`docs/ai/reviews/operator_request_channel/2026-08-08_010_deploy_verification.md`
+# item 1、2回再現)。ディレクトリの `r` が許すのは名前の列挙(`os.listdir`)と
+# `stat`までで、個々のファイルを`open`する権限とは別物(ansy上の実測、
+# plan §2.3の測定表を参照)。
+#
+# **この設計が守る性質は「dev-investigateが他のidentityの書いた本文を読めない
+# こと」であり、「提出側が自分の提出物を読めないこと」ではない。** `inbox` に
+# 入るのは常にdev-investigate自身が送信したOPREQだけで、他のidentityが書いた
+# ものは無い(書き込むのはoprc-receiveのsubmitだけ)。message ファイルは
+# dev-investigate自身のEUIDで作成され(`store._atomic_create`)mode `0440`
+# (所有者readビットを含む)のため、**dev-investigateは自分が提出した
+# メッセージ自身を所有者権限で読める** — これはACLの状態(`wx`だった当初も
+# `rwx`にした現在も)とは無関係に成り立つ。越境読み取り(他者が書いた本文を
+# 読むこと)は、default ACL に dev-investigate 向けの read エントリが無いため
+# 引き続き防がれる。
+#
+# oprc-receive の request-status がinbox項目に対してメッセージ本文を読まず
 # oprc/lifecycle.py の read_state_from_events()(イベントログのみで状態を
-# 判定する経路)を使う設計にした -- 同ファイルのdocstring参照。
-# Coordinator/Reviewerはplan本文側の表記を修正するか確認すること。
+# 判定する経路)を使う設計は変更していないが、理由は「本文を読めないから」
+# ではなく「状態の判定に本文が要らないから」(詳細はlifecycle.pyのdocstring)。
 operator_request_channel_acl:
   inbox:
     path: "{{ operator_request_channel_spool_dir }}/inbox"
     mode: "1700"
     entries:
-      - { entity: "{{ operator_request_channel_dev_investigate_user }}", permissions: wx }
+      - { entity: "{{ operator_request_channel_dev_investigate_user }}", permissions: rwx }
       - { entity: "{{ operator_request_channel_operator_user }}", permissions: rx }
     default_entries:
       - { entity: "{{ operator_request_channel_operator_user }}", permissions: r }

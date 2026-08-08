@@ -157,7 +157,27 @@ def count_and_size(spool_dir: str, box: str) -> Tuple[int, int]:
     """Return (message_count, total_bytes) for `box`. Missing directory
     counts as (0, 0) rather than raising -- callers that need the
     directory to exist find that out from `_atomic_create` when they try
-    to write."""
+    to write.
+
+    Invariant callers rely on: this function must never `open()` a
+    message file's content -- only `os.listdir()` (directory-level
+    enumeration) and `os.path.getsize()` (metadata, not content). Some
+    identities that call this (via `check_capacity()`, e.g. `oprc-
+    receive` running as `dev-investigate` against `inbox/`) are granted
+    directory-level read/traverse for exactly this capacity check, but
+    are not granted -- and must not need -- read access to individual
+    message files' content (`roles/operator_request_channel/defaults/
+    main.yml`'s ACL design). If this function ever grows a reason to
+    inspect a message's content, that reason does not belong here: do the
+    read in a caller that is allowed to see message content, not in the
+    shared capacity-counting path every box and every identity goes
+    through. (2026-08-08: an ACL that only granted `wx`, not `r`, on
+    `inbox/` made `os.listdir()` itself fail with `PermissionError` --
+    see `docs/ai/reviews/operator_request_channel/
+    2026-08-08_010_deploy_verification.md` item 1 -- which is why this
+    property is now load-bearing enough to state explicitly instead of
+    leaving it implicit in the code below.)
+    """
     directory = _box_dir(spool_dir, box)
     try:
         names = os.listdir(directory)
