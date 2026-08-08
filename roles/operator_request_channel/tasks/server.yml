@@ -1,0 +1,108 @@
+---
+# quory専用配備(requirement §12.1: server setupの対象はquoryだけ)。
+# 共有ライブラリ・schema・DLPルールセット・config.json は common.yml が
+# 行う。ここでは oprc-receive・operator-channel・spool領域・監査ログを
+# 配備し、ACL(plan §2.3)を付与する。
+#
+# 既存dispatcher(roles/dev_investigate/files/
+# recovery-investigate-dispatch-quory.sh)自体はこのroleでは配備しない --
+# その4本のcase arm追加はroles/dev_investigate側の変更で完結しており、
+# 反映にはplaybooks/dev_investigate_setup.ymlの再実行が要る(この
+# playbookとは別工程。requirement §12.4「本番side server setupは...二段階」
+# のとおり、この配備単体では既存dispatcherを更新しない)。
+#
+# 既存の3 ACL・systemd-journalグループ・鍵・authorized_keys・forced
+# command path は一切変更しない(このroleにdev_investigate関連のtaskは
+# 存在しない)。
+
+- name: Deploy shared oprc library, schema, DLP ruleset and config.json
+  ansible.builtin.import_tasks: common.yml
+
+- name: Deploy oprc-receive (copy -- Tier 1 drift-checked; libexec, not PATH)
+  ansible.builtin.copy:
+    src: bin/oprc-receive
+    dest: "{{ operator_request_channel_receive_dest }}"
+    owner: root
+    group: root
+    mode: "0755"
+  become: true
+  when: not ansible_check_mode
+  tags: [destructive]
+
+- name: Deploy operator-channel (copy -- Tier 1 drift-checked)
+  ansible.builtin.copy:
+    src: bin/operator-channel
+    dest: "{{ operator_request_channel_cli_bin_dest }}"
+    owner: root
+    group: root
+    mode: "0755"
+  become: true
+  when: not ansible_check_mode
+  tags: [destructive]
+
+- name: Install acl package (setfacl/getfacl; idempotent even if already installed)
+  ansible.builtin.apt:
+    name: acl
+    state: present
+  become: true
+  when: not ansible_check_mode
+  tags: [destructive]
+
+- name: Create the spool root
+  ansible.builtin.file:
+    path: "{{ operator_request_channel_spool_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  become: true
+  when: not ansible_check_mode
+  tags: [destructive]
+
+- name: Create spool subdirectories and grant their ACLs (plan §2.3)
+  ansible.builtin.include_tasks: spool_acl_entry.yml
+  loop: "{{ operator_request_channel_acl | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+
+- name: Create the audit log directory
+  ansible.builtin.file:
+    path: "{{ operator_request_channel_log_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  become: true
+  when: not ansible_check_mode
+  tags: [destructive]
+
+# root:root で先に作る -- state: touch は新規作成時だけ owner/group/mode を
+# 設定し、既存ファイルは中身も所有権も変えないため、先に作らないと
+# dev-investigate/yoshiのどちらかが最初にappend(O_CREAT)した側が偶発的な
+# 所有者になる。root所有はrequirement §12.3の「script、schema、rulesおよび
+# configはroot所有」と同じ理由を監査ログにも適用したもの。
+- name: Create the audit log file (root-owned; ACL grants the two identities append access)
+  ansible.builtin.file:
+    path: "{{ operator_request_channel_audit_log }}"
+    state: touch
+    owner: root
+    group: root
+    mode: "0660"
+  become: true
+  when: not ansible_check_mode
+  tags: [destructive]
+
+- name: Grant ACL entries on the audit log
+  ansible.posix.acl:
+    path: "{{ operator_request_channel_audit_log }}"
+    entity: "{{ acl_entry.entity }}"
+    etype: user
+    permissions: "{{ acl_entry.permissions }}"
+    state: present
+  loop: "{{ operator_request_channel_audit_log_acl }}"
+  loop_control:
+    loop_var: acl_entry
+    label: "{{ acl_entry.entity }}:{{ acl_entry.permissions }}"
+  become: true
+  when: not ansible_check_mode
+  tags: [destructive]

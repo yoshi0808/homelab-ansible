@@ -10,6 +10,9 @@
     deployment_drift_check_my_keys: "{{ deployment_drift_check_forced_command_keys | selectattr('hosts', 'contains', inventory_hostname) | list }}"
     deployment_drift_check_my_report_dirs: "{{ deployment_drift_check_report_dirs | selectattr('hosts', 'contains', inventory_hostname) | list }}"
     deployment_drift_check_my_hosts_file: "{{ deployment_drift_check_hosts_file | selectattr('hosts', 'contains', inventory_hostname) | list }}"
+    deployment_drift_check_my_paths: "{{ deployment_drift_check_paths | selectattr('hosts', 'contains', inventory_hostname) | list }}"
+    deployment_drift_check_my_absent_paths: "{{ deployment_drift_check_absent_paths | selectattr('hosts', 'contains', inventory_hostname) | list }}"
+    deployment_drift_check_my_dispatch_probes: "{{ deployment_drift_check_dispatch_probes | selectattr('hosts', 'contains', inventory_hostname) | list }}"
 
 # --- ① 配備物のハッシュ ------------------------------------------------------
 - name: Stat deployed files
@@ -78,6 +81,53 @@
   failed_when: false
   become: true
 
+# --- operator_request_channel案件(2026-08-08): 新設3クラス ------------------
+
+# ⑧ spool/event/audit領域のowner/group/mode
+- name: Stat paths for owner/group/mode drift
+  ansible.builtin.stat:
+    path: "{{ item.path }}"
+  loop: "{{ deployment_drift_check_my_paths }}"
+  loop_control:
+    label: "{{ item.path }}"
+  register: deployment_drift_check_path_stat
+  become: true
+
+# ⑨ /etc/sudoers.d/ 配下の不在。0750 root:root のためtraverseにrootが要る
+# -- このファイル内でbecome: trueを使う唯一のcollect task(plan §3.3)。
+# noqa: command-instead-of-module — 対象ディレクトリ直下のfilenameだけを
+# 列挙するmoduleが無い(findモジュールはbecomeと`recurse: false`の組合せで
+# 同等のことはできるが、この用途には直下filenameの一覧で十分でcommandの
+# ほうが単純)。
+- name: List filenames directly under each sudoers.d-style directory  # noqa: command-instead-of-module
+  ansible.builtin.command:
+    cmd: >-
+      find {{ item.dir | quote }} -mindepth 1 -maxdepth 1 -type f -printf '%f\n'
+  loop: "{{ deployment_drift_check_my_absent_paths }}"
+  loop_control:
+    label: "{{ item.dir }}"
+  register: deployment_drift_check_sudoers_listing
+  changed_when: false
+  failed_when: false
+  become: true
+
+# ⑩ dispatcherのallowlist外拒否probe。読み取りのみで、状態を変える
+# commandは一切与えない(probe_commandは常にdenyされる語彙)。
+# noqa: command-instead-of-module — dispatcher scriptを直接起動するのに
+# 対応するmoduleは無い。
+- name: Probe the dispatcher with disallowed input (expect non-zero exit)  # noqa: command-instead-of-module
+  ansible.builtin.command:
+    cmd: "{{ item.dispatch_path }}"
+  environment:
+    SSH_ORIGINAL_COMMAND: "{{ item.probe_command }}"
+  loop: "{{ deployment_drift_check_my_dispatch_probes }}"
+  loop_control:
+    label: "{{ item.probe_command }}"
+  register: deployment_drift_check_dispatch_probe_result
+  changed_when: false
+  failed_when: false
+  become: false
+
 - name: Publish collected state for the controller-side comparison
   ansible.builtin.set_fact:
     deployment_drift_check_collected:
@@ -86,3 +136,6 @@
       keys: "{{ deployment_drift_check_keys_raw.results | default([]) }}"
       report_dirs: "{{ deployment_drift_check_report_owner.results | default([]) }}"
       hosts_file: "{{ deployment_drift_check_hosts_raw.results | default([]) }}"
+      paths: "{{ deployment_drift_check_path_stat.results | default([]) }}"
+      absent_paths: "{{ deployment_drift_check_sudoers_listing.results | default([]) }}"
+      dispatch_probes: "{{ deployment_drift_check_dispatch_probe_result.results | default([]) }}"

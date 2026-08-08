@@ -1,0 +1,293 @@
+#!/usr/bin/env python3
+"""oprc-receive -- quory-side SSH forced-command backend for the Operator
+Request Channel (requirement §5.2, plan §3.1/§4).
+
+Invoked only via `exec` from
+roles/dev_investigate/files/recovery-investigate-dispatch-quory.sh's four
+new `case` arms, running as the `dev-investigate` OS identity (no sudo, no
+other entry point -- see that script's own header). `source` is therefore
+hardcoded to "coordinator" here; this file never reads a `source` field
+from anything the caller supplies (requirement §4.2: source comes from the
+execution entry point, never the payload).
+
+Actions (argv[1]), matching the dispatcher's four new commands 1:1:
+
+    submit                        payload on stdin -> new OPREQ in inbox/
+    outbound-list [cursor]        page of outbox/ (OPRES/DEVREQ) summaries
+    message-get <request-id>      one outbox/ message
+    request-status <request-id>   current state, inbox or outbox
+
+Every operand this script accepts is re-validated here independently of
+the dispatcher's own regex checks (multilayer validation -- same
+discipline as recovery-investigate-dispatch-quory.sh delegating to
+incident-bundle-helper / recovery-reports-helper, which re-validate their
+own arguments rather than trusting the caller). This script never builds
+a path from operand text itself -- request ids are validated against
+`ids.is_valid_request_id` (which structurally excludes "." and "/") before
+being handed to store.py, which validates them again.
+
+Protocol output is exactly one JSON object on stdout per successful
+invocation. Every diagnostic goes to stderr prefixed "denied:" (the
+request was correctly refused) or "error:" (something about the local
+deployment itself is broken -- schema/ruleset unreadable, etc). Neither
+channel is ever given payload content, a DLP-detected value, or a raw
+`chronyc` line (requirement §9.4, §16) -- only fixed, static strings and
+already-validated identifiers.
+
+Fixed library location: /usr/local/libexec/operator-request-channel is
+this deployment's home for the `oprc` package (plan §2.8's `libexec_dir`).
+Not read from config before config itself is loaded -- config loading
+needs the package first -- so it is a constant here, matching the fixed
+`CONFIG_PATH` below (requirement §10.1: no environment-supplied paths).
+"""
+
+import json
+import sys
+
+sys.path.insert(0, "/usr/local/libexec/operator-request-channel")
+
+from oprc import canonical, config, dlp, ids, lifecycle, schema, store, wire  # noqa: E402
+
+CONFIG_PATH = "/etc/operator-request-channel/config.json"
+SOURCE = "coordinator"
+
+
+def _deny(message):
+    print("denied: {}".format(message), file=sys.stderr)
+    sys.exit(1)
+
+
+def _error(message):
+    print("error: {}".format(message), file=sys.stderr)
+    sys.exit(1)
+
+
+def _load_config():
+    try:
+        cfg = config.load_config(CONFIG_PATH)
+    except config.ConfigError as exc:
+        _error("config: {}".format(exc))
+    if cfg.get("role") != "operator_host":
+        _error("config: wrong role for this entry point")
+    if not cfg.get("channel_enabled", False):
+        _deny("channel disabled")
+    return cfg
+
+
+def _read_stdin_bytes(max_bytes):
+    data = sys.stdin.buffer.read(max_bytes + 1)
+    if len(data) > max_bytes:
+        _deny("payload too large")
+    return data
+
+
+def cmd_submit(cfg):
+    try:
+        schema_doc, ruleset = lifecycle.load_verified_schema_and_ruleset(config, schema, cfg)
+    except (schema.SchemaError, config.ConfigError) as exc:
+        _error("cannot verify schema/ruleset: {}".format(exc))
+
+    # New-`created_at` gate (plan §2.11): only submit and Operator-created
+    # OPRES/DEVREQ call this. get/list/status never do.
+    #
+    # max_offset_seconds is read from config.json's optional
+    # max_clock_offset_seconds (plan §2.8; config.py does not require its
+    # presence -- see oprc/config.py's REQUIRED_OPERATOR_HOST_KEYS). Wired
+    # through explicitly (review 2026-08-08_006 Suggestion 1) rather than
+    # left to assert_time_synced()'s own function-default: without this,
+    # the config key was read and hash-tracked by drift check but never
+    # actually reached the check it names.
+    try:
+        config.assert_time_synced(max_offset_seconds=cfg.get("max_clock_offset_seconds", 60.0))
+    except config.TimeSyncError:
+        lifecycle.write_rejection(cfg["spool_dir"], cfg["audit_log_path"], SOURCE, "time_sync")
+        _deny("time synchronization is not confirmed; new submissions are paused")
+
+    raw_bytes = _read_stdin_bytes(cfg["max_payload_bytes"])
+    try:
+        raw = wire.parse_payload(raw_bytes, cfg["max_payload_bytes"])
+    except wire.WireError as exc:
+        lifecycle.write_rejection(cfg["spool_dir"], cfg["audit_log_path"], SOURCE, "wire:" + exc.reason)
+        _deny("malformed payload")
+
+    try:
+        schema.reject_server_assigned_fields(raw)
+    except schema.ValidationError:
+        lifecycle.write_rejection(cfg["spool_dir"], cfg["audit_log_path"], SOURCE, "schema:server_assigned_field")
+        _deny("payload must not set request_id/source/created_at")
+
+    received_at = lifecycle.now_iso()
+    try:
+        expires_at = lifecycle.compute_expires_at(raw.get("expires_at"), received_at, cfg["max_ttl_days"], cfg["default_ttl_days"])
+    except lifecycle.LifecycleError:
+        lifecycle.write_rejection(cfg["spool_dir"], cfg["audit_log_path"], SOURCE, "ttl")
+        _deny("expires_at is out of bounds")
+
+    request_id = ids.generate_request_id()
+    message = dict(raw)
+    message["request_id"] = request_id
+    message["source"] = SOURCE
+    message["created_at"] = received_at
+    message["expires_at"] = expires_at
+
+    try:
+        schema.validate(message, schema_doc)
+        schema.validate_source_type_allowed(message["source"], message.get("type"))
+        schema.validate_local_relationships(message)
+    except schema.ValidationError:
+        lifecycle.write_rejection(cfg["spool_dir"], cfg["audit_log_path"], SOURCE, "schema:validate")
+        _deny("payload does not conform to the schema, or is not allowed for this source")
+
+    try:
+        result = dlp.scan(message, ruleset, cfg["dlp_timeout_seconds"])
+    except dlp.ScanTimeout:
+        lifecycle.write_rejection(cfg["spool_dir"], cfg["audit_log_path"], SOURCE, "dlp:timeout")
+        _deny("dlp scan did not complete in time")
+    if result.blocked:
+        finding = result.findings[0]
+        lifecycle.write_rejection(
+            cfg["spool_dir"], cfg["audit_log_path"], SOURCE, "dlp:blocked",
+            category=finding.category, rule_id=finding.rule_id, pointer=finding.pointer,
+            dlp_engine_version=dlp.ENGINE_VERSION, dlp_ruleset_sha256=cfg["expected_dlp_ruleset_sha256"],
+        )
+        _deny("dlp blocked this payload")
+
+    meta = {
+        "content_sha256": canonical.content_hash(message),
+        "dlp_engine_version": dlp.ENGINE_VERSION,
+        "dlp_ruleset_sha256": cfg["expected_dlp_ruleset_sha256"],
+        "received_at": received_at,
+        "source": SOURCE,
+    }
+
+    try:
+        store.check_capacity(cfg["spool_dir"], "inbox", cfg["max_messages_per_box"], cfg["max_total_bytes"], len(raw_bytes))
+    except store.StoreCapacityExceeded:
+        lifecycle.write_rejection(cfg["spool_dir"], cfg["audit_log_path"], SOURCE, "capacity")
+        _deny("inbox is at capacity")
+
+    try:
+        lifecycle.write_accepted(cfg["spool_dir"], "inbox", cfg["audit_log_path"], request_id, message, meta)
+    except store.StoreConflict:
+        _error("request_id collision")
+
+    print(json.dumps({"request_id": request_id, "conversation_id": message.get("conversation_id")}))
+
+
+def cmd_outbound_list(cfg, cursor):
+    if cursor is not None and not ids.is_valid_request_id(cursor):
+        _deny("invalid cursor")
+    try:
+        page, next_cursor, excluded = store.list_ids(cfg["spool_dir"], "outbox", cursor, cfg["page_size"])
+    except store.StoreError:
+        _deny("invalid cursor")
+
+    items = []
+    for request_id in page:
+        try:
+            message, _meta, state = store.read_message(cfg["spool_dir"], "outbox", request_id)
+        except store.StoreError:
+            excluded += 1
+            continue
+        try:
+            state = lifecycle.mark_expired_if_needed(cfg["spool_dir"], "outbox", request_id, message, state)
+        except store.StoreError:
+            # A concurrent writer raced this request's own event log
+            # between the read above and this append; fall back to the
+            # last-read state for this one item rather than aborting the
+            # whole listing (requirement §16, same reasoning as
+            # operator-channel's cmd_list_pending).
+            pass
+        items.append(
+            {
+                "request_id": request_id,
+                "conversation_id": message.get("conversation_id"),
+                "type": message.get("type"),
+                "in_reply_to": message.get("in_reply_to"),
+                "created_at": message.get("created_at"),
+                "state": state,
+            }
+        )
+    print(json.dumps({"items": items, "next_cursor": next_cursor, "excluded_count": excluded}))
+
+
+def cmd_message_get(cfg, request_id):
+    if not ids.is_valid_request_id(request_id):
+        _deny("invalid request-id")
+    try:
+        message, meta, state = store.read_message(cfg["spool_dir"], "outbox", request_id)
+    except store.StoreNotFound:
+        _deny("not found")
+    except store.StoreInconsistent:
+        _deny("inconsistent")
+    state = lifecycle.mark_expired_if_needed(cfg["spool_dir"], "outbox", request_id, message, state)
+    print(
+        json.dumps(
+            {
+                "message": message,
+                "meta": {
+                    "content_sha256": meta.get("content_sha256"),
+                    "dlp_engine_version": meta.get("dlp_engine_version"),
+                    "dlp_ruleset_sha256": meta.get("dlp_ruleset_sha256"),
+                    "received_at": meta.get("received_at"),
+                },
+                "state": state,
+            }
+        )
+    )
+
+
+def cmd_request_status(cfg, request_id):
+    if not ids.is_valid_request_id(request_id):
+        _deny("invalid request-id")
+    # Try outbox first (dev-investigate has full read there); an inbox-only
+    # id (an OPREQ ansy itself submitted) falls back to the event-log-only
+    # path, since dev-investigate has no read on inbox/ message bodies
+    # (see lifecycle.py's module docstring and tasks/server.yml's header).
+    try:
+        message, _meta, state = store.read_message(cfg["spool_dir"], "outbox", request_id)
+    except store.StoreNotFound:
+        try:
+            state = lifecycle.read_state_from_events(cfg["spool_dir"], request_id)
+        except store.StoreNotFound:
+            _deny("not found")
+        except store.StoreInconsistent:
+            _deny("inconsistent")
+        print(json.dumps({"request_id": request_id, "state": state}))
+        return
+    except store.StoreInconsistent:
+        _deny("inconsistent")
+    state = lifecycle.mark_expired_if_needed(cfg["spool_dir"], "outbox", request_id, message, state)
+    print(json.dumps({"request_id": request_id, "state": state}))
+
+
+def main(argv):
+    if len(argv) < 2:
+        _deny("missing action")
+    action = argv[1]
+    operand = argv[2] if len(argv) > 2 else None
+    if len(argv) > 3:
+        _deny("too many arguments for '{}'".format(action))
+
+    cfg = _load_config()
+
+    if action == "submit":
+        if operand is not None:
+            _deny("submit takes no arguments")
+        cmd_submit(cfg)
+    elif action == "outbound-list":
+        cmd_outbound_list(cfg, operand)
+    elif action == "message-get":
+        if operand is None:
+            _deny("message-get requires a request-id")
+        cmd_message_get(cfg, operand)
+    elif action == "request-status":
+        if operand is None:
+            _deny("request-status requires a request-id")
+        cmd_request_status(cfg, operand)
+    else:
+        _deny("unknown action '{}'".format(action))
+
+
+if __name__ == "__main__":
+    main(sys.argv)

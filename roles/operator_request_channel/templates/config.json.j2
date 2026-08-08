@@ -1,0 +1,41 @@
+{#- operator-request-channel config.json (plan §2.8). One template renders
+   both host roles: ansy gets "role": "coordinator" plus the ssh_*
+   keys oprc/config.py's REQUIRED_COORDINATOR_KEYS demands; quory gets
+   "role": "operator_host" plus the spool/TTL/paging keys REQUIRED_
+   OPERATOR_HOST_KEYS demands. inventory_hostname decides which -- this
+   role is only ever run against ansy or quory (playbooks/
+   operator_request_channel_{client,server}_setup.yml each target exactly
+   one host), so no third branch exists.
+   Expected hashes are computed at deploy time from the repo's own copies
+   of the schema/ruleset (tasks/common.yml's Stat + set_fact), never
+   hand-typed here -- a hand-typed hash could silently drift from the
+   actual deployed bytes. -#}
+{
+  "config_version": 1,
+  "role": "{{ 'operator_host' if inventory_hostname == 'quory' else 'coordinator' }}",
+  "channel_enabled": {{ operator_request_channel_channel_enabled | bool | lower }},
+  "libexec_dir": "{{ operator_request_channel_libexec_dir }}",
+  "schema_path": "{{ operator_request_channel_schema_dest }}",
+  "dlp_rules_path": "{{ operator_request_channel_dlp_rules_dest }}",
+  "expected_schema_sha256": "{{ operator_request_channel_schema_sha256 }}",
+  "expected_dlp_engine_version": "{{ operator_request_channel_dlp_engine_version }}",
+  "expected_dlp_ruleset_sha256": "{{ operator_request_channel_dlp_ruleset_sha256 }}",
+  "max_payload_bytes": {{ operator_request_channel_max_payload_bytes }},
+  "dlp_timeout_seconds": {{ operator_request_channel_dlp_timeout_seconds }}
+{% if inventory_hostname == 'ansy' -%}
+  ,
+  "ssh_destination": "{{ operator_request_channel_ssh_destination }}",
+  "ssh_connect_timeout_seconds": {{ operator_request_channel_ssh_connect_timeout_seconds }}
+{% endif -%}
+{% if inventory_hostname == 'quory' -%}
+  ,
+  "spool_dir": "{{ operator_request_channel_spool_dir }}",
+  "audit_log_path": "{{ operator_request_channel_audit_log }}",
+  "max_ttl_days": {{ operator_request_channel_max_ttl_days }},
+  "default_ttl_days": {{ operator_request_channel_default_ttl_days }},
+  "max_messages_per_box": {{ operator_request_channel_max_messages_per_box }},
+  "max_total_bytes": {{ operator_request_channel_max_total_bytes }},
+  "page_size": {{ operator_request_channel_page_size }},
+  "max_clock_offset_seconds": {{ operator_request_channel_max_clock_offset_seconds }}
+{% endif -%}
+}

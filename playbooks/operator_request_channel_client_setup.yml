@@ -1,0 +1,39 @@
+---
+# tester-gate: check-mode-native -- TS-009条件1(quory以外の実害なし。
+# 対象はansy自身のみで、他ホストへは一切触れない)は満たすが、条件2
+# (破壊的な本体操作を省いた検証には意味がない)は満たさない。ディレクトリ
+# 作成(`file`)、schema/DLPルールセット/oprc/操作-channel-client配備
+# (`copy`)、config.json配備(`template`)はいずれもAnsible標準のcheck_modeで
+# 安全にプレビューできる -- roles/dev_investigate と同型の判断(setup系は
+# ここまで一貫してcheck-mode-native)。全taskは
+# roles/operator_request_channel/tasks/{common,client}.yml で
+# `when: not ansible_check_mode` によりゲートされる(TS-014。独立したtask
+# のみで、TS-015のblock化が要る相互依存チェーンは無い)。
+# 詳細は docs/ai/policies/ansible_test_safety_policy.md。
+#
+# operator_request_channel_client_setup.yml
+#
+# 目的: Operator Request Channel MVP のansy側client(operator-channel-client)
+# と、両ホスト共有のoprc/ライブラリ・request-schema-v1.json・dlp-rules.json・
+# config.jsonを配備する(requirement §12.2)。
+#
+# 対象: ansyのみ。他ホスト(quoryを含む)へは一切変更を広げない
+# (requirement §12.1「client setupの対象はansyだけとする」)。
+#
+# 前提: ansyからquoryへの通信は既存の dev-investigate SSH鍵・forced
+# command(roles/dev_investigate)を再利用する(requirement §4.1)。新しい
+# SSH鍵・SSHユーザー・authorized_keysの変更はこのplaybookに一切含まれない。
+#
+# 実行:
+#   ansible-playbook playbooks/operator_request_channel_client_setup.yml
+#
+# 設計: docs/ai/reviews/operator_request_channel/2026-08-08_002_plan.md
+- name: Deploy the Operator Request Channel client (ansy only)
+  hosts: ansy
+  gather_facts: true
+  become: false
+  tasks:
+    - name: Run operator_request_channel role (client)
+      ansible.builtin.include_role:
+        name: operator_request_channel
+        tasks_from: client

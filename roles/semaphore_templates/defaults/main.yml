@@ -331,6 +331,18 @@ semaphore_templates_catalog:
     class: SEMI-SAFE
     legacy_name: "SEMI-SAFE:Dev investigate setup"
 
+  # --- operator_request_channel案件(2026-08-08) -------------------------------
+  # quory限定のserver setup(requirement §12.4)。既存9本のR7 setup系と同じ
+  # 理由でSEMI-SAFE・引数なし・survey無し(対象はplaybook自身のhosts: quory
+  # に委ねる)。**このカタログへエントリを足すのはrepoの変更であり、
+  # Semaphoreへの登録はSEMI-SAFE: Semaphore templates setupをYoshinobuが
+  # 実行したときに起きる(このセッションでは実行しない、requirement §12.5
+  # ステップ3)。** scheduleを表現するフィールドがこのカタログに無いため、
+  # 「server setup templateにscheduleを登録しない」(requirement §12.4)は
+  # 構造的に満たされる。
+  - playbook: playbooks/operator_request_channel_server_setup.yml
+    class: SEMI-SAFE
+
   # --- setup系: R7で新たにボタンを与える9本 ----------------------------------
   # 引数は空、対象は各playbookの hosts: に委ねる(R7。2026-08-04に -l を巡る
   # 混乱があったため)。classは既存3本のsetup系templateに倣いSEMI-SAFEで揃える

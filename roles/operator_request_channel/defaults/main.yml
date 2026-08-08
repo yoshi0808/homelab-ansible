@@ -1,0 +1,106 @@
+---
+# Operator Request Channel MVP -- ansy(client)/quory(server) 共有デフォルト。
+# 正本: docs/ai/reviews/operator_request_channel/2026-08-08_001_requirement.md
+#       docs/ai/reviews/operator_request_channel/2026-08-08_002_plan.md
+#
+# roleは1本(plan §3.1)。`tasks_from: client` / `tasks_from: server` で
+# playbook側が呼び分ける。両者が共有する配備(oprc/・schema・ruleset・
+# config.json)は tasks/common.yml から行う。
+
+# --- 配備先path(plan §2.8/§12.2/§12.3) --------------------------------------
+operator_request_channel_libexec_dir: /usr/local/libexec/operator-request-channel
+operator_request_channel_config_dir: /etc/operator-request-channel
+operator_request_channel_config_dest: "{{ operator_request_channel_config_dir }}/config.json"
+operator_request_channel_schema_dest: "{{ operator_request_channel_config_dir }}/request-schema-v1.json"
+operator_request_channel_dlp_rules_dest: "{{ operator_request_channel_config_dir }}/dlp-rules.json"
+
+operator_request_channel_client_bin_dest: /usr/local/bin/operator-channel-client
+operator_request_channel_receive_dest: "{{ operator_request_channel_libexec_dir }}/oprc-receive"
+operator_request_channel_cli_bin_dest: /usr/local/bin/operator-channel
+
+operator_request_channel_spool_dir: /var/lib/operator-request-channel
+operator_request_channel_log_dir: /var/log/operator-request-channel
+operator_request_channel_audit_log: "{{ operator_request_channel_log_dir }}/audit.jsonl"
+
+# 既存 dev-investigate(roles/dev_investigate)の再利用(requirement §4.1)。
+# 新規ユーザーは作らない -- 値はroles/dev_investigate/defaults/main.ymlの
+# dev_investigate_user と一致させること(このroleはあちらをimportしない
+# ため、値の同期は手動。変える場合は両方を変える)。
+operator_request_channel_dev_investigate_user: dev-investigate
+operator_request_channel_operator_user: yoshi
+
+# 既存の forced command dispatcher(このroleは配備しない -- roles/
+# dev_investigate が引き続き配備する。ここでは drift 検査・probe から
+# 参照するためだけに path を持つ)。
+operator_request_channel_dispatch_dest: /usr/local/sbin/recovery-investigate-dispatch-quory.sh
+
+# --- ansy側 config(plan §2.8) -------------------------------------------------
+operator_request_channel_ssh_destination: quory-investigate
+operator_request_channel_ssh_connect_timeout_seconds: 15
+
+# --- 共通config(plan §2.8) ----------------------------------------------------
+operator_request_channel_channel_enabled: true
+operator_request_channel_max_payload_bytes: 65536
+operator_request_channel_dlp_timeout_seconds: 20
+
+# --- quory側config(plan §2.4/§2.6/§2.11) -------------------------------------
+operator_request_channel_max_ttl_days: 14
+operator_request_channel_default_ttl_days: 7
+operator_request_channel_max_messages_per_box: 500
+operator_request_channel_max_total_bytes: 134217728  # 128 MiB
+operator_request_channel_page_size: 50
+operator_request_channel_max_clock_offset_seconds: 60
+
+# --- ACL(plan §2.3) ------------------------------------------------------------
+#
+# **plan §2.3 と現物実装の食い違い(この実装者が発見・解決した点)**:
+# plan本文の表は inbox/ へ「default u:dev-investigate:r」を挙げているが、
+# 直後の説明文は「inbox に dev-investigate の read を与えない...default ACL
+# が付与するのは...yoshi の read だけである」と明記しており、両者は矛盾する。
+# **この実装は説明文(狭い方=より安全な方)を採用した** -- 提出側が自分の
+# 提出物を読み返す必要はなく(requirement §5.1の取得対象はOPRES/DEVREQのみ)、
+# 最小権限の原則に合致するため。この判断の帰結として、oprc-receiveの
+# request-status はinbox項目に対してメッセージ本文を読めず、
+# oprc/lifecycle.py の read_state_from_events()(イベントログのみで状態を
+# 判定する経路)を使う設計にした -- 同ファイルのdocstring参照。
+# Coordinator/Reviewerはplan本文側の表記を修正するか確認すること。
+operator_request_channel_acl:
+  inbox:
+    path: "{{ operator_request_channel_spool_dir }}/inbox"
+    mode: "1700"
+    entries:
+      - { entity: "{{ operator_request_channel_dev_investigate_user }}", permissions: wx }
+      - { entity: "{{ operator_request_channel_operator_user }}", permissions: rx }
+    default_entries:
+      - { entity: "{{ operator_request_channel_operator_user }}", permissions: r }
+  outbox:
+    path: "{{ operator_request_channel_spool_dir }}/outbox"
+    mode: "1700"
+    entries:
+      - { entity: "{{ operator_request_channel_operator_user }}", permissions: rwx }
+      - { entity: "{{ operator_request_channel_dev_investigate_user }}", permissions: rx }
+    default_entries:
+      - { entity: "{{ operator_request_channel_operator_user }}", permissions: rw }
+      - { entity: "{{ operator_request_channel_dev_investigate_user }}", permissions: r }
+  events:
+    path: "{{ operator_request_channel_spool_dir }}/events"
+    mode: "1700"
+    entries:
+      - { entity: "{{ operator_request_channel_dev_investigate_user }}", permissions: rwx }
+      - { entity: "{{ operator_request_channel_operator_user }}", permissions: rwx }
+    default_entries:
+      - { entity: "{{ operator_request_channel_dev_investigate_user }}", permissions: rw }
+      - { entity: "{{ operator_request_channel_operator_user }}", permissions: rw }
+  quarantine_metadata:
+    path: "{{ operator_request_channel_spool_dir }}/quarantine-metadata"
+    mode: "1700"
+    entries:
+      - { entity: "{{ operator_request_channel_dev_investigate_user }}", permissions: wx }
+      - { entity: "{{ operator_request_channel_operator_user }}", permissions: rwx }
+    default_entries:
+      - { entity: "{{ operator_request_channel_dev_investigate_user }}", permissions: rw }
+      - { entity: "{{ operator_request_channel_operator_user }}", permissions: rw }
+
+operator_request_channel_audit_log_acl:
+  - { entity: "{{ operator_request_channel_dev_investigate_user }}", permissions: rw }
+  - { entity: "{{ operator_request_channel_operator_user }}", permissions: rw }

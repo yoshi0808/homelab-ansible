@@ -1,0 +1,430 @@
+#!/usr/bin/env python3
+"""operator-channel -- Operator local CLI for the Operator Request Channel
+(requirement §5.3, §11).
+
+Run directly on quory by Yoshinobu as his own OS identity (`yoshi`), not
+through the SSH forced-command path. Requirement §11's constraints apply
+regardless of invocation route, and this file is built to make them true
+structurally rather than by convention:
+
+- No `subprocess`/`os.system`/shell call anywhere in this file. The only
+  child process reachable from anything this file calls is `chronyc
+  tracking`, invoked with a fixed argv by `oprc/config.py`
+  (`assert_time_synced`) -- read-only, no shell, not systemctl/sudo/
+  ansible-playbook/git. "本MVPのCLIから本番状態を変更するcommandへ到達
+  できない" holds because there is no code path from here to any of those
+  binaries, not because of an operator convention.
+- `evidence_references[].id` is stored and echoed back verbatim as an
+  opaque string (already pattern-constrained by request-schema-v1.json to
+  exclude "/" and ".."); nothing here ever joins it onto a filesystem
+  path.
+- No command in this file edits or deletes a message body. The only
+  mutations available are: append an `accepted`/`rejected`/`answered`/
+  `expired` event (store.append_event, which itself enforces the state
+  machine), or create a brand-new immutable message
+  (store.create_message, which refuses to overwrite).
+
+Commands (argv[1]) -- `source` is hardcoded "operator" here, never trusted
+from any input (requirement §4.2):
+
+    list-pending                  pending (submitted, unexpired) inbox OPREQs
+    show-request <request-id>     full message body, inbox or outbox
+    accept-request <request-id>   submitted -> accepted
+    reject-request <request-id>   submitted -> rejected
+    reply-opres <request-id>      OPRES body (JSON) on stdin; the
+                                   request-id names the OPREQ being
+                                   replied to, which must be accepted;
+                                   marks that OPREQ answered
+    new-devreq                    DEVREQ body (JSON) on stdin; standalone
+                                   unless the body sets `in_reply_to`, in
+                                   which case it behaves like reply-opres
+                                   but creates a DEVREQ instead
+    show-conversation <conversation-id>  every message sharing that id
+    show-status <request-id>      current state, inbox or outbox
+
+Protocol output is exactly one JSON object on stdout per successful
+invocation; diagnostics go to stderr ("denied:" for a correct refusal,
+"error:" for a broken local deployment), and neither ever includes payload
+content or a DLP-detected value (requirement §9.4, §16).
+"""
+
+import json
+import sys
+
+sys.path.insert(0, "/usr/local/libexec/operator-request-channel")
+
+from oprc import canonical, config, dlp, ids, lifecycle, schema, store, wire  # noqa: E402
+
+CONFIG_PATH = "/etc/operator-request-channel/config.json"
+SOURCE = "operator"
+
+
+def _deny(message):
+    print("denied: {}".format(message), file=sys.stderr)
+    sys.exit(1)
+
+
+def _error(message):
+    print("error: {}".format(message), file=sys.stderr)
+    sys.exit(1)
+
+
+def _load_config():
+    try:
+        cfg = config.load_config(CONFIG_PATH)
+    except config.ConfigError as exc:
+        _error("config: {}".format(exc))
+    if cfg.get("role") != "operator_host":
+        _error("config: wrong role for this entry point")
+    if not cfg.get("channel_enabled", False):
+        _deny("channel disabled")
+    return cfg
+
+
+def _read_stdin_json(max_bytes):
+    data = sys.stdin.buffer.read(max_bytes + 1)
+    if len(data) > max_bytes:
+        _deny("body too large")
+    try:
+        return wire.parse_payload(data, max_bytes)
+    except wire.WireError as exc:
+        _deny("malformed body: {}".format(exc.reason))
+
+
+def _find_message(cfg, request_id):
+    """A request_id lives in exactly one box (OPREQ -> inbox, OPRES/DEVREQ
+    -> outbox); try both rather than requiring the caller to know which."""
+    for box in ("inbox", "outbox"):
+        try:
+            message, meta, state = store.read_message(cfg["spool_dir"], box, request_id)
+            return box, message, meta, state
+        except store.StoreNotFound:
+            continue
+        except store.StoreInconsistent:
+            _deny("inconsistent")
+    _deny("not found")
+
+
+def cmd_list_pending(cfg):
+    items = []
+    cursor = None
+    while True:
+        page, next_cursor, _excluded = store.list_ids(cfg["spool_dir"], "inbox", cursor, cfg["page_size"])
+        for request_id in page:
+            try:
+                message, _meta, state = store.read_message(cfg["spool_dir"], "inbox", request_id)
+            except store.StoreError:
+                continue
+            try:
+                state = lifecycle.mark_expired_if_needed(cfg["spool_dir"], "inbox", request_id, message, state)
+            except store.StoreError:
+                # A concurrent writer raced this request's own event log
+                # between the read above and this append (store.py's own
+                # docs: same-request_id races are not fully closed by the
+                # library alone). Falling back to the last-read state for
+                # this one item is strictly better than letting one race
+                # abort the whole listing for every other request on the
+                # page (requirement §16 "channelの障害が...を停止させない",
+                # applied the same way to a listing operation's internal
+                # best-effort side task).
+                pass
+            if state == "submitted":
+                items.append(
+                    {
+                        "request_id": request_id,
+                        "conversation_id": message.get("conversation_id"),
+                        "type": message.get("type"),
+                        "created_at": message.get("created_at"),
+                        "purpose": message.get("purpose"),
+                    }
+                )
+        if next_cursor is None:
+            break
+        cursor = next_cursor
+    print(json.dumps({"items": items}))
+
+
+def cmd_show_request(cfg, request_id):
+    if not ids.is_valid_request_id(request_id):
+        _deny("invalid request-id")
+    box, message, _meta, state = _find_message(cfg, request_id)
+    state = lifecycle.mark_expired_if_needed(cfg["spool_dir"], box, request_id, message, state)
+    print(json.dumps({"box": box, "message": message, "state": state}))
+
+
+def cmd_accept_request(cfg, request_id):
+    if not ids.is_valid_request_id(request_id):
+        _deny("invalid request-id")
+    try:
+        message, _meta, state = store.read_message(cfg["spool_dir"], "inbox", request_id)
+    except store.StoreNotFound:
+        _deny("not found")
+    except store.StoreInconsistent:
+        _deny("inconsistent")
+    state = lifecycle.mark_expired_if_needed(cfg["spool_dir"], "inbox", request_id, message, state)
+    if state != "submitted":
+        _deny("request is not in submitted state (current: {})".format(state))
+    now = lifecycle.now_iso()
+    try:
+        # lifecycle.append_event_locked (not store.append_event directly):
+        # serializes against a concurrent mark_expired_if_needed() racing
+        # this same request_id (review 2026-08-08_006 Suggestion 2).
+        lifecycle.append_event_locked(cfg["spool_dir"], request_id, "accepted", now)
+    except store.InvalidTransition:
+        _deny("accept is not allowed from the current state")
+    store.append_audit(cfg["audit_log_path"], {"request_id": request_id, "event": "accepted", "occurred_at": now, "source": SOURCE})
+    print(json.dumps({"request_id": request_id, "state": "accepted"}))
+
+
+def cmd_reject_request(cfg, request_id):
+    if not ids.is_valid_request_id(request_id):
+        _deny("invalid request-id")
+    try:
+        message, _meta, state = store.read_message(cfg["spool_dir"], "inbox", request_id)
+    except store.StoreNotFound:
+        _deny("not found")
+    except store.StoreInconsistent:
+        _deny("inconsistent")
+    state = lifecycle.mark_expired_if_needed(cfg["spool_dir"], "inbox", request_id, message, state)
+    if state != "submitted":
+        _deny("request is not in submitted state (current: {})".format(state))
+    now = lifecycle.now_iso()
+    try:
+        lifecycle.append_event_locked(cfg["spool_dir"], request_id, "rejected", now)
+    except store.InvalidTransition:
+        _deny("reject is not allowed from the current state")
+    store.append_audit(cfg["audit_log_path"], {"request_id": request_id, "event": "rejected", "occurred_at": now, "source": SOURCE})
+    print(json.dumps({"request_id": request_id, "state": "rejected"}))
+
+
+def _create_response(cfg, message_type, in_reply_to, raw):
+    """Shared body for reply-opres / new-devreq. `raw` has already been
+    read from stdin by the caller (stdin can only be read once); `in_reply_to`
+    is either the reply-opres request-id (argv-authoritative) or whatever
+    new-devreq found in the body (or None for a standalone DEVREQ).
+    """
+    referenced = None
+    if in_reply_to is not None:
+        try:
+            referenced, _meta, ref_state = store.read_message(cfg["spool_dir"], "inbox", in_reply_to)
+        except store.StoreNotFound:
+            _deny("in_reply_to: not found")
+        except store.StoreInconsistent:
+            _deny("in_reply_to: inconsistent")
+        ref_state = lifecycle.mark_expired_if_needed(cfg["spool_dir"], "inbox", in_reply_to, referenced, ref_state)
+        if ref_state != "accepted":
+            _deny("in_reply_to is not in accepted state (current: {})".format(ref_state))
+
+    try:
+        schema_doc, ruleset = lifecycle.load_verified_schema_and_ruleset(config, schema, cfg)
+    except (schema.SchemaError, config.ConfigError) as exc:
+        _error("cannot verify schema/ruleset: {}".format(exc))
+
+    # New-`created_at` gate (plan §2.11): reply-opres/new-devreq mint a new
+    # created_at just like submit does, so the same gate applies here.
+    #
+    # max_offset_seconds is wired from config.json's optional
+    # max_clock_offset_seconds (review 2026-08-08_006 Suggestion 1 --
+    # previously this call site ignored the configured value entirely and
+    # always used assert_time_synced()'s own function default).
+    try:
+        config.assert_time_synced(max_offset_seconds=cfg.get("max_clock_offset_seconds", 60.0))
+    except config.TimeSyncError:
+        lifecycle.write_rejection(cfg["spool_dir"], cfg["audit_log_path"], SOURCE, "time_sync")
+        _deny("time synchronization is not confirmed; new messages are paused")
+
+    try:
+        schema.reject_server_assigned_fields(raw)
+    except schema.ValidationError:
+        lifecycle.write_rejection(cfg["spool_dir"], cfg["audit_log_path"], SOURCE, "schema:server_assigned_field")
+        _deny("body must not set request_id/source/created_at")
+
+    received_at = lifecycle.now_iso()
+    try:
+        expires_at = lifecycle.compute_expires_at(raw.get("expires_at"), received_at, cfg["max_ttl_days"], cfg["default_ttl_days"])
+    except lifecycle.LifecycleError:
+        lifecycle.write_rejection(cfg["spool_dir"], cfg["audit_log_path"], SOURCE, "ttl")
+        _deny("expires_at is out of bounds")
+
+    request_id = ids.generate_request_id()
+    message = dict(raw)
+    message["request_id"] = request_id
+    message["source"] = SOURCE
+    message["created_at"] = received_at
+    message["expires_at"] = expires_at
+    message["type"] = message_type
+    if in_reply_to is not None:
+        message["in_reply_to"] = in_reply_to
+        message["conversation_id"] = referenced.get("conversation_id")
+    else:
+        message["in_reply_to"] = None
+        message["conversation_id"] = ids.generate_conversation_id()
+
+    try:
+        schema.validate(message, schema_doc)
+        schema.validate_source_type_allowed(message["source"], message["type"])
+        if in_reply_to is not None:
+            schema.validate_reply_target(message, referenced)
+    except schema.ValidationError:
+        lifecycle.write_rejection(cfg["spool_dir"], cfg["audit_log_path"], SOURCE, "schema:validate")
+        _deny("body does not conform to the schema, or is not an allowed reply")
+
+    try:
+        result = dlp.scan(message, ruleset, cfg["dlp_timeout_seconds"])
+    except dlp.ScanTimeout:
+        lifecycle.write_rejection(cfg["spool_dir"], cfg["audit_log_path"], SOURCE, "dlp:timeout")
+        _deny("dlp scan did not complete in time")
+    if result.blocked:
+        finding = result.findings[0]
+        lifecycle.write_rejection(
+            cfg["spool_dir"], cfg["audit_log_path"], SOURCE, "dlp:blocked",
+            category=finding.category, rule_id=finding.rule_id, pointer=finding.pointer,
+            dlp_engine_version=dlp.ENGINE_VERSION, dlp_ruleset_sha256=cfg["expected_dlp_ruleset_sha256"],
+        )
+        _deny("dlp blocked this payload")
+
+    meta = {
+        "content_sha256": canonical.content_hash(message),
+        "dlp_engine_version": dlp.ENGINE_VERSION,
+        "dlp_ruleset_sha256": cfg["expected_dlp_ruleset_sha256"],
+        "received_at": received_at,
+        "source": SOURCE,
+    }
+
+    try:
+        store.check_capacity(cfg["spool_dir"], "outbox", cfg["max_messages_per_box"], cfg["max_total_bytes"], len(canonical.canonical_bytes(message)))
+    except store.StoreCapacityExceeded:
+        lifecycle.write_rejection(cfg["spool_dir"], cfg["audit_log_path"], SOURCE, "capacity")
+        _deny("outbox is at capacity")
+
+    try:
+        lifecycle.write_accepted(cfg["spool_dir"], "outbox", cfg["audit_log_path"], request_id, message, meta)
+    except store.StoreConflict:
+        _error("request_id collision")
+
+    if in_reply_to is not None:
+        # The OPREQ this replies to moves submitted->accepted->answered;
+        # this append is the last leg. Best-effort in the sense that the
+        # new OPRES/DEVREQ is already durably stored at this point either
+        # way -- a failure here would surface as an inconsistency the next
+        # time anyone reads in_reply_to's status (store.StoreInconsistent
+        # is never silently swallowed on read), not as data loss.
+        # lifecycle.append_event_locked (not store.append_event directly):
+        # serializes against a concurrent mark_expired_if_needed() racing
+        # this same in_reply_to request_id (review 2026-08-08_006
+        # Suggestion 2).
+        lifecycle.append_event_locked(cfg["spool_dir"], in_reply_to, "answered", received_at)
+
+    print(json.dumps({"request_id": request_id, "conversation_id": message.get("conversation_id"), "type": message_type}))
+
+
+def cmd_reply_opres(cfg, request_id):
+    raw = _read_stdin_json(cfg["max_payload_bytes"])
+    _create_response(cfg, "OPRES", request_id, raw)
+
+
+def cmd_new_devreq(cfg):
+    raw = _read_stdin_json(cfg["max_payload_bytes"])
+    in_reply_to = raw.get("in_reply_to")
+    if in_reply_to is not None:
+        if not ids.is_valid_request_id(in_reply_to):
+            _deny("invalid in_reply_to")
+    _create_response(cfg, "DEVREQ", in_reply_to, raw)
+
+
+def cmd_show_conversation(cfg, conversation_id):
+    if not ids.is_valid_conversation_id(conversation_id):
+        _deny("invalid conversation-id")
+    items = []
+    for box in ("inbox", "outbox"):
+        cursor = None
+        while True:
+            page, next_cursor, _excluded = store.list_ids(cfg["spool_dir"], box, cursor, cfg["page_size"])
+            for request_id in page:
+                try:
+                    message, _meta, state = store.read_message(cfg["spool_dir"], box, request_id)
+                except store.StoreError:
+                    continue
+                if message.get("conversation_id") == conversation_id:
+                    try:
+                        state = lifecycle.mark_expired_if_needed(cfg["spool_dir"], box, request_id, message, state)
+                    except store.StoreError:
+                        # Same best-effort fallback as cmd_list_pending
+                        # above: a same-request_id race must not abort the
+                        # rest of this conversation's listing.
+                        pass
+                    items.append(
+                        {
+                            "box": box,
+                            "request_id": request_id,
+                            "type": message.get("type"),
+                            "in_reply_to": message.get("in_reply_to"),
+                            "created_at": message.get("created_at"),
+                            "state": state,
+                        }
+                    )
+            if next_cursor is None:
+                break
+            cursor = next_cursor
+    items.sort(key=lambda item: item["created_at"])
+    print(json.dumps({"conversation_id": conversation_id, "items": items}))
+
+
+def cmd_show_status(cfg, request_id):
+    if not ids.is_valid_request_id(request_id):
+        _deny("invalid request-id")
+    box, message, _meta, state = _find_message(cfg, request_id)
+    state = lifecycle.mark_expired_if_needed(cfg["spool_dir"], box, request_id, message, state)
+    print(json.dumps({"request_id": request_id, "box": box, "state": state}))
+
+
+def main(argv):
+    if len(argv) < 2:
+        _deny("missing command")
+    action = argv[1]
+    operand = argv[2] if len(argv) > 2 else None
+    if len(argv) > 3:
+        _deny("too many arguments for '{}'".format(action))
+
+    cfg = _load_config()
+
+    if action == "list-pending":
+        if operand is not None:
+            _deny("list-pending takes no arguments")
+        cmd_list_pending(cfg)
+    elif action == "show-request":
+        if operand is None:
+            _deny("show-request requires a request-id")
+        cmd_show_request(cfg, operand)
+    elif action == "accept-request":
+        if operand is None:
+            _deny("accept-request requires a request-id")
+        cmd_accept_request(cfg, operand)
+    elif action == "reject-request":
+        if operand is None:
+            _deny("reject-request requires a request-id")
+        cmd_reject_request(cfg, operand)
+    elif action == "reply-opres":
+        if operand is None:
+            _deny("reply-opres requires a request-id")
+        if not ids.is_valid_request_id(operand):
+            _deny("invalid request-id")
+        cmd_reply_opres(cfg, operand)
+    elif action == "new-devreq":
+        if operand is not None:
+            _deny("new-devreq takes no positional argument; set in_reply_to in the JSON body for a reply")
+        cmd_new_devreq(cfg)
+    elif action == "show-conversation":
+        if operand is None:
+            _deny("show-conversation requires a conversation-id")
+        cmd_show_conversation(cfg, operand)
+    elif action == "show-status":
+        if operand is None:
+            _deny("show-status requires a request-id")
+        cmd_show_status(cfg, operand)
+    else:
+        _deny("unknown command '{}'".format(action))
+
+
+if __name__ == "__main__":
+    main(sys.argv)

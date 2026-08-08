@@ -111,6 +111,122 @@ deployment_drift_check_files:
     dest: /usr/local/sbin/ansible-timer-failure-capture.sh
     playbook: playbooks/systemd_timers.yml
 
+  # --- operator_request_channel案件(2026-08-08) ------------------------------
+  # 共有ライブラリ(oprc/*.py)・schema・DLPルールセットは ansy と quory の
+  # **両方**へ同一repo srcから配備される(plan §2.1「copy配備物だけが
+  # Tier1」)。ここは意図的に**片方だけに絞らず、ファイルごとにhosts:[ansy]
+  # とhosts:[quory]の2エントリを立てる**(plan §2.10がホスト単一の
+  # hosts:[ansy,quory]エントリを想定していたのに対する実装判断)。理由:
+  # このカタログのplaybookフィールドは1エントリにつき1つしか持てず、
+  # ansyの直し方(client_setup.yml)とquoryの直し方(server_setup.yml)は
+  # 異なる。1エントリに統合すると、ansy側で見つかったfindingにserver_setup
+  # を(またはその逆を)案内する誤った「直し方」行が出る。**両ホストを
+  # 同一srcと突き合わせる**という plan の狙い(一致の推移性)は、
+  # ホストごとに分けても同じ src: を参照する限り変わらず成立する
+  # (`hosts:` を「片方だけにして他方を検査対象から外す」こととは別)。
+  # 詳細は implement記録参照。
+  - hosts: [ansy]
+    src: roles/operator_request_channel/files/oprc/__init__.py
+    dest: /usr/local/libexec/operator-request-channel/oprc/__init__.py
+    playbook: playbooks/operator_request_channel_client_setup.yml
+  - hosts: [quory]
+    src: roles/operator_request_channel/files/oprc/__init__.py
+    dest: /usr/local/libexec/operator-request-channel/oprc/__init__.py
+    playbook: playbooks/operator_request_channel_server_setup.yml
+  - hosts: [ansy]
+    src: roles/operator_request_channel/files/oprc/canonical.py
+    dest: /usr/local/libexec/operator-request-channel/oprc/canonical.py
+    playbook: playbooks/operator_request_channel_client_setup.yml
+  - hosts: [quory]
+    src: roles/operator_request_channel/files/oprc/canonical.py
+    dest: /usr/local/libexec/operator-request-channel/oprc/canonical.py
+    playbook: playbooks/operator_request_channel_server_setup.yml
+  - hosts: [ansy]
+    src: roles/operator_request_channel/files/oprc/config.py
+    dest: /usr/local/libexec/operator-request-channel/oprc/config.py
+    playbook: playbooks/operator_request_channel_client_setup.yml
+  - hosts: [quory]
+    src: roles/operator_request_channel/files/oprc/config.py
+    dest: /usr/local/libexec/operator-request-channel/oprc/config.py
+    playbook: playbooks/operator_request_channel_server_setup.yml
+  - hosts: [ansy]
+    src: roles/operator_request_channel/files/oprc/dlp.py
+    dest: /usr/local/libexec/operator-request-channel/oprc/dlp.py
+    playbook: playbooks/operator_request_channel_client_setup.yml
+  - hosts: [quory]
+    src: roles/operator_request_channel/files/oprc/dlp.py
+    dest: /usr/local/libexec/operator-request-channel/oprc/dlp.py
+    playbook: playbooks/operator_request_channel_server_setup.yml
+  - hosts: [ansy]
+    src: roles/operator_request_channel/files/oprc/ids.py
+    dest: /usr/local/libexec/operator-request-channel/oprc/ids.py
+    playbook: playbooks/operator_request_channel_client_setup.yml
+  - hosts: [quory]
+    src: roles/operator_request_channel/files/oprc/ids.py
+    dest: /usr/local/libexec/operator-request-channel/oprc/ids.py
+    playbook: playbooks/operator_request_channel_server_setup.yml
+  - hosts: [ansy]
+    src: roles/operator_request_channel/files/oprc/lifecycle.py
+    dest: /usr/local/libexec/operator-request-channel/oprc/lifecycle.py
+    playbook: playbooks/operator_request_channel_client_setup.yml
+  - hosts: [quory]
+    src: roles/operator_request_channel/files/oprc/lifecycle.py
+    dest: /usr/local/libexec/operator-request-channel/oprc/lifecycle.py
+    playbook: playbooks/operator_request_channel_server_setup.yml
+  - hosts: [ansy]
+    src: roles/operator_request_channel/files/oprc/schema.py
+    dest: /usr/local/libexec/operator-request-channel/oprc/schema.py
+    playbook: playbooks/operator_request_channel_client_setup.yml
+  - hosts: [quory]
+    src: roles/operator_request_channel/files/oprc/schema.py
+    dest: /usr/local/libexec/operator-request-channel/oprc/schema.py
+    playbook: playbooks/operator_request_channel_server_setup.yml
+  - hosts: [ansy]
+    src: roles/operator_request_channel/files/oprc/store.py
+    dest: /usr/local/libexec/operator-request-channel/oprc/store.py
+    playbook: playbooks/operator_request_channel_client_setup.yml
+  - hosts: [quory]
+    src: roles/operator_request_channel/files/oprc/store.py
+    dest: /usr/local/libexec/operator-request-channel/oprc/store.py
+    playbook: playbooks/operator_request_channel_server_setup.yml
+  - hosts: [ansy]
+    src: roles/operator_request_channel/files/oprc/wire.py
+    dest: /usr/local/libexec/operator-request-channel/oprc/wire.py
+    playbook: playbooks/operator_request_channel_client_setup.yml
+  - hosts: [quory]
+    src: roles/operator_request_channel/files/oprc/wire.py
+    dest: /usr/local/libexec/operator-request-channel/oprc/wire.py
+    playbook: playbooks/operator_request_channel_server_setup.yml
+  - hosts: [ansy]
+    src: roles/operator_request_channel/files/request-schema-v1.json
+    dest: /etc/operator-request-channel/request-schema-v1.json
+    playbook: playbooks/operator_request_channel_client_setup.yml
+  - hosts: [quory]
+    src: roles/operator_request_channel/files/request-schema-v1.json
+    dest: /etc/operator-request-channel/request-schema-v1.json
+    playbook: playbooks/operator_request_channel_server_setup.yml
+  - hosts: [ansy]
+    src: roles/operator_request_channel/files/dlp-rules.json
+    dest: /etc/operator-request-channel/dlp-rules.json
+    playbook: playbooks/operator_request_channel_client_setup.yml
+  - hosts: [quory]
+    src: roles/operator_request_channel/files/dlp-rules.json
+    dest: /etc/operator-request-channel/dlp-rules.json
+    playbook: playbooks/operator_request_channel_server_setup.yml
+  # エントリポイント本体(ホストごとに異なるファイル、1エントリのみ)
+  - hosts: [ansy]
+    src: roles/operator_request_channel/files/bin/operator-channel-client
+    dest: /usr/local/bin/operator-channel-client
+    playbook: playbooks/operator_request_channel_client_setup.yml
+  - hosts: [quory]
+    src: roles/operator_request_channel/files/bin/oprc-receive
+    dest: /usr/local/libexec/operator-request-channel/oprc-receive
+    playbook: playbooks/operator_request_channel_server_setup.yml
+  - hosts: [quory]
+    src: roles/operator_request_channel/files/bin/operator-channel
+    dest: /usr/local/bin/operator-channel
+    playbook: playbooks/operator_request_channel_server_setup.yml
+
 # --- ②③ systemd unit / timer の状態 -----------------------------------------
 # enabled / active は期待値。timer は on_calendar も見る(空なら検査しない)
 # playbook: R1-aの判断根拠は docs/ai/reviews/deploy_awareness/2026-08-04_002_implement.md。
@@ -217,6 +333,49 @@ deployment_drift_check_semaphore_probe_host: quory
 # (足した分はマーカーを持つ側に入る)。増えるのは、カタログの管理外に
 # テンプレートを手で作ったときだけである。
 deployment_drift_check_semaphore_expected_orphans: 1
+
+# --- operator_request_channel案件(2026-08-08): 新設3クラス(requirement §14) --
+#
+# ⑧ spool/event/audit領域のowner/group/mode。**このカタログの中で唯一、
+# 期待値そのものを書く例外**(冒頭の但し書き参照) -- repo側にこれらの
+# owner/group/modeを描画できる情報源が無い(roles/operator_request_channel/
+# defaults/main.ymlのACL定義とは独立に、実際に配備された属性を直接見る
+# ための値)。値を変えるときは、roles/operator_request_channel/defaults/
+# main.ymlのACL定義・server.ymlのfile/acl taskと同時に変える。
+deployment_drift_check_paths:
+  - { hosts: [quory], path: /var/lib/operator-request-channel, owner: root, group: root, mode: "0755",
+      playbook: playbooks/operator_request_channel_server_setup.yml }
+  - { hosts: [quory], path: /var/lib/operator-request-channel/inbox, owner: root, group: root, mode: "1700",
+      playbook: playbooks/operator_request_channel_server_setup.yml }
+  - { hosts: [quory], path: /var/lib/operator-request-channel/outbox, owner: root, group: root, mode: "1700",
+      playbook: playbooks/operator_request_channel_server_setup.yml }
+  - { hosts: [quory], path: /var/lib/operator-request-channel/events, owner: root, group: root, mode: "1700",
+      playbook: playbooks/operator_request_channel_server_setup.yml }
+  - { hosts: [quory], path: /var/lib/operator-request-channel/quarantine-metadata, owner: root, group: root, mode: "1700",
+      playbook: playbooks/operator_request_channel_server_setup.yml }
+  - { hosts: [quory], path: /var/log/operator-request-channel, owner: root, group: root, mode: "0755",
+      playbook: playbooks/operator_request_channel_server_setup.yml }
+  - { hosts: [quory], path: /var/log/operator-request-channel/audit.jsonl, owner: root, group: root, mode: "0660",
+      playbook: playbooks/operator_request_channel_server_setup.yml }
+
+# ⑨ channel/dev-investigate関連と思われるsudoersファイルの不在(R-1の
+# 受容根拠「sudoが存在しない」を日次で裏付ける、plan §2.3.1/§3.3)。
+# 具体的なfilenameを1つ決め打ちせず、/etc/sudoers.d/ 直下の全filenameを
+# 収集し(collect.ymlがbecome: trueで読む唯一のtask)、部分文字列一致で
+# 判定する -- 将来どんな名前で作られても拾えるようにするための設計であり、
+# 「決め打ちのpathが無いこと」だけを見る狭い実装よりも広く見る。
+deployment_drift_check_absent_paths:
+  - { hosts: [quory], dir: /etc/sudoers.d, forbidden_substrings: [dev-investigate, operator-request-channel, oprc, "operator-channel"] }
+
+# ⑩ dispatcherのallowlist外拒否probe。実際にdispatcherへ許可されていない
+# 入力を与え、非ゼロ終了することだけを確認する(状態を変えるcommandは
+# 一切与えない)。2本目は「既存25本のarity検査が新設4本の追加で緩んで
+# いないか」を追加確認する。
+deployment_drift_check_dispatch_probes:
+  - { hosts: [quory], dispatch_path: /usr/local/sbin/recovery-investigate-dispatch-quory.sh,
+      probe_command: "totally-unknown-operation-xyz" }
+  - { hosts: [quory], dispatch_path: /usr/local/sbin/recovery-investigate-dispatch-quory.sh,
+      probe_command: "operator-request-submit extra-unexpected-argument" }
 
 # レポート保存先
 deployment_drift_check_report_dir: "{{ reports_base_dir }}/drift"

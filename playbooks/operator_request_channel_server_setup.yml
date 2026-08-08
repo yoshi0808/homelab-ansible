@@ -1,0 +1,51 @@
+---
+# tester-gate: check-mode-native -- TS-009条件1(このplaybookはquory自身
+# だけを変更し、他の既存本番serviceの再起動・reloadは一切発生しない)は
+# 満たすが、条件2(破壊的な本体操作を省いた検証には意味がない)は満たさない。
+# ディレクトリ作成(`file`)、schema/DLPルールセット/oprc-receive/
+# operator-channel配備(`copy`)、config.json配備(`template`)、ACL付与
+# (`ansible.posix.acl`)はいずれもAnsible標準のcheck_modeで安全に
+# プレビューできる -- roles/dev_investigate と同型の判断。全taskは
+# roles/operator_request_channel/tasks/{common,server,spool_acl_entry}.yml
+# で `when: not ansible_check_mode` によりゲートされる(TS-014。独立した
+# taskのみで、TS-015のblock化が要る相互依存チェーンは無い -- ディレクトリ
+# 作成→ACL付与の順序依存はあるが、"破壊的操作どうしが連鎖する"種類ではなく、
+# 個別ゲートのままdev_investigateと同じ形にした)。
+# 詳細は docs/ai/policies/ansible_test_safety_policy.md。
+#
+# operator_request_channel_server_setup.yml
+#
+# 目的: Operator Request Channel MVP のquory側受け口(oprc-receive)・
+# Operator local CLI(operator-channel)・spool/監査ログ領域と、両ホスト
+# 共有のoprc/ライブラリ・request-schema-v1.json・dlp-rules.json・
+# config.jsonを配備する(requirement §12.3)。
+#
+# 対象: quoryのみ。他ホスト(ansyを含む)へは一切変更を広げない
+# (requirement §12.1「server setupの対象はquoryだけとする」)。
+#
+# **このplaybookは既存dispatcher(recovery-investigate-dispatch-quory.sh)
+# を配備しない。** その4本のcase arm追加は roles/dev_investigate 側の
+# 変更で完結しており、反映には playbooks/dev_investigate_setup.yml の
+# 再実行が別途要る(requirement §12.4の二段階構成のとおり)。既存の3 ACL・
+# systemd-journalグループ・鍵・authorized_keys・forced command pathは
+# このplaybookでは一切変更しない(roles/operator_request_channelに
+# dev_investigate関連のtaskは存在しない)。
+#
+# **本番反映の承認面はSemaphore(requirement §12.4)。** このplaybook自体に
+# scheduleは登録しない。ansyからquoryのこのplaybookを直接実行する経路も
+# 追加しない -- Semaphore経由でYoshinobuが明示実行する運用のみ
+# (roles/semaphore_templates/defaults/main.yml参照)。
+#
+# 実行(Semaphore登録後、Yoshinobuの明示実行を想定):
+#   ansible-playbook playbooks/operator_request_channel_server_setup.yml -l quory
+#
+# 設計: docs/ai/reviews/operator_request_channel/2026-08-08_002_plan.md
+- name: Deploy the Operator Request Channel server (quory only)
+  hosts: quory
+  gather_facts: true
+  become: false
+  tasks:
+    - name: Run operator_request_channel role (server)
+      ansible.builtin.include_role:
+        name: operator_request_channel
+        tasks_from: server

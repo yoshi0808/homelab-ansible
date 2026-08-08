@@ -15,6 +15,19 @@
 # is unchanged. Do not add checks beyond those tables without Yoshinobu's
 # approval.
 #
+# Operator Request Channel MVP (2026-08-08) added 4 more checks — contract:
+# docs/ai/reviews/operator_request_channel/2026-08-08_001_requirement.md §5.2,
+# plan: docs/ai/reviews/operator_request_channel/2026-08-08_002_plan.md §4.
+# operator-request-submit / operator-outbound-list / operator-message-get /
+# operator-request-status all `exec` into the fixed path
+# /usr/local/libexec/operator-request-channel/oprc-receive (deployed by
+# roles/operator_request_channel, not this role) — this dispatcher never
+# reads or writes the channel's spool itself, and channel-specific
+# processing (DLP, schema, request storage) lives entirely in oprc-receive
+# and the oprc/ library it imports, not here. Total is now 29. None of the
+# original 25 arms, their arity checks, or their denial text changed by one
+# character to make room for these.
+#
 # All checks are read-only (I-1): no pvesh create/set/delete, no systemctl
 # start/stop/restart/enable, no qm start/stop, no redirection, no tee/rm/mv/cp.
 # SSH_ORIGINAL_COMMAND is never eval'd or otherwise shell-reinterpreted (I-2,
@@ -61,6 +74,12 @@ NAME_RE='^[a-zA-Z0-9_-]+$'
 # names (20260803_053711+0900.json); '.' is deliberately NOT added so ".."
 # stays structurally unspellable.
 FILE_RE='^[a-zA-Z0-9_+-]+\.json$'
+# Operator Request Channel request_id / cursor (plan §2.5/§2.6). Kept
+# identical to oprc/ids.py's REQUEST_ID_RE, which re-validates
+# independently (same multilayer discipline as BUNDLE_ID_RE above). "." and
+# "/" are structurally unspellable in this pattern, so no operand accepted
+# here can encode a path.
+OPRC_REQUEST_ID_RE='^req-[0-9]{8}T[0-9]{6}\+0900-[0-9a-f]{16}$'
 
 # unit enum shared by status / journal-unit / unit-cat / deployed-hash's own
 # self-entry. Fixed list only — never taken from an operand.
@@ -377,6 +396,45 @@ case "$check" in
       echo "${entry_count}: command=${cmd_path} comment=${comment:-(none)}"
     done < /home/dev-investigate/.ssh/authorized_keys
     echo "total: ${entry_count} entries"
+    ;;
+
+  # --- Operator Request Channel MVP (2026-08-08, requirement §5.2) -----------
+  # Fixed vocabulary of 4 operations, none of which take a free-form
+  # argument: submit takes none (payload is stdin only, I-1's "no arbitrary
+  # command/path" holds because this dispatcher never even looks at the
+  # payload — oprc-receive does, after its own DLP/schema gate); the other
+  # three take at most one operand, which must already match
+  # OPRC_REQUEST_ID_RE before this script will exec anything (oprc-receive
+  # re-validates the same operand independently, matching the
+  # BUNDLE_ID_RE/FILE_RE double-check pattern above). All four `exec` into a
+  # single fixed path — never eval, never re-enter this script, never touch
+  # the spool from here.
+  operator-request-submit)
+    [[ -z "$p1" && -z "$p2" && -z "$p3" ]] || deny_count
+    exec /usr/local/libexec/operator-request-channel/oprc-receive submit
+    ;;
+  operator-outbound-list)
+    case "$p1" in
+      '')
+        [[ -z "$p2" && -z "$p3" ]] || deny_count
+        exec /usr/local/libexec/operator-request-channel/oprc-receive outbound-list
+        ;;
+      *)
+        [[ -z "$p2" && -z "$p3" ]] || deny_count
+        [[ "$p1" =~ $OPRC_REQUEST_ID_RE ]] || deny_invalid cursor
+        exec /usr/local/libexec/operator-request-channel/oprc-receive outbound-list "$p1"
+        ;;
+    esac
+    ;;
+  operator-message-get)
+    [[ -n "$p1" && -z "$p2" && -z "$p3" ]] || deny_count
+    [[ "$p1" =~ $OPRC_REQUEST_ID_RE ]] || deny_invalid request-id
+    exec /usr/local/libexec/operator-request-channel/oprc-receive message-get "$p1"
+    ;;
+  operator-request-status)
+    [[ -n "$p1" && -z "$p2" && -z "$p3" ]] || deny_count
+    [[ "$p1" =~ $OPRC_REQUEST_ID_RE ]] || deny_invalid request-id
+    exec /usr/local/libexec/operator-request-channel/oprc-receive request-status "$p1"
     ;;
 
   *)

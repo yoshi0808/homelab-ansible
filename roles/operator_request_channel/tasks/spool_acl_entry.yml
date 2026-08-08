@@ -1,0 +1,50 @@
+---
+# 呼び出し元: server.yml (loop: "{{ operator_request_channel_acl | dict2items }}")
+# item.key   = ディレクトリ名(inbox/outbox/events/quarantine_metadata)
+# item.value = { path, mode, entries, default_entries }(defaults/main.yml)
+#
+# ネストしたloopのitem衝突を避けるため、内側のloopは loop_var: acl_entry を
+# 使う(外側のitemはこのファイル全体を通じて item.value.path 等として
+# 参照し続ける)。
+
+- name: "Create spool subdirectory ({{ item.key }})"
+  ansible.builtin.file:
+    path: "{{ item.value.path }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "{{ item.value.mode }}"
+  become: true
+  when: not ansible_check_mode
+  tags: [destructive]
+
+- name: "Grant ACL entries ({{ item.key }})"
+  ansible.posix.acl:
+    path: "{{ item.value.path }}"
+    entity: "{{ acl_entry.entity }}"
+    etype: user
+    permissions: "{{ acl_entry.permissions }}"
+    state: present
+  loop: "{{ item.value.entries }}"
+  loop_control:
+    loop_var: acl_entry
+    label: "{{ acl_entry.entity }}:{{ acl_entry.permissions }}"
+  become: true
+  when: not ansible_check_mode
+  tags: [destructive]
+
+- name: "Grant default ACL entries for newly-created files ({{ item.key }})"
+  ansible.posix.acl:
+    path: "{{ item.value.path }}"
+    entity: "{{ acl_entry.entity }}"
+    etype: user
+    permissions: "{{ acl_entry.permissions }}"
+    default: true
+    state: present
+  loop: "{{ item.value.default_entries }}"
+  loop_control:
+    loop_var: acl_entry
+    label: "{{ acl_entry.entity }}:{{ acl_entry.permissions }} (default)"
+  become: true
+  when: not ansible_check_mode
+  tags: [destructive]

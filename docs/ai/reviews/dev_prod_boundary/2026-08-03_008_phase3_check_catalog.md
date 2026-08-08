@@ -20,6 +20,8 @@ requirement: `2026-08-02_001_requirement.md` R11 / R12 / R13b / R14c、AC9
 | I-6 | 拒否は必ず `denied: ...` を stderr へ出し**非ゼロ終了**する(AC8 / AC20) |
 | I-7 | quory 側の wrapper は first-line filter に過ぎず、**forced command が唯一の授権境界**(R14 で確認済み) |
 
+**I-1 の適用範囲(2026-08-08 追記)**: 上の I-1 は、**本カタログが定める調査チェック**について「すべて read」であることを言う。これとは別に、`docs/ai/reviews/operator_request_channel/2026-08-08_001_requirement.md` が承認した Operator Request Channel の操作が、同じ dispatcher へ追加されている。**そちらは専用プログラム経由で専用spoolへ新規message／eventを足すため、書き込みを含む。** 本カタログの25チェックは1つも変わっておらず、channel操作は本カタログの管理対象ではない。**「この dispatcher には書き込みの語彙が1つも無い」と読まないこと。** 経路と境界は `docs/ai/context/operations/operator-request-channel.md` が正本である。
+
 ## 1. 新設 class Q — quory(`recovery-investigate-dispatch-quory.sh`)
 
 受け口は新規ユーザー `dev-investigate`。**sudo を1つも持たない**(`/etc/sudoers.d/` 配下にこの identity のファイルを作らない)。

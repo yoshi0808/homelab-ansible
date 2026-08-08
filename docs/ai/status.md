@@ -13,7 +13,7 @@
 
 | # | 項目 | 現在地 | 次にやること |
 |---|---|---|---|
-| — | **進行中の案件は無い。** | | |
+| 1 | **Operator Request Channel MVP** | **実装・review・test・auditまで完了、未配備。** 案件記録は `docs/ai/reviews/operator_request_channel/`、運用の正本は `docs/ai/context/operations/operator-request-channel.md`。requirement §19 の完了条件28項目のうち18件がTester検証済み、**10件が配備後へ繰り越し** | commit/push後、`docs/ai/context/operations/operator-request-channel.md` §3 の**順序どおりに**ボタンを押す。**`SEMI-SAFE: Operator request channel server setup` の後に、既存の `SEMI-SAFE:Dev investigate setup` を押すことが必須**(dispatcherの4本のarmはそちらでしか入らない)。その後、繰り越した10件をTesterが検証する |
 
 ## Next(着手候補) — 工程・体制
 

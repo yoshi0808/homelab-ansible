@@ -1,0 +1,290 @@
+#!/usr/bin/env python3
+"""operator-channel-client -- ansy-side client for the Operator Request
+Channel (requirement §5.1).
+
+Reaches quory only through the existing `dev-investigate` SSH forced
+command (requirement §4.1) -- this file never opens any other connection,
+never takes a target host as an argument, and never runs a local shell
+with untrusted input: the only subprocess it starts is a fixed-argv `ssh`
+invocation (`subprocess.run([...])`, no `shell=True`), with the remote
+command passed as separate argv elements so ssh does the space-joining
+that becomes `SSH_ORIGINAL_COMMAND` on the far side -- this script never
+builds that string itself.
+
+Commands (argv[1]):
+
+    submit                    OPREQ fields (JSON) on stdin -> submit to quory
+    list [cursor]              page of ansy-addressed OPRES/DEVREQ summaries
+    get <request-id>           one OPRES/DEVREQ, DLP-rescanned before print
+    status <request-id>        current state of any request-id ansy knows of
+
+`source` is never something this script sends -- it is assigned by the
+receiving forced command from the execution entry point (requirement
+§4.2), and `submit` actively refuses to send a payload that already
+contains request_id/source/created_at (requirement §6.1), matching the
+receiving side's own `schema.reject_server_assigned_fields` check (belt
+and suspenders across the network boundary, not reliance on the remote
+side alone).
+
+Protocol output is exactly one JSON object on stdout per successful
+invocation. Diagnostics go to stderr ("denied:" for a correct refusal,
+"error:" for a broken local deployment or unreachable remote), and neither
+ever includes payload content or a DLP-detected value (requirement §9.4,
+§16) -- this holds for the remote SSH stderr too: it is only ever a
+`denied:`/`error:` line built the same value-free way by oprc-receive, so
+relaying it verbatim does not leak anything oprc-receive itself would not
+already have refused to print.
+"""
+
+import datetime
+import json
+import subprocess
+import sys
+
+sys.path.insert(0, "/usr/local/libexec/operator-request-channel")
+
+from oprc import canonical, config, dlp, ids, schema, wire  # noqa: E402
+
+CONFIG_PATH = "/etc/operator-request-channel/config.json"
+SSH_PATH = "/usr/bin/ssh"
+
+
+def _deny(message):
+    print("denied: {}".format(message), file=sys.stderr)
+    sys.exit(1)
+
+
+def _error(message):
+    print("error: {}".format(message), file=sys.stderr)
+    sys.exit(1)
+
+
+def _load_config():
+    try:
+        cfg = config.load_config(CONFIG_PATH)
+    except config.ConfigError as exc:
+        _error("config: {}".format(exc))
+    if cfg.get("role") != "coordinator":
+        _error("config: wrong role for this entry point")
+    if not cfg.get("channel_enabled", False):
+        _deny("channel disabled")
+    return cfg
+
+
+def _load_schema_and_ruleset(cfg):
+    try:
+        schema_doc = schema.load_schema(cfg["schema_path"])
+        config.verify_schema_hash(cfg)
+        ruleset = config.load_and_verify_dlp_ruleset(cfg)
+    except (schema.SchemaError, config.ConfigError) as exc:
+        _error("cannot verify schema/ruleset: {}".format(exc))
+    return schema_doc, ruleset
+
+
+def _run_ssh(cfg, remote_argv, stdin_bytes=None):
+    """Run `ssh <ssh_destination> <remote_argv...>` with a fixed, bounded
+    timeout and no shell. `remote_argv` are separate argv elements handed
+    to ssh -- ssh itself joins them with spaces to build the request line
+    the far end's forced command receives as SSH_ORIGINAL_COMMAND; this
+    function never constructs that string itself.
+    """
+    argv = [
+        SSH_PATH,
+        "-o", "BatchMode=yes",
+        "-o", "ConnectTimeout={}".format(int(cfg["ssh_connect_timeout_seconds"])),
+        cfg["ssh_destination"],
+    ] + list(remote_argv)
+    overall_timeout = cfg["ssh_connect_timeout_seconds"] + cfg["dlp_timeout_seconds"] + 15
+    try:
+        proc = subprocess.run(
+            argv,
+            input=stdin_bytes if stdin_bytes is not None else b"",
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=overall_timeout,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        _error("ssh to quory did not complete")
+    if proc.returncode != 0:
+        # Relay the remote's own denied:/error: line verbatim (see module
+        # docstring: it is already value-free by oprc-receive's own
+        # discipline) rather than re-wrapping it, so a human sees the real
+        # reason without this script needing to re-derive it.
+        remote_stderr = proc.stderr.decode("utf-8", errors="replace").strip()
+        _deny(remote_stderr if remote_stderr else "remote refused (exit {})".format(proc.returncode))
+    return proc.stdout
+
+
+def _read_stdin_json(max_bytes):
+    data = sys.stdin.buffer.read(max_bytes + 1)
+    if len(data) > max_bytes:
+        _deny("payload too large")
+    try:
+        return wire.parse_payload(data, max_bytes)
+    except wire.WireError as exc:
+        _deny("malformed payload: {}".format(exc.reason))
+
+
+def cmd_submit(cfg):
+    schema_doc, ruleset = _load_schema_and_ruleset(cfg)
+
+    raw = _read_stdin_json(cfg["max_payload_bytes"])
+    try:
+        schema.reject_server_assigned_fields(raw)
+    except schema.ValidationError:
+        _deny("payload must not set request_id/source/created_at -- the receiving end assigns those")
+
+    if raw.get("type") != "OPREQ":
+        _deny("ansy may only submit OPREQ (requirement §4.2)")
+
+    # requirement §6.2: a new OPREQ always starts its own conversation.
+    # conversation_id is not server-assigned (§6.1 lists only request_id/
+    # source/created_at), so this script -- not oprc-receive -- is where a
+    # fresh id gets minted; oprc-receive only ever sees a conversation_id
+    # that is already present. Any caller-supplied value is overwritten
+    # rather than trusted, since a fresh OPREQ has no existing conversation
+    # to join.
+    raw["conversation_id"] = ids.generate_conversation_id()
+
+    # Local shape check, best-effort: schema.validate() requires
+    # request_id/source/created_at/expires_at to be present (they describe
+    # a *stored* message), which this raw client payload does not have yet
+    # -- those three are assigned by quory's oprc-receive, never sent by
+    # this script (see reject_server_assigned_fields above). Building a
+    # throwaway copy with placeholder values lets this script catch a
+    # shape error (bad purpose length, malformed target_names, etc.)
+    # before spending a round trip, without ever sending the placeholders.
+    validation_copy = dict(raw)
+    validation_copy["request_id"] = ids.generate_request_id()
+    validation_copy["source"] = "coordinator"
+    validation_copy["created_at"] = validation_copy.get("created_at") or _placeholder_timestamp()
+    validation_copy.setdefault("expires_at", _placeholder_timestamp())
+    try:
+        schema.validate(validation_copy, schema_doc)
+        schema.validate_local_relationships(validation_copy)
+    except schema.ValidationError as exc:
+        _deny("payload does not conform to the schema: {} field(s)".format(len(exc.errors)))
+
+    # Checkpoint 1 (requirement §9.1): ansy's own send-before DLP, on the
+    # exact bytes about to be sent (not the validation copy above, though
+    # the only fields that differ are the three placeholders, which are
+    # not free text).
+    try:
+        result = dlp.scan(raw, ruleset, cfg["dlp_timeout_seconds"])
+    except dlp.ScanTimeout:
+        _deny("dlp scan did not complete in time")
+    if result.blocked:
+        _deny("dlp blocked this payload before it was sent")
+
+    payload_bytes = json.dumps(raw, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    if len(payload_bytes) > cfg["max_payload_bytes"]:
+        _deny("payload exceeds max_payload_bytes")
+
+    stdout = _run_ssh(cfg, ["operator-request-submit"], stdin_bytes=payload_bytes)
+    try:
+        response = json.loads(stdout.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError):
+        _error("malformed response from quory")
+    print(json.dumps(response))
+
+
+def _placeholder_timestamp():
+    jst = datetime.timezone(datetime.timedelta(hours=9))
+    return (datetime.datetime.now(jst) + datetime.timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%S%z")
+
+
+def cmd_list(cfg, cursor):
+    if cursor is not None and not ids.is_valid_request_id(cursor):
+        _deny("invalid cursor")
+    remote_argv = ["operator-outbound-list"] + ([cursor] if cursor is not None else [])
+    stdout = _run_ssh(cfg, remote_argv)
+    try:
+        response = json.loads(stdout.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError):
+        _error("malformed response from quory")
+    print(json.dumps(response))
+
+
+def cmd_get(cfg, request_id):
+    if not ids.is_valid_request_id(request_id):
+        _deny("invalid request-id")
+    schema_doc, ruleset = _load_schema_and_ruleset(cfg)
+
+    stdout = _run_ssh(cfg, ["operator-message-get", request_id])
+    try:
+        response = json.loads(stdout.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError):
+        _error("malformed response from quory")
+
+    message = response.get("message")
+    meta = response.get("meta") if isinstance(response.get("meta"), dict) else {}
+    if not isinstance(message, dict):
+        _error("malformed response from quory")
+
+    # requirement §5.1 last bullet: schema version / DLP version / ruleset
+    # hash / content hash reconciliation, all against this host's own
+    # locally-verified copies (never against whatever the remote claims
+    # about itself beyond the message/meta it returned).
+    try:
+        schema.validate(message, schema_doc)
+    except schema.ValidationError:
+        _deny("received message does not conform to the local schema")
+    if meta.get("dlp_engine_version") != dlp.ENGINE_VERSION:
+        _deny("dlp engine_version mismatch between quory and ansy")
+    if meta.get("dlp_ruleset_sha256") != cfg["expected_dlp_ruleset_sha256"]:
+        _deny("dlp ruleset hash mismatch between quory and ansy")
+    if meta.get("content_sha256") != canonical.content_hash(message):
+        _deny("content hash does not match the received message")
+
+    # Checkpoint 4 (requirement §9.1): ansy's own pull-before DLP.
+    try:
+        result = dlp.scan(message, ruleset, cfg["dlp_timeout_seconds"])
+    except dlp.ScanTimeout:
+        _deny("dlp scan did not complete in time")
+    if result.blocked:
+        _deny("dlp blocked this message on intake; not displayed")
+
+    print(json.dumps({"message": message, "state": response.get("state")}))
+
+
+def cmd_status(cfg, request_id):
+    if not ids.is_valid_request_id(request_id):
+        _deny("invalid request-id")
+    stdout = _run_ssh(cfg, ["operator-request-status", request_id])
+    try:
+        response = json.loads(stdout.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError):
+        _error("malformed response from quory")
+    print(json.dumps(response))
+
+
+def main(argv):
+    if len(argv) < 2:
+        _deny("missing command")
+    action = argv[1]
+    operand = argv[2] if len(argv) > 2 else None
+    if len(argv) > 3:
+        _deny("too many arguments for '{}'".format(action))
+
+    cfg = _load_config()
+
+    if action == "submit":
+        if operand is not None:
+            _deny("submit takes no arguments; payload is read from stdin")
+        cmd_submit(cfg)
+    elif action == "list":
+        cmd_list(cfg, operand)
+    elif action == "get":
+        if operand is None:
+            _deny("get requires a request-id")
+        cmd_get(cfg, operand)
+    elif action == "status":
+        if operand is None:
+            _deny("status requires a request-id")
+        cmd_status(cfg, operand)
+    else:
+        _deny("unknown command '{}'".format(action))
+
+
+if __name__ == "__main__":
+    main(sys.argv)

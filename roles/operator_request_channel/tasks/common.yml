@@ -1,0 +1,161 @@
+---
+# ansy(client)・quory(server)が共有する配備: oprc/ ライブラリ、schema、DLP
+# ルールセット、config.json。呼び出し元(client.yml / server.yml)が
+# import する。tester-gateの分類・理由は呼び出し元playbookヘッダを参照
+# (docs/ai/policies/ansible_test_safety_policy.md TS-036: ここへ複製しない)。
+#
+# copyであってtemplateではない(oprc/・schema・ruleset)。この3種はJinja
+# 構文を1つも持たないため描画が要らず、**copy配備物であることがドリフト検査
+# Tier 1の適格条件**(roles/deployment_drift_check/defaults/main.yml冒頭)。
+# config.jsonだけがhostごとに値が違うためtemplate配備(plan §2.8)。
+
+# plan §1「未確認事項への対処」: quoryのPython版は開発側から観測する手段が
+# 無かった(未確認のまま)ため、oprc/ の実装はPython 3.9+標準ライブラリのみに
+# 限定した(§2.1, D1)。その設計判断の裏付けとして、plan自身がこのpreflight
+# assertを「server setup playbookの先頭で」置くことを明記している
+# (§8未解決事項も、この assert で配備前に確定する前提で書かれている)。
+#
+# **client(ansy)側にも同じ判断を適用した**: ansyのPython版は plan §1 で
+# 3.14.4(3.9を大きく上回る)と確認済みだが、この配置(common.ymlの先頭 --
+# client.yml/server.ymlどちらから import されても最初に走る)にすることで、
+# 追加の重複task無しに両ホストへ同じ担保を及ぼせる。将来ansyの実行環境が
+# 変わった場合の検出にもなる、コストゼロの防御なので対象を絞る理由が無い。
+#
+# read-onlyの診断であり状態を変えないため、`--check`実行時にも必ず走らせる
+# (`check_mode: false`)。ここをskipすると、`--check`だけで済ませた検証が
+# 「配備前に前提を確認した」ことの証拠にならない — このpreflightの存在意義
+# そのものが崩れる。
+- name: "Preflight: confirm this host's python3 is 3.9 or newer (plan §1)"
+  ansible.builtin.command:
+    cmd: >-
+      python3 -c 'import sys; print("{}.{}.{}".format(*sys.version_info[:3])); assert sys.version_info >= (3, 9)'
+  register: operator_request_channel_python_preflight
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Fail closed if python3 is missing or older than 3.9
+  ansible.builtin.assert:
+    that:
+      - operator_request_channel_python_preflight.rc == 0
+    fail_msg: >-
+      python3 が見つからないか 3.9 未満です(rc={{ operator_request_channel_python_preflight.rc }}、
+      検出したversion: {{ operator_request_channel_python_preflight.stdout | default('(取得できず)') | trim }})。
+      roles/operator_request_channel/files/oprc/ は Python 3.9+ 標準ライブラリのみに
+      依存する設計です(plan §1/§21)。この前提を満たさないホストへは配備しません。
+    success_msg: "python3 preflight OK: {{ operator_request_channel_python_preflight.stdout | trim }}"
+  check_mode: false
+
+- name: Stat repo-side schema and DLP ruleset for the expected hashes (controller)
+  ansible.builtin.stat:
+    path: "{{ playbook_dir }}/../{{ item }}"
+    checksum_algorithm: sha256
+  loop:
+    - roles/operator_request_channel/files/request-schema-v1.json
+    - roles/operator_request_channel/files/dlp-rules.json
+  loop_control:
+    label: "{{ item }}"
+  register: operator_request_channel_src_stat
+  delegate_to: localhost
+  become: false
+  check_mode: false
+
+- name: Fail closed if the repo-side schema or DLP ruleset is unreadable
+  ansible.builtin.assert:
+    that:
+      - operator_request_channel_src_stat.results[0].stat.exists | default(false)
+      - operator_request_channel_src_stat.results[1].stat.exists | default(false)
+    fail_msg: >-
+      request-schema-v1.json または dlp-rules.json が controller 上で読めません。
+      期待hashを確定できないため配備を止めます。
+  check_mode: false
+
+- name: Build expected-hash facts for config.json.j2
+  ansible.builtin.set_fact:
+    operator_request_channel_schema_sha256: "{{ operator_request_channel_src_stat.results[0].stat.checksum }}"
+    operator_request_channel_dlp_ruleset_sha256: "{{ operator_request_channel_src_stat.results[1].stat.checksum }}"
+    # engine_versionはrepoのdlp-rules.json自身から読む(値を書き写さない --
+    # roles/deployment_drift_check/defaults/main.yml冒頭と同じ原則)。
+    operator_request_channel_dlp_engine_version: >-
+      {{ (lookup('file', playbook_dir + '/../roles/operator_request_channel/files/dlp-rules.json') | from_json).engine_version }}
+  check_mode: false
+
+- name: Create the config directory
+  ansible.builtin.file:
+    path: "{{ operator_request_channel_config_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  become: true
+  when: not ansible_check_mode
+  tags: [destructive]
+
+- name: Deploy the request schema (copy -- Tier 1 drift-checked)
+  ansible.builtin.copy:
+    src: request-schema-v1.json
+    dest: "{{ operator_request_channel_schema_dest }}"
+    owner: root
+    group: root
+    mode: "0644"
+  become: true
+  when: not ansible_check_mode
+  tags: [destructive]
+
+- name: Deploy the DLP ruleset (copy -- Tier 1 drift-checked)
+  ansible.builtin.copy:
+    src: dlp-rules.json
+    dest: "{{ operator_request_channel_dlp_rules_dest }}"
+    owner: root
+    group: root
+    mode: "0644"
+  become: true
+  when: not ansible_check_mode
+  tags: [destructive]
+
+- name: Create the libexec directory for the shared oprc library
+  ansible.builtin.file:
+    path: "{{ operator_request_channel_libexec_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  become: true
+  when: not ansible_check_mode
+  tags: [destructive]
+
+# src ends in "/" -> copies the *contents* of files/oprc/ into dest/oprc/.
+# __pycache__ (a local-only byproduct of running the offline tests) is
+# excluded so it is never deployed or hashed -- it is not part of the
+# library's identity and its presence/absence is a function of whether
+# tests were run locally, not of the source itself.
+- name: Deploy the shared oprc library (copy -- Tier 1 drift-checked)
+  ansible.builtin.copy:
+    src: oprc/
+    dest: "{{ operator_request_channel_libexec_dir }}/oprc/"
+    owner: root
+    group: root
+    mode: "0644"
+    directory_mode: "0755"
+  become: true
+  when: not ansible_check_mode
+  tags: [destructive]
+
+- name: Purge any __pycache__ that copy may have carried over from a prior run
+  ansible.builtin.file:
+    path: "{{ operator_request_channel_libexec_dir }}/oprc/__pycache__"
+    state: absent
+  become: true
+  when: not ansible_check_mode
+  tags: [destructive]
+
+- name: Deploy config.json (template -- host-specific values, plan §2.8)
+  ansible.builtin.template:
+    src: config.json.j2
+    dest: "{{ operator_request_channel_config_dest }}"
+    owner: root
+    group: root
+    mode: "0644"
+  become: true
+  when: not ansible_check_mode
+  tags: [destructive]

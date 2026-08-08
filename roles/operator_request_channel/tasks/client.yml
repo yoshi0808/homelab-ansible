@@ -1,0 +1,19 @@
+---
+# ansy専用配備(requirement §12.1: client setupの対象はansyだけ)。
+# 共有ライブラリ・schema・DLPルールセット・config.json は common.yml が
+# 行う。quory固有のタスク(spool/ACL/log/dispatcher/operator-channel)は
+# ここでは一切行わない -- server.yml側の責務。
+
+- name: Deploy shared oprc library, schema, DLP ruleset and config.json
+  ansible.builtin.import_tasks: common.yml
+
+- name: Deploy operator-channel-client (copy -- Tier 1 drift-checked)
+  ansible.builtin.copy:
+    src: bin/operator-channel-client
+    dest: "{{ operator_request_channel_client_bin_dest }}"
+    owner: root
+    group: root
+    mode: "0755"
+  become: true
+  when: not ansible_check_mode
+  tags: [destructive]

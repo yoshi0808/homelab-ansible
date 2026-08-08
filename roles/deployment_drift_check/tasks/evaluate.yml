@@ -168,14 +168,97 @@
       {%- endfor -%}
       {{ out }}
 
+# --- operator_request_channel案件(2026-08-08): 新設3クラス ------------------
+
+- name: Build findings for path owner/group/mode
+  ansible.builtin.set_fact:
+    deployment_drift_check_findings_paths: >-
+      {%- set out = [] -%}
+      {%- for r in deployment_drift_check_path_stat.results | default([]) -%}
+        {%- if not (r.stat.exists | default(false)) -%}
+          {%- set _ = out.append({'category': 'path_permissions', 'item': r.item.path,
+                                  'expected': 'present', 'actual': 'missing',
+                                  'detail': 'パスが存在しない',
+                                  'playbook': r.item.playbook | default(''),
+                                  'run_host': r.item.run_host | default(inventory_hostname, true)}) -%}
+        {%- else -%}
+          {%- if (r.stat.pw_name | default('')) != r.item.owner -%}
+            {%- set _ = out.append({'category': 'path_permissions', 'item': r.item.path,
+                                    'expected': r.item.owner, 'actual': r.stat.pw_name | default('(不明)'),
+                                    'detail': '所有者が期待と異なる',
+                                    'playbook': r.item.playbook | default(''),
+                                    'run_host': r.item.run_host | default(inventory_hostname, true)}) -%}
+          {%- endif -%}
+          {%- if (r.stat.gr_name | default('')) != r.item.group -%}
+            {%- set _ = out.append({'category': 'path_permissions', 'item': r.item.path,
+                                    'expected': r.item.group, 'actual': r.stat.gr_name | default('(不明)'),
+                                    'detail': 'グループが期待と異なる',
+                                    'playbook': r.item.playbook | default(''),
+                                    'run_host': r.item.run_host | default(inventory_hostname, true)}) -%}
+          {%- endif -%}
+          {%- if (r.stat.mode | default('')) != r.item.mode -%}
+            {%- set _ = out.append({'category': 'path_permissions', 'item': r.item.path,
+                                    'expected': r.item.mode, 'actual': r.stat.mode | default('(不明)'),
+                                    'detail': 'モードが期待と異なる',
+                                    'playbook': r.item.playbook | default(''),
+                                    'run_host': r.item.run_host | default(inventory_hostname, true)}) -%}
+          {%- endif -%}
+        {%- endif -%}
+      {%- endfor -%}
+      {{ out }}
+
+- name: Build findings for sudoers.d absence
+  ansible.builtin.set_fact:
+    deployment_drift_check_findings_sudoers: >-
+      {%- set out = [] -%}
+      {%- for r in deployment_drift_check_sudoers_listing.results | default([]) -%}
+        {%- set names = (r.stdout | default('')).splitlines() | select | list -%}
+        {%- set hits = [] -%}
+        {%- for n in names -%}
+          {%- for sub in r.item.forbidden_substrings -%}
+            {%- if (sub | lower) in (n | lower) and n not in hits -%}
+              {%- set _ = hits.append(n) -%}
+            {%- endif -%}
+          {%- endfor -%}
+        {%- endfor -%}
+        {%- if hits | length > 0 -%}
+          {%- set _ = out.append({'category': 'sudoers_absent', 'item': r.item.dir,
+                                  'expected': '該当ファイルなし',
+                                  'actual': hits | join(', '),
+                                  'detail': 'dev-investigate/channel関連と思われるsudoersファイルが存在する。手動調査が必要(R-1の受容根拠が崩れている可能性)',
+                                  'playbook': '', 'run_host': inventory_hostname}) -%}
+        {%- endif -%}
+      {%- endfor -%}
+      {{ out }}
+
+- name: Build findings for dispatcher allowlist-out-of-band probes
+  ansible.builtin.set_fact:
+    deployment_drift_check_findings_dispatch_probes: >-
+      {%- set out = [] -%}
+      {%- for r in deployment_drift_check_dispatch_probe_result.results | default([]) -%}
+        {%- if (r.rc | default(1)) == 0 -%}
+          {%- set _ = out.append({'category': 'dispatch_allowlist', 'item': r.item.probe_command,
+                                  'expected': 'non-zero exit (denied)',
+                                  'actual': 'exit 0',
+                                  'detail': 'dispatcherが許可されていない入力を受け付けている可能性',
+                                  'playbook': '', 'run_host': inventory_hostname}) -%}
+        {%- endif -%}
+      {%- endfor -%}
+      {{ out }}
+
 - name: Combine findings for this host
   ansible.builtin.set_fact:
     deployment_drift_check_findings: >-
       {{ deployment_drift_check_findings_files + deployment_drift_check_findings_units + deployment_drift_check_findings_keys
-         + deployment_drift_check_findings_reports + deployment_drift_check_findings_hostsfile }}
+         + deployment_drift_check_findings_reports + deployment_drift_check_findings_hostsfile
+         + deployment_drift_check_findings_paths + deployment_drift_check_findings_sudoers
+         + deployment_drift_check_findings_dispatch_probes }}
     deployment_drift_check_checked_counts:
       files: "{{ deployment_drift_check_my_files | length }}"
       units: "{{ deployment_drift_check_my_units | length }}"
       keys: "{{ deployment_drift_check_my_keys | length }}"
       report_dirs: "{{ deployment_drift_check_my_report_dirs | length }}"
       hosts_file: "{{ deployment_drift_check_my_hosts_file | length }}"
+      paths: "{{ deployment_drift_check_my_paths | length }}"
+      absent_paths: "{{ deployment_drift_check_my_absent_paths | length }}"
+      dispatch_probes: "{{ deployment_drift_check_my_dispatch_probes | length }}"
