@@ -13,7 +13,7 @@
 
 | # | 項目 | 現在地 | 次にやること |
 |---|---|---|---|
-| 1 | **Operator Request Channel MVP — `accept-request` が通らない。診断を直して再配備待ち** | **配備済みで、submit までは通る。`accept-request` から先は通らない。** 2026-08-08にYoshinobuの判断で一度休止したが、2026-08-09に**診断だけを仕上げて accept を再試験する**方針で再開した(4件目の原因が「診断が握りつぶしている」ためで、練り直しの前に原因が見えている必要がある)。**channelは止めていない** — 壊れているのは accept 以降だけで、submit は正常に動き、放置しても本番へ影響しないため。止めるなら root所有configの `channel_enabled` を false にする(既存25本の read-only 調査には影響しない) | ①commit ②quory再配備(Semaphore) ③Operator が `accept-request req-20260808T191118+0900-dd87c0e962a516ac` を再実行し、**出力に並ぶ例外チェーン全体**を共有 ④隠れていた例外から原因を特定して修正。**チェーン出力でも決まらなかったときにだけ**、診断サブコマンドの新設を検討対象へ上げる |
+| 1 | **Operator Request Channel MVP — 4件目まで原因特定済み。accept 以降の縦方向試験が未実施** | **配備済みで、submit までは通る。`accept-request` は4件目(EROFS)が塞がっていたが、2026-08-09にOperator側のsandbox設定で解消した。** 現在は spool と log が通常shellから read-only のまま、`/usr/local/bin/operator-channel` だけが承認付きでsandbox外実行される — **直接書き込みは禁止し、正規経路だけが書ける**形。**channelは止めていない**。止めるなら root所有configの `channel_enabled` を false にする(既存25本の read-only 調査には影響しない) | **縦方向試験のitem 2〜7が未判定のまま**(`2026-08-08_014_vertical_test_2.md` §6)。`req-20260808T191118+0900-dd87c0e962a516ac` に対して accept → reply-opres → ansy側 get、standalone DEVREQ、持ち出し前DLP(checkpoint 3)を通す |
 
 ### 分かっていること(Operator Request Channel)
 
@@ -24,11 +24,11 @@
 | 1 | submit が1件も通らない | `inbox` のACLが `wx` だけで、上限検査の `listdir` が落ちた | 修正済み・**PASS確認済み** |
 | 2 | 未捕捉例外の生tracebackがstderrへ出る | 例外ハンドラ不在 | 修正済み |
 | 3 | `accept-request` が `StoreError` | イベントファイルの作成モード `0640` がACLの `mask` を `r--` へ切り下げた | 修正済み。**ACLは現物で `mask::rw-` を確認済み** |
-| 4 | `accept-request` が `StoreError, root=FileExistsError, errno=17` | **未特定。真の失敗が診断に握りつぶされている** | **未解決。診断側の是正はcommit待ち** |
+| 4 | `accept-request` が `StoreError <- OSError(errno=30) <- FileExistsError(errno=17)` | Operatorのsandboxが spool を読み取り専用にしていた(EROFS)。**コードのバグではない** | Operator側の設定で解消済み(2026-08-09)。**accept の成功はまだ観測していない** |
 
-**4件目について**: 真の失敗は `store.append_event()` の `except FileExistsError:` の中で2回目の `os.open(O_WRONLY|O_APPEND)` が投げた例外。`FileExistsError` は正常な通過点で、`_root_cause()` がチェーンの最深部まで歩くためそれだけが報告されていた。**報告された例外チェーンは現在のコード構造と辻褄が合う**(`store.py:356-399`。前回書いた「辻褄が合わない」は誤り)。
+**4件目について**: `dev-investigate` は同じファイルシステム上にイベントファイルを作れていた(だから `O_CREAT|O_EXCL` が EEXIST を返す)。**同じパスに対して Operator のプロセスだけが EROFS を受けていた** — ホスト全体ではなくプロセス単位の読み取り専用ビューである。
 
-`O_CREAT|O_EXCL` は `b69948c` で初めて入ったので、**`FileExistsError` が出ていること自体が quory 側 `store.py` が `b69948c` である証拠**になる(縦方向試験で3回連続「未判定」だった項目)。
+**この案件の設計は、書き込みの門が POSIX ACL だけだと仮定していた。** mount 層の制約は role のどこにも入っていない(`grep ProtectSystem\|ReadWritePaths\|bwrap\|writable_roots` が0件)。**練り直しの材料になる。** 同種の2層(bwrapの `writable_roots` と systemdの `ReadWritePaths` の両方が要る)は `recovery_exec` 経路で既に踏んでいる。
 
 **quory の調査手段は `operator-channel` CLI の出力だけである。** spool への直接アクセス(`ls` / `getfacl` / `os.open()` 等)は正本が禁じており、2026-08-09 に Operator が退けた。診断が足りないなら CLI 側を直す。
 
