@@ -332,6 +332,32 @@ class UncaughtExceptionSafetyTests(OprcReceiveTestCase):
     the same value-free `error:` line every other failure path in this
     file produces."""
 
+    def test_root_cause_class_name_and_errno_survive_a_wrapped_exception(self):
+        # Reproduces the exact production incident (2026-08-08 post-deploy
+        # vertical test) at the entry point where a symmetric version of
+        # the same bug is reachable: dev-investigate's lazy-expiry check
+        # can append "expired" to an events/ file yoshi created for an
+        # outbox entry (store.mark_expired_if_needed -> append_event), so
+        # this file's entry point can hit the same wrapped-PermissionError
+        # shape too. See test_entrypoint_operator_channel.py's identical
+        # test for the full incident description.
+        def raise_wrapped_permission_error(*_args, **_kwargs):
+            try:
+                raise PermissionError(13, "Permission denied")
+            except OSError as exc:
+                raise store.StoreError("cannot open event log: {}".format(type(exc).__name__))
+
+        with mock.patch.object(store, "check_capacity", side_effect=raise_wrapped_permission_error):
+            result = self._submit(self._valid_opreq())
+        self.assertNotEqual(result.exit_code, 0)
+        combined = result.stdout + result.stderr
+        self.assertIn("StoreError", result.stderr)
+        self.assertIn("PermissionError", result.stderr)
+        self.assertIn("errno=13", result.stderr)
+        self.assertNotIn("Permission denied", combined)
+        self.assertNotIn("cannot open event log", combined)
+        self.assertNotIn("Traceback", combined)
+
     def test_unexpected_exception_during_submit_does_not_leak_a_traceback(self):
         marker = "SENSITIVE-MARKER-should-never-reach-output"
         with mock.patch.object(store, "check_capacity", side_effect=RuntimeError(marker)):

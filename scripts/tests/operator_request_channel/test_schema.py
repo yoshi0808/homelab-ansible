@@ -73,7 +73,15 @@ class ValidateAgainstRealSchemaTests(unittest.TestCase):
         self.assertIn("/purpose", pointers)
 
     def test_additional_property_is_rejected(self):
-        msg = _base_message(password="should-not-be-a-field")
+        # Field name is deliberately neutral (not "password"/"secret"/
+        # "token"): this test checks that an *unknown field* is rejected
+        # by additionalProperties, not that any particular field name is
+        # -- the field name is incidental to what's being tested. Using a
+        # credential-shaped name here previously triggered a GitGuardian
+        # false positive on the public repo (2026-08-08, "Generic
+        # Password"); the value was never a real credential, but the
+        # literal shape alone was enough to flag it.
+        msg = _base_message(unexpected_field="should-not-be-a-field")
         with self.assertRaises(schema.ValidationError) as ctx:
             schema.validate(msg, self.schema_doc)
         rules = [rule for _p, rule in ctx.exception.errors]

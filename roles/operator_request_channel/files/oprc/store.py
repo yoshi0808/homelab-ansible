@@ -53,7 +53,65 @@ ALLOWED_TRANSITIONS: Dict[Optional[str], "frozenset[str]"] = {
 }
 
 _MESSAGE_FILE_MODE = 0o440
-_EVENT_FILE_MODE = 0o640
+# 2026-08-08 deploy verification (post-deploy vertical test, quory):
+# accept-request failed with a StoreError wrapping a PermissionError on an
+# events/<id>.jsonl file dev-investigate itself had appended "submitted"
+# to moments earlier -- `getfacl` on quory showed `mask::r--` capping both
+# named ACL grants (`u:yoshi:rw-` and `u:dev-investigate:rw-`, both from
+# the directory's *default* ACL, plan §2.3) down to an effective `r--`.
+#
+# Root cause, confirmed by local reproduction in this sandbox (setfacl/
+# getfacl against a throwaway directory with the same mode and default-ACL
+# shape as events/ -- see test_event_file_acl_mask.py): when a directory
+# has a default ACL and a *new* file is created under it, the resulting
+# ACL_MASK entry is capped by the **group** permission bits of the `mode`
+# argument passed to `open()`/`creat()` -- independent of what the
+# directory's default ACL itself grants, and independent of the file's own
+# `group::` entry (which is inherited separately, from the directory's own
+# `default:group::`, and is `---` here either way -- confirmed
+# unaffected by this fix, see the same test module). A `mode` whose group
+# bits are read-only (`0o640`) silently caps every *named* ACL grant on
+# the new file to read-only too, no matter how permissive the directory's
+# default ACL is.
+#
+# events/<id>.jsonl is the one spool file class where both identities
+# (`dev-investigate` and `yoshi`) genuinely need to *write* to a file the
+# other one may have created (dev-investigate's submit creates it and
+# appends "submitted"; yoshi's accept/reject/reply-opres append
+# "accepted"/"rejected"/"answered" to that same file; dev-investigate's
+# own lazy-expiry check can likewise need to append "expired" to a file
+# yoshi created for an outbox entry). The group bits of the creation mode
+# therefore need to be `rw`, not just `r` -- message files (`inbox/`,
+# `outbox/`, `quarantine-metadata/`) are write-once and only ever need a
+# second identity to *read* them, where the same `0o440` mode's `r--`
+# group bits are sufficient and were left unchanged (see the same test
+# module for the empirical confirmation that they do not need this fix).
+#
+# **This constant alone is not relied upon** (2026-08-08, review
+# 2026-08-08_013 Critical 1). `os.open()`'s `mode` argument is, in
+# general, applied by the kernel as `mode & ~umask` for a plain file (this
+# implementer re-verified that directly: on this sandbox's kernel, a file
+# created with no default ACL in play, mode `0o660`, under umask `022`,
+# lands at `0o640` -- exactly as expected). Whether that same masking
+# reaches the ACL_MASK entry specifically when the parent directory has a
+# *default* ACL (events/'s actual situation) turned out to be less
+# settled than the review assumed: repeated testing on this sandbox's
+# kernel (ext4, tmpfs, umask `022`) never reproduced a capped mask through
+# `os.open()` alone in that specific case -- the mask came out `rw-`
+# regardless of umask. That is not a green light to rely on `os.open()`'s
+# mode argument here: this behavior is not documented as a guarantee, has
+# reportedly differed across kernel versions and ACL implementations in
+# the past, and quory's actual kernel cannot be inspected from ansy to
+# confirm it matches. requirement §8 asks for creation-time mode to be
+# *fixed*, not measured on one machine and assumed to hold on another.
+# `os.fchmod()`, in contrast, is unconditionally never subject to umask on
+# any POSIX system (re-verified directly: `os.fchmod(fd, 0o660)` under
+# umask `022` lands at exactly `0o660`, no exceptions) -- so
+# `append_event()` sidesteps the open()-vs-umask question entirely rather
+# than depending on which way any particular kernel resolves it: it
+# creates the file, then calls `os.fchmod()` to pin the mode explicitly --
+# see that function's own docstring and code.
+_EVENT_FILE_MODE = 0o660
 _AUDIT_FILE_MODE = 0o660
 
 
@@ -259,16 +317,28 @@ def append_event(spool_dir: str, request_id: str, event_type: str, occurred_at: 
     transitions the state machine (module-level `ALLOWED_TRANSITIONS`)
     does not allow.
 
-    Uses a single `os.write()` call under `O_APPEND` to a per-request-id
-    file, which is atomic with respect to other appenders on the same
-    local filesystem -- this is what makes concurrent submits to
-    *different* request_ids never interleave or lose an event (requirement
-    §16); concurrent transitions on the *same* request_id are additionally
-    serialized by the transition check below (a second writer re-reads the
-    current state and finds its own transition no longer legal once the
-    first writer's event is visible), though a true simultaneous
-    read-then-write race between two processes is not fully closed by this
-    module alone -- see the implement record's open items.
+    Uses a single `os.write()` call under `O_APPEND` (or, for the first
+    event on a given request_id, a write at offset 0 to the file this
+    call itself just created -- equivalent, since the file is empty) to a
+    per-request-id file, which is atomic with respect to other appenders
+    on the same local filesystem -- this is what makes concurrent submits
+    to *different* request_ids never interleave or lose an event
+    (requirement §16); concurrent transitions on the *same* request_id are
+    additionally serialized by the transition check below (a second
+    writer re-reads the current state and finds its own transition no
+    longer legal once the first writer's event is visible), though a true
+    simultaneous read-then-write race between two processes is not fully
+    closed by this module alone -- see the implement record's open items.
+
+    File-creation mode is fixed explicitly via `os.fchmod()` immediately
+    after creation, not left to the `mode` argument of `os.open()`'s
+    `O_CREAT` alone -- see `_EVENT_FILE_MODE`'s own comment for the full
+    reasoning: `os.fchmod()` is unconditionally exempt from the calling
+    process's umask on every POSIX system, so this does not depend on how
+    any particular kernel resolves the (less consistently documented)
+    interaction between umask and a directory's default ACL at file
+    creation time. requirement §8 requires creation-time mode to be
+    fixed, not measured on one machine and assumed to hold on another.
     """
     if event_type not in EVENT_TYPES:
         raise StoreError("unknown event type: {}".format(event_type))
@@ -284,9 +354,45 @@ def append_event(spool_dir: str, request_id: str, event_type: str, occurred_at: 
     line = json.dumps(record, ensure_ascii=False, separators=(",", ":")) + "\n"
 
     try:
-        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, _EVENT_FILE_MODE)
+        # O_EXCL (not just O_CREAT) so we can tell "we just created this
+        # file" apart from "it already existed" -- only the creator may
+        # chmod() it (see the FileExistsError branch below for why).
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, _EVENT_FILE_MODE)
+    except FileExistsError:
+        # Someone else's earlier event already created this file -- the
+        # common case is appending "accepted"/"rejected"/"answered"/
+        # "expired" to a request whose "submitted" event a *different*
+        # identity appended (dev-investigate creates OPREQ event logs,
+        # yoshi creates OPRES/DEVREQ ones, and either can later append to
+        # the other's file; see oprc/lifecycle.py's _events_file_lock()
+        # for the same-request_id race this is combined with). We must
+        # NOT chmod() here: chmod requires being the file's owner (or
+        # root), and the entire point of this code path is appending as
+        # an identity that is *not* the file's owner -- attempting it
+        # would raise EPERM for exactly the non-owning-append case this
+        # mechanism exists to support (review 2026-08-08_013 Critical 1's
+        # own warning).
+        try:
+            fd = os.open(path, os.O_WRONLY | os.O_APPEND)
+        except OSError as exc:
+            raise StoreError("cannot open event log: {}".format(type(exc).__name__))
     except OSError as exc:
         raise StoreError("cannot open event log: {}".format(type(exc).__name__))
+    else:
+        # We just created the file, so we are its owner and os.fchmod()
+        # is guaranteed to succeed; unlike the `mode` argument to
+        # open()'s O_CREAT above, os.fchmod() is never masked by umask --
+        # this is what actually fixes the ACL-mask problem regardless of
+        # the calling process's umask (mirrors _atomic_create()'s
+        # existing create-then-chmod pattern for message files, which is
+        # why message files were never exposed to this in the first
+        # place). Operates on the fd, not the path, to avoid a second
+        # path lookup between creation and this call.
+        try:
+            os.fchmod(fd, _EVENT_FILE_MODE)
+        except OSError as exc:
+            os.close(fd)
+            raise StoreError("cannot fix event log mode after creation: {}".format(type(exc).__name__))
     try:
         os.write(fd, line.encode("utf-8"))
     finally:

@@ -14,6 +14,10 @@ plan: `2026-08-08_002_plan.md`
 
 **改訂3(2026-08-08、配備後検証の差し戻し)**: 配備後検証 `2026-08-08_010_deploy_verification.md` がquory実機で2件の実バグを検出した(item 1: submitが`PermissionError`で確定的に失敗、item 2: 未捕捉例外の生tracebackがstderrへ出る経路の実在)。契約変更(plan §2.3のinbox ACLを`wx`→`rwx`へ改訂、Coordinatorがansy上で実測して裏付け済み)を反映し、両バグを是正した。該当節(§3・§6・§8)を更新した。`docs/ai/roles/operator.md`・`docs/ai/context/operations/operator-request-channel.md`・`.claude/settings.json`はこの改訂でも一切触れていない。
 
+**改訂4(2026-08-08、配備後の縦方向試験による差し戻し)**: quory実機で`accept-request`が`error: unexpected internal failure (StoreError)`で確定的に失敗する3件目の実バグが見つかった(events/ファイルのPOSIX ACL mask問題)。契約変更(plan §2.3に「ファイル作成モードはディレクトリのACLと同じ強さで効く」節を追加、Coordinatorがansy上で実測)を反映し、`oprc/store.py`の`_EVENT_FILE_MODE`を是正した。あわせて、この障害の特定にCoordinatorがOperatorへ`getfacl`を依頼する必要があったという観測性の指摘を受け、共通例外ハンドラ(`lifecycle.run_entrypoint()`)に根本例外のクラス名と`errno`を(メッセージ本文・path・payloadは出さないまま)残す改良を行った。該当節(§3・§6・§8)を更新した。`docs/ai/roles/operator.md`・`docs/ai/context/operations/operator-request-channel.md`・`2026-08-08_002_plan.md`・`docs/ai/status.md`・`.claude/settings.json`はこの改訂でも一切触れていない。
+
+**改訂5(2026-08-08、レビュー`_013_review_event_mode.md`による差し戻し)**: 2件。① Critical 1: `_EVENT_FILE_MODE`の値そのものを直しても、`os.open()`へ渡すmode引数は呼び出し側のumaskの影響を受けうるため、requirement §8「作成時umaskと最終owner／group／modeを固定する」を満たしていなかった。`oprc/store.py`の`append_event()`を、umaskの影響を受けない`os.fchmod()`で作成直後にmodeを固定する形へ書き直した(**ただし、実際にumaskがACL maskへ影響するかはこのsandboxのカーネルでは再現できなかった — 詳細と誠実な記録は下記§3参照**)。② GitGuardianが公開リポジトリの`test_schema.py:76`を誤検知(`password="should-not-be-a-field"`という`key=value`形のliteral)、フィールド名を中立な名前へ変更した。該当節(§3・§6・§8)を更新した。`docs/ai/roles/operator.md`・`docs/ai/context/operations/operator-request-channel.md`・`2026-08-08_002_plan.md`・`docs/ai/status.md`・`.claude/settings.json`はこの改訂でも一切触れていない。
+
 ---
 
 ## 1. 対象パス
@@ -213,6 +217,87 @@ def main(argv):
 
 **Operator指摘への追加テスト**: 既存の注入テストは例外の**クラス名**だけを見ており、**例外メッセージ本体**に疑似secretが乗るケースは無かった。3エントリポイントそれぞれへ、疑似secret文字列を例外メッセージに直接埋め込んだ`RuntimeError`/`PermissionError`を注入するテストを追加し、stdout・stderrいずれにもその文字列が現れないことを確認した(§6参照)。
 
+### events/ファイルのPOSIX ACL mask問題(配備後の縦方向試験、3件目の実バグ)
+
+**問題**: quory実機でOperatorが`accept-request`を実行すると`error: unexpected internal failure (StoreError)`で失敗し、状態は`submitted`のまま変化しなかった。`list-pending`/`show-request`/submitはいずれも成功していた。Operatorが対象ファイルへ`getfacl`を実行した結果:
+
+```text
+# file: /var/lib/operator-request-channel/events/req-...jsonl
+# owner: dev-investigate
+user::rw-
+user:yoshi:rw-              #effective:r--
+user:dev-investigate:rw-    #effective:r--
+mask::r--
+group::---
+other::---
+```
+
+**原因**: POSIX ACLでは、ディレクトリにdefault ACLがある状態で**新規**ファイルを作成すると、そのACL_MASKエントリは`open()`/`creat()`に渡した`mode`引数の**groupビット**によって上書き・制限される — ディレクトリのdefault ACL自体が何を許可しているかとは独立に、である(`group::`エントリはこれとは別に、ディレクトリ自身の`default:group::`から継承される)。`oprc/store.py`の`_EVENT_FILE_MODE`は`0o640`(groupビット`r--`)だったため、`events/`のdefault ACLが`dev-investigate`/`yoshi`双方に与えていた`rw`は、新規作成されたファイル上では常に実効`r--`へ切り詰められていた — 上記`getfacl`の出力と完全に一致する。
+
+`events/`はsubmit(dev-investigateが作成し"submitted"を追記)・accept/reject/reply-opres(yoshiが"accepted"/"rejected"/"answered"を追記)・lazy expiry判定(どちらの側からも起こりうる"expired"の追記)のいずれもが、**自分が作成していないファイルへ書き込む**唯一のspoolファイル種別であり、この切り詰めが即座に機能不全を引き起こした。
+
+**是正**: `roles/operator_request_channel/files/oprc/store.py`の`_EVENT_FILE_MODE`を`0o640`から`0o660`(groupビット`rw-`)へ変更した(`store.py`はImplementer Aの実装だが、この1点はCoordinator/Operatorの明示指示による)。plan §2.3にCoordinatorが追加した「ファイル作成モードは、ディレクトリのACLと同じ強さで効く」節と、その実測(毎回新しいディレクトリ、各3回、決定的)に基づく。
+
+**この実装者自身による裏取り**: このsandbox上で`setfacl`/`getfacl`を使い、`events/`と同じmode(`1700`)・同じ形のdefault ACLを持つ使い捨てディレクトリを作り、実際に`0o640`で作成したファイルが`mask::r--`(バグを再現)、`0o660`で作成したファイルが`mask::rw-`(是正を確認)になることを実測した(`scripts/tests/operator_request_channel/test_event_file_acl_mask.py`)。第2の実OS uidは不要 — `setfacl`のnamed entryは実在するアカウントに解決できなくても機能するため、任意の数値UIDで機構そのものを再現できる。
+
+**「他のファイルに同じ罠が無いこと」の確認(依頼文の指示どおり自分で確認、要らないものまで広げない)**:
+
+| ファイル種別 | 作成モード | 別identityが後から必要とする権限 | 結論 |
+|---|---|---|---|
+| `inbox`/`outbox`の message(`_MESSAGE_FILE_MODE`) | `0o440` | 読み取り(`r`)のみ -- messageはwrite-onceで、作成後は誰も書き込まない | **変更不要**。groupビット`r--`から作られるmask`r--`は、必要な`r`をちょうど満たす(実測: `test_message_file_mode_grants_exactly_the_read_access_it_needs`) |
+| `quarantine-metadata`(`_MESSAGE_FILE_MODE`共用) | `0o440` | 現状、この案件のどのentry pointからも読み書きされない(読み取りに対応するforced command/CLI操作自体が無い) | **変更不要**。書き込みが要る箇所が存在しない |
+| `audit.jsonl`(`_AUDIT_FILE_MODE`) | `0o660`(既存のまま) | dev-investigate・yoshi双方が追記 | **変更不要、かつ元から無関係**。Ansibleが`file: state=touch mode=0660`で**先に**作成し(`server.yml`)、その後`setfacl -m`で既存ファイルへ直接ACLを付与する経路であり、「ディレクトリのdefault ACLを新規ファイルが継承する」経路(バグの発生条件そのもの)を通らない。既存ファイルへの`setfacl -m`はmaskを自動的に再計算するため、この罠に元から該当しない(実測: `test_setfacl_on_an_existing_0660_file_grants_full_effective_rw`) |
+
+**`group::`・`other::`が広がっていないことの確認**: 同じ実測(`test_fix_does_not_broaden_group_or_other`)で、`0o640`作成時と`0o660`作成時の`group::`/`other::`が完全に一致することを確認した -- どちらも`---`のまま。これらのエントリは(default ACLにgroup::/other::の明示指定が無い限り)ディレクトリ自身の`default:group::`/`default:other::`から継承され、作成モードの引数には左右されない。
+
+### 未捕捉例外の観測性改善(同じ障害の診断が困難だったことへの対応)
+
+**問題**: 上記バグの原因特定には、Coordinatorがquory上のOperatorへ`getfacl`の実行を依頼する必要があった。`run_entrypoint()`が出力していたのは外側の例外(`StoreError`)のクラス名だけで、その下の根本原因(`PermissionError`)は握りつぶされていた。`store.append_event()`自身の`StoreError`メッセージは実際には安全な形で根本原因のクラス名を含んでいた(`"cannot open event log: {}".format(type(exc).__name__)`)が、`run_entrypoint()`は`str(exc)`を一切出力しない設計だったため、この情報も一緒に失われていた。
+
+**是正**: `oprc/lifecycle.py`に`_root_cause(exc)`(`__cause__`/`__context__`を辿って連鎖の最深部を返す、循環耐性あり)と`_describe_failure(exc)`(外側のクラス名・根本原因のクラス名(異なる場合のみ)・根本原因が持つ`errno`(整数のみ)を組み立てる、`str(exc)`と`.filename`/`.filename2`は一切読まない)を追加し、`run_entrypoint()`の出力を`error: unexpected internal failure (<説明>)`へ変更した。
+
+**設計判断: どこへ残すか(stderrのみ、監査記録へは残さない)**: 依頼文が「あなたの設計判断」とした点。stderrのみとし、`audit.jsonl`への記録は追加しなかった。理由:
+
+1. `run_entrypoint()`は`dispatch`と`argv`だけを引数に取る、意図的に依存の無い薄いラッパである(§3「同時書き込みの直列化」の`_events_file_lock()`と同じく、共通化の価値は「単純で複製されないこと」にある)。監査記録には`audit_log_path`(configから得る)が要り、これを引数に加えると、3つの呼び出し元すべてが常に正しいpathを渡す責任を負うことになり、複製のリスクを共通化前の状態へ半分戻すことになる。
+2. 例外は`_load_config()`より前(configそのものが壊れている場合)にも起こりうる -- その場合`audit_log_path`は存在しない。stderrはconfigの状態に関わらず常に使える経路である。
+3. 今回の実インシデントを実際に解決したのはstderrの情報(Operatorがそれを見てCoordinatorへ伝え、Coordinatorが`getfacl`を依頼した)であり、監査記録が必要だったわけではない。observabilityの実際のニーズはstderrで満たされる。
+
+**再確認条件の充足状況**: 根本例外のクラス名と`errno`は`_describe_failure()`が出力に含める。例外メッセージ本文・path・payload・検出値は`_describe_failure()`のどの経路でも一切読まない(`.filename`/`.filename2`を明示的に避けている)ことをコードとdocstringの両方に明記し、疑似secretをメッセージ本文へ埋め込む既存テスト(review差し戻しで追加)が是正後も全件成功することを確認した(§6参照)。
+
+### events/作成modeのumask依存を解消(review `_013_review_event_mode.md` Critical 1の是正)
+
+**指摘**: `_EVENT_FILE_MODE`を`0o660`に直しても、`os.open()`へ渡す`mode`引数はカーネルが`mode & ~umask`として適用するため、呼び出し側(quory上のOperatorセッション)のumask次第で結果が変わりうる。requirement §8は「作成時umaskと最終owner／group／modeを固定する」と明記しており、これが未実装だった。quoryのOperatorセッションのumaskは開発側から観測できない。
+
+**是正**: `oprc/store.py`の`append_event()`を書き直した。`os.open(..., O_CREAT | O_EXCL, _EVENT_FILE_MODE)`でまず作成を試み、
+
+- 自分が**新規作成した**場合(成功時): 直後に`os.fchmod(fd, _EVENT_FILE_MODE)`を呼ぶ。`os.fchmod()`(`os.chmod()`と同様)はumaskの影響を一切受けない -- これが実際に固定を担保する。`_atomic_create()`が message ファイルに対して既にやっている「作成後にchmodする」パターンをevents/にも適用した形。
+- **既に存在した**場合(`FileExistsError`): chmodを一切試みない。理由(依頼文が明示した見落としやすい点そのもの): chmod/fchmodはファイルの所有者(またはroot)しか呼べない。events/ファイルは自分が作成していない側が追記する(dev-investigateが作成した"submitted"にyoshiが"accepted"を追記、等)ことが前提の設計であり、追記だけの側がchmodを試みると`EPERM`になる。追記側は`O_WRONLY | O_APPEND`(`O_CREAT`なし)で開くだけで、mode変更は一切試みない。
+
+**この修正で正直に記録すべきこと**: 是正の実装中、「umaskが実際にACLのmaskへ影響するか」をこのsandbox上で再現しようと試みたが、**再現できなかった**。ext4・tmpfsいずれの上でも、`events/`と同じ形(mode `1700`・named userへのdefault ACL)のディレクトリでumask `022`を有効にした状態で単純な`os.open(path, O_CREAT, 0o660)`を実行しても、結果のACL maskは`rw-`のままだった(mask化されなかった)。一方、**default ACLが絡まない普通のファイル**では、同じumask `022`が`0o660`を`0o640`へ確実に切り詰めることも別途確認した(umask自体は機能している)。
+
+このため、「default ACLが存在するディレクトリでの新規ファイル作成時、umaskがACL maskへ及ぶかどうか」は、少なくともこのsandboxのカーネルでは確認できなかった、というのが実際の実測結果である。**ただしこれは是正を見送る理由にはならない**:
+
+1. この挙動は移植性のある仕様として文書化されているものではなく、カーネルバージョンやACL実装によって過去に異なる振る舞いをしてきたと言われている領域であり、quoryの実際のカーネルがこのsandboxと同じ挙動を示す保証が無い(quoryのカーネルはこのセッションから観測できない)。
+2. `os.fchmod()`がumaskの影響を一切受けないことは、ACLの有無に関係なく無条件に正しいPOSIXの挙動であり(これも直接再検証した)、この経路を使えば「default ACL とumaskの相互作用がどちらに転ぶか」という問いそのものを迂回できる。
+3. requirement §8は「固定する」ことを求めており「安全な方に転ぶことを祈って測る」ことを求めていない。
+
+`store.py`のコードコメントと`test_event_file_acl_mask.py`のテストdocstringの両方に、この実測結果(再現できなかったこと)を誠実に記載した -- 「umaskがこの経路を壊すことを確認した」という、実際には確認できていない主張はどこにもしていない。
+
+**再確認条件の充足状況**:
+
+- **umaskを変えて実際に確かめるテスト**: `EventFileModeIsUmaskIndependentTests`(`test_event_file_acl_mask.py`)が、umaskを`022`(グループの書き込みビットを削る値)に設定した状態で実際に`store.append_event()`を呼び、結果のACL maskが`rw-`になること(`test_append_event_fixes_the_mode_even_under_a_hostile_umask`)、`os.fchmod()`自体がumaskの影響を受けないこと(`test_fchmod_is_exempt_from_umask_unconditionally`、ACL非依存の直接証明)、umaskそのものはこのプロセスで機能していること(`test_umask_masks_a_plain_open_with_no_default_acl_involved`、対照実験)を確認した。umaskはテスト内で確実に元へ戻す(`addCleanup`、プロセス全体に影響する値のため他テストへ漏れないことも確認済み)。
+- **追記側がEPERMにならないこと**: `AppendToExistingEventFileNeverAttemptsChmodTests`が、`os.fchmod()`が「作成した1回だけ」呼ばれ、同じrequest_idへの2回目以降の`append_event()`(追記)では**呼ばれない**ことをモックで確認した(`mock.patch("os.fchmod", wraps=os.fchmod)`で呼び出し回数を検証)。このsandboxには実uidが1つしか無く`EPERM`そのものは再現できないため、`EPERM`回避が依存している「作成時にしかchmodを試みない」というコードレベルの保証を直接検証する形にした(この限界は依頼文の過去のやり取りで許容されている手法と同型)。
+- **message/quarantine/auditの扱いを変えていないこと**: `_atomic_create()`(message/quarantine共用)・`_AUDIT_FILE_MODE`の初期化経路はいずれも今回変更していない(`append_event()`のみを変更)。既存の`test_event_file_acl_mask.py`の該当テストクラスは変更前と同じ内容のまま全件成功する。
+- **是正前に実際に失敗することの確認**: `append_event()`を一時的に是正前の形(`os.open(..., O_CREAT | O_APPEND, _EVENT_FILE_MODE)`単発)へ戻し、`AppendToExistingEventFileNeverAttemptsChmodTests`が実際に失敗する(`fchmod`呼び出し回数が0のまま)ことを確認したのち、是正版へ戻して成功することを確認した。**`EventFileModeIsUmaskIndependentTests`側は、是正前のコードでもこのsandboxでは成功してしまう**(上記の「再現できなかった」実測と整合する結果であり、テストの不備ではなく、環境依存の挙動をこのsandboxが偶然踏まないことの反映)。
+
+### GitGuardianの誤検知source除去(review Suggestion)
+
+`scripts/tests/operator_request_channel/test_schema.py`の`test_additional_property_is_rejected`が`_base_message(password="should-not-be-a-field")`という`key="value"`形のliteralを持っており、公開リポジトリに対するGitGuardianが「Generic Password」として誤検知した(検知された値は文字列`should-not-be-a-field`そのもので、実在の資格情報ではない)。このテストが確かめているのは「schemaが未知のフィールドを拒否すること」であり、フィールド名が`password`である必然性は無かったため、`unexpected_field`という中立な名前へ変更した。テストの意図(additionalPropertiesによる拒否)・強度(拒否されることのアサーション)は変えていない。
+
+`_fixtures.py`の断片組み立て方式(secretを実行時に非literalな形で組み立てる)は変更していない -- 依頼文の指示どおり。
+
+**同種literalの横断確認**: `password=`/`secret=`/`token=`(`key="value"`形および`"key": "value"`形の両方)を`scripts/tests/operator_request_channel/`と`roles/operator_request_channel/`全体へ`grep`し、`_fixtures.py`以外に該当するliteralは上記1件のみだったことを確認した。`password`/`secret`/`token`/`credential`を含む他の一致箇所(`test_dlp.py`のカテゴリ名文字列、`_fixtures.py`自身の断片組み立て呼び出し、`ids.py`の標準ライブラリ`secrets`モジュール名、docstring中の説明文など)はいずれも`key=value`/`key: value`という資格情報の見た目を持たないことを個別に確認した(§6参照)。
+
 ---
 
 ## 4. requirement/planとの食い違いを発見し、狭い方(安全側)を採った箇所
@@ -247,7 +332,10 @@ plan §3.3は「共有ファイル(ライブラリ・schema・rules)のエント
 
 ## 6. 自己検証で確認したこと
 
-- `python3 scripts/tests/operator_request_channel/run-tests.py -v`: **312件全てPASS**(Implementer Aの162件 + 本担当150件)。実行環境はansy相当のローカル環境、`python3.14.4`。同時実行テスト(`MarkExpiredIfNeededConcurrencyTests`)はフレーク耐性を見るため単独で12回連続実行し、全回成功を確認した。
+- `python3 scripts/tests/operator_request_channel/run-tests.py -v`: **324件全てPASS**(Implementer Aの162件 + 本担当162件)。実行環境はansy相当のローカル環境、`python3.14.4`。同時実行テスト(`MarkExpiredIfNeededConcurrencyTests`)はフレーク耐性を見るため単独で12回連続実行し、全回成功を確認した。
+- **umask依存是正(review `_013_review_event_mode.md` Critical 1)の確認**: `test_event_file_acl_mask.py`へ追加した`EventFileModeIsUmaskIndependentTests`(2件)と`AppendToExistingEventFileNeverAttemptsChmodTests`(1件)、計3件で以下を確認した。(a)umaskを`022`(グループ書き込みビットを削る値)へ実際に変更した状態で`store.append_event()`を呼び、結果のACL maskが`rw-`のまま(切り詰められない)こと。(b)`os.fchmod()`自体は(ACLの有無に関係なく)umaskの影響を受けないこと。(c)同じumask `022`が、default ACLの絡まない普通のファイル作成では`0o660`を確実に`0o640`へ切り詰めること(umaskがこのプロセスで実際に機能していることの対照実験)。(d)`os.fchmod()`が、あるrequest_idへの1回目の`append_event()`(新規作成)でのみ呼ばれ、2回目以降(追記)では呼ばれないこと(`mock.patch("os.fchmod", wraps=os.fchmod)`で呼び出し回数を検証、追記側が`EPERM`を踏まない設計の担保)。umaskはプロセス全体に影響する値のため`addCleanup`で確実に元へ戻し、他テストへ漏れないことを確認した。**是正前に実際に失敗することの確認**: `append_event()`を一時的に是正前(`O_CREAT | O_APPEND`単発、fchmodなし)へ戻し、(d)のテストが実際に失敗する(fchmod呼び出し回数が0のまま)ことを確認したのち、是正版へ戻して成功することを確認した。**正直に記録する限界**: (a)のテストは、是正前のコードでもこのsandboxでは成功してしまう(§3で記載した通り、このカーネル上ではdefault ACLが絡む`os.open()`のumaskによる切り詰めそのものを再現できなかったため)。旧/新の判別ができるのは(d)のみであり、(a)(b)(c)は「umaskに依存しない」という要求仕様そのものの検証として位置づけている。
+- **events/ ACL mask是正の確認**: `test_event_file_acl_mask.py`(5件、`setfacl`/`getfacl`を実際に使う)が、(a)`store._EVENT_FILE_MODE`(定数そのものを参照、値をハードコードし直していない)で作成したファイルの`mask`が`rw-`になり`#effective:r--`の切り詰めが出ないこと、(b)`0o640`で作成すると`mask::r--`・`#effective:r--`が実際に再現すること、(c)`group::`/`other::`が是正前後で完全に一致すること(広がっていないこと)、(d)`inbox`/`outbox`のmessageファイルは`0o440`のままで必要な`r`をちょうど満たすこと、(e)`audit.jsonl`は既存ファイルへの`setfacl -m`という別経路のためこの罠に該当しないこと、を実測で確認した。**是正前に実際に失敗することの確認**: `store._EVENT_FILE_MODE`を一時的に`0o640`へ戻し、`test_the_actual_store_event_file_mode_is_not_capped_to_read_only`が実際に失敗する(`mask::r--`のまま)ことを確認したのち、`0o660`へ戻して成功することを確認した。
+- **根本例外の可視化(errno・クラス名)の確認**: 3エントリポイントそれぞれへ`test_root_cause_class_name_and_errno_survive_a_wrapped_exception`を追加した。`store.append_event()`が実際に使う形(`except OSError as exc: raise StoreError(...)`、Pythonの暗黙連鎖`__context__`を利用)で`PermissionError(13, "Permission denied")`を`StoreError`越しに送出し、stderrに外側クラス名(`StoreError`)・根本原因クラス名(`PermissionError`)・`errno=13`のすべてが現れること、かつ例外メッセージ本文(`"Permission denied"`・`"cannot open event log"`)がstdout/stderrいずれにも一切現れないことを確認した。既存の疑似secret混入テスト(差し戻し2回目で追加)も是正後の出力形式で引き続き全件成功することを確認済み(§3参照)。
 - **配備後検証item 1・2の是正確認**: (a)`test_capacity_no_content_read.py`(5件)が、`count_and_size()`/`check_capacity()`が容量検査のためメッセージファイルの`open()`を一切呼ばないこと、かつ保存件数・総容量の上限自体は引き続き正しく機能する(超過でStoreCapacityExceeded、範囲内で成功)ことを確認した。**限界(依頼文の許容どおり明記)**: このセッションには第2のOS uidが無く、`inbox`の実際の権限境界を直接再現するテストは書けていない -- 検査したのは「コードが本文readに依存しない」という設計レベルの性質であり、ACLそのものの実測はCoordinatorがansy上で行った測定(plan §2.3)に依っている。(b)`UncaughtExceptionSafetyTests`(3エントリポイントそれぞれに追加、計19件)が、`_dispatch()`内の想定外例外(`store.check_capacity`/`store.append_event`/`store.read_message`/`canonical.content_hash`/`_run_ssh`等をモックしてRuntimeError・実際に発生したPermissionErrorを注入)がstdout/stderrへ`Traceback`の文字列を一切出さないことを確認した。`SystemExit`(`denied:`)経路が誤って握りつぶされていないことも別テストで確認した。
 - **Operatorレビューの3件の是正確認**: ①**共通化**: 3エントリポイントそれぞれに`test_uses_the_shared_run_entrypoint_safety_net`を追加し、`main()`が`oprc.lifecycle.run_entrypoint()`を実際に呼ぶこと(`_dispatch`を第一引数として渡すこと)をモックの呼び出し検証で確認した -- 個別`try/except`が復活していないことの機械的な担保。②**count_and_sizeのdocstring**: 目視で確認(store.pyはコードでもテストでも既にこの不変条件を守っており、今回はdocstringへの明文化のみ)。③**「読めない」記述の除去**: `grep -rn`で`roles/operator_request_channel/`と本記録全体を走査し、「dev-investigateはinboxの本文を読めない」の類の主張が(訂正の説明として引用している箇所を除き)残っていないことを確認した。
 - **例外メッセージ本体への疑似secret混入テスト(Operator指摘)**: 3エントリポイントそれぞれへ`test_exception_message_body_containing_a_pseudo_secret_is_not_leaked`/`test_permission_error_message_body_containing_a_pseudo_secret_is_not_leaked`(計6件)を追加した。`_fixtures.password_keyvalue_text()`/`_fixtures.slack_bot_token()`で生成した疑似secretを例外の**メッセージ本体**(`str(exc)`に現れる部分)へ直接埋め込み、stdout・stderrいずれにもその文字列が現れないことを確認した -- 既存のクラス名ベースの注入テストとは異なる観点(メッセージ本体)を明示的に検査する。
@@ -256,8 +344,10 @@ plan §3.3は「共有ファイル(ライブラリ・schema・rules)のエント
 - `ansible-playbook --syntax-check` を両playbookに実行し、いずれもエラーなし。
 - `ansible-lint playbooks/operator_request_channel_{client,server}_setup.yml`: `Passed: 0 failure(s), 0 warning(s) in 7 files processed`。
 - `scripts/check-tester-gate.sh`: `[tester-gate-lint] OK (54 playbooks)`。
-- `gitleaks detect --no-git`を対象パス(role本体・playbook・test・変更した既存4ファイル)へ個別に実行し、いずれも `no leaks found`。差し戻し是正で変更した6ファイル(`oprc/lifecycle.py`・`bin/oprc-receive`・`bin/operator-channel`・test 3本)についても同じ検査を再実行し、`no leaks found`を再確認した。
+- `gitleaks detect --no-git`を対象パス(role本体・playbook・test・変更した既存4ファイル)へ個別に実行し、いずれも `no leaks found`。差し戻し是正で変更した6ファイル(`oprc/lifecycle.py`・`bin/oprc-receive`・`bin/operator-channel`・test 3本)についても同じ検査を再実行し、`no leaks found`を再確認した。events/ ACL mask是正・根本例外可視化(改訂4)で変更した6ファイル(`oprc/store.py`・`oprc/lifecycle.py`・test 4本)についても同じ検査を再実行し、`no leaks found`・IPv4ヒット0件を確認した。この改訂ではAnsible YAMLを変更していないため`--syntax-check`/`ansible-lint`/`check-tester-gate.sh`は再実行のみ(結果は前回と同じ、エラー無し)。
 - IPv4リテラル検査: `scripts/git-pre-commit-check.sh`と同じ正規表現(`([0-9]{1,3}\.){3}[0-9]{1,3}`、127.0.0.1/0.0.0.0/255.255.255.255は除外)を対象ファイル全文へ適用し、ヒット0件(差し戻し是正分も同様)。DLP fixtureは`_fixtures.py`の断片組み立てのみを使用し、疑似secret・private IPの完成形をファイルへ書いていない。
+- **GitGuardian誤検知source除去の確認**: `grep -rnE`で`password=`/`secret=`/`token=`(`key="value"`形・`"key": "value"`形の両方)を`scripts/tests/operator_request_channel/`・`roles/operator_request_channel/`全体へ適用し、`_fixtures.py`の断片組み立て呼び出し以外に該当するliteralが残っていないことを確認した(§3参照)。`test_schema.py`の該当テストは`unexpected_field`への改名後も同じアサーション(additionalPropertiesによる拒否)で成功することを324件の全体実行に含めて確認した。
+- **今回変更した5ファイル**(`oprc/store.py`・`test_event_file_acl_mask.py`・`test_schema.py`、および前回までの変更を含む差分全体)へ`gitleaks detect --no-git`と上記IPv4正規表現を再実行し、いずれも`no leaks found`・ヒット0件を確認した。この改訂ではAnsible YAMLを変更していないため`--syntax-check`/`ansible-lint`/`check-tester-gate.sh`は再実行のみ(結果は前回と同じ、エラー無し)。
 - 変更/新規のYAML全ファイルを`yaml.safe_load_all`で構文検査し、全件OK。
 - `roles/deployment_drift_check`へ足した3クラスが実際にfindingを立てることを、`hosts: localhost, connection: local`の使い捨てplaybook(`docs/ai/core.md`のdecoy inventory相当、実ホスト非接触)で7ケース(owner/group/mode一致・3属性不一致・path欠落・sudoers空・sudoers該当・probe正しく拒否・probe誤って許可)すべて確認した。実ホストの状態は一切変更していない。
 - `roles/dev_investigate/files/recovery-investigate-dispatch-quory.sh`の既存25本について: `git diff --stat`で**追加58行・削除0行**であることを確認(既存armは1文字も変わっていない)。加えて、新設4本の arity/形式/allowlist外拒否のテストと、既存armのうち quory 固有パスに依存しない6本(disk/load/failed/ports/journal-system/deployed-hash)をこのホスト上でローカル実行するサンプル非回帰テストを`test_dispatcher.py`に含めた。
@@ -301,3 +391,5 @@ plan §3.3は「共有ファイル(ライブラリ・schema・rules)のエント
 8. **plan §1のquory Python版preflight assertは是正済み(2026-08-08、監査`_009_audit.md`指摘1)。** `roles/operator_request_channel/tasks/common.yml`の先頭に追加し、client(ansy)側にも同じ担保を及ぼした。`--check`実行時にもスキップされないこと(`check_mode: false`)、および実際にrc!=0で配備前にplayが停止することの両方を、`hosts: localhost, connection: local`の使い捨てplaybookで確認済み(§3・§6参照)。監査指摘2(`.gitignore`変更の記帳)・指摘3(Phase 3カタログI-1不変条件への注記)は、監査自身が「クローズを妨げない」「Coordinatorの担当」としており、本担当のこの改訂では対応していない。
 9. **配備後検証item 1(submitのPermissionErrorクラッシュ)・item 2(未捕捉例外の生traceback漏出)は是正済み(2026-08-08、`_010_deploy_verification.md`)。** item 1はplan §2.3のACL改訂(inboxを`wx`→`rwx`)、item 2は`oprc/lifecycle.py`の共通`run_entrypoint()`で対応した(§3参照)。**依頼文が明示的に許容した限界**として、第2のOS uidが無いため`inbox`の実際の権限境界そのものをこのセッションのテストで再現することはできず、`test_capacity_no_content_read.py`は「容量検査がファイル内容readに依存しない」という設計レベルの性質のみを検証している(§6参照)。item 3-7・22・23・25・26(Operator操作・Semaphore実行を要するもの)は本セッションでも未判定のまま(Operatorセッション起動・Semaphore実行はYoshinobu側の操作を要するため)。
 10. **quory側Operatorレビューを受けた3件の追加是正(2026-08-08、本改訂)。** ① 3エントリポイントに複製していた`try/except`を`oprc/lifecycle.py`の`run_entrypoint()`1箇所へ統合した。② `store.count_and_size()`のdocstringへ「message本文を`open()`してはならない」という不変条件を明記した(store.pyはImplementer Aの実装だが、この1点はCoordinator/Operatorの明示指示により本担当が変更した)。③ 「dev-investigateはinboxの本文を読めない」という成立しない主張を、本記録(§3・旧§4.1)・`oprc/lifecycle.py`のdocstring・`oprc-receive`のコメント・`defaults/main.yml`のACLコメントのすべてから除去し、正しい性質(「他のidentityが書いた本文を読めない」、inboxには越境読み取り対象がそもそも無い)に置き換えた。`read_state_from_events()`を使うという設計判断そのものは変えていない。例外メッセージ本体に疑似secretを埋め込むテストを新設した(§6参照)。
+11. **配備後の縦方向試験で見つかったaccept-requestの`StoreError`失敗は是正済み(2026-08-08、前回改訂)。** 原因はPOSIX ACLのmask機構(`events/`のdefault ACLが与える`rw`が、ファイル作成モードのgroupビットによって実効`r`へ切り詰められていた)。`oprc/store.py`の`_EVENT_FILE_MODE`を`0o640`から`0o660`へ変更し、`setfacl`/`getfacl`による実測で是正前に再現・是正後に解消することを確認した(§3・§6参照)。他のファイル種別(message/quarantine/audit)は同じ実測で「変更不要」と確認済み(表は§3)。あわせて、`lifecycle.run_entrypoint()`が根本例外のクラス名と`errno`を出力するよう改良した(監査記録への保存は設計判断として見送り、理由は§3参照)。**残る制約**: `_MESSAGE_FILE_MODE`/`_AUDIT_FILE_MODE`が将来変更される場合、または新しいspoolファイル種別が追加される場合は、同じPOSIX ACL maskの罠に該当しないか`test_event_file_acl_mask.py`と同じ手法(`setfacl`/`getfacl`によるローカル実測)で確認すること -- この案件がそうだったように、書き込みモードの数字だけを見て安全かどうかを判断しない。**ただし項目11の是正だけでは`events/`の作成が依然umaskの影響を受けうることが後続review(`_013_review_event_mode.md` Critical 1)で判明し、項目12で追加是正した。**
+12. **`events/<id>.jsonl`作成がumaskに依存する欠陥(review `_013_review_event_mode.md` Critical 1)、およびGitGuardian誤検知source、いずれも是正済み(2026-08-08、本改訂)。** 前者: `_EVENT_FILE_MODE`の値だけでは`os.open()`のmode引数が呼び出し側umaskの影響を受けうる(requirement §8「作成時umaskと最終owner／group／modeを固定する」が未実装だった)。`append_event()`を`O_EXCL`で新規作成を判別し、自分が作成した場合のみ直後に`os.fchmod()`(umaskの影響を受けない)でmodeを固定するよう書き直した。既存ファイルへの追記(自分が作成していない場合)ではchmod/fchmodを一切試みない -- 依頼文が明示した通り、所有者でない側がchmodを試みると`EPERM`になるため。umaskを実際に`022`へ変更した状態での実測、および`os.fchmod()`が作成時の1回しか呼ばれないこと(追記側でのEPERM回避の担保)をモックで検証した(§3・§6参照)。**正直な限界として記録する**: このsandboxのカーネルでは、default ACLが存在するディレクトリでの`os.open()`がumaskによってACL maskまで切り詰められる現象そのものを再現できなかった(ext4・tmpfs両方で確認)。これは是正を不要とする根拠にはならない(quoryの実カーネルがこのsandboxと同じ挙動を示す保証が無く、`os.fchmod()`のumask非依存性は無条件に正しいため)、という判断過程を§3に記載した。後者: `test_schema.py`の`test_additional_property_is_rejected`が使っていた`password="should-not-be-a-field"`というliteralがGitGuardianに誤検知されたため、フィールド名を`unexpected_field`へ変更した(テストの意図・強度は不変)。`password=`/`secret=`/`token=`形の他の該当箇所が無いことをgrepで横断確認した(§3・§6参照)。

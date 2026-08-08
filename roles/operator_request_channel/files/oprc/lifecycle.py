@@ -390,6 +390,47 @@ def write_accepted(spool_dir: str, box: str, audit_log_path: str, request_id: st
     )
 
 
+def _root_cause(exc: BaseException) -> BaseException:
+    """Walk `__cause__`/`__context__` to the innermost exception in the
+    chain -- e.g. the `PermissionError` underneath a `store.StoreError`
+    that wrapped it (`except OSError as exc: raise StoreError(...)`
+    without `from None` leaves Python's implicit chaining intact, which is
+    what makes this walk possible). Cycle-safe (falls back to the last
+    exception seen if a chain ever looped, which should not happen but
+    must not hang this function if it somehow did).
+    """
+    current = exc
+    seen = set()
+    while True:
+        nxt = current.__cause__ or current.__context__
+        if nxt is None or id(nxt) in seen:
+            return current
+        seen.add(id(current))
+        current = nxt
+
+
+def _describe_failure(exc: BaseException) -> str:
+    """Build the value-free description `run_entrypoint()` prints:
+    the outer exception's class name, the root cause's class name (via
+    `_root_cause()`, omitted if identical to the outer one), and `errno`
+    if the root cause carries one (e.g. `PermissionError`/`OSError`
+    subclasses) -- never a message, path, or payload fragment.
+
+    Deliberately does not read `.filename`/`.filename2` -- `OSError`
+    subclasses carry those, and they hold exactly the kind of path this
+    module must never print (requirement §9.4/§16). `errno` alone (an
+    integer, e.g. 13 for EACCES) carries no such information.
+    """
+    root = _root_cause(exc)
+    parts = [type(exc).__name__]
+    if root is not exc:
+        parts.append("root=" + type(root).__name__)
+    errno = getattr(root, "errno", None)
+    if isinstance(errno, int):
+        parts.append("errno={}".format(errno))
+    return ", ".join(parts)
+
+
 def run_entrypoint(dispatch, argv) -> None:
     """The single shared exception safety net all three entry points
     (`bin/oprc-receive`, `bin/operator-channel`, `bin/operator-channel-client`)
@@ -405,24 +446,41 @@ def run_entrypoint(dispatch, argv) -> None:
     - `PermissionError` and `OSError` are caught -- both are `Exception`
       subclasses, so the blanket `except Exception` below already covers
       them; named explicitly here because `PermissionError` is exactly
-      the class the real-world bug that prompted this function was
+      the class the real-world bugs that prompted this function were
       (`store.count_and_size()`'s `os.listdir()` against an ACL that did
-      not yet grant directory-level read).
+      not yet grant directory-level read; later, an ACL-mask cap on
+      `events/<id>.jsonl` -- see `store._EVENT_FILE_MODE`'s comment).
     - No traceback is ever printed.
-    - The exception's own message (`str(exc)`) is never printed -- only
-      `type(exc).__name__` (the class name), which cannot be derived from
-      payload content, unlike an arbitrary exception message might be
-      (an exception raised while processing a payload can and does
+    - The exception's own message (`str(exc)`) is never printed for
+      either the caught exception or its root cause -- only class names
+      and `errno` (see `_describe_failure()`), which cannot be derived
+      from payload content, unlike an arbitrary exception message might
+      be (an exception raised while processing a payload can and does
       sometimes embed a fragment of what it was processing -- a bad key,
-      a truncated value -- in its own message; the class name never can).
+      a truncated value -- in its own message; a class name or an errno
+      integer never can).
     - No payload, path, or DLP-detected value is printed by this function
       -- it never touches any of those itself; it only ever receives the
-      exception object `dispatch()` raised.
+      exception object `dispatch()` raised, and `_describe_failure()`
+      deliberately avoids the `.filename`/`.filename2` attributes
+      `OSError` subclasses carry (those hold a path).
     - Output is exactly one line, `error: unexpected internal failure
-      (<ExceptionClassName>)`, to stderr, and a non-zero exit -- fail
-      closed for anything unanticipated, the same discipline every other
-      failure path in these three files already follows for the failures
-      it did anticipate.
+      (<description>)`, to stderr, and a non-zero exit -- fail closed for
+      anything unanticipated, the same discipline every other failure
+      path in these three files already follows for the failures it did
+      anticipate.
+
+    The root-cause class name and `errno` were added after the ACL-mask
+    bug above took real debugging time to diagnose on quory: the outer
+    `StoreError`'s own message already safely named the inner
+    `PermissionError` (`"cannot open event log: {}".format(type(exc).
+    __name__)`), but this function was dropping that -- printing only
+    "StoreError" and discarding everything else, even though the wrapping
+    class's message here happened to be safe. Reading the root cause's
+    class name and errno directly off the exception object (rather than
+    parsing a wrapper's message string, which is not guaranteed to be
+    safe or present for every `StoreError`-like class) keeps the
+    value-free guarantee intact while restoring the diagnostic value.
 
     `SystemExit` (raised by every entry point's own `_deny()`/`_error()`
     calls) is deliberately not caught -- it is not an `Exception`
@@ -433,5 +491,5 @@ def run_entrypoint(dispatch, argv) -> None:
     try:
         dispatch(argv)
     except Exception as exc:  # noqa: BLE001 -- intentional catch-all, see docstring
-        print("error: unexpected internal failure ({})".format(type(exc).__name__), file=sys.stderr)
+        print("error: unexpected internal failure ({})".format(_describe_failure(exc)), file=sys.stderr)
         sys.exit(1)

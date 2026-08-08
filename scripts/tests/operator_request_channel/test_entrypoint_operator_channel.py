@@ -310,6 +310,37 @@ class UncaughtExceptionSafetyTests(OperatorChannelTestCase):
     value-free `error:` line every other failure path here produces, never
     a raw traceback."""
 
+    def test_root_cause_class_name_and_errno_survive_a_wrapped_exception(self):
+        # Reproduces the exact production incident (2026-08-08 post-deploy
+        # vertical test): accept-request failed with `error: unexpected
+        # internal failure (StoreError)` -- the *outer* wrapper's class
+        # name only -- while the real cause (a PermissionError, errno 13,
+        # from the events/ ACL-mask bug) was invisible on either side of
+        # the SSH boundary; Coordinator had to ask Operator to run
+        # `getfacl` by hand to find it. This raises the exact shape
+        # `store.append_event()` itself raises when `os.open()` fails
+        # (`except OSError as exc: raise StoreError(...)`, which leaves
+        # Python's implicit `__context__` chaining intact) so the test
+        # exercises the real chain-walking path, not a synthetic one.
+        request_id, _msg = self._seed_opreq()
+
+        def raise_wrapped_permission_error(*_args, **_kwargs):
+            try:
+                raise PermissionError(13, "Permission denied")
+            except OSError as exc:
+                raise store.StoreError("cannot open event log: {}".format(type(exc).__name__))
+
+        with mock.patch.object(store, "append_event", side_effect=raise_wrapped_permission_error):
+            result = self._run(["accept-request", request_id])
+        self.assertNotEqual(result.exit_code, 0)
+        combined = result.stdout + result.stderr
+        self.assertIn("StoreError", result.stderr)  # outer class, as before
+        self.assertIn("PermissionError", result.stderr)  # root cause class -- this is the fix
+        self.assertIn("errno=13", result.stderr)  # errno -- this is the fix
+        self.assertNotIn("Permission denied", combined)  # message body still never appears
+        self.assertNotIn("cannot open event log", combined)  # nor the wrapper's own message
+        self.assertNotIn("Traceback", combined)
+
     def test_unexpected_exception_during_accept_does_not_leak_a_traceback(self):
         request_id, _msg = self._seed_opreq()
         marker = "SENSITIVE-MARKER-accept-request"

@@ -256,6 +256,29 @@ class UncaughtExceptionSafetyTests(OperatorChannelClientTestCase):
     function's own docstring); this catch-all is what keeps that
     assumption true for local failures too."""
 
+    def test_root_cause_class_name_and_errno_survive_a_wrapped_exception(self):
+        # See test_entrypoint_operator_channel.py's identical test for the
+        # full incident description (2026-08-08 post-deploy vertical
+        # test). This file has no direct spool access, but run_entrypoint()
+        # is the same generic function regardless of what raised the
+        # wrapped exception, so the mechanism is exercised the same way.
+        def raise_wrapped_permission_error(*_args, **_kwargs):
+            try:
+                raise PermissionError(13, "Permission denied")
+            except OSError as exc:
+                raise RuntimeError("ssh failed: {}".format(type(exc).__name__))
+
+        with mock.patch.object(self.module, "_run_ssh", side_effect=raise_wrapped_permission_error):
+            result = self._run(["submit"], self._valid_opreq_body())
+        self.assertNotEqual(result.exit_code, 0)
+        combined = result.stdout + result.stderr
+        self.assertIn("RuntimeError", result.stderr)
+        self.assertIn("PermissionError", result.stderr)
+        self.assertIn("errno=13", result.stderr)
+        self.assertNotIn("Permission denied", combined)
+        self.assertNotIn("ssh failed", combined)
+        self.assertNotIn("Traceback", combined)
+
     def test_unexpected_exception_during_submit_does_not_leak_a_traceback(self):
         marker = "SENSITIVE-MARKER-local-submit"
         with mock.patch.object(self.module, "_run_ssh", side_effect=RuntimeError(marker)):
