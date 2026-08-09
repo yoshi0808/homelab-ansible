@@ -617,6 +617,11 @@ semaphore_templates_report_dir: >-
 # =============================================================================
 
 # --- R1/R2: scheduleカタログ --------------------------------------------------
+# **主目的はドリフトを起こさないこと**(Yoshinobu、2026-08-10)。UIで一時的に
+# 変えることはあってよく、それを禁じる仕組みではない — **一時的な変更が恒久化
+# しない**ことを保証する。次の適用でカタログの値へ戻る。「開発側からいつ何が
+# 実行されるか読める」のは副次的な効果である。
+#
 # 1エントリが持つのは name(scheduleの同定キー、R2) / template(対象template名。
 # roles/semaphore_templatesのrender_nameが生成する現在名 "{class}: {title}"
 # 形式と一致していること) / cron / active / task_params の5項目。
@@ -803,6 +808,23 @@ semaphore_schedules_catalog:
   - name: "SEMI-SAFE:Codex update check(Only on Quory)"
     template: "SEMI-SAFE: Codex update check"
     cron: "0 17 * * 5"
+    active: true
+    task_params:
+      environment: "{}"
+
+  # --- 第4バッチ(2026-08-10追加): 最後の1件。これで管理外が0件になる ---------
+  #
+  # **本番のProxmox週次フルパッチ。** pve1 / pve2 にパッチを当て、再起動を伴う、
+  # この環境でいちばん重い定期実行である。形は他の18件と同じで実行パラメータも
+  # 持たないが、**「毎週土曜6時に走る」という事実がGitに載ることがこのバッチの
+  # 意味**であり、そのため単独のバッチにしてある。
+  #
+  # 載ることで、cron・対象template・task_params・無効化の4つはUIで変えても次の
+  # 適用でカタログの値へ戻る。有効化(false→true)だけは別扱いで、R12の4条件が
+  # 揃わない限り発行されない。
+  - name: "UN-SAFE:Proxmox Weekly Full Patch"
+    template: "UN-SAFE: Proxmox patch weekly full"
+    cron: "00 06 * * 6"
     active: true
     task_params:
       environment: "{}"
