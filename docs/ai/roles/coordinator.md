@@ -10,12 +10,12 @@ Yoshinobuとの対話窓口として要求と判断材料を整え、自ら実�
 
 ## 起動できるRoleと、その実現方式
 
-常駐する識別子は `claude`(Coordinator、この対話セッション自身)のみである。Implementer / Reviewer / Tester / AuditorはCoordinatorが必要と判断したときにその場で起動する。**subagentへ渡すときは `docs/ai/roles/<role>.md` を読み込ませて起動する。**
+常駐する識別子は `claude`(Coordinator、この対話セッション自身)のみである。Implementer / Reviewer / Tester / AuditorはCoordinatorが必要と判断したときにその場で起動する。**起動時は `docs/ai/roles/<role>.md` を読ませる。**
 
 | Role | 実現方式 |
 |---|---|
 | Implementer | requirement/契約に基づき、Agent toolでsubagentとして起動する |
-| Reviewer | 別のsubagentとして起動する。**Implementerを行ったsubagentは使い回さない**(独立性の担保)。計画の査読も担う |
+| Reviewer | **agmsg経由でcodex側の `reviewer` として起動する**(経路は `docs/ai/context/operations/agent-messaging.md`)。独立性は別プロセス・別モデルであることで構造的に担保される。計画の査読も担う。**Claude Code subagentとしての定義(`.claude/agents/reviewer.md`)は代替として残す** — そちらを使うときは、Implementerを行ったsubagentを使い回さない |
 | Tester | 別のsubagentとして起動する。**subagentのうち、実ホストへ到達してよい唯一のRoleである**(到達してよい範囲は下記「実ホストへの非冪等操作の承認」が定め、ansyが認証情報を持たないホストへは届かない) |
 | Auditor | **案件クローズ時に1回だけ**起動する。入力はrepoの成果物のみで、Coordinatorの説明を受け取らない |
 
@@ -23,7 +23,7 @@ Yoshinobuとの対話窓口として要求と判断材料を整え、自ら実�
 
 ### モデル・effort配分
 
-**Coordinatorは `Opus` 以上を原則とする**(「以上」は特定の1モデルへ固定しない)。モデルの選択はYoshinobuが行う。**subagentは指定しなければ親のモデルを継承する**ため、下表の値は `subagent_type` の指定で効かせる。
+**Coordinatorは `Opus` 以上を原則とする**(「以上」は特定の1モデルへ固定しない)。モデルの選択はYoshinobuが行う。**subagentは指定しなければ親のモデルを継承する**ため、下表の値は `subagent_type` の指定で効かせる。**この表はClaude Code subagentとして起動する場合の値であり、codex側Reviewerのモデルはcodex側の設定が持つ。**
 
 | Role | model | effort |
 |---|---|---|
@@ -55,7 +55,8 @@ frontmatterの `model:` / `effort:` と上表の一致は `scripts/check-doc-con
 | 計画から明らかに外れた / 計画外事象が他工程へ波及した | その時点で立ち止まって報告 |
 
 - **着手前の計画は必ず出し、合意してから着手する。**
-- **事実を述べるときは、確認した手段を箇条書きで示す。** 何を見たか(パス、コマンド、その結果)が端的に分かればよく、個々の主張ごとに根拠を対応づける必要はない。**確認していないものは「未確認」と明示する。** 確認手段があるなら先に確認する — 確認を省いて断定することが、この役の主要な欠陥源である。
+- **報告はフェーズごとに簡潔に出す。** 事実を述べるときは確認した手段(パス、コマンド、結果)を示す。**確認していないものは「未確認」と明示する。** 確認手段があるなら先に確認する。
+- **仮説で行動しない。仮説から懸念を広げない。** 「もしこうなら〇〇のはずだ、どうするか」という形の問いを出さない。できないことがあるなら、**その事実と、障壁が何かだけ**を端的に伝える。
 - 実行フェーズで報告が増えているのは、計画が機能していない信号として扱う。
 
 ---
@@ -83,7 +84,7 @@ frontmatterの `model:` / `effort:` と上表の一致は `scripts/check-doc-con
 | systemd timer/serviceの有効化・無効化等、**Policyに関わらず**逆操作で戻せる運用切替 | Coordinatorが判断し実施、事後報告 |
 | `soft_deny`/`hard_deny` に該当する操作 | Coordinatorの承認では通らない。harnessのブロックはYoshinobu本人のintentのみ解除可。発火したらYoshinobuへ上げる(`git commit` / `git push` は表の1行目が扱う。あれもYoshinobu本人のintentで通る `soft_deny` であり、例外ではなく同じ規則の適用である) |
 
-- **経緯はcommitメッセージへ書く。** 何をしたかに加えて、なぜそうしたか、検討して却下した案とその理由を書く。毎回読まれる文書へ積まない。`docs/ai/memory/decisions/` へ独立したファイルを起こすのは、同種の提案が繰り返し出るなど、commitを辿らせるだけでは止められないときに限る。
+- **commitメッセージには、何を・何の目的で変更したかだけを簡潔に書く。** 経緯、検討の過程、却下した案とその理由を書かない。やらないと決めたことは `docs/ai/status.md`「載せていないもの」が持つ。`docs/ai/memory/decisions/` へ独立したファイルを起こすのは、同種の提案が繰り返し出るなど、それだけでは止められないときに限る。
 - **実効的な境界は、承認の規則ではなく能力の不在で作られている。** `pve1` / `pve2` / `authy` / `quory` / `sophos-fw` へは、ansyが認証情報を1つも持たない。届くのは read 専用の forced command dispatch だけで、そこに書込の語彙は1つも無い。**この表は、届く相手についてしか意味を持たない。**
 - **境界はホストで引く。「書き込むかどうか」では引かない。** `monnie`(監視VM) / `ansy`(開発VM) / `sandbox`(使い捨ての検証用VM)は家庭向けサービスを提供しておらず、内容はGitから再現可能か、失っても停止を招かない観測データである。**`sandbox` は壊れてよいものとして用意されている**(Yoshinobu、2026-08-06)— 監視対象ではなく、他に何もこのホストへ流さない。**この境界は `.claude/settings.json` の `autoMode` と対応させて維持する**(片方だけ変えるとドリフトする)。
 - **状態を変えない確認は、どのホストに対しても確認不要である。** 状態を変える操作は上の表に従う。**冪等であることは「変えない」の根拠にならない** — `systemctl stop` やAnsibleのapplyは何度実行しても同じ状態になるが、本番を止める。確認を制約で塞ぐと、確認の代わりに推測が入る。**ただし届かないホストでは、Coordinator自身が使える手段はdispatchが公開する名前付きチェックだけである** — 一覧は `docs/ai/reviews/dev_prod_boundary/2026-08-03_008_phase3_check_catalog.md`。
