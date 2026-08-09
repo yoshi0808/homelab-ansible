@@ -1,0 +1,182 @@
+---
+# Task-layer control-flow fixture for
+# roles/semaphore_templates/tasks/main.yml's schedule block/rescue/always
+# (2026-08-09 re-review, docs/ai/reviews/semaphore_schedules_as_code/
+# 2026-08-09_019_review_implementation_r2.md item 3, the 3rd-round
+# re-review docs/ai/reviews/semaphore_schedules_as_code/2026-08-09_020_
+# review_implementation_r3.md Critical #1 / Medium #2, and the 4th-round
+# re-review docs/ai/reviews/semaphore_schedules_as_code/2026-08-09_023_
+# review_implementation_r4.md Critical #1).
+#
+# This is a **structural mirror**, not a literal drive of tasks/main.yml.
+# The real vulnerability the r2 re-review found (High #1) is specifically
+# about a `no_log: true` task (a real `uri` call with an Authorization
+# header) failing with a message that happens to contain the token, and
+# that message reaching the console or the report before the existing
+# token-scrub runs. Empirically (see run_task_flow_tests.py's header
+# comment), `ansible.builtin.uri`'s own failure messages
+# ("Status code was N and not [...]") never embed the request's
+# Authorization header or the response body, so there is no realistic way
+# to make one of the *real* uri tasks in this role fail with the token
+# actually present in `ansible_failed_result.msg` -- that is exactly the
+# "通常想定しにくいが万一含まれていても" (unlikely but just-in-case) case
+# tasks/main.yml's own header comment already describes. This fixture
+# reproduces that just-in-case case directly and deterministically (a
+# no_log task whose msg *is* engineered to contain the token), so the
+# scrub-timing mechanism itself -- not the improbable trigger condition --
+# is what gets exercised and asserted.
+#
+# The shape below is intentionally identical to tasks/main.yml's schedule
+# section as fixed on 2026-08-09 (all four rounds):
+#   (first, sibling to everything else): a reserved-name guard -- fails
+#     closed if any `(_)?fixture_*`-prefixed name (this fixture's own
+#     internal-state namespace, the same one `fixture_run_failed`/
+#     `fixture_report_save_failed` live in -- mirroring `(_)?semaphore_
+#     schedules_*` in the real role) is *already defined* before this
+#     fixture's own tasks would ever set it, and is not one of the small
+#     allowlist of names this fixture legitimately accepts from the
+#     outside. This is the r4 fix: extra-vars can corrupt a *value* but
+#     cannot un-define a name, so checking "is this reserved name already
+#     defined" (not "what is its value") cannot be spoofed the way a
+#     boolean flag can.
+#   block: [the thing that might fail -- parametrized by fixture_should_
+#     fail (default true) so scenario E can make it succeed instead]
+#   rescue: [scrub into a fact; do NOT call fail here, so always: still runs]
+#   always: [block: try to save a report (report tasks use
+#            ignore_unreachable: true + register, since rescue: cannot
+#            catch UNREACHABLE -- r3 Medium #2) / rescue: scrub a report-
+#            save FAILED (not UNREACHABLE) into a *separate* fact, also
+#            without calling fail]
+#   (sibling, outside the named block): re-raise using whichever of the
+#     two scrubbed facts are set, combining both if both are set, **or**
+#     `ansible_failed_result is defined` as a fallback that cannot be
+#     spoofed to false via extra-vars (r3 Critical #1). This fallback
+#     alone is *not* sufficient when the block succeeds and only the
+#     report-save goes UNREACHABLE (r4 Critical #1: `ignore_unreachable`
+#     never triggers `rescue`, so `ansible_failed_result` stays undefined)
+#     -- that residual gap is what the reserved-name guard at the top
+#     closes instead.
+#
+# Loopback / localhost only. No real host, no real API, no real IP.
+# `ansible_remote_tmp` can be pointed at an unwritable path via
+# `fixture_bad_remote_tmp` (scenario D/E / UNREACHABLE) -- this only
+# affects tasks that actually execute a remote module (copy/file), not the
+# `ansible.builtin.fail`/`set_fact` action-plugin-only tasks in the block/
+# rescue above, which never need a remote temp dir (verified empirically;
+# see run_task_flow_tests.py).
+
+- name: Pattern fixture mirroring the schedules block/rescue/always shape
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  become: false
+  vars:
+    ansible_remote_tmp: "{{ fixture_bad_remote_tmp | default(omit) }}"
+  tasks:
+    # r4 fix: reserved-name guard, mirroring schedules_validate_config.yml's
+    # new first task. This checks the fixture's *actual* internal-state
+    # namespace (`(_)?fixture_*`, the same prefix `fixture_run_failed` /
+    # `fixture_report_save_failed` use) against an explicit allowlist of the
+    # names this fixture legitimately accepts from the outside
+    # (`fixture_secret_token` / `fixture_report_dir` /
+    # `fixture_bad_remote_tmp` / `fixture_should_fail`). The helper vars
+    # below are deliberately named `_reserved_name_guard_*` (no `fixture`
+    # substring) so they don't match their own pattern and false-positive
+    # on themselves.
+    - name: "Fail closed if any (_)fixture_* internal-state name is already defined before this fixture's own tasks set it"
+      vars:
+        _reserved_name_guard_allowlist:
+          - fixture_secret_token
+          - fixture_report_dir
+          - fixture_bad_remote_tmp
+          - fixture_should_fail
+        _reserved_name_guard_observed: "{{ lookup('varnames', '^_?fixture_.*', wantlist=True) }}"
+        _reserved_name_guard_unexpected: >-
+          {{ _reserved_name_guard_observed | reject('in', _reserved_name_guard_allowlist) | list | sort }}
+      ansible.builtin.fail:
+        msg: >-
+          reserved (_)fixture_* names already defined before this
+          fixture's own tasks ran: {{ _reserved_name_guard_unexpected | join(', ') }}
+      when: (_reserved_name_guard_unexpected | length) > 0
+
+    - name: Simulate the schedule block (fails unless fixture_should_fail is explicitly false)
+      block:
+        - name: A no_log task whose failure message happens to contain the token (worst case)
+          ansible.builtin.fail:
+            msg: "simulated no_log task failure; token={{ fixture_secret_token }}"
+          no_log: true
+          when: fixture_should_fail | default(true) | bool
+
+        - name: Simulate success (scenario E -- schedule processing itself succeeds)
+          ansible.builtin.debug:
+            msg: "fixture block succeeded (fixture_should_fail=false)"
+          when: not (fixture_should_fail | default(true) | bool)
+      rescue:
+        - name: "Build a token-scrubbed copy of the original failure (does not re-raise here — always: must still run)"
+          ansible.builtin.set_fact:
+            fixture_run_failed: true
+            fixture_run_failed_task: "{{ ansible_failed_task.name | default('不明') }}"
+            fixture_run_failed_msg: >-
+              {{ (ansible_failed_result.msg | default('(取得できず)'))
+                 | regex_replace((fixture_secret_token | regex_escape), '***REDACTED-TOKEN***') }}
+          no_log: true
+      always:
+        - name: Save a report; a failure here must not erase the original failure
+          block:
+            - name: Write the report file (scenario B may make this FAILED; scenario D/E may make this UNREACHABLE)
+              ansible.builtin.copy:
+                content: >-
+                  {{ {'failed': fixture_run_failed | default(false),
+                      'failed_task': fixture_run_failed_task | default(''),
+                      'failed_msg': fixture_run_failed_msg | default('')} | to_nice_json }}
+                dest: "{{ fixture_report_dir }}/latest.json"
+                mode: "0644"
+              ignore_unreachable: true
+              register: fixture_report_write_result
+          rescue:
+            - name: Build a token-scrubbed copy of the report-save FAILED failure (kept separate from the original failure)
+              ansible.builtin.set_fact:
+                fixture_report_save_failed: true
+                fixture_report_save_failed_msg: >-
+                  {{ (ansible_failed_result.msg | default('(取得できず)'))
+                     | regex_replace((fixture_secret_token | regex_escape), '***REDACTED-TOKEN***') }}
+              no_log: true
+
+        # rescue: does not fire for UNREACHABLE (Ansible does not route it
+        # there) -- ignore_unreachable above keeps the play alive instead
+        # of dying immediately, and this task detects the condition
+        # explicitly from the registered result.
+        - name: Record an UNREACHABLE report-save failure (rescue cannot catch UNREACHABLE)
+          ansible.builtin.set_fact:
+            fixture_report_save_failed: true
+            fixture_report_save_failed_msg: >-
+              {{ (fixture_report_write_result.msg | default('(取得できず)'))
+                 | regex_replace((fixture_secret_token | regex_escape), '***REDACTED-TOKEN***') }}
+          no_log: true
+          when: fixture_report_write_result.unreachable | default(false)
+
+    - name: Re-raise the original failure and/or the report-save failure (both scrubbed, neither absorbed into success)
+      ansible.builtin.fail:
+        msg: >-
+          {{
+            ('fixture task失敗(task: ' ~ (fixture_run_failed_task | default('不明')) ~ '): ' ~ (fixture_run_failed_msg | default('(詳細不明)')))
+            if (fixture_run_failed | default(false)) else ''
+          }}
+          {{
+            ('/ さらにレポート保存も失敗しました: ' ~ (fixture_report_save_failed_msg | default('(詳細不明)')))
+            if (fixture_report_save_failed | default(false)) else ''
+          }}
+          {{
+            (
+              '/ fixture block失敗が検出されましたがfactが空です'
+              ~ '(extra-varsによる上書きの可能性)。ansible_failed_taskを確認してください。'
+            ) if (
+              (not (fixture_run_failed | default(false)))
+              and (not (fixture_report_save_failed | default(false)))
+              and (ansible_failed_result is defined)
+            ) else ''
+          }}
+      when: >-
+        (fixture_run_failed | default(false))
+        or (fixture_report_save_failed | default(false))
+        or (ansible_failed_result is defined)

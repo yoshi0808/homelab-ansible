@@ -44,9 +44,11 @@ homelab_vault_pass
 # 打ち消す — いずれもリポジトリに残す成果物である)
 #   scripts/tests/fixtures/                  scripts/check-doc-consistency.py の回帰fixture
 #   scripts/tests/operator_request_channel/  Operator Request Channelのoffline/integration test
+#   scripts/tests/semaphore_schedules/       semaphore_schedules filter pluginの単体test
 scripts/tests/*
 !scripts/tests/fixtures/
 !scripts/tests/operator_request_channel/
+!scripts/tests/semaphore_schedules/
 new-session.sh*
 kick.sh
 prep-agent.sh*

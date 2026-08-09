@@ -1,0 +1,68 @@
+---
+# Included with `loop: semaphore_schedules_diff_result.new` from
+# schedules_apply_stage1.yml. `item` here is one entry of that list:
+# {name, desired} where `desired` was already computed by the diff filter
+# via semaphore_schedules_desired(entry, None, template_id, 1) -- R13:
+# `desired.active` is always False for a brand-new schedule.
+#
+# R6 guarantees `new` is only ever non-empty in closed-world (migration
+# preflight fails closed on any catalog name absent from the API), so no
+# phase branch is needed here -- unlike schedules_apply_stage1_item.yml,
+# there is no pre-existing identity to have drifted from.
+#
+# Task names below are deliberately static (ansible-lint name[template]:
+# Jinja belongs only at the very end of a name) -- the calling loop's
+# `loop_control: label: "{{ item.name }}"` (schedules_apply_stage1.yml)
+# already shows which schedule each console line belongs to; `item.name`
+# still appears in fail/assert messages where it matters for diagnosis.
+
+- name: Create the schedule
+  ansible.builtin.uri:
+    url: "{{ semaphore_templates_api_base_url }}/project/{{ semaphore_templates_project_id }}/schedules"
+    method: POST
+    headers:
+      Authorization: "Bearer {{ semaphore_templates_token }}"
+    body_format: json
+    body: "{{ item.desired | semaphore_schedules_create_payload(semaphore_templates_project_id) }}"
+    status_code: [200, 201]
+    validate_certs: "{{ semaphore_templates_api_validate_certs }}"
+  register: _semaphore_schedules_create_result
+  no_log: true
+
+- name: Fail closed if the create response did not return an id
+  ansible.builtin.assert:
+    that:
+      - _semaphore_schedules_create_result.json.id is defined
+    fail_msg: >-
+      POST {{ semaphore_templates_api_base_url }}/project/{{ semaphore_templates_project_id }}/schedules
+      ({{ item.name }}) がidを返しませんでした。ここで停止します
+      (Semaphore上には作成済みの可能性があるため、次回実行時のpreflightの
+      diffで確認すること)。
+    quiet: true
+  no_log: true
+
+- name: Verify the newly created schedule round-tripped correctly (R16-2)
+  ansible.builtin.uri:
+    url: "{{ semaphore_templates_api_base_url }}/project/{{ semaphore_templates_project_id }}/schedules/{{ _semaphore_schedules_create_result.json.id }}"
+    method: GET
+    headers:
+      Authorization: "Bearer {{ semaphore_templates_token }}"
+    status_code: [200]
+    validate_certs: "{{ semaphore_templates_api_validate_certs }}"
+  register: _semaphore_schedules_create_verify
+  no_log: true
+
+- name: Fail closed if the newly created schedule did not verify (R16-2)
+  ansible.builtin.fail:
+    msg: >-
+      schedule {{ item.name }}(id={{ _semaphore_schedules_create_result.json.id }})の
+      POST直後GETが期待値と一致しません: {{ (_semaphore_schedules_create_verify.json
+      | semaphore_schedules_verify(item.desired)) | join(', ') }}。
+      APIが未知のキーを黙って捨てた可能性があります(6.5節)。ここで
+      停止します(R16-2)。
+  when: >-
+    ((_semaphore_schedules_create_verify.json | semaphore_schedules_verify(item.desired)) | length) > 0
+
+- name: Record the created schedule
+  ansible.builtin.set_fact:
+    semaphore_schedules_created: "{{ semaphore_schedules_created + [{'name': item.name, 'id': _semaphore_schedules_create_result.json.id}] }}"

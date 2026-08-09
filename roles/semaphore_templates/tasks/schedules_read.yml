@@ -1,0 +1,75 @@
+---
+# semaphore_schedules_as_code R10: この時点(main.ymlでapply.ymlの後に
+# importされる)で読む template 一覧は、template側のapply/--checkが
+# 既に確定した後の状態である。--check時はapply.ymlが走らないため
+# template側は未変更のまま、apply時は新規作成分も含めて読める。
+# 「--checkとapplyで前提が分岐しない」(R10)は、read.ymlのGETを二重に
+# 行わずtemplate applyの直後にここで一度だけ再取得することで担保する。
+#
+# read-only: --checkの有無にかかわらず常に実行する(R7、diffの入力)。
+# uriモジュールはcheck_mode非対応(auto-skip)のため、全taskに明示的な
+# check_mode: falseが要る(skills/ansible-implementation-style/SKILL.md
+# 「check_modeの実装上の落とし穴」1)。
+
+- name: GET the current Semaphore schedules for the resolved project
+  ansible.builtin.uri:
+    url: "{{ semaphore_templates_api_base_url }}/project/{{ semaphore_templates_project_id }}/schedules"
+    method: GET
+    headers:
+      Authorization: "Bearer {{ semaphore_templates_token }}"
+    status_code: [200]
+    validate_certs: "{{ semaphore_templates_api_validate_certs }}"
+  register: _semaphore_schedules_api_list
+  no_log: true
+  check_mode: false
+
+- name: Fail closed if the schedules response does not look like a list
+  ansible.builtin.assert:
+    that:
+      - _semaphore_schedules_api_list.json is defined
+      - _semaphore_schedules_api_list.json is sequence
+      - _semaphore_schedules_api_list.json is not string
+      - _semaphore_schedules_api_list.json is not mapping
+    fail_msg: >-
+      GET {{ semaphore_templates_api_base_url }}/project/{{ semaphore_templates_project_id }}/schedules
+      の応答がscheduleのJSON配列として読めません。推測して書き込みへ進まず、
+      ここで停止します。
+    quiet: true
+
+- name: Set the observed schedules fact and snapshot their ids (R16 preflight-time snapshot)
+  ansible.builtin.set_fact:
+    semaphore_schedules_observed: "{{ _semaphore_schedules_api_list.json }}"
+    semaphore_schedules_preflight_ids: "{{ _semaphore_schedules_api_list.json | map(attribute='id') | list }}"
+
+# R10: fresh GET of templates, taken *after* the template-side apply.yml has
+# already run (or been skipped under --check). This is intentionally a
+# second GET distinct from read.yml's semaphore_templates_observed (which
+# was fetched *before* apply.yml and is now stale for this purpose).
+- name: GET the current Semaphore templates for the resolved project (fresh, post template-apply — R10)
+  ansible.builtin.uri:
+    url: "{{ semaphore_templates_api_base_url }}/project/{{ semaphore_templates_project_id }}/templates"
+    method: GET
+    headers:
+      Authorization: "Bearer {{ semaphore_templates_token }}"
+    status_code: [200]
+    validate_certs: "{{ semaphore_templates_api_validate_certs }}"
+  register: _semaphore_schedules_templates_list
+  no_log: true
+  check_mode: false
+
+- name: Fail closed if the fresh templates response does not look like a list
+  ansible.builtin.assert:
+    that:
+      - _semaphore_schedules_templates_list.json is defined
+      - _semaphore_schedules_templates_list.json is sequence
+      - _semaphore_schedules_templates_list.json is not string
+      - _semaphore_schedules_templates_list.json is not mapping
+    fail_msg: >-
+      GET {{ semaphore_templates_api_base_url }}/project/{{ semaphore_templates_project_id }}/templates
+      (R10の再取得)の応答がtemplateのJSON配列として読めません。ここで
+      停止します。
+    quiet: true
+
+- name: Set the fresh observed-templates fact (R10 — schedules resolve against this, not read.yml's pre-apply snapshot)
+  ansible.builtin.set_fact:
+    semaphore_schedules_observed_templates: "{{ _semaphore_schedules_templates_list.json }}"

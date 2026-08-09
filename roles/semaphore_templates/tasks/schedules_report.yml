@@ -1,0 +1,223 @@
+---
+# R19: schedule の差分レポートを、template のレポート
+# (semaphore_templates_report_dir、latest.json)とは別の置き場
+# (semaphore_schedules_report_dir)へ、同時に読める形で保存する。既存の
+# latest.json は上書きしない。
+#
+# **2026-08-09、査読差し戻し(`2026-08-09_017_review_implementation.md`
+# High #3)への対応。** このfileは`tasks/main.yml`のnested block/rescue/
+# alwaysの`always:`から(さらにその内側の独自block/rescueに包まれて)呼ば
+# れ、**成功経路・`--check`・schedule blockが失敗した経路のすべてで実行
+# される。** 失敗経路では、preflight/diff/stage1/stage2のどの時点で
+# 止まったかにより、これ以降で参照する事実の一部がまだ`set_fact`されて
+# いないことがある(例: `schedules_preflight.yml`自体が失敗すれば
+# `semaphore_schedules_diff_result`は存在しない)。**このfileが自分自身
+# 「未定義変数」で失敗すると、元の失敗がその新しいエラーに隠れてしまう**
+# ため、参照する変数すべてに`default(...)`を付けている。これは「安全に
+# 生成できる範囲のレポートを保存する」(査読の要求)の実装そのものであり、
+# 値が空/既定であること自体が「ここまでしか進まなかった」という情報に
+# なる。
+#
+# **2026-08-09、再査読差し戻し(`2026-08-09_019_review_implementation_
+# r2.md` High #1)への対応。** 以前はこのfile自身が`ansible_failed_result.
+# msg`を直接読んで(未scrubbedのまま)`failed_msg`へ入れ、mode 0644の
+# JSONへ保存していた — これがtoken漏えいの経路だった。**修正: この
+# failedの3つの事実(`semaphore_schedules_run_failed` /
+# `_run_failed_task` / `_run_failed_msg`)はもうこのfileでは計算しない。**
+# `tasks/main.yml`のschedule block自身のrescueが、`ansible_failed_result`
+# から読み取った直後にscrub済みのfactとして`set_fact`する(このrole既存の
+# token scrubパターンと同一)。このfileは、そのscrub済みfactを
+# `default(...)`で読むだけであり、生の`ansible_failed_result`には一切
+# 触れない。
+#
+# Runs after every other schedules task (including schedules_apply_
+# stage1.yml / schedules_apply_stage2.yml) so it can show the actual
+# outcome, not just the pre-apply diff. Under --check the outcome lists
+# are simply empty (schedules_diff.yml initialized them; the two apply
+# files never ran) and semaphore_schedules_stage2_gate_result is
+# schedules_diff.yml's preview.
+#
+# copy/file support check_mode simulation (skill "check_modeの実装上の
+# 落とし穴" 1) so both need an explicit check_mode: false to actually save
+# under --check (R7 — report saving is a read-side/diagnostic action).
+
+- name: Freeze the schedules report timestamp (JST; repo規約でUTC/リテラルZは使わない)
+  ansible.builtin.set_fact:
+    semaphore_schedules_ts_iso: "{{ lookup('pipe', \"TZ='Asia/Tokyo' date '+%Y-%m-%dT%H:%M:%S+09:00'\") }}"
+    semaphore_schedules_ts: "{{ lookup('pipe', \"TZ='Asia/Tokyo' date '+%Y%m%d_%H%M%S+0900'\") }}"
+
+# For each newly-created schedule (this run), note whether the catalog
+# wants it active — the diff filter never puts a brand-new schedule into
+# `pending_activation` in the same run that creates it (R13's docstring:
+# activation happens in a *later* apply), so this is computed here purely
+# for report readability, from data already on hand (no new filter call).
+- name: Build a "created, activation pending a future apply" note list (R13/AC3)
+  ansible.builtin.set_fact:
+    semaphore_schedules_created_pending_activation: >-
+      {%- set catalog_by_name = {} -%}
+      {%- for e in semaphore_schedules_catalog -%}
+        {%- set _ = catalog_by_name.update({e.name: e}) -%}
+      {%- endfor -%}
+      {%- set out = [] -%}
+      {%- for c in (semaphore_schedules_created | default([])) -%}
+        {%- if catalog_by_name.get(c.name, {}).get('active') is true -%}
+          {%- set _ = out.append(c.name) -%}
+        {%- endif -%}
+      {%- endfor -%}
+      {{ out }}
+
+- name: Show the schedules diff/outcome summary
+  ansible.builtin.debug:
+    msg:
+      - "mode                 : {{ 'check (適用なし)' if ansible_check_mode else 'apply' }}"
+      - >-
+          failed : {{ semaphore_schedules_run_failed | default(false) }}
+          {{ ('(' ~ (semaphore_schedules_run_failed_task | default('')) ~ ')')
+             if (semaphore_schedules_run_failed | default(false)) else '' }}
+      - "phase                : {{ 'closed-world' if (semaphore_schedules_closed_world_bool | default(false)) else '移行期間' }}"
+      - "api_base_url         : {{ semaphore_templates_api_base_url }}"
+      - >-
+          timezone expected/observed/version :
+          {{ semaphore_schedules_expected_timezone | default('(未取得)') }} /
+          {{ semaphore_schedules_observed_timezone | default('(未取得)') }}
+          / {{ semaphore_schedules_observed_api_version | default('(未取得)') }}
+      - >-
+          新規作成 : {{ (semaphore_schedules_diff_result | default({})).new | default([]) | length }} 件
+          (作成={{ semaphore_schedules_created | default([]) | length }} 件、
+          うち有効化待ち={{ semaphore_schedules_created_pending_activation | default([]) | length }} 件)
+      - >-
+          第1段階 更新 : {{ (semaphore_schedules_diff_result | default({})).stage1 | default([]) | length }} 件
+          (書込={{ semaphore_schedules_stage1_written | default([]) | length }} 件、
+          見送り={{ semaphore_schedules_stage1_skipped | default([]) | length }} 件)
+      - "無変更               : {{ (semaphore_schedules_diff_result | default({})).unchanged | default([]) | length }} 件"
+      - "管理外(削除しない)   : {{ (semaphore_schedules_preflight_result | default({})).unmanaged | default([]) | length }} 件"
+      - >-
+          有効化待ち : {{ (semaphore_schedules_diff_result | default({})).pending_activation | default([]) | length }} 件
+          (有効化済み={{ semaphore_schedules_stage2_activated | default([]) | length }} 件)
+      - >-
+          有効化許可 : {{ (semaphore_schedules_stage2_gate_result | default({})).allowed | default(false) }}
+          ({{ (semaphore_schedules_stage2_gate_result | default({})).reasons | default(['未評価']) | join(' / ') }})
+
+- name: Show unmanaged schedules (defined nowhere in the catalog — R18, report only)
+  ansible.builtin.debug:
+    msg: "? id={{ item.id }} name={{ item.name }} (このカタログに定義が無い。削除しない)"
+  loop: "{{ (semaphore_schedules_preflight_result | default({})).unmanaged | default([]) }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Show stage-1 skipped writes (identity changed since preflight — migration only, R8)
+  ansible.builtin.debug:
+    msg: "! {{ item.name }}(id={{ item.id }}): {{ item.reason }}"
+  loop: "{{ semaphore_schedules_stage1_skipped | default([]) }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+# **2026-08-09、3回目の査読差し戻し(`2026-08-09_020_review_
+# implementation_r3.md`、`_019` Medium #2がopenのまま再指摘)への対応。**
+# `ansible.builtin.block`の`rescue:`はUNREACHABLE(接続先でremote temp
+# directoryが作れない等)を捕捉しない — 通常のFAILEDとは別の状態であり、
+# 発生した瞬間にplay全体が即座に終了し、`main.yml`側のrescue/always/最終
+# 合成taskのいずれにも到達しない。ローカルdecoy(`connection: local`+
+# 書き込み不可な`ansible_remote_tmp`)で、`ignore_unreachable`を付けない
+# 版が`rescue`/`always`のどちらも実行せずplayごと終了することを実測した
+# 上で、以下の対策を採った。
+#
+# `ignore_unreachable: true`(ansible-core既存の task attribute)を
+# 3つのtaskすべてへ付け、`register:`した結果の`.unreachable`を後続task
+# から明示的に判定する。これによりUNREACHABLEでもplayが即死せず、この
+# 同じblock内の後続task(このファイル自身の続き)が通常どおり実行される
+# ことを実測確認済み — `rescue:`は(ignore_unreachableにより)発火しない
+# が、それは元々「通常のFAILED」用の経路(main.yml側のnested block/
+# rescueが既に担当)であり、ここではUNREACHABLE専用の別経路として
+# `semaphore_schedules_report_save_failed*`を直接`set_fact`する。
+
+- name: Ensure the schedules report directory exists
+  ansible.builtin.file:
+    path: "{{ semaphore_schedules_report_dir }}"
+    state: directory
+    mode: "0755"
+  become: false
+  check_mode: false
+  ignore_unreachable: true
+  register: _semaphore_schedules_report_dir_result
+  # safe-readonly: レポート保存は読み取り診断の一部であり、--checkでも実行する
+  # (roles/semaphore_templates/tasks/report.yml と同じ扱い)
+
+- name: Save the schedules diff/outcome report
+  ansible.builtin.copy:
+    content: "{{ semaphore_schedules_report | to_nice_json }}"
+    dest: "{{ semaphore_schedules_report_dir }}/{{ semaphore_schedules_ts }}.json"
+    mode: "0644"
+  vars:
+    semaphore_schedules_report:
+      generated_at: "{{ semaphore_schedules_ts_iso }}"
+      mode: "{{ 'check' if ansible_check_mode else 'apply' }}"
+      failed: "{{ semaphore_schedules_run_failed | default(false) }}"
+      failed_task: "{{ semaphore_schedules_run_failed_task | default('') }}"
+      failed_msg: "{{ semaphore_schedules_run_failed_msg | default('') }}"
+      phase: "{{ 'closed-world' if (semaphore_schedules_closed_world_bool | default(false)) else '移行期間' }}"
+      api_base_url: "{{ semaphore_templates_api_base_url }}"
+      timezone:
+        expected: "{{ semaphore_schedules_expected_timezone | default('(未取得)') }}"
+        observed: "{{ semaphore_schedules_observed_timezone | default('(未取得)') }}"
+        api_version: "{{ semaphore_schedules_observed_api_version | default('(未取得)') }}"
+      diff:
+        new: "{{ (semaphore_schedules_diff_result | default({})).new | default([]) }}"
+        stage1: "{{ (semaphore_schedules_diff_result | default({})).stage1 | default([]) }}"
+        unchanged_count: "{{ (semaphore_schedules_diff_result | default({})).unchanged | default([]) | length }}"
+        pending_activation: "{{ (semaphore_schedules_diff_result | default({})).pending_activation | default([]) }}"
+      unmanaged: "{{ (semaphore_schedules_preflight_result | default({})).unmanaged | default([]) }}"
+      outcome:
+        created: "{{ semaphore_schedules_created | default([]) }}"
+        created_pending_activation: "{{ semaphore_schedules_created_pending_activation | default([]) }}"
+        stage1_written: "{{ semaphore_schedules_stage1_written | default([]) }}"
+        stage1_skipped: "{{ semaphore_schedules_stage1_skipped | default([]) }}"
+        stage2_activated: "{{ semaphore_schedules_stage2_activated | default([]) }}"
+      activation_gate: "{{ semaphore_schedules_stage2_gate_result | default({'allowed': false, 'reasons': ['未評価'], 'url_used': ''}) }}"
+  become: false
+  check_mode: false
+  ignore_unreachable: true
+  register: _semaphore_schedules_report_save_result
+  when: not (_semaphore_schedules_report_dir_result.unreachable | default(false))
+  # safe-readonly: 上と同じ理由
+
+- name: Publish the latest schedules report under a stable name
+  ansible.builtin.copy:
+    src: "{{ semaphore_schedules_report_dir }}/{{ semaphore_schedules_ts }}.json"
+    dest: "{{ semaphore_schedules_report_dir }}/latest.json"
+    remote_src: true
+    mode: "0644"
+  become: false
+  check_mode: false
+  ignore_unreachable: true
+  register: _semaphore_schedules_report_publish_result
+  when: >-
+    not (_semaphore_schedules_report_dir_result.unreachable | default(false))
+    and not (_semaphore_schedules_report_save_result.unreachable | default(false))
+  # safe-readonly: 上と同じ理由
+
+- name: Record an UNREACHABLE report-save failure (rescue cannot catch UNREACHABLE — must be handled explicitly)
+  ansible.builtin.set_fact:
+    semaphore_schedules_report_save_failed: true
+    semaphore_schedules_report_save_failed_msg: >-
+      {{ (
+           (_semaphore_schedules_report_dir_result.msg | default('(取得できず)'))
+           if (_semaphore_schedules_report_dir_result.unreachable | default(false))
+           else (_semaphore_schedules_report_save_result.msg | default('(取得できず)'))
+           if (_semaphore_schedules_report_save_result.unreachable | default(false))
+           else (_semaphore_schedules_report_publish_result.msg | default('(取得できず)'))
+         )
+         | regex_replace((semaphore_templates_token | regex_escape), '***REDACTED-TOKEN***')
+         if (semaphore_templates_token | default('') | length) > 0
+         else (
+           (_semaphore_schedules_report_dir_result.msg | default('(取得できず)'))
+           if (_semaphore_schedules_report_dir_result.unreachable | default(false))
+           else (_semaphore_schedules_report_save_result.msg | default('(取得できず)'))
+           if (_semaphore_schedules_report_save_result.unreachable | default(false))
+           else (_semaphore_schedules_report_publish_result.msg | default('(取得できず)'))
+         ) }}
+  no_log: true
+  when: >-
+    (_semaphore_schedules_report_dir_result.unreachable | default(false))
+    or (_semaphore_schedules_report_save_result.unreachable | default(false))
+    or (_semaphore_schedules_report_publish_result.unreachable | default(false))

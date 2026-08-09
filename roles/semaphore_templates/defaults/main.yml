@@ -491,10 +491,34 @@ semaphore_templates_catalog:
 # ホスト名検証が必ず失敗する。使う名前は inventory がそのホストへ与えている
 # 名前(`inventories/homelab/hosts.yml` の `ansible_host`)に揃える。
 #
-# ansy(検証用)へ向けるときの上書き例:
+# **2026-08-09追補(semaphore_schedules_as_code案件): 実行先を1つのつまみ
+# `semaphore_target`(playbooks/semaphore_templates_setup.ymlの`hosts:`が
+# 直接この変数を読む。既定quory)へ一本化した。** api_base_urlの既定値は
+# `semaphore_target`から導出する — quory向けの値(下記)は従来から変えて
+# いない。`semaphore_target`はplaybookの`hosts:`解決時点(role defaultsが
+# 読み込まれる前)にも要るため、playbook側にも同じ既定値'quory'をinlineで
+# 持たせている(2箇所化はhosts:がrole defaultsを参照できないという構造上の
+# 制約であり、値は常に一致させる)。
+#
+# **token_pathは同じ導出をしない**(下記「tokenの置き場」節、
+# 2026-08-09の査読差し戻しで撤回した理由を参照)。
+#
+# **`-e`での個別上書きは従来どおり効く** — `semaphore_templates_api_base_url`
+# を直接`-e`で渡せば、この導出式より優先される(extra-varsの優先順位は
+# role defaultsより常に高い)。
+#
+# ansy(検証用)へ向けるときの上書き例(いずれか一方でよい):
+#   -e semaphore_target=ansy
+#   # または個別に:
 #   -e semaphore_templates_api_base_url=https://ansy.internal:3000/api
 #   -e semaphore_templates_project_name=homelab-ansible
-#   -e semaphore_templates_token_path=~/.semaphore-api-token-ansy
+#
+# **未知の`semaphore_target`を渡すと、この導出式はJinjaの
+# `UndefinedError`(dict object has no attribute ...)で停止する** —
+# 辞書に無いキーで添字アクセスしているため。playbook側の`hosts:`解決も
+# 別途fail-closedにしてある(playbookヘッダ参照。既定のAnsibleの挙動は
+# 未知のhostパターンをexit 0で黙ってskipするため、それだけでは停止しない
+# ことを実測で確認した)。
 #
 # **2026-08-05に検証を切る回避を撤去した。** 2026-08-04時点ではこの例が
 # 通らず(ROOT CAがKeyUsage拡張を持たず、Pythonのsslが証明書検証に失敗
@@ -502,7 +526,11 @@ semaphore_templates_catalog:
 # 同じ鍵のままKeyUsage付きで再発行し配布したため、**名前で引いたまま
 # `validate_certs: true`(既定)で通る**。ansy / quory の両方でPythonのssl
 # による検証成功を実測済み。案件: docs/ai/reviews/root_ca_keyusage/。
-semaphore_templates_api_base_url: "https://quory.internal:3000/api"
+semaphore_templates_api_base_url: >-
+  {{ {
+    'quory': 'https://quory.internal:3000/api',
+    'ansy': 'https://ansy.internal:3000/api',
+  }[semaphore_target | default('quory')] }}
 semaphore_templates_api_validate_certs: true
 
 # R12(2026-08-04追補): project_id / inventory_id / repository_id は固定値を
@@ -521,13 +549,25 @@ semaphore_templates_repository_name: homelab-ansible
 semaphore_templates_app: ansible
 
 # --- tokenの置き場(R4) --------------------------------------------------------
-# トークンはrepoに置かない。quory上のroot専用ファイルから読む
+# トークンはrepoに置かない。root専用ファイルから読む
 # (roles/recovery_push の push-key と同じ /etc/homelab-recovery/ 配下の
 # 慣例に倣う)。読めない・空のときは推測せず停止する(R4/AC6)。
-# ansy検証時は `-e semaphore_templates_token_path=~/.semaphore-api-token-ansy`
-# で上書きする(root所有0600のquory向けチェックは通らないファイルなので、
-# ansyでの実測はこのrole経由ではなく別途curl等で行うことを想定している —
-# 詳細はimplement記録の追補を参照)。
+#
+# **2026-08-09、査読差し戻し(`2026-08-09_017_review_implementation.md`
+# Critical #4/High #4)を受けて、per-target分岐を撤回した。** 一度は
+# api_base_urlと同じ`semaphore_target`辞書分岐(ansy向けに`~/.semaphore-
+# api-token-ansy`)を導入したが、(1) `~` は`become: true`下での展開先が
+# 曖昧、(2) `tasks/token.yml`のroot所有0600検査をansyのホームディレクトリ
+# 配下のファイルは通らない、の2点で「ansy/quory双方へ同じroleで反映する」
+# というゴールを満たせなかった。**この解決はCoordinatorが環境側で行う方向
+# で調整中**(ansy上にroot所有0600の実体を`/etc/homelab-recovery/`配下へ
+# 置く)。コード側の所有権検査(R4)は緩めない — 環境側の配置が済むまでは
+# ansyでtoken読み取りがfail-closedするが、それが正しい状態である。
+#
+# したがって既定値は**両ホスト共通の同一絶対パス**(従来のquory向けの値)
+# に戻した。ansy検証時に別のtokenファイルを使いたい場合は、
+# `-e semaphore_templates_token_path=<root所有0600の絶対path>` で個別に
+# 上書きする(`~`を含む値を渡さないこと)。
 semaphore_templates_token_path: /etc/homelab-recovery/semaphore-templates-api-token
 
 # R11(2026-08-04追補): 同定情報の永続はSemaphoreオブジェクト自身の
@@ -536,5 +576,127 @@ semaphore_templates_token_path: /etc/homelab-recovery/semaphore-templates-api-to
 # ため、Critical #1(state file喪失時の重複作成)の構造そのものが無くなる。
 # ここに置く変数は無い(state fileが要らなくなったため)。
 
-# レポート保存先(deployment_drift_checkと同じ reports_base_dir 配下)
-semaphore_templates_report_dir: "{{ reports_base_dir }}/semaphore-templates"
+# レポート保存先(deployment_drift_checkと同じ reports_base_dir 配下 — quory向け)。
+#
+# **2026-08-09、4回目の査読差し戻し(Tester実機`2026-08-09_022_test_
+# result.md` §1)への対応。** `reports_base_dir`の既定値
+# (`/home/yoshi/homelab-ansible/reports`)は`yoshi:yoshi`所有・mode 0775
+# であり、ansyへSSH接続する`ansible_user`(`ann`、
+# inventories/homelab/group_vars/semaphore_servers.yml)からは書けない
+# (Coordinator実測: `test -w`がrc 1)。この既定値のままでは
+# `-e semaphore_target=ansy`だけではreport保存の手前で全実行が停止し、
+# 「つまみを1つにする」設計が成立しない。
+#
+# **quory側の既定値(`reports_base_dir`基準)は変えていない。**
+# ansy向けだけ、`ann`が実際に作成・書き込みできることを確認済みの
+# 別pathへ切り替える(`semaphore_target`辞書分岐、api_base_urlと同じ
+# パターン)。
+#
+# **確認手段(実ホストへansibleを実行していない)**: このセッションは
+# ansy自身(`hostname`=ansy)の上で`yoshi`として動作しており、`ann`は
+# 同じマシンのローカルUnixユーザーである。`ansible-playbook`は一切
+# 使わず、`sudo -u ann mkdir -p /home/ann/homelab-reports-probe/... `
+# → `sudo -u ann test -w ...` → `sudo -u ann` でのファイル書き込み
+# → `sudo -n -u ann rm -rf ...`(後始末)という素のシェル操作だけで、
+# `/home/ann/`配下の新規ディレクトリを`ann`自身が作成・書き込み・削除
+# できることを実測した(2026-08-09)。**ただしこれはこのマシン上の
+# ローカル権限の実測であり、SSH経由の接続そのもの(鍵・sshd設定等)は
+# 確認していない** — その点はTester/Coordinatorの範囲。
+semaphore_templates_report_dir: >-
+  {{ {
+    'quory': reports_base_dir ~ '/semaphore-templates',
+    'ansy': '/home/ann/homelab-reports/semaphore-templates',
+  }[semaphore_target | default('quory')] }}
+
+# =============================================================================
+# semaphore_schedules_as_code案件: scheduleのカタログとreconcile設定
+#
+# 正本: docs/ai/reviews/semaphore_schedules_as_code/2026-08-09_001_requirement.md
+# (以下R番号・AC番号はすべてこの文書を指す)。ロジック本体は
+# roles/semaphore_templates/filter_plugins/semaphore_schedules.py。
+# =============================================================================
+
+# --- R1/R2: scheduleカタログ --------------------------------------------------
+# 1エントリが持つのは name(scheduleの同定キー、R2) / template(対象template名。
+# roles/semaphore_templatesのrender_nameが生成する現在名 "{class}: {title}"
+# 形式と一致していること) / cron / active / task_params の5項目。
+#
+# **同定はschedule自身のnameで行う。templateの同定方式(descriptionへ埋め込む
+# マーカー)とは別物。** scheduleオブジェクトはdescriptionを持たない(6.5節、
+# 実測)。
+#
+# **段階適用(§11)の第1バッチ: SAFE分類の3件だけ。** quoryは19件全てが
+# active=trueで稼働中だが、削除を行わない設計(R5)のため、カタログに載って
+# いる分だけが管理対象になる。残り16件は移行が進むにつれ後続バッチで追加する
+# (SEMI-SAFE→UN-SAFEの順、requirement §11)。
+#
+# 転記元: 2026-08-09、ansy(quoryのRestore複製)のSemaphore APIから実測。
+# **name欄の空白の有無は実物どおり** — 3件のうち2件は "SAFE:" の直後に
+# 空白が無い。対象templateの実際の名前("SAFE: X"、空白あり)とズレている
+# 実例であり、「同定はnameで行う」ことの根拠そのものである(手で命名された
+# scheduleの名前と、role側が機械生成するtemplate名は独立している)。
+#
+# **activeは3件ともquoryの実状(19件全てtrue)に合わせてtrue。** ただし
+# 移行期間(semaphore_schedules_closed_worldが未設定)は管理外scheduleが
+# 常に存在するため、R14によりfalse→trueの発行そのものが起こらない
+# (カタログのactive:trueは「有効化待ち」としてレポートに出るだけで、
+# 実際にPUTされるのはclosed-world後の別のapply、R13/R8-3)。
+#
+# **task_params.environmentはJSON文字列("{}")であり、dictではない**
+# (6.5節の実測どおり)。YAML側でも文字列のまま(クォート必須)で持つ —
+# dictに変えるとAPIの実データ形状と一致しなくなる。
+semaphore_schedules_catalog:
+  - name: "SAFE: Time sync check"
+    template: "SAFE: Time sync check"
+    cron: "50 5 * * *"
+    active: true
+    task_params:
+      environment: "{}"
+
+  - name: "SAFE:Recovery monitoring check"
+    template: "SAFE: Recovery monitoring check"
+    cron: "30 6 * * *"
+    active: true
+    task_params:
+      environment: "{}"
+
+  - name: "SAFE:Deployment drift check"
+    template: "SAFE: Deployment drift check"
+    cron: "40 0 * * *"
+    active: true
+    task_params:
+      environment: "{}"
+
+# --- R17: closed-worldフェーズへの移行フラグ ----------------------------------
+# 単調で明示的なフラグ。**人がコミットで立て、実装はいかなる条件でも降ろさない。**
+# エントリ数などから推測して自動判定しない(将来正規に20件目を追加した時点で
+# 検査が解除されてしまうため、R17本文)。既定false(移行期間)。
+semaphore_schedules_closed_world: false
+
+# --- R15: 有効化(false→true)の実行ごとの明示許可 ------------------------------
+# 既定は不許可。`-e semaphore_schedules_allow_activation=true` で都度渡す
+# (R12条件③)。
+semaphore_schedules_allow_activation: false
+
+# --- R15: allowlist型のcanonical本番URL ---------------------------------------
+# 有効化を許可してよい接続先の判定に使う。**他の変数(semaphore_target等)
+# からは導出しない** — 導出すると「ansyでなければ許可」という否定判定
+# (denylist型)に近づき、別名・別表記のDNS名で同じサーバへ到達したとき
+# fail-openする(R15本文)。値はquoryの現在のcanonical URLへのリテラル。
+semaphore_schedules_canonical_api_base_url: "https://quory.internal:3000/api"
+
+# --- R11: cronを解釈するtimezoneの前提値 --------------------------------------
+# 2026-08-09、ansyで実測した値(GET /api/info の schedule_timezone)。
+# **quory側は未確認。** 不一致ならAC10のとおり停止するのが設計どおりの
+# 挙動であり、この値を「正しいはず」と決め打ちしない。
+semaphore_schedules_expected_timezone: "Asia/Tokyo"
+
+# --- R19: レポート保存先 -------------------------------------------------------
+# semaphore_templates_report_dir(上記)とは別の置き場にする
+# (「既存のlatest.jsonを上書きしない」)。ansy向けの分岐・確認手段は
+# semaphore_templates_report_dir(上記コメント)と同じ。
+semaphore_schedules_report_dir: >-
+  {{ {
+    'quory': reports_base_dir ~ '/semaphore-schedules',
+    'ansy': '/home/ann/homelab-reports/semaphore-schedules',
+  }[semaphore_target | default('quory')] }}

@@ -53,6 +53,159 @@
       ansible.builtin.import_tasks: apply.yml
       when: not ansible_check_mode
 
+    # --- semaphore_schedules_as_code案件: schedule系(R10 — templateの
+    # apply/--checkが確定した後に走らせる。requirement
+    # docs/ai/reviews/semaphore_schedules_as_code/2026-08-09_001_requirement.md) --
+    #
+    # **2026-08-09、査読差し戻し(`2026-08-09_017_review_implementation.md`
+    # High #3)を受けてnested block/rescue/alwaysへ変更した。** 以前は
+    # schedules_report.ymlをこのtaskリストの末尾に置いていたため、
+    # preflight/stage1/stage2のいずれかがfailすると、周囲のblockの残りが
+    # skipされ外側のrescueへ移り、レポートが一切保存されなかった
+    # (R8の「既に発行済みの書き込みをレポートへ明記する」、R18の管理外
+    # レポート、AC22の「適用済みの1件目が具体的に記録される」を満たせない)。
+    #
+    # **2026-08-09、再査読差し戻し(`2026-08-09_019_review_implementation_
+    # r2.md`)で、このalways化自体が新しい欠陥を2件生んでいたことが判明し、
+    # 以下のとおり修正した。**
+    #
+    # (1) High: inner rescueの`fail`が`ansible_failed_result.msg`を
+    # そのまま表示していたため、外側(このrole既存)のtoken scrubより手前で
+    # 未scrub のメッセージがコンソールへ出る経路になっていた。同様に
+    # `schedules_report.yml`も生のメッセージを`failed_msg`としてmode 0644の
+    # JSONへ保存していた。**修正: inner rescueでは`fail`を呼ばず、まず
+    # このrole既存のscrubパターン(下記outer rescueと同一の
+    # `regex_replace`+`no_log: true`)でメッセージをscrubし、
+    # `semaphore_schedules_run_failed*`という3つのfactへ格納するだけに
+    # した。** `schedules_report.yml`はこのscrub済みfactを読むだけに変更し、
+    # 自分で`ansible_failed_result`から再構築しない(そちらが元の漏えい元
+    # だった)。
+    #
+    # (2) Medium: 元のrescueがこの場で`fail`し、その直後に`always:`の
+    # レポート保存が別の理由(ディスク容量・権限等)で失敗すると、外側から
+    # 見える`ansible_failed_task`/`ansible_failed_result`はレポート保存の
+    # 失敗だけになり、元のschedule失敗と既適用分のoutcomeが診断から消える
+    # ことをレビューがlocalhost decoyで再現した。**修正: レポート保存
+    # (`schedules_report.yml`のimport)自体をnested block/rescueで包み、
+    # 保存が失敗してもその場でfailさせず、scrub済みメッセージを別の
+    # 独立したfact(`semaphore_schedules_report_save_failed*`)へ格納するに
+    # 留める。** このnamed blockの外(このtaskリスト内、outer blockの
+    # 兄弟task)に置いた最終taskが、schedule失敗・レポート保存失敗の
+    # どちらか一方または両方が起きていれば、両方の内容を含めて非ゼロで
+    # `fail`する — 元の失敗が後発の失敗に上書きされない。
+    - name: Read, preflight, diff, and (optionally) apply schedules — capture (not swallow) any failure
+      block:
+        - name: Validate semaphore_schedules_closed_world / semaphore_schedules_allow_activation are unambiguous booleans (R15/R17)
+          ansible.builtin.import_tasks: schedules_validate_config.yml
+
+        - name: Read the current Semaphore schedules and a fresh template list (R10, read-only)
+          ansible.builtin.import_tasks: schedules_read.yml
+
+        - name: Check the schedule_timezone precondition against the same API used for writes (R11/AC10)
+          ansible.builtin.import_tasks: schedules_timezone_check.yml
+
+        - name: Preflight the schedules catalog; stop before any write on error (R9)
+          ansible.builtin.import_tasks: schedules_preflight.yml
+
+        - name: Compute the schedules diff (R8/R8-2/R8-3) and the activation-eligibility preview
+          ansible.builtin.import_tasks: schedules_diff.yml
+
+        - name: Apply schedule stage 1 (create/update, skipped under --check — R7)
+          ansible.builtin.import_tasks: schedules_apply_stage1.yml
+          when: not ansible_check_mode
+
+        - name: Apply schedule stage 2 (activation only, skipped under --check — R7/R8-3)
+          ansible.builtin.import_tasks: schedules_apply_stage2.yml
+          when: not ansible_check_mode
+      rescue:
+        - name: "Build a token-scrubbed copy of the original schedule failure (does not re-raise here — always: must still run)"
+          ansible.builtin.set_fact:
+            semaphore_schedules_run_failed: true
+            semaphore_schedules_run_failed_task: "{{ ansible_failed_task.name | default('不明') }}"
+            semaphore_schedules_run_failed_msg: >-
+              {{ (ansible_failed_result.msg | default('(取得できず)'))
+                 | regex_replace((semaphore_templates_token | regex_escape), '***REDACTED-TOKEN***')
+                 if (semaphore_templates_token | default('') | length) > 0
+                 else (ansible_failed_result.msg | default('(取得できず)')) }}
+          no_log: true
+      always:
+        - name: Save the schedules report; a failure here must not erase the original schedule failure above (R19)
+          block:
+            - name: Report the schedules diff and outcome (always runs — success, --check, or a schedule failure above)
+              ansible.builtin.import_tasks: schedules_report.yml
+          rescue:
+            - name: Build a token-scrubbed copy of the report-save failure (kept separate from the original schedule failure)
+              ansible.builtin.set_fact:
+                semaphore_schedules_report_save_failed: true
+                semaphore_schedules_report_save_failed_msg: >-
+                  {{ (ansible_failed_result.msg | default('(取得できず)'))
+                     | regex_replace((semaphore_templates_token | regex_escape), '***REDACTED-TOKEN***')
+                     if (semaphore_templates_token | default('') | length) > 0
+                     else (ansible_failed_result.msg | default('(取得できず)')) }}
+              no_log: true
+
+    # **2026-08-09、3回目の査読差し戻し(`2026-08-09_020_review_
+    # implementation_r3.md` Critical #1)への対応。** 上記2つのフラグ
+    # (`semaphore_schedules_run_failed`/`_report_save_failed`)は素朴な
+    # `set_fact`であり、`-e '{"semaphore_schedules_run_failed": false}'`
+    # のようなnativeなfalseをextra-varsで渡されると、Ansibleの変数優先順位
+    # (extra-varsが最上位、`set_fact`より常に強い)により`set_fact`の結果を
+    # 上書きしてしまう。schedule自身の`task_params`がジョブ実行時に`-e`と
+    # して渡る設計(実データで`Ubuntu vm full upgrade`の`environment`が
+    # `{"dry_run":"true"}`であることから、この仕組み自体は既に実在する)
+    # のため、この2フラグの名前空間がscheduleの設定値と共有されているのは
+    # 机上の懸念ではない。前回のフラグ修正(`_bool`正規化)と同じ欠陥
+    # クラスであり、Reviewerが同型のfixtureで実際にrc 0への吸収を再現した。
+    #
+    # **修正: 最終的な再送出の可否(`when:`)を、外部から上書き可能な素の
+    # 変数の真偽値だけでは決めない。** `ansible_failed_result`は
+    # rescueが発火したときにansible-coreのengine自身が設定する特別変数で
+    # あり、`-e`でその**値**を汚すことはできても(実測済み)、`is defined`
+    # という**存在の有無**をfalseへ偽装することはできない(存在しない名前を
+    # 「未定義にする」extra-varsは無い。ローカルdecoyで
+    # `-e '{"ansible_failed_result": false}'`を渡しても`ansible_failed_
+    # result is defined`はtrueのまま残ることを確認済み)。したがって
+    # `when:`は「いずれかのフラグがtrue」**または**「`ansible_failed_
+    # result`が定義されている(=このblock自身のrescueが実際に発火した)」
+    # のORとし、フラグが外部からfalseに固定されていても、schedule block
+    # 自身が本当に失敗していれば`ansible_failed_result is defined`だけで
+    # 再送出が成立する。メッセージ本文がフラグ汚染により空になる場合の
+    # フォールバック文言も用意した(rawな`ansible_failed_result.msg`を
+    # フォールバックに使うとscrubを回避する新しい経路になるため、
+    # フォールバックは固定文言のみとし生データは使わない)。
+    - name: Re-raise the original schedule failure and/or the report-save failure (both scrubbed, neither absorbed into success — R8/R18/AC22)
+      ansible.builtin.fail:
+        msg: >-
+          {{
+            (
+              'semaphore_schedules task失敗(task: ' ~ (semaphore_schedules_run_failed_task | default('不明')) ~ '): '
+              ~ (semaphore_schedules_run_failed_msg | default('(詳細不明)'))
+              ~ ' 既に発行済みの書き込みは取り消しません。'
+            ) if (semaphore_schedules_run_failed | default(false)) else ''
+          }}
+          {{
+            ('/ さらにレポート保存も失敗しました: ' ~ (semaphore_schedules_report_save_failed_msg | default('(詳細不明)')))
+            if (semaphore_schedules_report_save_failed | default(false)) else
+            ('/ レポートは保存できました(semaphore_schedules_report_dir/latest.json)。'
+             if (semaphore_schedules_run_failed | default(false)) else '')
+          }}
+          {{
+            (
+              '/ schedule処理でエラーが検出されましたが、詳細を保持するfactが空です'
+              ~ '(semaphore_schedules_run_failed等の内部変数が外部の-eで上書きされて'
+              ~ 'いる可能性があります)。ansible_failed_taskとレポート'
+              ~ '(semaphore_schedules_report_dir)を直接確認してください。'
+            ) if (
+              (not (semaphore_schedules_run_failed | default(false)))
+              and (not (semaphore_schedules_report_save_failed | default(false)))
+              and (ansible_failed_result is defined)
+            ) else ''
+          }}
+      when: >-
+        (semaphore_schedules_run_failed | default(false))
+        or (semaphore_schedules_report_save_failed | default(false))
+        or (ansible_failed_result is defined)
+
   rescue:
     - name: Build a token-scrubbed copy of the failure message (defense in depth)
       ansible.builtin.set_fact:

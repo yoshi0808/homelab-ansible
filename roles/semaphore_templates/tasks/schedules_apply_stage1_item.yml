@@ -1,0 +1,176 @@
+---
+# Included with `loop: semaphore_schedules_diff_result.stage1` from
+# schedules_apply_stage1.yml. `item` is {name, id, before, after, fields}
+# from the diff filter -- `item.id`/`item.name` are the identity observed
+# at preflight time (R8). `item.after` is **only** used as a diff-time hint
+# (it is stale by the time this file runs) -- the actual desired state used
+# for the payload, the post-write verify, and the value handed to stage 2's
+# precheck is recomputed below from this file's own fresh GET.
+#
+# R8: "merge元は、各PUTを発行する直前に取得したものでなければならない"
+# -- so this file takes its own fresh GET, distinct from the one already
+# taken in schedules_diff.yml for diff computation. R8 also requires a
+# phase-dependent reaction if that fresh GET shows the identity has
+# drifted since preflight:
+#   - migration: skip this one write, continue with the rest (rc stays 0)
+#   - closed-world: abort *all* remaining POST/PUT (rc non-zero) -- this
+#     is implemented by letting `ansible.builtin.fail` propagate: a failed
+#     task inside a `loop:`-driven `include_tasks` stops the loop and the
+#     whole play (verified empirically against a local decoy loop with no
+#     real host contact -- see the implement record).
+#
+# status_code includes 404 so a schedule deleted between preflight and now
+# is treated as "identity drifted" rather than an uncaught task failure
+# (that distinction matters because migration must still be able to
+# continue past it).
+#
+# **2026-08-09、査読差し戻し(`2026-08-09_017_review_implementation.md`
+# Critical #1)を受けて修正した。** 以前の実装は`item.after`
+# (schedules_diff.ymlの早い時点の単一GETから算出)をそのままPUTのdesired
+# として使っており、この直前fresh GETはidentity確認とmerge元にしか
+# 使っていなかった。例えばカタログ`active: true`・早いGET`active: true`・
+# cron差分ありのscheduleを、このPUT直前にUIが`active: false`へ変えると、
+# 古い`item.after.active: true`がfresh rawへ上書きされ、R12の4条件を
+# 経ずに再有効化されてしまう(R8-2「既存は観測値のまま」、R8-3「第1段階
+# では有効化しない」、AC20に反する)。**この直前fresh GETを入力として
+# stage-1 desiredをこの場で計算し直し**、payload・直後検証・
+# semaphore_schedules_stage1_desired_by_id(stage-2 precheckが参照する
+# 検証済み状態)のすべてに、その再計算した値だけを一貫して使う。
+#
+# Task names below are deliberately static (ansible-lint name[template]:
+# Jinja belongs only at the very end of a name) -- the calling loop's
+# `loop_control: label: "{{ item.name }}"` (schedules_apply_stage1.yml)
+# already shows which schedule each console line belongs to; `item.name`
+# still appears in fail messages where it matters for diagnosis.
+
+- name: Fetch fresh detail immediately before the PUT (R8 freshness)
+  ansible.builtin.uri:
+    url: "{{ semaphore_templates_api_base_url }}/project/{{ semaphore_templates_project_id }}/schedules/{{ item.id }}"
+    method: GET
+    headers:
+      Authorization: "Bearer {{ semaphore_templates_token }}"
+    status_code: [200, 404]
+    validate_certs: "{{ semaphore_templates_api_validate_certs }}"
+  register: _semaphore_schedules_stage1_fresh
+  no_log: true
+
+- name: Determine whether identity still matches preflight time (R8)
+  ansible.builtin.set_fact:
+    _semaphore_schedules_stage1_identity_ok: >-
+      {{ (_semaphore_schedules_stage1_fresh.status == 200)
+         and ((_semaphore_schedules_stage1_fresh.json.id | default(None)) == item.id)
+         and ((_semaphore_schedules_stage1_fresh.json.name | default(None)) == item.name) }}
+
+- name: Abort all remaining writes if identity changed since preflight (closed-world, R8/AC22)
+  ansible.builtin.fail:
+    msg: >-
+      closed-world: schedule {{ item.name }}(id={{ item.id }})の直前取得が
+      preflight時点のidentityと一致しません(HTTP {{ _semaphore_schedules_stage1_fresh.status }}、
+      現在name={{ _semaphore_schedules_stage1_fresh.json.name | default('(取得不可)') }})。
+      R8/R18に従い残りのPOST/PUTをすべて中止し、再preflightを促します。
+      既に適用済みの書き込みは取り消しません(semaphore_schedules_stage1_written参照)。
+  when: (not _semaphore_schedules_stage1_identity_ok) and semaphore_schedules_closed_world_bool
+
+- name: Skip this write and continue if identity changed since preflight (migration, R8)
+  ansible.builtin.set_fact:
+    semaphore_schedules_stage1_skipped: >-
+      {{ semaphore_schedules_stage1_skipped + [{'name': item.name, 'id': item.id,
+         'reason': 'preflight時点からidentityが変化したため見送り(R8)'}] }}
+  when: (not _semaphore_schedules_stage1_identity_ok) and (not semaphore_schedules_closed_world_bool)
+
+# Recompute stage-1 desired *from this file's own fresh GET*, not from
+# item.after (schedules_diff.yml's stale snapshot) -- this is the Critical
+# #1 fix. `entry` and `template_id` are the same catalog row / resolved id
+# schedules_diff.yml already used; only `observed_detail` (the freshly
+# fetched raw object) is new here.
+- name: Recompute the stage-1 desired state from the fresh detail (R8/R8-2)
+  ansible.builtin.set_fact:
+    _semaphore_schedules_stage1_desired_fresh: >-
+      {{ (semaphore_schedules_catalog | selectattr('name', 'equalto', item.name) | first)
+         | semaphore_schedules_desired(
+             _semaphore_schedules_stage1_fresh.json,
+             semaphore_schedules_preflight_result.template_ids[item.name],
+             1) }}
+  when: _semaphore_schedules_stage1_identity_ok
+
+- name: PUT stage-1 managed fields (R8 get-then-merge-then-send)
+  ansible.builtin.uri:
+    url: "{{ semaphore_templates_api_base_url }}/project/{{ semaphore_templates_project_id }}/schedules/{{ item.id }}"
+    method: PUT
+    headers:
+      Authorization: "Bearer {{ semaphore_templates_token }}"
+    body_format: json
+    body: "{{ _semaphore_schedules_stage1_fresh.json | semaphore_schedules_payload(_semaphore_schedules_stage1_desired_fresh) }}"
+    status_code: [200, 201, 204]
+    validate_certs: "{{ semaphore_templates_api_validate_certs }}"
+  register: _semaphore_schedules_stage1_put
+  no_log: true
+  when: _semaphore_schedules_stage1_identity_ok
+
+- name: Verify the stage-1 write (R16-2)
+  ansible.builtin.uri:
+    url: "{{ semaphore_templates_api_base_url }}/project/{{ semaphore_templates_project_id }}/schedules/{{ item.id }}"
+    method: GET
+    headers:
+      Authorization: "Bearer {{ semaphore_templates_token }}"
+    status_code: [200]
+    validate_certs: "{{ semaphore_templates_api_validate_certs }}"
+  register: _semaphore_schedules_stage1_verify
+  no_log: true
+  when: _semaphore_schedules_stage1_identity_ok
+
+- name: Fail closed if the stage-1 write did not verify (R16-2)
+  ansible.builtin.fail:
+    msg: >-
+      schedule {{ item.name }}(id={{ item.id }})のPUT直後GETが期待値と
+      一致しません: {{ (_semaphore_schedules_stage1_verify.json
+      | semaphore_schedules_verify(_semaphore_schedules_stage1_desired_fresh)) | join(', ') }}。
+      APIが未知のキーを黙って捨てた可能性があります(6.5節)。ここで
+      停止します(R16-2)。第2段階(有効化)へは進みません。
+  when: >-
+    _semaphore_schedules_stage1_identity_ok
+    and ((_semaphore_schedules_stage1_verify.json
+          | semaphore_schedules_verify(_semaphore_schedules_stage1_desired_fresh)) | length) > 0
+
+# 2026-08-09、査読差し戻し(`2026-08-09_017_review_implementation.md`
+# High #4)への対応。AC4/AC17は「管理5項目以外の非管理フィールドが実行前と
+# 一致する」ことを求めるが、semaphore_schedules_verify()は管理5項目しか
+# 見ない。もう一方のImplementerがfilter側へ
+# `semaphore_schedules_nonmanaged_diff(before_raw, after_raw)`
+# (戻り値: 管理5項目以外で値が変わったフィールド名のlist)を追加する契約に
+# なっている。ここではPUT直前raw(_semaphore_schedules_stage1_fresh.json)と
+# PUT直後raw(_semaphore_schedules_stage1_verify.json)を渡す呼び出し側だけ
+# 先に配線する(Coordinator指示: 相手の実装が入るまでは呼び出し側だけで
+# よい)。
+- name: Fail closed if non-managed fields changed during the stage-1 write (AC4/AC17)
+  ansible.builtin.fail:
+    msg: >-
+      schedule {{ item.name }}(id={{ item.id }})のPUTで、管理5項目以外の
+      フィールドが変化しました: {{ (_semaphore_schedules_stage1_fresh.json
+      | semaphore_schedules_nonmanaged_diff(_semaphore_schedules_stage1_verify.json)) | join(', ') }}。
+      非管理フィールドの保持が確認できません。ここで停止します(AC4/AC17)。
+      第2段階(有効化)へは進みません。
+  when: >-
+    _semaphore_schedules_stage1_identity_ok
+    and ((_semaphore_schedules_stage1_fresh.json
+          | semaphore_schedules_nonmanaged_diff(_semaphore_schedules_stage1_verify.json)) | length) > 0
+
+- name: Record the successful stage-1 write
+  ansible.builtin.set_fact:
+    semaphore_schedules_stage1_written: >-
+      {{ semaphore_schedules_stage1_written + [{'name': item.name, 'id': item.id, 'fields': item.fields}] }}
+  when: _semaphore_schedules_stage1_identity_ok
+
+# Critical #1 (continued): stage 2's precheck (schedules_apply_stage2_item.
+# yml) reads semaphore_schedules_stage1_desired_by_id[id] as "the state
+# stage 1 already verified". That dict was seeded in schedules_diff.yml
+# from the *pre-write* detail; for a schedule actually written here, that
+# seed is now stale (the write itself may legitimately have changed the
+# managed fields). Overwrite it with the just-verified fresh desired state
+# so stage 2 compares against reality, not against the pre-write snapshot.
+- name: Update the stage-1-verified desired state used by stage 2's precheck
+  ansible.builtin.set_fact:
+    semaphore_schedules_stage1_desired_by_id: >-
+      {{ semaphore_schedules_stage1_desired_by_id
+         | combine({item.id: _semaphore_schedules_stage1_desired_fresh}) }}
+  when: _semaphore_schedules_stage1_identity_ok

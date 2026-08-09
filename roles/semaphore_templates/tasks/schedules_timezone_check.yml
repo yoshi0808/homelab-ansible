@@ -1,0 +1,38 @@
+---
+# R11: cronを解釈するtimezoneを、書き込み先と同じAPI(semaphore_templates_
+# api_base_url — schedule側専用の接続設定は持たない、template側と同じ
+# つまみを共有する)から照合する。設定ファイルや環境変数は読まない
+# (playbookのhosts:を固定したままapi_base_urlだけを-eで切り替える設計の
+# ため、ホスト上の設定を読むと接続先と観測対象がずれる、R11本文)。
+#
+# read-only: --checkの有無にかかわらず常に実行する(AC10は`--check`の
+# 有無を問わない)。書き込みが1件も発生する前に判定する必要があるため、
+# schedule preflight(R9)より前に置く。
+
+- name: GET /api/info from the same base URL used for schedule writes (R11)
+  ansible.builtin.uri:
+    url: "{{ semaphore_templates_api_base_url }}/info"
+    method: GET
+    headers:
+      Authorization: "Bearer {{ semaphore_templates_token }}"
+    status_code: [200]
+    validate_certs: "{{ semaphore_templates_api_validate_certs }}"
+  register: _semaphore_schedules_api_info
+  no_log: true
+  check_mode: false
+
+- name: Record the observed schedule_timezone and version (R11 — for the report)
+  ansible.builtin.set_fact:
+    semaphore_schedules_observed_timezone: "{{ _semaphore_schedules_api_info.json.schedule_timezone | default('', true) }}"
+    semaphore_schedules_observed_api_version: "{{ _semaphore_schedules_api_info.json.version | default('', true) }}"
+
+- name: Fail closed if the observed schedule_timezone does not match the catalog's assumption (R11/AC10)
+  ansible.builtin.fail:
+    msg: >-
+      GET {{ semaphore_templates_api_base_url }}/info の schedule_timezone
+      ({{ semaphore_schedules_observed_timezone | default('(空)', true) }}) が、
+      カタログの前提値 semaphore_schedules_expected_timezone
+      ({{ semaphore_schedules_expected_timezone }}) と一致しません。
+      cronの解釈がずれる可能性があるため、書き込みを1件も発行せず
+      ここで停止します(R11/AC10)。
+  when: semaphore_schedules_observed_timezone != semaphore_schedules_expected_timezone

@@ -1,0 +1,39 @@
+---
+# R9: 全カタログのpreflightを完了するまで、書き込みを1件も発行しない。
+# ロジック本体はfilter_plugins/semaphore_schedules.py の
+# semaphore_schedules_preflight(①〜⑦の7検査、互いに独立)。ここでは
+# 呼び出しと「1件でもerrorsがあれば非ゼロ停止」(R9本文)だけを行う —
+# その停止が「書き込みを1件も発行しない」を担保する仕組みは、この
+# assert/failでplayを止めること自体である(以降のtask importは実行されない)。
+
+- name: Preflight the schedules catalog (R9 ①〜⑦)
+  ansible.builtin.set_fact:
+    semaphore_schedules_preflight_result: >-
+      {{ semaphore_schedules_catalog | semaphore_schedules_preflight(
+           semaphore_schedules_observed,
+           semaphore_schedules_observed_templates,
+           semaphore_schedules_closed_world_bool) }}
+
+# 2026-08-09、査読差し戻し(`2026-08-09_017_review_implementation.md`
+# 指摘6)への対応。「同一変更でtemplateとscheduleを追加するとcheckと
+# applyの前提が分岐する」という指摘自体は、requirement R10が「templateを
+# 先に適用する2段階とする」という運用制約で解決すると明記しており実装は
+# 変えない(今回のバッチも新規templateを含まない)。**ここで行うのは
+# 1点だけ** — template名の解決に失敗したときのpreflightエラー(③、
+# filter_plugins/semaphore_schedules.pyの「の一致件数が」という文言)に、
+# この運用制約を名指しする補足を添えることで、実行者が「2段階目のapplyを
+# 先に走らせ忘れていないか」に気付けるようにする。
+- name: Fail closed if preflight found any error (R9)
+  ansible.builtin.fail:
+    msg: >-
+      semaphore_schedules preflightが{{ semaphore_schedules_preflight_result.errors | length }}件の
+      エラーを検出しました。書き込みを1件も発行せず停止します(R9)。
+      {{ semaphore_schedules_preflight_result.errors | join(' / ') }}
+      {{ (
+          '/ このうちtemplate名の解決件数エラーは、新規templateをこの変更で追加した場合に起こりえます。'
+          ~ 'R10は「templateを先にapplyする2段階」を運用制約としており、--checkであってもtemplate側の'
+          ~ 'apply(1段階目)を先に本実行してから、このplaybookを再実行してください'
+          ~ '(schedule側だけを先にcheck/applyしても解決しません)。'
+         ) if (semaphore_schedules_preflight_result.errors | select('search', '一致件数が') | list | length) > 0
+           else '' }}
+  when: (semaphore_schedules_preflight_result.errors | length) > 0

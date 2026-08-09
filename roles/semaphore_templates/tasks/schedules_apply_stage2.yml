@@ -1,0 +1,56 @@
+---
+# R8-3 stage 2: activation-only PUTs. Caller (tasks/main.yml) gates this
+# whole file with `when: not ansible_check_mode` (R7). Nothing to do if
+# nothing is pending activation (schedules_diff.yml already computed
+# `pending_activation`, independent of stage-1's own outcome — R8-2's
+# docstring in the filter module).
+#
+# R16: "有効化を発行する直前に schedule 集合を再取得し、preflight 時点から
+# 変化していたら有効化を見送る". schedules_diff.yml already set an
+# activation-eligibility *preview* on this same fact name using
+# preflight_ids for both filter arguments (a trivial pass by construction).
+# This file overwrites it with the authoritative evaluation, using a fresh
+# GET taken right here -- immediately before any stage-2 PUT is attempted,
+# and after every stage-1 write in this same run has already completed
+# (schedules_apply_stage1.yml is imported before this file in tasks/
+# main.yml), so a stage-1-caused change in the schedule set does not by
+# itself look like foreign interference at this point.
+
+- name: Evaluate and (if permitted) apply stage-2 activation
+  when: (semaphore_schedules_diff_result.pending_activation | length) > 0
+  block:
+    - name: GET current schedules right before evaluating stage-2 activation (R16 freshness)
+      ansible.builtin.uri:
+        url: "{{ semaphore_templates_api_base_url }}/project/{{ semaphore_templates_project_id }}/schedules"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ semaphore_templates_token }}"
+        status_code: [200]
+        validate_certs: "{{ semaphore_templates_api_validate_certs }}"
+      register: _semaphore_schedules_stage2_current_list
+      no_log: true
+
+    - name: Compute the authoritative activation gate (R12/R15/R16 — overwrites schedules_diff.yml's preview)
+      ansible.builtin.set_fact:
+        semaphore_schedules_stage2_gate_result: >-
+          {{ semaphore_templates_api_base_url | semaphore_schedules_activation_gate(
+               semaphore_schedules_canonical_api_base_url,
+               semaphore_schedules_allow_activation_bool,
+               semaphore_schedules_closed_world_bool,
+               semaphore_schedules_preflight_result.unmanaged | length,
+               semaphore_schedules_preflight_ids,
+               (_semaphore_schedules_stage2_current_list.json | map(attribute='id') | list)) }}
+
+    - name: Show whether stage-2 activation is permitted this run
+      ansible.builtin.debug:
+        msg:
+          - "activation allowed : {{ semaphore_schedules_stage2_gate_result.allowed }}"
+          - "url_used           : {{ semaphore_schedules_stage2_gate_result.url_used }}"
+          - "reasons            : {{ semaphore_schedules_stage2_gate_result.reasons }}"
+
+    - name: Activate schedules pending activation, one at a time (R8-3 stage 2; only when the gate allows it)
+      ansible.builtin.include_tasks: schedules_apply_stage2_item.yml
+      loop: "{{ semaphore_schedules_diff_result.pending_activation }}"
+      loop_control:
+        label: "{{ item.name }}"
+      when: semaphore_schedules_stage2_gate_result.allowed

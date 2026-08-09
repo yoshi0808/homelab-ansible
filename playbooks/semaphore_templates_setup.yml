@@ -6,7 +6,8 @@
 # (roles/semaphore_templates/tasks/main.yml の apply.yml include を参照)。
 # 側ファイル(state.json)は2026-08-04追補(R11)で廃止した — 同定情報は
 # Semaphoreオブジェクト自身の`description`に持つため、読み書きするローカル
-# 状態はもう無い。
+# 状態はもう無い。scheduleのreconcile(2026-08-09追補、下記)も同じ規約
+# (read-onlyは常時、write=POST/PUTだけをゲート)に従う。
 #
 # Testerは実行しない。実ホスト(quory)へは到達できないため検証できない。
 # **ansy(project id=2)のSemaphoreは2026-08-04にAPI動作検証専用として
@@ -16,9 +17,12 @@
 #
 # semaphore_templates_setup.yml
 #
-# 目的: Semaphoreの「押せるボタン」の定義をこのリポジトリの正本にする。
-#       roles/semaphore_templates/defaults/main.yml のカタログを、
-#       Semaphore REST API へ冪等にreconcileする(R3)。
+# 目的: Semaphoreの「押せるボタン」の定義と、その定期実行(schedule)の
+#       定義を、このリポジトリの正本にする。
+#       roles/semaphore_templates/defaults/main.yml のtemplate/schedule
+#       両カタログを、Semaphore REST API へ冪等にreconcileする(R3、
+#       schedule側はdocs/ai/reviews/semaphore_schedules_as_code/
+#       2026-08-09_001_requirement.md)。
 #
 # 使用方法:
 #   確認(必ず先に実行し、差分を読んでから適用する — R6):
@@ -27,15 +31,33 @@
 #     ansible-playbook playbooks/semaphore_templates_setup.yml
 #   ansy向け(検証用。id=4ほか既存templateを変更・削除しないこと):
 #     ansible-playbook playbooks/semaphore_templates_setup.yml --check \
-#       -e semaphore_templates_api_base_url=https://ansy.internal:3000/api \
-#       -e semaphore_templates_project_name=homelab-ansible \
-#       -e semaphore_templates_token_path=~/.semaphore-api-token-ansy
+#       -e semaphore_target=ansy
+#     # semaphore_targetは実行先ホストとAPI接続先(api_base_url)を
+#     # 1つのつまみでまとめて切り替える(2026-08-09追補、下記
+#     # 「実行先ホスト」参照)。**token_pathはこのつまみで切り替わらない**
+#     # (2026-08-09の査読差し戻しで撤回。defaults/main.ymlの「tokenの
+#     # 置き場」節を参照)。ansyで別のtokenファイルを使う場合は個別に
+#     # 上書きする(root所有0600の絶対pathであること、`~`を使わないこと):
+#     ansible-playbook playbooks/semaphore_templates_setup.yml --check \
+#       -e semaphore_target=ansy \
+#       -e semaphore_templates_token_path=/etc/homelab-recovery/semaphore-templates-api-token
 #
-# 実行元: quory自身(既定)。本playbookは hosts: quory で、Semaphore APIを
-# quory上のlocalhost経由で呼ぶ。ansyからquoryのSemaphoreを操作する経路は
-# 作らない(非ゴール§3、requirement R4「ansy側にtokenを置かない」)。上記の
-# ansy向け実行は、hosts自体は変わらずquoryのまま、`-e`でAPI接続先だけを
-# ansyへ向ける形で行う(ansyがquoryを操作する経路にはならない)。
+# --- 実行先ホスト(2026-08-09追補: semaphore_targetで一本化) -------------------
+# 本playbookは hosts: "{{ semaphore_target | default('quory') }}" で、
+# Semaphore APIを実行先ホスト自身のlocalhost経由で呼ぶ(ansyからquoryの
+# Semaphoreを操作する経路は作らない — 非ゴール§3、requirement R4
+# 「ansy側にtokenを置かない」)。既定はquory(従来と同じ実行先)。
+# `-e semaphore_target=ansy` を渡すと、hosts:の解決先と
+# roles/semaphore_templates/defaults/main.yml のapi_base_urlの既定値が、
+# 両方まとめてansy向けに切り替わる(role defaults参照)。**token_pathは
+# 両ホスト共通の同一絶対pathのまま切り替わらない**(上記「使用方法」参照)。
+#
+# **未知のsemaphore_targetを渡すと、下の最初のplayで明示的に停止する。**
+# Ansibleの既定挙動は、`hosts:`パターンが1件もinventoryに一致しないとき
+# WARNINGを出すだけでexit code 0のままplayを黙ってskipする(2026-08-09、
+# `--list-hosts`と実行の両方で実測確認済み) — この既定挙動のままでは
+# 「未知の値は停止する」という設計を満たさないため、明示的なfail-closedの
+# assertを別playとして前段に置いている。
 #
 # OQ1: 2026-08-04追補により、テンプレート定義のAPI操作についてはansyでの
 # 実測が得られている(エンドポイント形、認証ヘッダ、argumentsの文字列化)。
@@ -58,9 +80,33 @@
 # ansyでの実測に基づく再設計であり、詳細と自己検証の記録は
 # docs/ai/reviews/semaphore_templates_as_code/2026-08-04_003_implement.md
 # の追補を参照。
+#
+# schedule側(2026-08-09追補): template適用が完了した後に、
+# roles/semaphore_templates/defaults/main.yml の
+# semaphore_schedules_catalog をreconcileする(R10)。有効化
+# (false→true)はclosed-worldフラグ・明示許可・接続先allowlistの3条件が
+# 揃わない限り行われない(R12/R15、既定はすべて不許可・移行期間側)。
+# 詳細は docs/ai/reviews/semaphore_schedules_as_code/。
 
-- name: Reconcile Semaphore templates from the repo catalog
-  hosts: quory
+- name: Fail closed if semaphore_target is not a known Semaphore-server inventory host
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  become: false
+
+  tasks:
+    - name: "Validate semaphore_target before the main play resolves hosts:"
+      ansible.builtin.fail:
+        msg: >-
+          semaphore_target={{ semaphore_target | default('quory') }} は
+          inventoryの semaphore_servers グループに存在しないホスト名です
+          (既知の値: {{ groups['semaphore_servers'] | join(', ') }})。
+          Ansibleの既定挙動(未一致のhostパターンをexit 0で黙ってskip
+          する)に任せず、ここで明示的に停止します。
+      when: (semaphore_target | default('quory')) not in (groups['semaphore_servers'] | default([]))
+
+- name: Reconcile Semaphore templates and schedules from the repo catalog
+  hosts: "{{ semaphore_target | default('quory') }}"
   gather_facts: false
   become: false
 
