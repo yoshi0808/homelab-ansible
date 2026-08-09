@@ -667,6 +667,47 @@ semaphore_schedules_catalog:
     task_params:
       environment: "{}"
 
+  # --- 第2バッチ(2026-08-10追加): 実行パラメータを持つ3件 ---------------------
+  #
+  # **ここから先の`task_params`は、押したときに何が起きるかを変える値を持つ。**
+  # requirementが「査読が止めた本番事故」の筆頭に挙げたのがこの3件で、6項目だけの
+  # PUTは`task_params`を消す — `dry_run`が失われれば本番のfull upgradeが定期実行
+  # される(requirement 6.5 / R8)。転記を1文字も間違えないこと。
+  #
+  # **`environment`と`params`は層が違う。** `environment`はplaybookへ`-e`で渡る
+  # Ansible変数(値は文字列)。`params`はSemaphore自身の起動オプションで、
+  # `dry_run`は`--check`、`debug_level`は冗長度を指す(値はnative型)。
+  # `SAFE:Prometheus update check`は両方を持ち、**同じ`dry_run`という名前が別の
+  # 意味で2つある**。片方だけ写すと意味が変わる。
+  #
+  # 値の出所: ansy(quoryのSemaphoreをRestoreした複製)のAPIから2026-08-10に取得。
+  # quory自身のscheduleを読む手段は現在無い(dispatchのカタログにschedule照会が
+  # 無いため)。**転記が違っていればquoryの`--check`が差分として見せる**ので、
+  # 適用前に必ず差分を読むこと。第1バッチの3件はこの方法で一致を確認済み。
+  - name: "SEMI-SAFE:Cert_renew (only on Quory)"
+    template: "SEMI-SAFE: Cert renew"
+    cron: "0 6 * * 0"
+    active: true
+    task_params:
+      environment: '{"force_renew":"false"}'
+
+  - name: "SEMI-SAFE:Ubuntu vm full upgrade(dry_run=true)"
+    template: "SEMI-SAFE: Ubuntu vm full upgrade (dry-run)"
+    cron: "15 18 2 * *"
+    active: true
+    task_params:
+      environment: '{"dry_run":"true"}'
+
+  - name: "SAFE:Prometheus update check"
+    template: "SAFE: Prometheus update check (check)"
+    cron: "5 17 * * 5"
+    active: true
+    task_params:
+      environment: '{"dry_run":"true"}'
+      params:
+        debug_level: 4
+        dry_run: false
+
 # --- R17: closed-worldフェーズへの移行フラグ ----------------------------------
 # 単調で明示的なフラグ。**人がコミットで立て、実装はいかなる条件でも降ろさない。**
 # エントリ数などから推測して自動判定しない(将来正規に20件目を追加した時点で
@@ -686,9 +727,9 @@ semaphore_schedules_allow_activation: false
 semaphore_schedules_canonical_api_base_url: "https://quory.internal:3000/api"
 
 # --- R11: cronを解釈するtimezoneの前提値 --------------------------------------
-# 2026-08-09、ansyで実測した値(GET /api/info の schedule_timezone)。
-# **quory側は未確認。** 不一致ならAC10のとおり停止するのが設計どおりの
-# 挙動であり、この値を「正しいはず」と決め打ちしない。
+# GET /api/info の schedule_timezone。**ansy(2026-08-09)とquory(2026-08-10、
+# task 659の--check)の双方で実測し、一致を確認済み。** 不一致ならAC10のとおり
+# 停止するのが設計どおりの挙動であり、この値を「正しいはず」と決め打ちしない。
 semaphore_schedules_expected_timezone: "Asia/Tokyo"
 
 # --- R19: レポート保存先 -------------------------------------------------------
