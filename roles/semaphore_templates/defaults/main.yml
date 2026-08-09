@@ -622,6 +622,14 @@ semaphore_templates_report_dir: >-
 # しない**ことを保証する。次の適用でカタログの値へ戻る。「開発側からいつ何が
 # 実行されるか読める」のは副次的な効果である。
 #
+# **新しいplaybookを足すときは、templateとscheduleをここで同時に決める**
+# (Yoshinobu、2026-08-10)。定期実行させるなら、上のtemplateカタログへ足す差分と
+# 同じ変更でこちらへもエントリを足し、**既存の実行時刻と競合しないcronを選ぶ**。
+# 19件の実行時刻がこのファイルで一望できることが、その判断を可能にしている。
+# **schedule を先に作ってはならない** — R10により、schedule が指すtemplateは
+# 適用時点でSemaphoreに実在していなければならず、同一変更で両方を足す場合は
+# template側を先に適用する2段階になる。
+#
 # 1エントリが持つのは name(scheduleの同定キー、R2) / template(対象template名。
 # roles/semaphore_templatesのrender_nameが生成する現在名 "{class}: {title}"
 # 形式と一致していること) / cron / active / task_params の5項目。

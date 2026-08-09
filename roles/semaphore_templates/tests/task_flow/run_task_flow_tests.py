@@ -95,6 +95,26 @@ Scenario E (2026-08-09, 4th-round re-review docs/ai/reviews/
   (not a downstream one) is what's shown -- this scenario is expected to
   stop before the report write is even attempted.
 
+Scenario F (2026-08-10, 5th-round re-review docs/ai/reviews/
+  semaphore_schedules_as_code/2026-08-10_026_review_implementation_r5.md
+  Critical #1): the reserved-name guard *itself* got bypassed in the r4
+  version, because it stored its judgment in task-level `vars:`
+  (`_reserved_name_guard_unexpected` etc.), and task-level `vars:` has
+  *lower* precedence than extra-vars -- exactly the same defect class as
+  `fixture_run_failed`/`fixture_report_save_failed` one layer up (this is
+  the third time in this feature's history: the boolean-string flags, the
+  internal failure facts, and now the guard meant to protect them).
+  Reviewer reproduced this against the real production task file with
+  `-e '{"semaphore_schedules_report_save_failed": false,
+  "_reserved_name_guard_unexpected": []}'`: the guard's own `when:` read
+  the externally-supplied empty list and skipped, and the original r4
+  exploit (report-only UNREACHABLE + native-false failure fact -> rc 0)
+  came back. This scenario reproduces the same combination against the
+  fixture (which after the r5 fix has *no* named intermediate variable in
+  its guard at all) and asserts the guard still fires -- there is nothing
+  left for `-e` to shadow, so passing extra-vars for the old helper-variable
+  names should have zero effect.
+
 Loopback/localhost only -- fixture_pattern.yml uses `hosts: localhost,
 connection: local` and never calls a network API. No real host, no real
 Semaphore API, no real IP is ever touched.
@@ -316,6 +336,56 @@ def scenario_e(scratch):
         os.chmod(unwritable_tmp_parent, stat.S_IRWXU)  # restore so cleanup can remove it
 
 
+def scenario_f(scratch):
+    # r5 Critical #1: the same combination as scenario E, but *also*
+    # attempting to neutralize the reserved-name guard itself by pinning
+    # its (now nonexistent, post-fix) helper-variable names to a native
+    # empty list via extra-vars. Before the r5 fix, this exact combination
+    # made the guard `skip` (reading the externally-supplied `[]` instead
+    # of its own computed result) and let the r4 exploit through to rc 0.
+    # After the fix there is no named variable for these extra-vars to
+    # shadow, so they should have no effect at all and the guard should
+    # still fire exactly as in scenario E.
+    report_dir = os.path.join(scratch, "reports_f")
+    os.makedirs(report_dir, exist_ok=True)
+    unwritable_tmp_parent = os.path.join(scratch, "unwritable_remote_tmp_f")
+    os.makedirs(unwritable_tmp_parent, exist_ok=True)
+    bad_remote_tmp = os.path.join(unwritable_tmp_parent, "sub")
+    os.chmod(unwritable_tmp_parent, stat.S_IRUSR | stat.S_IXUSR)  # r-x, no write
+    try:
+        rc, output = run_playbook(
+            report_dir,
+            extra_args=[
+                "-e", "fixture_should_fail=false",
+                "-e", f"fixture_bad_remote_tmp={bad_remote_tmp}",
+                "-e", (
+                    '{"fixture_report_save_failed": false, '
+                    '"_reserved_name_guard_unexpected": [], '
+                    '"_reserved_name_guard_observed": [], '
+                    '"_reserved_name_guard_allowlist": ["fixture_report_save_failed"]}'
+                ),
+            ],
+        )
+        problems = []
+
+        if rc == 0:
+            problems.append(
+                "scenario F: expected non-zero rc — pinning the (now removed) guard-helper variable "
+                "names to native empty lists must not neutralize the reserved-name guard"
+            )
+        if "reserved (_)fixture_* names already defined" not in output:
+            problems.append(
+                "scenario F: the reserved-name guard's own failure message was not found — "
+                "the guard-neutralization attempt may have succeeded"
+            )
+        if "fixture_report_save_failed" not in output:
+            problems.append("scenario F: the guard's message did not name fixture_report_save_failed specifically")
+
+        return problems
+    finally:
+        os.chmod(unwritable_tmp_parent, stat.S_IRWXU)  # restore so cleanup can remove it
+
+
 def main():
     scratch = tempfile.mkdtemp(prefix="semaphore_templates_task_flow_")
     try:
@@ -325,6 +395,7 @@ def main():
         problems += scenario_c(scratch)
         problems += scenario_d(scratch)
         problems += scenario_e(scratch)
+        problems += scenario_f(scratch)
 
         if problems:
             print("FAILED:")
@@ -332,10 +403,12 @@ def main():
                 print(" -", p)
             return 1
         print(
-            "OK: all five scenarios passed (no post-rescue sentinel leak; report-save failure did "
+            "OK: all six scenarios passed (no post-rescue sentinel leak; report-save failure did "
             "not replace the original failure; native-false extra-var override did not suppress "
             "the re-raise; UNREACHABLE report-save did not erase the original failure; the "
-            "reserved-name guard rejects pre-defined internal-state names before they can be exploited)"
+            "reserved-name guard rejects pre-defined internal-state names before they can be "
+            "exploited; and the guard's own judgment cannot be neutralized via its former "
+            "helper-variable names either)"
         )
         return 0
     finally:

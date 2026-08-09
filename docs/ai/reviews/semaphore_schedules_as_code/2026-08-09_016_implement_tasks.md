@@ -4,7 +4,8 @@
 改訂: 2026-08-09 — 独立レビュー`2026-08-09_017_review_implementation.md`の差し戻し(自分の担当範囲の指摘6件)を反映。節は積まず、内容を現状へ更新した。
 改訂2: 2026-08-09 — 再査読`2026-08-09_019_review_implementation_r2.md`(前回7件はすべてclosed、`always:`化自体が生んだ新規回帰2件)を反映。節は積まず、内容を現状へ更新した。
 改訂3: 2026-08-09 — 3回目の査読`2026-08-09_020_review_implementation_r3.md`(前回High #1はclosed、Medium #2が再指摘、extra-vars優先順位を突いた新規Highが1件)と、ansy実機でのTester結果`2026-08-09_022_test_result.md`(`reports_base_dir`権限問題)を反映。節は積まず、内容を現状へ更新した。
-改訂4(最終): 2026-08-09 — 4回目の査読`2026-08-09_023_review_implementation_r4.md`(Medium #2・ansy report保存先はclosed、「schedule成功+report-only UNREACHABLE+report失敗factをnative falseで固定」という残り1枝がopen)を反映。節は積まず、内容を現状へ更新した。この改訂でCoordinatorから「これが通れば実装完了、commit提示へ移る」と伝えられている。
+改訂4: 2026-08-09 — 4回目の査読`2026-08-09_023_review_implementation_r4.md`(Medium #2・ansy report保存先はclosed、「schedule成功+report-only UNREACHABLE+report失敗factをnative falseで固定」という残り1枝がopen)を反映。節は積まず、内容を現状へ更新した。この改訂でCoordinatorから「これが通れば実装完了、commit提示へ移る」と伝えられていたが、実際には5回目の査読で追加のCriticalが見つかった。
+改訂5(最終): 2026-08-10 — 5回目の査読`2026-08-10_026_review_implementation_r5.md`(4回目で追加したreserved-name guard自身が、判定をtask-level `vars:`へ保存していたため同じ「extra-vars優先順位の悪用」で迂回できた)を反映。節は積まず、内容を現状へ更新した。**この案件で同じ欠陥クラスが3回連続で出た**(`allow_activation`の文字列表現、内部failure fact、guard自身の判定)ため、今回は「判定の中間結果を一切、名前付き変数へ保存しない」という設計へ変更した。
 
 ## 1. 担当範囲
 
@@ -14,7 +15,7 @@
 
 | パス | 内容 |
 |---|---|
-| `roles/semaphore_templates/tasks/schedules_validate_config.yml`(新規) | `semaphore_schedules_closed_world`/`semaphore_schedules_allow_activation`の入口型検証と正規化(査読Critical #2)。最初のtaskとして、`(_)?semaphore_schedules_*`という内部状態名が外部から事前定義されていないかを一括で拒否するreserved-name guardを追加(4回目査読Critical #1) |
+| `roles/semaphore_templates/tasks/schedules_validate_config.yml`(新規) | `semaphore_schedules_closed_world`/`semaphore_schedules_allow_activation`の入口型検証と正規化(査読Critical #2)。最初のtaskとして、`(_)?semaphore_schedules_*`という内部状態名が外部から事前定義されていないかを一括で拒否するreserved-name guardを追加(4回目査読Critical #1)。guard自身の判定を名前付き変数へ一切保存しない形へ書き換え(5回目査読Critical #1、最終形) |
 | `roles/semaphore_templates/tasks/schedules_read.yml`(新規) | schedule一覧GET、template一覧のfresh GET(R10)、preflight時点idスナップショット |
 | `roles/semaphore_templates/tasks/schedules_timezone_check.yml`(新規) | `GET /api/info`とcatalogの前提timezoneの照合(R11/AC10) |
 | `roles/semaphore_templates/tasks/schedules_preflight.yml`(新規) | R9 7検査の呼び出しとfail-closed。template名解決エラーにはR10の2段階規約を名指しする補足を付ける(査読指摘6) |
@@ -28,8 +29,8 @@
 | `roles/semaphore_templates/tasks/main.yml`(既存へ配線) | template apply後にschedule系をnested block/rescue/alwaysで包んでimport(R10、査読High #3)。rescueはfailせずscrub済みfactを作るだけにし、レポート保存自体もさらに内側のblock/rescueで包んで、両方の失敗を保持したまま最後に1回だけ非ゼロで再送出する(再査読High #1/Medium #2)。最終再送出の`when:`を、外部から上書き可能な素のfactの真偽値だけに依存させず`ansible_failed_result is defined`とのORへ変更(3回目査読Critical #1) |
 | `roles/semaphore_templates/defaults/main.yml`(既存へ追記) | scheduleカタログ3件、R17/R15/R11/R19の設定変数、`semaphore_target`によるapi_base_urlの導出。token_pathは両ホスト共通の単一絶対pathへ戻した(査読High #4/Critical#4、旧称)。`semaphore_templates_report_dir`/`semaphore_schedules_report_dir`もquory/ansyで分岐させ、ansy向けは`ann`が書き込めることを確認済みの`/home/ann/homelab-reports/...`へ(3回目査読・Tester実機`_022`) |
 | `playbooks/semaphore_templates_setup.yml`(既存へ変更) | `hosts:`を`semaphore_target`から取得、未知値のfail-closed play新設、ansy向け使用例からtoken_path上書き例を削除 |
-| `roles/semaphore_templates/tests/task_flow/fixture_pattern.yml`(新規) | `main.yml`のschedule block/rescue/alwaysの形(3・4回目査読での修正含む)を構造的に再現するfixture playbook。先頭にreserved-name guardの構造的な写しも追加(4回目査読テスト依頼) |
-| `roles/semaphore_templates/tests/task_flow/run_task_flow_tests.py`(新規) | 上記fixtureを5シナリオ(token非漏えい/レポート保存失敗時の元失敗保持/native false extra-varでの再送出抑止不可/UNREACHABLEでも元失敗保持/schedule成功+report-only UNREACHABLE+report失敗factのnative false固定という複合exploitをreserved-name guardが事前に拒否)で駆動する自動テスト |
+| `roles/semaphore_templates/tests/task_flow/fixture_pattern.yml`(新規) | `main.yml`のschedule block/rescue/alwaysの形(3〜5回目査読での修正含む)を構造的に再現するfixture playbook。先頭にreserved-name guardの構造的な写しも追加、guard自身も名前付き変数を使わない形へ(4・5回目査読) |
+| `roles/semaphore_templates/tests/task_flow/run_task_flow_tests.py`(新規) | 上記fixtureを6シナリオ(token非漏えい/レポート保存失敗時の元失敗保持/native false extra-varでの再送出抑止不可/UNREACHABLEでも元失敗保持/schedule成功+report-only UNREACHABLE+report失敗factのnative false固定という複合exploitをreserved-name guardが事前に拒否/guard自身の(廃止済み)ヘルパー変数名をnative空listで固定してもguardを無力化できない)で駆動する自動テスト |
 | 本ファイル | implement記録 |
 
 ## 3. 確定済み設計事項の実装
@@ -50,7 +51,8 @@
   - `schedules_report.yml`は、preflight失敗のように早期に止まった場合でも自分自身が未定義変数エラーで死なないよう、参照するすべての事実に`default(...)`を付けている。
   - **3回目査読Critical #1(内部の失敗fictがextra-varsのnative falseで上書きされ、失敗がrc 0になる)**: 上記2つのfact(`semaphore_schedules_run_failed`/`_report_save_failed`)は素の`set_fact`であり、`-e '{"semaphore_schedules_run_failed": false}'`のようなnative falseは`set_fact`より強い(Ansibleの変数優先順位でextra-varsは最上位)。scheduleの`task_params`がジョブ実行時に`-e`として渡る設計(実データで`Ubuntu vm full upgrade`の`environment`が`{"dry_run":"true"}`)のため、この2フラグの名前空間はscheduleの設定値と共有されており、外部からの上書きは机上の懸念ではない。Reviewerが同型fixtureでrc 0への吸収を実際に再現した。**修正(1段目): 最終再送出の`when:`を、フラグの真偽値だけでなく`(...) or (ansible_failed_result is defined)`とした。** `ansible_failed_result`はrescueが発火したときにansible-core自身が設定する特別変数であり、extra-varsで**値**を汚すことはできても(実測)、**存在の有無**(`is defined`)をfalseへ偽装することはできない(ローカルdecoyで`-e '{"ansible_failed_result": false}'`を渡しても`is defined`はtrueのまま残ることを確認済み)。
   - **3回目査読Medium #2(再指摘。レポート保存がUNREACHABLEになると集約へ到達しない)**: `ansible.builtin.block`の`rescue:`はUNREACHABLE(接続先でremote temp directoryが作れない等)を捕捉しない — 発生した瞬間にplay全体が即座に終了し、`rescue:`/`always:`のどちらにも到達しない。ローカルdecoy(`connection: local`+書き込み不可な`ansible_remote_tmp`)で、この状態を実測再現した上で対策した。**修正: `schedules_report.yml`の3つの保存task(ディレクトリ作成・保存・publish)へ`ignore_unreachable: true`+`register:`を付け、後続taskで`.unreachable`を明示的に判定し、`semaphore_schedules_report_save_failed`/`_msg`を直接`set_fact`する経路を追加した。** `ignore_unreachable: true`を付けるとUNREACHABLEでもplayが即死せず、同じblock内の後続taskへ進むことをローカルdecoyで確認済み(rescueは発火しない — それは元々「通常のFAILED」用の経路であり、UNREACHABLEは別経路として明示的に扱う)。
-  - **4回目査読Critical #1(残り枝。schedule処理は成功しreport保存だけがUNREACHABLEになり、`semaphore_schedules_report_save_failed`をnative falseで固定される場合)**: この組合せでは`rescue`が一度も発火しないため`ansible_failed_result`は未定義のままであり、1段目の`(...) or (ansible_failed_result is defined)`という安全網も働かない — 最終再送出の3条件がすべてfalseになり、レポート未保存のままplayが成功で終わる。`register`した結果へ判定を差し替えても、registerされた変数もただの名前でありextra-varsに上書きされるため解決しない(Reviewer指摘)。**修正(2段目、最終形): 値ではなく「その名前が外部から事前定義されていること自体」を、schedule処理のtaskが1つも走る前に`schedules_validate_config.yml`の最初のtaskで拒否する。** extra-varsは定義済みの名前を未定義にはできないため、この向きの検査は上書きできない。**対象は指摘された2変数に限らず、この roleがschedule処理の内部状態として使う名前全体とした** — 個々の名前を手で列挙する代わりに、`lookup('varnames', '^_?semaphore_schedules_.*', wantlist=True)`(`vars`辞書直接参照はansible-core 2.20.1で非推奨警告が出るため、推奨されるlookup pluginを使う)で現在定義済みの該当prefix変数を列挙し、role defaultsが正当に持つ6つの設定変数(catalog/closed_world/allow_activation/canonical_api_base_url/expected_timezone/report_dir)だけをallowlistとして許可、それ以外が1件でもあれば停止する。**allowlist補集合という設計にしたことで、この先この役割に内部変数を追加しても、allowlistへ載せない限り自動的に保護される。** 検査自身のヘルパー変数名(`_reserved_name_guard_*`)は検査対象パターンに一致しない命名にし、自己参照でfalse positiveにならないことをローカルdecoyで確認した。
+  - **4回目査読Critical #1(残り枝。schedule処理は成功しreport保存だけがUNREACHABLEになり、`semaphore_schedules_report_save_failed`をnative falseで固定される場合)**: この組合せでは`rescue`が一度も発火しないため`ansible_failed_result`は未定義のままであり、1段目の`(...) or (ansible_failed_result is defined)`という安全網も働かない — 最終再送出の3条件がすべてfalseになり、レポート未保存のままplayが成功で終わる。`register`した結果へ判定を差し替えても、registerされた変数もただの名前でありextra-varsに上書きされるため解決しない(Reviewer指摘)。**対応(1段目): 値ではなく「その名前が外部から事前定義されていること自体」を、schedule処理のtaskが1つも走る前に`schedules_validate_config.yml`の最初のtaskで拒否する。** extra-varsは定義済みの名前を未定義にはできないため、この向きの検査は上書きできない。**対象は指摘された2変数に限らず、この roleがschedule処理の内部状態として使う名前全体とした** — 個々の名前を手で列挙する代わりに、`lookup('varnames', '^_?semaphore_schedules_.*', wantlist=True)`(`vars`辞書直接参照はansible-core 2.20.1で非推奨警告が出るため、推奨されるlookup pluginを使う)で現在定義済みの該当prefix変数を列挙し、role defaultsが正当に持つ6つの設定変数(catalog/closed_world/allow_activation/canonical_api_base_url/expected_timezone/report_dir)だけをallowlistとして許可、それ以外が1件でもあれば停止する。**allowlist補集合という設計にしたことで、この先この役割に内部変数を追加しても、allowlistへ載せない限り自動的に保護される。**
+  - **5回目査読Critical #1(guard自身が同じ手口で迂回できた、最終形)**: 上記1段目の初版は、allowlist・観測結果・不一致リストの3つをtask-level `vars:`(`_reserved_name_guard_*`)へ一度保存してから`when:`/`msg:`で参照していた。**しかしtask-level `vars:`もextra-varsより優先順位が低い**ため、`-e '{"semaphore_schedules_report_save_failed": false, "_reserved_name_guard_unexpected": []}'`のように保護対象のfactと「判定結果を空にするfact」を同時に渡すと、`vars:`側の計算結果ごと外部の値で上書きされ、guard自体がskipされ、report-only UNREACHABLE + native false固定という4回目査読の経路がそのまま復活することをReviewerが本物のplaybook経路で再現した。**この案件で同じ欠陥クラス(値の上書きでなく、判定を保持する場所そのものが外部から名前で書き換え可能)が3回連続で出た**(`allow_activation`の文字列表現、内部failure fact、そして今回のguard自身)。**修正(最終形): 判定の中間結果を一切、名前付き変数(`vars:`/`set_fact`/`register`のいずれも)へ保存しない。** `lookup('varnames', ...)`とallowlistのliteral listを、`when:`と`msg:`それぞれの中で**独立に、その場で**評価する構成へ書き換えた — 参照できる名前が存在しない値は、extra-varsを含むいかなる名前ベースの上書きでも書き換えられない。allowlistの6項目は`when:`/`msg:`の両方に同じ内容で重複させてある(YAMLアンカー等でこの重複を消す手段は無かった — `vars:`を経由しない限りAnsible側から参照可能な名前を作れず、Ansibleはtaskの未知keyを許さないため、文字列展開の外でYAMLアンカーを使う場所も無い)。**allowlistを変更するときは両方を同時に直す必要がある**、という保守コストをこのfail-closedの堅牢性と引き換えにしている。
 - **timezone照合(R11)**: 書き込みに使うのと同一の`semaphore_templates_api_base_url`に対し`GET /api/info`を発行し、`schedule_timezone`を`semaphore_schedules_expected_timezone`と照合、不一致ならfail-closed(AC10)。
 - **preflight(R9)**: `semaphore_schedules_preflight`フィルタを呼び、`errors`が1件でもあれば`ansible.builtin.fail`で即停止。template名の解決件数エラー(③)が含まれる場合は、R10の「templateを先にapplyする2段階」運用制約を名指しする補足メッセージを追加する(2026-08-09、査読差し戻し指摘6。設計は変えず、メッセージだけを改善)。
 - **diff/stage1/stage2の分離(R8/R8-2/R8-3)**: `schedules_diff.yml`で個別schedule detail(単一GET)を取得し`semaphore_schedules_diff`を呼ぶ。
@@ -112,7 +114,7 @@ Ansibleの既定挙動(`--list-hosts`で確認): 未一致のhostパターンは
 filterの92単体testは`main.yml`のnested rescue/alwaysを一度も通らない(pure Pythonでansible runtimeを介さない)ため、`roles/semaphore_templates/tests/task_flow/`を新設した(`scripts/tests/semaphore_schedules/`は先行Implementer所有のため触れていない。`.gitignore`の許可リスト問題も、この新パス`roles/semaphore_templates/tests/`は対象外であることを`git check-ignore`で確認済み)。
 
 - `fixture_pattern.yml`: `main.yml`のschedule block/rescue/alwaysと**構造的に同一の形**(3・4回目査読の修正を含む — 先頭にreserved-name guard → block内でno_logタスクが失敗(`fixture_should_fail`で成功に切替可能) → rescueはfailせずscrub済みfactだけを作る → alwaysはレポート保存をさらに内側のblock/rescueで包み、保存task自体には`ignore_unreachable: true`+`register:`を付けてUNREACHABLEを明示的に検出、FAILEDは内側rescueが、UNREACHABLEはその後続taskが、それぞれ別factへ分離 → named blockの外の最終taskが`ansible_failed_result is defined`とのORで非ゼロ再送出)を持つ、実ホスト・実APIに触れないfixture。
-- `run_task_flow_tests.py`: このfixtureを5シナリオで駆動する。A: レポート保存が成功する場合(sentinel非漏えい)。B: `chmod`でレポート保存を意図的にFAILEDにする場合(元failureの保持)。C: `-e '{"fixture_run_failed": false}'`(native false)で内部factを外部から固定しても、rcが必ず非ゼロになること(3回目査読Critical #1)。D: `ansible_remote_tmp`を書き込み不可pathへ向けてレポート保存をUNREACHABLEにしても、元failureの識別情報が残ること(3回目査読Medium #2再指摘)。E: `fixture_should_fail=false`(block自体は成功)+report-onlyのUNREACHABLE+`-e '{"fixture_report_save_failed": false}'`という4回目査読の複合exploitで、reserved-name guard自身の停止メッセージが(block/report-writeより先に)出て非ゼロになること。5シナリオとも3回連続実行して安定を確認した。
+- `run_task_flow_tests.py`: このfixtureを6シナリオで駆動する。A: レポート保存が成功する場合(sentinel非漏えい)。B: `chmod`でレポート保存を意図的にFAILEDにする場合(元failureの保持)。C: `-e '{"fixture_run_failed": false}'`(native false)で内部factを外部から固定しても、rcが必ず非ゼロになること(3回目査読Critical #1)。D: `ansible_remote_tmp`を書き込み不可pathへ向けてレポート保存をUNREACHABLEにしても、元failureの識別情報が残ること(3回目査読Medium #2再指摘)。E: `fixture_should_fail=false`(block自体は成功)+report-onlyのUNREACHABLE+`-e '{"fixture_report_save_failed": false}'`という4回目査読の複合exploitで、reserved-name guard自身の停止メッセージが(block/report-writeより先に)出て非ゼロになること。F: Eと同じ組合せに加え、guard自身の(廃止済み)ヘルパー変数名`_reserved_name_guard_unexpected`等をnative空listで固定してguard自体の無力化を試みても、rcが非ゼロのまま・guardのメッセージが出ること(5回目査読Critical #1)。6シナリオとも3回連続実行して安定を確認した。
 
 **実装中に発見した事実(修正はしていない、Ansible-core自体の挙動)**: ansible-core 2.20.1は、`no_log: true`を付けたtaskが失敗しても、`[ERROR]: Task failed: ...`という診断バナーに**そのtaskの生の`msg`をそのまま表示する**(`fatal: ... => {"censored": ...}`という後続のJSON dumpだけがno_logで隠される)。`ansible.builtin.fail`・`ansible.builtin.uri`の両方で、rescueを介さない最小構成で再現・確認した。これは**rescueが始まる前に**表示されるため、どのようなrescue側のscrubでも防げない。ただし、この役割の実際の`uri`タスクの失敗メッセージ("Status code was N and not [...]: HTTP Error N: <reason>")はAuthorizationヘッダ値もレスポンス本文も含まないことを同じ実測で確認しており、**現状のtask構成でこの経路が実際にtokenを漏らすことはない**(role既存ヘッダコメントの「通常想定しにくいが万一」という記述と整合する)。テストはこの事実を踏まえ、「rescue以降(このroleのコードが制御できる範囲)でsentinelが再度現れないこと」をassertし、rescue開始前のバナー自体は対象外とした — この境界と理由をtest自身のdocstringに明記した。
 
@@ -124,9 +126,9 @@ filterの92単体testは`main.yml`のnested rescue/alwaysを一度も通らな�
 
 **行って無効化した誤った検証方法**: 当初、実際のschedule roleをmockサーバ相手に`sudo -u ann ansible-playbook ...`として動かし、report書き込みまでエンドツーエンドで確認しようとしたが、`ann`がこの作業ツリー(`/home/yoshi/homelab-ansible`、および親の`/home/yoshi`)自体を辿れない(`sudo -n -u ann test -x /home/yoshi` が失敗)ことが分かり、この試みは無効だった。**これはこの検証手法自体の限界であり、私の変更した`report_dir`とは無関係** — `ann`がこのcwd配下にアクセスできないという事実は、Semaphoreの実行が別のcheckout場所を使っていることを示唆するが、その場所は未確認のままCoordinator/Testerへ委ねる。テスト後、`/home/ann/homelab-reports`は削除済み(状態を残していない)。
 
-### 4.8 reserved-name guardの直接検証(2026-08-09、4回目査読Critical #1への対応)
+### 4.8 reserved-name guardの直接検証(2026-08-09/10、4・5回目査読Critical #1への対応)
 
-`schedules_validate_config.yml`単体を、`include_role: tasks_from: noop, public: true`(role defaultsのみロード、ネットワーク到達なし)の直後に`include_tasks`で直接実行し、以下を確認した。
+`schedules_validate_config.yml`単体を、`include_role: tasks_from: noop, public: true`(role defaultsのみロード、ネットワーク到達なし)の直後に`include_tasks`で直接実行し、4回目査読時点(task-level `vars:`版)で以下を確認していた。
 
 - **クリーンな実行**(外部からの事前定義なし): guardは`skipping`(条件不成立)で通過し、以降の型検証・正規化も通常どおり動く。role defaultsが持つ6変数だけが検出され、それ以外は0件であることを`lookup('varnames', ...)`の出力で直接確認した。
 - **攻撃再現1**: `-e '{"semaphore_schedules_report_save_failed": false}'` → guardが`semaphore_schedules_report_save_failed`を名指しして`fail`、rc=2。
@@ -134,7 +136,14 @@ filterの92単体testは`main.yml`のnested rescue/alwaysを一度も通らな�
 - **攻撃再現3**: `-e '{"_semaphore_schedules_stage1_identity_ok": true}'`(stage1のidentity確認をbypassしようとする、下線始まりの内部専用名)→ 同様にrc=2。パターンが`(_)?semaphore_schedules_`の両方を拾うことを確認した。
 - **正当な上書きは通す**: `-e semaphore_schedules_closed_world=true`(allowlist内の6変数の1つ)は guardを通過し、後続の型検証・正規化どおりに動作する。
 
-`roles/semaphore_templates/tests/task_flow/fixture_pattern.yml`にも同じ設計のguardを追加し、scenario Eとして同じ攻撃パターン(schedule処理は成功・report-onlyのUNREACHABLE・report失敗factのnative false固定)を再現、guard自身のメッセージがblock/report-writeより先に出て停止することを確認した(§4.6参照)。
+**5回目査読で、上記の`vars:`実装自体がextra-vars優先順位で迂回できることが判明した(Reviewerが本物のtask fileで再現)。** 名前付き変数を一切使わない最終形へ書き換えた後、同じ手順で以下を追加確認した。
+
+- **クリーンな実行**: 変わらずguardは`skipping`で通過(rc=0)。
+- **保護対象のfactのみ上書き**: `-e '{"semaphore_schedules_report_save_failed": false}'` → 変わらずrc=2で停止。
+- **guard自身の迂回を試みる**: `-e '{"semaphore_schedules_report_save_failed": false, "_reserved_name_guard_unexpected": []}'`(4回目査読版で実際に迂回できていた組合せ)→ **rc=2で停止**(4回目査読版ではrc=0だった)。`_reserved_name_guard_observed`/`_reserved_name_guard_allowlist`も同時に汚すバリエーションでも同様にrc=2。
+- **正当な上書きは変わらず通る**: `-e semaphore_schedules_closed_world=true` → guard通過、rc=0。
+
+`roles/semaphore_templates/tests/task_flow/fixture_pattern.yml`のguardも同じ最終形へ書き換え、scenario E(4回目査読の複合exploit)に加え、scenario F(guard自身の迂回試行)を追加した — いずれもguard自身のメッセージがblock/report-writeより先に出て停止することを確認した(§4.6参照)。
 
 ## 5. 発見していた問題(解決済み) — filter plugin `_strict_equal()` とAnsible-core 2.20のData Taggingの衝突
 
@@ -160,5 +169,5 @@ filterの92単体testは`main.yml`のnested rescue/alwaysを一度も通らな�
 3. 先行Implementerの申し送り(`2026-08-09_015_implement_filters.md` §9)のうち、`create_payload`がPOST時にAPIが必須とする他のフィールド(`repository_id`等)を含めるべきかは未確認のまま — 実際にPOSTを打つ側(Tester)が最初に踏むリスクとして残る。
 4. ansy向けtoken配置(査読High #4の環境側対応)はCoordinator調整中で、完了まではansyでのtoken読み取りがfail-closedする(意図した状態)。
 5. **§4.6で発見した、ansible-core 2.20.1の`[ERROR]:`バナーが`no_log: true`を尊重しない挙動。** 現状のtask構成では実害が無いことを確認済みだが、これは`main.yml`の元々のtemplate側rescue(自分の変更対象外、2026-08-04時点で「実測確認済み」とコメントされている箇所)にも等しく当てはまる、rescueでは原理的に防げない特性であり、この案件のスコープを超える。Coordinatorが認識しておくべき事実として記録する — 対応の要否・対象は本件の範囲外の判断。
-6. ~~残存する複合シナリオのリスク~~ **【解決済み、4回目査読への対応】** 3回目査読時点で残っていた「UNREACHABLEなreport保存」+「extra-varsでreport_save_failedを偽装」の複合は、4回目査読で実際に指摘・再現され(Critical #1)、§3「4回目査読Critical #1」「§4.8」のreserved-name guardで解決した。値の真偽値ではなく名前の事前定義自体を拒否する設計のため、この複合に限らずschedule処理の内部状態名全体を対象にしている。
+6. ~~残存する複合シナリオのリスク~~ **【解決済み、5回目査読への対応(4回目査読時点の「解決済み」は不十分だった)】** 3回目査読時点で残っていた「UNREACHABLEなreport保存」+「extra-varsでreport_save_failedを偽装」の複合は、4回目査読で指摘・再現され(Critical #1)、reserved-name guardで対応した。**しかしそのguard自身がtask-level `vars:`に判定を保存しており、5回目査読で同じextra-vars優先順位の悪用によりguardごと迂回できることが判明した。** §3「5回目査読Critical #1」「§4.8」のとおり、判定の中間結果を名前付き変数へ一切保存しない形へ書き換えて最終的に解決した。**この案件で同じ欠陥クラスが3回連続で表面化したという事実は、Coordinatorへの申し送りとして重要** — 「名前で参照できる場所に判定を置かない」という設計原則を、この案件以外の同種のfail-closedにも展開する価値があるかもしれない。
 7. ansy実行環境そのもの(Semaphore/`ann`が実際にどのcheckoutパスから実行するか)は未確認のまま(§4.7参照)。`ann`は`/home/yoshi`配下を辿れないため、この作業ツリーとは別の場所のはずだが、その場所・そこでの`ansible.cfg`/`roles_path`解決は未確認。

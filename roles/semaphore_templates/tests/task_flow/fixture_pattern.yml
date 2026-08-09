@@ -27,7 +27,7 @@
 # is what gets exercised and asserted.
 #
 # The shape below is intentionally identical to tasks/main.yml's schedule
-# section as fixed on 2026-08-09 (all four rounds):
+# section as fixed on 2026-08-10 (all five rounds):
 #   (first, sibling to everything else): a reserved-name guard -- fails
 #     closed if any `(_)?fixture_*`-prefixed name (this fixture's own
 #     internal-state namespace, the same one `fixture_run_failed`/
@@ -38,7 +38,10 @@
 #     outside. This is the r4 fix: extra-vars can corrupt a *value* but
 #     cannot un-define a name, so checking "is this reserved name already
 #     defined" (not "what is its value") cannot be spoofed the way a
-#     boolean flag can.
+#     boolean flag can. **r5 refinement: the guard's own judgment is never
+#     stored under a name either** -- see the task's own comment below for
+#     why (task-level `vars:` turned out to be just as overridable as
+#     `set_fact`/`register`).
 #   block: [the thing that might fail -- parametrized by fixture_should_
 #     fail (default true) so scenario E can make it succeed instead]
 #   rescue: [scrub into a fact; do NOT call fail here, so always: still runs]
@@ -73,31 +76,46 @@
   vars:
     ansible_remote_tmp: "{{ fixture_bad_remote_tmp | default(omit) }}"
   tasks:
-    # r4 fix: reserved-name guard, mirroring schedules_validate_config.yml's
-    # new first task. This checks the fixture's *actual* internal-state
-    # namespace (`(_)?fixture_*`, the same prefix `fixture_run_failed` /
-    # `fixture_report_save_failed` use) against an explicit allowlist of the
-    # names this fixture legitimately accepts from the outside
-    # (`fixture_secret_token` / `fixture_report_dir` /
-    # `fixture_bad_remote_tmp` / `fixture_should_fail`). The helper vars
-    # below are deliberately named `_reserved_name_guard_*` (no `fixture`
-    # substring) so they don't match their own pattern and false-positive
-    # on themselves.
+    # r5 fix (2026-08-10, docs/ai/reviews/semaphore_schedules_as_code/
+    # 2026-08-10_026_review_implementation_r5.md Critical #1): the r4
+    # version of this guard stored its judgment in task-level `vars:`
+    # (`_reserved_name_guard_*`), which -- like `set_fact`/`register` --
+    # has *lower* precedence than extra-vars. `-e '{"fixture_report_save_
+    # failed": false, "_reserved_name_guard_unexpected": []}'` overwrote
+    # the computed result and skipped the guard entirely (Reviewer
+    # reproduced this against the real production task file). **Mirroring
+    # the real fix: no named variable holds any intermediate result here at
+    # all.** `lookup(...)` and the allowlist literal are evaluated inline,
+    # independently, inside both `when:` and `msg:` -- there is no name for
+    # extra-vars (or anything else) to shadow. The allowlist is duplicated
+    # verbatim in both places for the same reason a shared named variable
+    # would have been; keep both in sync if it ever changes.
     - name: "Fail closed if any (_)fixture_* internal-state name is already defined before this fixture's own tasks set it"
-      vars:
-        _reserved_name_guard_allowlist:
-          - fixture_secret_token
-          - fixture_report_dir
-          - fixture_bad_remote_tmp
-          - fixture_should_fail
-        _reserved_name_guard_observed: "{{ lookup('varnames', '^_?fixture_.*', wantlist=True) }}"
-        _reserved_name_guard_unexpected: >-
-          {{ _reserved_name_guard_observed | reject('in', _reserved_name_guard_allowlist) | list | sort }}
       ansible.builtin.fail:
         msg: >-
           reserved (_)fixture_* names already defined before this
-          fixture's own tasks ran: {{ _reserved_name_guard_unexpected | join(', ') }}
-      when: (_reserved_name_guard_unexpected | length) > 0
+          fixture's own tasks ran:
+          {{ (
+               lookup('varnames', '^_?fixture_.*', wantlist=True)
+               | reject('in', [
+                   'fixture_secret_token',
+                   'fixture_report_dir',
+                   'fixture_bad_remote_tmp',
+                   'fixture_should_fail',
+                 ])
+               | list | sort
+             ) | join(', ') }}
+      when: >-
+        (
+          lookup('varnames', '^_?fixture_.*', wantlist=True)
+          | reject('in', [
+              'fixture_secret_token',
+              'fixture_report_dir',
+              'fixture_bad_remote_tmp',
+              'fixture_should_fail',
+            ])
+          | list | length
+        ) > 0
 
     - name: Simulate the schedule block (fails unless fixture_should_fail is explicitly false)
       block:

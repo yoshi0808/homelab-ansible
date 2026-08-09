@@ -11,9 +11,7 @@
 
 ## Now(進行中)
 
-| # | 項目 | 現在地 | 次にやること |
-|---|---|---|---|
-| 1 | **Semaphore schedule をリポジトリ管理下に置く** | **実装完了・commit 済み(`03035f5`、2026-08-09)。** カタログは SAFE 3件(`SAFE: Time sync check` / `SAFE:Recovery monitoring check` / `SAFE:Deployment drift check`)で、残る16件は管理外として列挙のみ行い削除しない。フェーズは**移行期間**(closed-world フラグは `false`)。設計と受入条件の正本は `docs/ai/reviews/semaphore_schedules_as_code/2026-08-09_001_requirement.md`、工程の記録は同フォルダの `_015`〜`_023`(値をここへ写さない)。<br>**ansy(quory の Semaphore を Restore した複製)で `--check` まで実測済み** — 有効化は4条件すべてが不成立で止まり、書き込みは0件。Tester は 18/23 PASS・FAIL 0、未検証5件の理由は `_022` §5 が持つ。**ansy 実行は `-e semaphore_target=ansy` だけで成立する**(実行ホスト・API・token・レポート先が1つのつまみで切り替わる)。既定は quory で従来と同一 | **quory で `--check` → 適用(Yoshinobu が Semaphore から起動)。** 移行期間なので `false → true` は発行されない。その後、次のバッチを SEMI-SAFE → UN-SAFE の順に足し、**19件すべてが載って管理外が0件になったら closed-world フラグを人がコミットで立てる**。<br>**引き継いだ未確認事項**: Semaphore 2.18.4 が受理する cron grammar、新規 POST の必須フィールド、`task_params` の PUT が作る孤児行の観測、OQ1(件数20/19)、OQ3(API と SQLite の突合) |
+**進行中の案件は無い。** 着手候補は下の Next を参照する。
 
 **ansy のスナップショットから戻したときに要るもの**(2026-08-09、Semaphore Restore の前に取得)。**リポジトリは `9397fe5` まで commit 済みなので、git の内容は巻き戻らない。** 巻き戻るのは ansy 上の git 管理外だけで、次の7つがそれに当たる。スナップショット取得時点より**古い**世代へ戻した場合にだけ、作り直しが要る。
 

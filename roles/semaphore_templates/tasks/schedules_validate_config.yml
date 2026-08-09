@@ -76,36 +76,70 @@
 # `lookup('varnames', ...)`(`vars`辞書直接参照はansible-core 2.20.1で
 # 非推奨警告が出るため、推奨されるlookup pluginを使う)で、現在定義済みの
 # 変数名のうち`(_)?semaphore_schedules_`で始まるものを列挙し、
-# allowlistに無いものが1件でもあれば停止する。**この検査自身が使う
-# ヘルパー変数名は、検査対象パターンに一致しない別の命名にしてある**
-# (`_reserved_name_guard_*` — 自己参照でfalse positiveにならないように、
-# ローカルdecoyで実際に検証済み)。
+# allowlistに無いものが1件でもあれば停止する。
+#
+# **2026-08-10、5回目の査読差し戻し(`docs/ai/reviews/
+# semaphore_schedules_as_code/2026-08-10_026_review_implementation_r5.md`
+# Critical #1)への対応。** 初版は上記の判定(allowlist・観測結果・
+# 不一致リスト)をtask-level `vars:`(`_reserved_name_guard_*`)へ一度
+# 保存してから`when:`/`msg:`で参照していたが、**task-level `vars:`も
+# extra-varsより優先順位が低い**ため、`-e '{"semaphore_schedules_report_
+# save_failed": false, "_reserved_name_guard_unexpected": []}'`のように
+# 保護対象のfactと「判定結果を空にするfact」を同時に渡すと、`vars:`側の
+# 計算結果ごと外部の値で上書きされ、guard自体がskipされることをReviewer
+# が実測した。**同じ欠陥クラス(値の上書きでなく、判定を保持する場所その
+# ものが外部から名前で書き換え可能)が、この案件でこれで3回目
+# (`allow_activation`の文字列、内部failure fact、そしてguard自身)。**
+#
+# **修正: 判定の中間結果を一切、名前付き変数(`vars:`/`set_fact`/
+# `register`のいずれも)へ保存しない。** `lookup(...)`とallowlistの
+# literal listを`when:`と`msg:`それぞれの中で**独立に、その場で**評価
+# する — 参照できる名前が存在しない値は、extra-varsを含むいかなる名前
+# ベースの上書きでも書き換えられない。allowlistの6項目は`when:`/`msg:`の
+# 両方に同じ内容で重複させてある(YAMLアンカー等でこの重複を消す手段は
+# 無かった — `vars:`を経由しない限りAnsible側から参照可能な名前を作れず、
+# 文字列展開の外でYAMLアンカーを使うにはtask構造そのものに新しいキーが
+# 要るが、Ansibleがtaskの未知keyを許さないため断念した)。**allowlistを
+# 変更するときは両方を同時に直すこと。**
 - name: "Fail closed if any (_)semaphore_schedules_* internal-state name is already defined before this role's own tasks set it"
-  vars:
-    _reserved_name_guard_allowlist:
-      - semaphore_schedules_catalog
-      - semaphore_schedules_closed_world
-      - semaphore_schedules_allow_activation
-      - semaphore_schedules_canonical_api_base_url
-      - semaphore_schedules_expected_timezone
-      - semaphore_schedules_report_dir
-    _reserved_name_guard_observed: "{{ lookup('varnames', '^_?semaphore_schedules_.*', wantlist=True) }}"
-    _reserved_name_guard_unexpected: >-
-      {{ _reserved_name_guard_observed | reject('in', _reserved_name_guard_allowlist) | list | sort }}
   ansible.builtin.fail:
     msg: >-
       以下の変数名が、schedule処理の一切のtaskが走る前から既に定義されて
-      います: {{ _reserved_name_guard_unexpected | join(', ') }}。
+      います:
+      {{ (
+           lookup('varnames', '^_?semaphore_schedules_.*', wantlist=True)
+           | reject('in', [
+               'semaphore_schedules_catalog',
+               'semaphore_schedules_closed_world',
+               'semaphore_schedules_allow_activation',
+               'semaphore_schedules_canonical_api_base_url',
+               'semaphore_schedules_expected_timezone',
+               'semaphore_schedules_report_dir',
+             ])
+           | list | sort
+         ) | join(', ') }}。
       これらはこの role が内部状態(失敗判定・レポート保存結果など)として
       `set_fact`/`register`する名前であり、`-e`等の外部からの事前定義を
-      許可しません(査読r4 Critical #1 — 値ではなく名前の事前定義自体を
-      拒否することで、extra-varsの優先順位を悪用した再送出の抑止を防ぐ)。
+      許可しません(査読r5 Critical #1 — 判定の中間結果を名前付き変数へ
+      一切保存しないため、この判定式自体を外部から上書きする経路が無い)。
       許可される外部設定は semaphore_schedules_catalog /
       semaphore_schedules_closed_world / semaphore_schedules_allow_activation /
       semaphore_schedules_canonical_api_base_url /
       semaphore_schedules_expected_timezone / semaphore_schedules_report_dir
       の6つだけです。名前を変えて再実行してください。
-  when: (_reserved_name_guard_unexpected | length) > 0
+  when: >-
+    (
+      lookup('varnames', '^_?semaphore_schedules_.*', wantlist=True)
+      | reject('in', [
+          'semaphore_schedules_catalog',
+          'semaphore_schedules_closed_world',
+          'semaphore_schedules_allow_activation',
+          'semaphore_schedules_canonical_api_base_url',
+          'semaphore_schedules_expected_timezone',
+          'semaphore_schedules_report_dir',
+        ])
+      | list | length
+    ) > 0
 
 - name: "Fail closed if semaphore_schedules_closed_world is not an unambiguous boolean"
   ansible.builtin.fail:
