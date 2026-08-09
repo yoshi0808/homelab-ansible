@@ -1,0 +1,4 @@
+interface:
+  display_name: "Ansible Correctness Review"
+  short_description: "Ansible実装の成立性・冪等性・失敗経路を査読"
+  default_prompt: "Use $ansible-correctness-review to review this Ansible diff for correctness and material execution risks."

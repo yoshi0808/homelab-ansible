@@ -1,0 +1,4 @@
+interface:
+  display_name: "Test Gap Review"
+  short_description: "受入条件と実装を照合して重大なテスト不足だけを抽出するレビュー"
+  default_prompt: "Use $test-gap-review to identify material test gaps in this change."
