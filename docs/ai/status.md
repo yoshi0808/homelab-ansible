@@ -13,7 +13,18 @@
 
 | # | 項目 | 現在地 | 次にやること |
 |---|---|---|---|
-| — | (進行中の案件なし) | | |
+| 1 | **Semaphore schedule をリポジトリ管理下に置く** | **requirement 確定(2026-08-09、Approve)。** 正本は `docs/ai/reviews/semaphore_schedules_as_code/2026-08-09_001_requirement.md`(値をここへ写さない)。**codex Reviewer と13回往復した。** 設計の核は、削除しない / `template_id` と project id をカタログへ持たず名前解決する / 更新は単一 GET からの get-then-merge-then-send / 管理項目の更新と有効化を二段階に分ける / closed-world フラグまでは新規作成と rename を preflight で拒否する / 有効化は canonical な本番 URL の allowlist と明示許可が要る、の6点。<br>**査読が止めた本番事故が3つある**。①公式リファレンス通りの6項目 PUT は実データの `task_params` を消す — `Ubuntu vm full upgrade` の **`dry_run=true` はここに入っており**、消えると本番の full upgrade が定期実行される ②更新と有効化を同じ PUT に載せると、値が捨てられても `active: true` は受理され、パラメータを失った schedule が起動する ③closed-world 後に ansy へ apply すると、Restore 直後 `active: false` の19件が有効化され検証用複製が定期実行基盤に変わる。<br>**ansy は quory の Semaphore バックアップを Restore した複製**(2026-08-09)。project id は 2→3 へ変わり、template id も quory と一致しない — **id を保存する実装は ansy のテストで必ず破綻する**ので検証上の利点である。API 契約と DB 構造の実測は requirement 6.5 節が正本 | **実装へ進む。** 段階適用で、SAFE 分類の数件をカタログへ入れて ansy で `--check` → 適用 → 現物確認 → quory、の順に広げる。19件すべてが載って管理外が0件になったら closed-world フラグを人が立てる。**requirement 9節が implement / test_plan / Tester への引き継ぎ6件を送り先つきで持っている**(`task_params` の schema 全体、AC15 の reachable mock、OQ1 の件数20/19、競合制御の有無、孤児 `task_params` 行の観測) |
+
+**ansy のスナップショットから戻したときに要るもの**(2026-08-09、Semaphore Restore の前に取得)。**リポジトリは `9397fe5` まで commit 済みなので、git の内容は巻き戻らない。** 巻き戻るのは ansy 上の git 管理外だけで、次の6つがそれに当たる。スナップショット取得時点より**古い**世代へ戻した場合にだけ、作り直しが要る。
+
+1. **agmsg 一式**(`~/.agents/skills/agmsg/`、team `homelab` の登録、message DB)— 再構築手順は `docs/ai/context/operations/agent-messaging.md`
+2. **codex シム**(`~/.agents/bin/codex`)と、`~/.bashrc` の PATH 行(**非対話ガードより上**に置くこと)
+3. **配送の hook** — `.claude/settings.local.json`(Claude Code 側)と `.codex/hooks.json`(Codex 側)。どちらも gitignored。Codex 側は起動時に「Hooks need review」で信頼を与え直す必要がある
+4. **`~/.semaphore-api-token-ansy`** — UI で再発行する
+5. **`~/.codex/rules/default.rules`** — codex の承認ルール(`ansible-playbook` の許可を含む)
+6. **`new-session.sh`** — gitignored。1ペイン構成のままで、spawn は行わない
+
+**リブートで必ず失われるもの**(スナップショットの世代に関係なく): tmux セッション `homelab`、Codex Reviewer のペイン、agmsg の Monitor。いずれも次セッションの SessionStart hook と `spawn.sh` で戻る。
 
 ## Next(着手候補) — 工程・体制
 
