@@ -708,6 +708,105 @@ semaphore_schedules_catalog:
         debug_level: 4
         dry_run: false
 
+  # --- 第3バッチ(2026-08-10追加): 残るSAFE / SEMI-SAFE の12件 ----------------
+  #
+  # いずれも`task_params`は空の`environment`のみで、実行パラメータを持たない。
+  # 値の出所と検証の手順は第2バッチと同じ(ansyから取得し、quoryの`--check`で
+  # 差分が出ないことを確認してから適用する)。
+  #
+  # **`SEMI-SAFE: Proxmox patch dry-run weekly`が指すtemplateは`SAFE: Proxmox
+  # patch dryrun`である。** schedule名の接頭辞とtemplateの分類が食い違って
+  # 見えるが、誤りではない — template側の分類を2026-08-04にSEMI-SAFEからSAFEへ
+  # 是正したとき、schedule名は当時のまま残った。**renameは全フェーズで非対応
+  # (R2/R20)なので、ここは実物どおりに転記する。**
+  #
+  # これで残るはUN-SAFEの`Proxmox Weekly Full Patch`1件だけになる。19件目を
+  # 足す差分が、そのまま「本番の週次フルパッチをカタログ管理下に入れる」という
+  # 提案になるよう、意図的に最後の単独バッチへ回している。
+  - name: "SAFE: Authy healthcheck daily"
+    template: "SAFE: Authy healthcheck"
+    cron: "30 5 * * *"
+    active: true
+    task_params:
+      environment: "{}"
+
+  - name: "SAFE: Monitoring healthcheck daily"
+    template: "SAFE: Monitoring healthcheck"
+    cron: "35 5 * * *"
+    active: true
+    task_params:
+      environment: "{}"
+
+  - name: "SAFE: Proxmox hardware check daily"
+    template: "SAFE: Proxmox hw check"
+    cron: "45 5 * * *"
+    active: true
+    task_params:
+      environment: "{}"
+
+  - name: "SAFE: Proxmox healthcheck daily"
+    template: "SAFE: Proxmox healthcheck"
+    cron: "40 5 * * *"
+    active: true
+    task_params:
+      environment: "{}"
+
+  - name: "SEMI-SAFE: Ubuntu nightly reboot if required daily"
+    template: "SEMI-SAFE: Ubuntu nightly"
+    cron: "30 3 * * *"
+    active: true
+    task_params:
+      environment: "{}"
+
+  - name: "SEMI-SAFE: Proxmox patch dry-run weekly"
+    template: "SAFE: Proxmox patch dryrun"
+    cron: "30 17 * * 5"
+    active: true
+    task_params:
+      environment: "{}"
+
+  - name: "SEMI-SAFE:Sophos trim"
+    template: "SEMI-SAFE: Sophos trim"
+    cron: "15 18 * * 5"
+    active: true
+    task_params:
+      environment: "{}"
+
+  - name: "SEMI-SAFE:Cloudkey_cert_deploy"
+    template: "SEMI-SAFE: Cloudkey cert deploy"
+    cron: "10 0 1 * *"
+    active: true
+    task_params:
+      environment: "{}"
+
+  - name: "SAFE:Proxmox backup restore verify"
+    template: "SAFE: Proxmox backup restore verify"
+    cron: "30 18 28 * *"
+    active: true
+    task_params:
+      environment: "{}"
+
+  - name: "SEMI-SAFE:Unifi backup fetch"
+    template: "SEMI-SAFE: Unifi backup fetch"
+    cron: "30 18 * * 5"
+    active: true
+    task_params:
+      environment: "{}"
+
+  - name: "SAFE:Proxmox snapshot check"
+    template: "SAFE: Proxmox snapshot check"
+    cron: "0 18 * * 4"
+    active: true
+    task_params:
+      environment: "{}"
+
+  - name: "SEMI-SAFE:Codex update check(Only on Quory)"
+    template: "SEMI-SAFE: Codex update check"
+    cron: "0 17 * * 5"
+    active: true
+    task_params:
+      environment: "{}"
+
 # --- R17: closed-worldフェーズへの移行フラグ ----------------------------------
 # 単調で明示的なフラグ。**人がコミットで立て、実装はいかなる条件でも降ろさない。**
 # エントリ数などから推測して自動判定しない(将来正規に20件目を追加した時点で
