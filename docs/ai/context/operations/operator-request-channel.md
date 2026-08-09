@@ -70,6 +70,14 @@ server setup templateにscheduleを登録しない。git pull・template登録�
 
 **期待するhashは配備時にrepoから算出して各ホストのconfigへ埋まる。** ホスト上でルールセットを書き換えると、次回起動時にhash不一致で止まる。
 
+### 依頼文に長いパスを書かない
+
+ルール `high-entropy-string` の候補パターンは20文字以上の `[A-Za-z0-9+/_=.-]` 連続であり、**リポジトリ内のパスやAPIのパスがそのまま当たる**。秘密情報を含まない依頼文でも `high_entropy` で拒否される。
+
+対処はパス文字列を依頼文から外すことである。ルールセットは書き換えない(書き換えるとhash不一致で経路ごと止まる)。**書き直したpayloadは、送る前に同じスキャナへ通して通過を確認してから submit する。**
+
+検出されるのは `purpose` / `requested_information` / `expected_result` / `observed_facts` / `unconfirmed` の5つで、ルール定義は `roles/operator_request_channel/files/dlp-rules.json` が正本。
+
 ## 5. 保管と immutability
 
 - **受理したmessage本文は更新も置換もしない。** 状態はappend-onlyのイベント列として別に記録し、現在状態はそこから導出する。
