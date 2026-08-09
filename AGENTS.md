@@ -4,4 +4,4 @@ Codexは作業開始時に、共通原則の正本 [`docs/ai/core.md`](docs/ai/c
 
 Ansible実行の安全分類は [`docs/ai/policies/ansible_test_safety_policy.md`](docs/ai/policies/ansible_test_safety_policy.md) が正本。
 
-注記(2026-07-26): Codexは開発工程から外れ、`recovery_exec`とProxmoxパッチ適用の実行エンジンとしてのみ稼働している。それらは`recovery_exec_setup`が配布する専用のAGENTS.md(`AGENTS.md.j2`)を読むため、このリポジトリ直下のAGENTS.mdを参照する主体は現状存在しない。
+Codexは、`recovery_exec`とProxmoxパッチ適用の実行エンジンに加え、開発工程ではCoordinatorが指定したRoleとして起動される。開発工程でRoleを指定されたCodexは、共通原則に続けて`docs/ai/roles/<role>.md`の該当する正本を読む。運用実行エンジンは引き続き`recovery_exec_setup`が配布する専用のAGENTS.md(`AGENTS.md.j2`)に従う。
