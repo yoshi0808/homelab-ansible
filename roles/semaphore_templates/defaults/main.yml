@@ -833,7 +833,7 @@ semaphore_schedules_catalog:
 # 単調で明示的なフラグ。**人がコミットで立て、実装はいかなる条件でも降ろさない。**
 # エントリ数などから推測して自動判定しない(将来正規に20件目を追加した時点で
 # 検査が解除されてしまうため、R17本文)。既定false(移行期間)。
-semaphore_schedules_closed_world: false
+semaphore_schedules_closed_world: true
 
 # --- R15: 有効化(false→true)の実行ごとの明示許可 ------------------------------
 # 既定は不許可。`-e semaphore_schedules_allow_activation=true` で都度渡す
