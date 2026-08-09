@@ -52,8 +52,8 @@ Semaphore schedule / systemd timer が実行
 | forced command 鍵の構造(エントリ数・`command=`始まり) | ある |
 | `/etc/hosts` の網羅 / `reports/` の所有権 | ある |
 | **`template` 配備物の内容** | **無い**(Tier 2、未着手)。unit本体・sudoers・dispatch script等が該当 |
-| **Semaphore template の内容** | **無い**(未実装)。定義の正本は`roles/semaphore_templates/`だが、UIで書き換えられても次にreconcileを流すまで検出されない |
-| Semaphore の schedule / inventory / environment | 無い。**scheduleを触ると定期実行が止まりうる**ため管理対象から意図的に外している |
+| **Semaphore template / schedule の内容** | **無い**(未実装)。定義の正本は`roles/semaphore_templates/`だが、UIで書き換えられても**次にreconcileを流すまで検出されない**。流せば差分として出る(§7) |
+| Semaphore の inventory / environment | 無い。カタログの対象外である |
 
 ## 2. 最も重要な事実 — `git pull` は配備物を更新しない
 
@@ -186,3 +186,43 @@ ssh quory-investigate "semaphore-query running 20"   # 見送りが続く理由�
 `docs/ai/core.md` の原則。同期は素のシェルスクリプトが行い、通知だけをAnsible playbookへ委ねている。**playbookが自分の走っている作業ツリーを更新すると、実行途中でroleやtemplateが差し替わりうる。** §3のSemaphore同時実行と同じ危険である。
 
 新しく「gitを触る自動化」を作るときは、この分離を崩さない。
+
+## 7. Semaphore の template / schedule はどう届くか(2026-08-10 新設)
+
+**ここだけ配備の形が違う。** §2 が扱うのはファイルのコピーだが、こちらは **Semaphore の REST API へ reconcile する**。届け先はディスクではなく Semaphore の DB である。
+
+正本は `roles/semaphore_templates/defaults/main.yml`。**「どの playbook をボタンにするか」(template)と「いつ押されるか」(schedule)の両方**がここにある。
+
+### 届くまで
+
+| # | 起きること | 誰が |
+|---|---|---|
+| 1 | カタログを直して commit / push | **人が承認**(AIが実行) |
+| 2 | quory が作業ツリーを pull | 自動 |
+| 3 | `SEMI-SAFE: Semaphore templates setup` を **Dry Run つき**で押し、差分を読む | **人** |
+| 4 | 差分が意図どおりなら、Dry Run を外して押す | **人** |
+
+**起動ダイアログの Dry Run が `--check` に対応する。** この template の `arguments` は空で、`--check` は引数として埋め込まれていない。読み取り(token・名前解決・GET・差分計算・レポート保存)は Dry Run でも本実行され、**API への書き込みだけが抑止される**。
+
+**押すまで Semaphore 側は変わらない。** §2 の配備物と同じで、pull だけでは届かない。**そして §1 の表のとおり、押し忘れを日次検査が拾う仕組みは無い。**
+
+差分は `reports/semaphore-templates/` と `reports/semaphore-schedules/` の `latest.json` に残る(quory 側)。AI は `report-show` で読める。
+
+### schedule を触るときの規則
+
+- **UI で一時的に変えてよい。** 禁じる仕組みではなく、**一時的な変更が恒久化しない**ことを保証するのが目的である(Yoshinobu、2026-08-10)。次の適用でカタログの値へ戻る
+- **戻る対象は cron・対象 template・`task_params`・無効化の4つ。** `false → true`(有効化)だけは別扱いで、下記の4条件が揃わない限り発行されない
+- **削除は行わない。** カタログに無い schedule に DELETE を出す経路が存在しない
+- **closed-world フェーズに入っている**(2026-08-10)。カタログに無い schedule を検出したら、**preflight で書き込みを1件も出さずに停止する**。消さずに知らせる形である
+- **新しい playbook を足すときは、template と schedule を同じ変更で決め、既存の実行時刻と競合しない cron を選ぶ。** schedule を先に作ってはならない — schedule が指す template は適用時点で実在している必要があり、同一変更で両方を足す場合は **template を先に適用する2段階**になる
+
+有効化の4条件: closed-world フェーズであること / 管理外が0件であること / **実行ごとの明示的な許可**(`-e semaphore_schedules_allow_activation=true`、既定は不許可)/ 書き込み先の API URL がカタログの canonical な本番 URL と完全一致すること。
+
+### Git から復元できる範囲
+
+**「定義」は戻せるが、「動いている状態」までは戻らない。**
+
+- 新規作成は**常に無効**で行われる。復元後に定期実行を再開させるには、上記4条件を満たす別の実行が要る
+- **template を先に戻す必要がある**(schedule の解決先が実在しないと停止する)
+- **`run_at` / `type` / `delete_after_run` は管理していない。** cron スケジュールでは使われておらず(実測で全件 NULL / 空)、失われる値が無いためである
+- **この復元経路は一度も通っていない。** 19件はすべて既存で、POST を発行したことがない。**新規作成時の必須フィールドは未確認**(`docs/ai/reviews/semaphore_schedules_as_code/2026-08-10_025_closeout.md` §3)。20件目を足すときが初回になる
