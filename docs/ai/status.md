@@ -20,7 +20,7 @@
 3. **配送の hook** — `.claude/settings.local.json`(Claude Code 側)と `.codex/hooks.json`(Codex 側)。どちらも gitignored。Codex 側は起動時に「Hooks need review」で信頼を与え直す必要がある
 4. **`~/.semaphore-api-token-ansy`** — UI で再発行する
 5. **`~/.codex/rules/default.rules`** — codex の承認ルール(`ansible-playbook` の許可を含む)
-6. **`new-session.sh`** — gitignored。1ペイン構成のままで、spawn は行わない
+6. **`new-session.sh`** — gitignored。**2ペイン構成**(左=Coordinator、右=codex Reviewer)。pane 0 の起動処理から `delivery.sh set monitor codex` と `spawn.sh codex reviewer --fresh` を行う。失敗しても Coordinator は立ち上がり、成否は `/tmp/new-session-reviewer-boot.log` に残る
 7. **`/etc/homelab-recovery/semaphore-templates-api-token`**(root 所有 0600、ansy 用 token の複製)— `~/.semaphore-api-token-ansy` から作り直す。これが無いと ansy 向けの Semaphore reconcile が token 読み取りで停止する
 
 **リブートで必ず失われるもの**(スナップショットの世代に関係なく): tmux セッション `homelab`、Codex Reviewer のペイン、agmsg の Monitor。いずれも次セッションの SessionStart hook と `spawn.sh` で戻る。
