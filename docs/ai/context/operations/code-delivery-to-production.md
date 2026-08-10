@@ -225,4 +225,4 @@ ssh quory-investigate "semaphore-query running 20"   # 見送りが続く理由�
 - 新規作成は**常に無効**で行われる。復元後に定期実行を再開させるには、上記4条件を満たす別の実行が要る
 - **template を先に戻す必要がある**(schedule の解決先が実在しないと停止する)
 - **`run_at` / `type` / `delete_after_run` は管理していない。** cron スケジュールでは使われておらず(実測で全件 NULL / 空)、失われる値が無いためである
-- **この復元経路は一度も通っていない。** 19件はすべて既存で、POST を発行したことがない。**新規作成時の必須フィールドは未確認**(`docs/ai/reviews/semaphore_schedules_as_code/2026-08-10_025_closeout.md` §3)。20件目を足すときが初回になる
+- **復元そのものは ansy で実証済み**(2026-08-10)。カタログにある schedule を消してから流すと、`name` / 対象 template / cron / `task_params` がカタログ値と一致する形で作られ、`active` は `false` になる。**ただし quory 本番では、書き込みの経路を一度も通っていない** — カタログを載せた5回の実行はいずれも差分0件だった。一次記録は `docs/ai/reviews/semaphore_schedules_as_code/2026-08-10_028_test_result_write_paths.md`
