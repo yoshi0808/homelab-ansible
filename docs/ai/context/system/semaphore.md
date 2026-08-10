@@ -52,6 +52,22 @@ Semaphoreのジョブ結果はSQLite(`semaphore.db`)にあり、read-onlyのSELE
 
 **確かめ方**: `ssh quory-investigate "semaphore-query template-list <n>"` で実物を見る。ここに在ればUIの表示の問題で、無ければ本当に作られていない。**UIの見た目を、作成されたかどうかの判断に使わない。**
 
+## インストールと版上げ(2026-08-10 ansy 実測)
+
+**apt リポジトリは存在しない。`apt upgrade` では上がらない。** 導入は GitHub Releases の `.deb` を `apt install ./semaphore_X.Y.Z_linux_amd64.deb` で入れた形で、apt から見た供給元は `/var/lib/dpkg/status` だけである(`apt-cache policy semaphore`)。`/etc/apt/sources.list.d/` に semaphore の source は無い。上流も apt リポジトリを提供しておらず、公式の Upgrading 手順自体が「Releases から `.deb` を落として `dpkg -i`」である。**新版が出たことを知る経路が無い。**
+
+**この `.deb` が持つファイルは `/usr/bin/semaphore` の1つだけで、maintainer script を持たない**(`/var/lib/dpkg/info/semaphore.list`、postinst / prerm ともに存在しない)。したがって:
+
+- **`apt install` はサービスを再起動しない。** 稼働中のプロセスは削除済み inode の旧バイナリを実行し続け、`systemctl restart semaphore` を明示的に打つまで版は切り替わらない。**版上げの playbook が自分の足を撃つ危険があるのは `apt install` ではなく、この restart タスク1つだけである。**
+- `/etc/systemd/system/semaphore.service` と `/etc/semaphore/config.json` は **dpkg の管理外**(`dpkg -S` が一致なし)。パッケージを入れ替えても unit と config は変化しない。
+- unit は `KillMode=control-group` なので、restart で死ぬのは `semaphore.service` の cgroup だけである。**別セッションから手で流している `ansible-playbook` は巻き添えにならない。** 巻き添えになるのは Semaphore job として流したときに限る。
+
+**不可逆なのはプロセスではなく DB である。** dialect は `sqlite`、実体は `/var/lib/semaphore/semaphore.db`。`semaphore server` は起動時にマイグレーションを実行するため、restart した時点でスキーマが上がる。バイナリを戻しても旧版が動く保証は無い。**退避すべきはバイナリではなく `semaphore.db`。** なお `semaphore migrate` サブコマンドが独立に存在するので、マイグレーションを `server` の起動任せにせず明示のタスクへ切り出せる。
+
+版の読み取りは `semaphore version` で、出力は `2.18.4-7ca373d-1779131064` の形(`X.Y.Z` の後に commit hash とビルド番号が付く)。
+
+**未確認**: quory 側の版・unit・config は測っていない。`quory-investigate` の forced command に apt / dpkg / systemctl-cat 系の操作が無く、この経路では読めない。上記は ansy の実測であり、quory も同じ入れ方であるという前提に立っている。
+
 ## 可用性
 
 - 本番Semaphoreの停止は、新しいGUI・schedule jobの起動と結果閲覧に影響する。すでに稼働中の管理対象serviceの可用性と、制御平面の可用性は分けて判断する。
