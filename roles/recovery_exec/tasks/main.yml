@@ -1,9 +1,12 @@
 ---
 # recovery_exec: Codex runner for autonomous recovery pipeline (§4.2)
 #
-# Creates recovery-exec user, generates two shared SSH keys (investigate/action),
-# deploys wrapper scripts, Codex config and AGENTS.md.
-# Calls target_setup.yml to register keys and deploy scripts on authy/monnie.
+# Creates recovery-exec user, generates three shared SSH keys
+# (investigate / action / PVE investigate), deploys wrapper scripts,
+# Codex config and AGENTS.md.
+# Calls target_setup.yml to register keys and deploy scripts on the target
+# nodes: authy / monnie (investigate + action, recovery_exec_targets) and
+# pve1 / pve2 (investigate only, separate key, recovery_exec_pve_targets).
 #
 # Authentication: Codex uses browser OAuth. The token is stored in
 # /home/recovery-exec/.codex/ (managed by Codex itself). No API key required.

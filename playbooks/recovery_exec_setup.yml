@@ -1,6 +1,11 @@
 ---
-# Deploy recovery-exec (Codex runner) to quory,
-# and set up SSH landing accounts on target nodes (authy, monnie).
+# Deploy recovery-exec (Codex runner) to quory, and set up SSH landing
+# accounts on the target nodes. The play runs on control_nodes (quory only)
+# but reaches out to the targets via delegate_to from target_setup.yml:
+# authy / monnie (investigate + action) and pve1 / pve2 (investigate only,
+# separate key). pve1 が停止していると、その item が unreachable となり
+# task ごと UNREACHABLE へ昇格して play が rc=4 で終わる(到達性の判定は
+# 入っていない)。
 #
 # **ansy(dev_nodes)は対象にしない**(2026-08-06)。開発機へ本番ランタイムを配る
 # 設計をやめたため。検証が要るときは sandbox を使う
