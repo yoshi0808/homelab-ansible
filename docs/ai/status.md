@@ -17,9 +17,12 @@
 - **段1(agmsg 本体の更新)完了** — ansy を v1.1.13 → **v1.2.0** へ。team 登録・message DB・codex Reviewer との疎通は無傷。退避は `~/agmsg-backup-20260816_151346.tar.gz`
 - **段2(ansy へのサーバ配備)完了** — Reviewer 3ラウンド(Request Changes ×2 → Approve)、Tester 受入。**未検証は R15(再起動後の復帰)のみ**
 - **段3の ansy 側完了** — team `homelab-ops` を E2EE(age-v1)で作成、`coordinator` として登録、remote 接続と sync engine の稼働まで。鍵束は `~/agmsg-homelab-ops-handoff.bundle`(0600、repo外)。**`actas` は使っていない** — 1つの Monitor が `homelab` と `homelab-ops` の両方を覆う
-- **残り: quory 側**(Yoshinobu の手作業区間) — 鍵束と digest の手運び、`pull` → `unlock` → `operator` として join、watcher の起動(Operator セッションの一部。**watcher は常駐させない**)。手順は `docs/ai/context/operations/agent-messaging.md` §9
+- **quory 側も入った(2026-08-16)** — `pull` → `unlock`(digest 一致)→ `operator` として join まで完了。**AC5 の実受信が成立**(1つの Monitor が `homelab-ops` 宛を配信、`homelab` との同居は無傷、`actas` 不使用)。**AC3(双方向)も成立** — 逆方向は Operator セッションでの受信確認を得た
+- **engine をエージェントのツール実行から起動しない**(2026-08-16 に実測) — `nohup` + `disown` は SIGHUP からしか守らず、ツール実行はプロセスグループごと片付ける。**症状は「起動したと報告されるのに同期が始まらず、ログにエラーも残らない」。** 通常のシェルから起動し直せば溜まっていた分がまとめて流れる。正本は `docs/ai/context/operations/agent-messaging.md` §9
 - **R5 / AC6 を改訂した**(2026-08-16、Yoshinobu 決定) — sync engine は `nohup` + `disown` で起動し公開 CLI に停止手段が無いため、**quory 側でも engine は常駐する。** 線は「常駐するか」ではなく「**人が見ていないときに AI の文脈へ入るか**」で引く。systemd unit と sudoers は引き続き作らない
-- **未検証**: AC1-b(quory からの実到達)、AC3(双方向)、AC5 の実受信、**R15(再起動後に*サーバ*が戻ること)**、および**それとは別に、再起動後に *sync engine* が `session-start.sh` 経由で戻ること**(engine は Claude Code を起動したシェルの環境から CA を引き継ぐ)。**AC4 は成立**(サーバ DB に `homelab` は存在せず、`homelab-ops` の行は `cipher=age-v1`)
+- **AC1-b は成立**(2026-08-16) — quory から証明書検証を無効化せずに到達でき、ヘルス応答は ok。**この往復は agmsg ではなく既存の Operator Request Channel を通した**(agmsg は quory が未 join のため使えなかった)。R14(片方が落ちても既存経路と手作業へ縮退する)の実例でもある
+- **未検証**: **R15(再起動後に*サーバ*が戻ること)**、および**それとは別に、再起動後に *sync engine* が戻ること**。後者は**両ホストとも未確認**で、**quory 側は確度が低い**(セッション開始時の自動起動が、engine を刈るのと同じツール実行の経路を通るなら、リブート後の初回は無音のまま繋がらない)。ansy 側は再起動すればこの対話セッションと tmux も落ちるため、実施時期は Yoshinobu の判断。手順としては `agent-messaging.md` §9「リブート後」に**セッションごとの確認**として落としてある。**AC4 は成立**(サーバ DB に `homelab` は存在せず、行は `cipher=age-v1`)
+- **申し送り(未着手)**: 運用文書は書いたが、**quory 側の規範**(承認を求める前の提示義務)は quory の管轄として残っている
 
 **ansy のスナップショットから戻したときに要るもの**(2026-08-09、Semaphore Restore の前に取得)。**リポジトリは `9397fe5` まで commit 済みなので、git の内容は巻き戻らない。** 巻き戻るのは ansy 上の git 管理外だけで、次の8つがそれに当たる。スナップショット取得時点より**古い**世代へ戻した場合にだけ、作り直しが要る。
 

@@ -105,7 +105,8 @@ codex 側には2つの層があり、どちらもリポジトリ外にある。*
 **Node は system trust store を見ない。** サーバは私設 CA の証明書を提示するため、sync engine(Node)は既定では `UNABLE_TO_GET_ISSUER_CERT_LOCALLY` で落ちる。`remote.sh` に `CURL_CA_BUNDLE` を渡すと、`remote-sync.sh` がそれを Node へ `NODE_EXTRA_CA_CERTS` として引き継ぐ。curl 側は system store で通るため、**症状は「curl は通るのに engine だけ起動しない」**という形で出る。
 
 - ansy 側は `~/.bashrc` に `export CURL_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt` を置いてある(**非対話ガードより上**)。
-- **再起動後の復帰は `session-start.sh` が接続済み team の engine を自動起動する**が、これは Claude Code を起動したシェルの環境を引き継ぐ。`.bashrc` を読まない経路から起動すると、engine は上記の理由で立たない。`remote.sh status <team>` が `engine running` を言うかで確かめる。
+- **再起動後の復帰は `session-start.sh` が接続済み team の engine を自動起動する**が、これは Claude Code を起動したシェルの環境を引き継ぐ。`.bashrc` を読まない経路から起動すると、engine は上記の理由で立たない。**この自動起動がリブートを跨いで実際に成立するかは未検証である**(下記「リブート後」)。
+- **engine を、エージェントのツール実行から起動しない。** `nohup` + `disown` は SIGHUP からしか守らない。**エージェントのコマンド実行はプロセスグループごと片付けるため、engine は残らない。** 症状は「起動したと報告されるのに同期が始まらない」で、**ログにエラーは残らない**(quory で実測: ログ末尾は capabilities 取得成功の1行だけ、`status` は pidfile を stale と判定、成功した同期の行が出ない)。**通常のシェルから起動すること。** 起動し直せば、溜まっていた join とメッセージはまとめて流れる。
 - **sync engine は `nohup` + `disown` で起動し、シェルもセッションも越えて生き続ける**(`remote.sh` の engine 起動部)。**公開 CLI に停止手段は無い** — 止まるのは `disconnect` / `forget` / `set-endpoint` / `unlock` の副作用としてだけである。したがって **quory 側にも engine は常駐する**(2026-08-16、Yoshinobu 決定。判断の記録は requirement R5 / AC6)。**engine が運ぶのはローカル store までで、AI の文脈へ入れるのは watcher である** — 常駐と非常駐の線はここに引かれている。
 - `connect` は age-v1 の設定をサーバへの通信を伴って行い、**そこが失敗すると binding だけが記録される。** その状態の `sync start` は `authenticated sync configuration is missing` で失敗する。回復は `connect --e2ee` の再実行(登録済みの team は adopt される)であり、`sync start` の再試行ではない。
 
@@ -119,7 +120,19 @@ codex 側には2つの層があり、どちらもリポジトリ外にある。*
 4. **`remote.sh unlock homelab-ops --bundle <手で運んだ鍵束> --confirm-digest <別経路で突き合わせた値>`** — digest の突き合わせが、bundle がすり替わっていないことの唯一の担保である。
 5. **`operator` として明示的に join する** — `join.sh homelab-ops operator <Operator セッションの type> <project path>`。**`actas` を使わない**(受信が1識別子へ限定され、他方の team が無音になる)。ansy 側が使っている `coordinator` は取らない。
 6. **watcher を Operator セッションの一部として起動する。watcher は常駐させない。** 起動の組み込み方は quory 側の裁量(requirement Q6)。セッションを閉じたら watcher が残っていないことを、そのつど確かめる(**sync engine は残る。それが正しい状態である**)。
-7. **確認** — `remote.sh status homelab-ops` が `engine running` と `encryption: age-v1, key present` を言うこと、`team.sh homelab-ops` に2名が見えること。
+7. **確認** — `remote.sh status homelab-ops` が `engine running` と `encryption: age-v1, key present` を言い、**「最後に成功した同期」の行が出ていること**。`team.sh homelab-ops` に2名が見えること。**`engine running` だけでは足りない**(下記)。
+
+### リブート後(両ホスト共通)
+
+**engine は systemd unit ではない。リブートで必ず落ちる。** 戻す仕掛けはセッション開始時の自動起動しかなく、**それが成立したかどうかは自分で確かめる。**
+
+セッションを立てたら、疎通を当てにする前に `remote.sh status <team>` を見る。
+
+- **`engine running` の1行だけで判断しない。** 見るのは**「最後に成功した同期」の行**である。pid が生きていても、サイクルが1度も成功していないことがある。
+- 成功行が無ければ、**通常のシェルから** `sync start <team>` を打ち直す(**エージェントのツール実行から打たない**)。溜まっていた分はまとめて流れる。
+- **確認を省くと、気づく手段は「送ったのに届かない」しかない。** engine が起動直後に刈られたときログにエラーは残らず、`status` も接続済みと言う。
+
+**quory 側は特に確度が低い。** Operator セッションのツール実行から起動された engine が刈られることは実測済みであり、**セッション開始時の自動起動が同じ経路を通るなら、リブート後の初回は無音のまま繋がらない。** セッションを立てるたびに上記の確認を行う。
 
 ## 10. 参照
 

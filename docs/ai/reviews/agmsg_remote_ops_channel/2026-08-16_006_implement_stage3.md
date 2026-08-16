@@ -72,7 +72,28 @@ quory 側では、これが当初の R5 / AC6(常駐物を作らない)と両立
 
 **線は「常駐するか」から「人が見ていないときに AI の文脈へ入るか」へ移った。** engine が運ぶのはローカル store までで、watcher はセッションと共に消える。受け入れた代償は、人が見ていない間もメッセージが復号されて quory のローカル store へ落ち続けること。
 
-## 8. 残り
+## 8. AC1-b は成立した(quory 側の実測、Operator Request Channel 経由)
+
+**quory から証明書検証を無効化せずに HTTPS で到達でき、ヘルス応答は `status` / `database` とも ok**(2026-08-16、Operator が実測。OPRES `req-20260816T192455+0900-…`)。requirement AC1-b が Yoshinobu 区間として残していた残存確認は、これで埋まった。**ansy からは原理的に確認できない区間であり、根拠は quory 側の観測報告である。**
+
+あわせて quory 側の前提が揃った — agmsg v1.2.0(`remote.sh` / `key.sh` あり)、Node v22.23.2、`age` 1.2.1(当初は未導入で、2026-08-16 に Yoshinobu が導入した)。
+
+**この往復は agmsg ではなく既存の Operator Request Channel を通っている。** agmsg 側は quory が未 join のため使えず、**経路が立ち上がるまでの連絡は従来経路が担った**。運用として、片方が落ちても手作業と既存経路へ縮退できる(R14)ことの実例でもある。
+
+## 9. quory 側が入った(2026-08-16 夜)
+
+`pull` → `unlock`(digest 一致)→ `operator` として join まで quory 側で完了。**ただし join もメッセージもサーバへ上がってこなかった。**
+
+切り分けは ansy 側の観測から始めた。nginx のアクセスログを送信元ごとに分解すると、**quory から届いていたのは pull 一連の GET とヘルスチェックの計10件だけで、POST は1件も無く、19:36:49 以降は無音**だった。同時間帯に ansy 自身の engine は5秒周期で POST を含めて往復しており、**TLS ハンドシェイクの失敗も記録が無い**(quory の engine はリクエストを出していない)。ufw の許可ルールは1件で quory の解決値と一致していた。
+
+**当初の見立て(CA 未設定)は quory 側の実測で否定された** — `CURL_CA_BUNDLE` は設定済みだった。実際の原因は、**engine をエージェントのツール実行から起動していたため、コマンド終了時に子プロセスごと刈られていた**こと。`nohup` + `disown` は SIGHUP からしか守らない。通常のシェルから `sync start` を打ち直したところ、**溜まっていた join とメッセージが即座にサーバへ上がり**、ansy 側の Monitor が受信した。
+
+観測できた受入条件:
+
+- **AC5(実受信)成立** — 1つの Monitor が `homelab-ops` 宛を配信した。`homelab`(codex Reviewer)との同居は保たれ、`actas` は使っていない
+- **AC3(双方向)成立** — `operator` → `coordinator` は ansy 側の Monitor が配信。`coordinator` → `operator` は、リブート時の懸念を共有した2通目について **Operator セッションで受信したという返答**を得た(10:57:58)。サーバ側の行は `cipher=age-v1` のまま増えており、平文は経由していない
+
+## 10. 残り
 
 1. **quory 側**(Yoshinobu): 鍵束と digest の手運び → `pull` → `unlock` → `operator` として join → watcher 起動。手順は `docs/ai/context/operations/agent-messaging.md` §9
 2. **AC1-b / AC3 / AC5 の実受信**: quory 側が入った後
