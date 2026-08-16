@@ -1,0 +1,29 @@
+# agmsg_server reverse proxy / TLS termination.
+# Managed by roles/agmsg_server -- do not edit by hand, changes will be
+# overwritten on the next playbook run.
+#
+# Presents the same leaf+intermediate-CA fullchain cert_renew already deploys
+# for Semaphore on this host (R11) -- no separate certificate material.
+# Proxies to the agmsg reference server, which does not terminate TLS itself
+# and only listens on loopback (R2).
+#
+# IPv4 only, deliberately. roles/agmsg_server/tasks/firewall.yml resolves
+# the allowed source and manages a ufw rule for IPv4 only -- listening on
+# `[::]` here as well would open a second public surface (IPv6) that this
+# role does not restrict, leaving it exposed or not purely by accident of
+# the host's own ufw/IPv6 defaults rather than anything this role verifies.
+server {
+    listen {{ agmsg_server_public_port }} ssl;
+    server_name ansy.internal ansy;
+
+    ssl_certificate     {{ agmsg_server_tls_cert_path }};
+    ssl_certificate_key {{ agmsg_server_tls_key_path }};
+
+    location / {
+        proxy_pass http://{{ agmsg_server_internal_bind }}:{{ agmsg_server_internal_port }};
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_http_version 1.1;
+        proxy_read_timeout 75s;
+    }
+}

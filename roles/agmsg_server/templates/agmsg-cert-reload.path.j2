@@ -1,0 +1,18 @@
+[Unit]
+Description=Watch the ansy TLS certificate and key for changes and reload the agmsg reverse proxy (nginx)
+
+[Path]
+# roles/homelab_cert_renew/tasks/deploy_semaphore.yml deploys the certificate
+# and the private key as two separate tasks (cert first, key second), with
+# nothing in between. Watching only the certificate would fire a reload
+# attempt between those two tasks, when the new cert is paired with the old
+# key -- `nginx -t` fails on that mismatched pair (safe: nginx keeps serving
+# the last-good pair), but nothing would fire a *second* attempt once the key
+# catches up. Watching both paths means whichever file changes last is the
+# one that triggers the reload that actually succeeds, regardless of order.
+PathModified={{ agmsg_server_tls_cert_path }}
+PathModified={{ agmsg_server_tls_key_path }}
+Unit={{ agmsg_server_cert_watch_unit }}.service
+
+[Install]
+WantedBy=multi-user.target

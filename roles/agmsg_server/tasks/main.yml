@@ -1,0 +1,29 @@
+---
+# agmsg_server: 常駐リファレンスサーバの配備。tester-gateの分類・理由は
+# 呼び出し元playbook(playbooks/agmsg_server_setup.yml)のヘッダを参照する
+# (TS-036)。
+#
+# 実行順序: firewall(到達範囲の限定) → packages(Docker/nginx導入) →
+# deploy(サーバ本体の起動) → proxy(TLS終端・証明書監視、公開面が最後に
+# 立ち上がる)。
+#
+# **2026-08-16、独立レビュー round3(Critical①)への対応でfirewallを先頭へ
+# 移した。** 以前はfirewallを最後に置いていたが、それでは
+# 「proxy.ymlがnginxの公開listenerを立てる」→「firewall.ymlが到達制御を
+# 確立する」という順序になり、両者のあいだに公開面だけが立っている窓が
+# 生まれる。firewall.ymlの先頭taskはufwが有効かつdefault-denyであることを
+# fail-closedで確認する(read-only、`--check`でも常に実行、TS-014)ため、
+# ここを満たさない限りpackages/deploy/proxyは一切実行されない — 公開面が
+# 立つ前に到達制御の成立を保証する、という要求を実行順序そのもので満たす。
+
+- name: Restrict external reachability to quory, fail closed if ufw is not enforcing (R2)
+  ansible.builtin.import_tasks: firewall.yml
+
+- name: Install Docker and nginx, enable Docker at boot (R15)
+  ansible.builtin.import_tasks: packages.yml
+
+- name: Deploy and start the agmsg reference server (R1)
+  ansible.builtin.import_tasks: deploy.yml
+
+- name: Deploy the TLS reverse proxy and certificate watcher (R10/R11/R15)
+  ansible.builtin.import_tasks: proxy.yml

@@ -1,0 +1,13 @@
+---
+- name: Reload nginx
+  ansible.builtin.systemd:
+    name: nginx
+    state: reloaded
+  become: true
+  listen: Reload nginx
+
+- name: Reload systemd for agmsg_server
+  ansible.builtin.systemd:
+    daemon_reload: true
+  become: true
+  listen: Reload systemd for agmsg_server

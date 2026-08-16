@@ -1,0 +1,56 @@
+---
+# agmsg_server: ansy 常駐の agmsg リファレンスサーバ(HTTPS)を配備する。
+# 対象は ansy のみ。upstream: https://github.com/fujibee/agmsg(server/ 配下)。
+#
+# 段2スコープ(requirement `agmsg_remote_ops_channel` §5): R1・R2・R10・R11・
+# R15。team 作成・E2EE 鍵束・remote 接続・quory からの実到達確認(AC1-b)は
+# 対象外(段3)。
+#
+# 設計・実測の根拠: docs/ai/reviews/agmsg_remote_ops_channel/2026-08-16_002_spike.md
+
+agmsg_server_repo_url: https://github.com/fujibee/agmsg.git
+
+# 段1でクライアント(~/.agents/skills/agmsg/、このrepo管理外)がv1.2.0へ
+# 更新済み(remote機能はこの版から存在する)。サーバも同じtagへ固定する。
+# クライアントを更新するときはここも追随させること — 自動追随の機構は無い。
+agmsg_server_version: v1.2.0
+
+agmsg_server_src_dir: /opt/agmsg-server/src
+agmsg_server_deploy_dir: /opt/agmsg-server/deploy
+agmsg_server_env_path: "{{ agmsg_server_deploy_dir }}/.env"
+agmsg_server_compose_project: agmsg
+
+# Dockerが公開するのはloopbackだけにする。段0(2026-08-16_002_spike.md §5)で
+# 実測済みのとおり、上流compose.yamlの既定 "8787:8787" は0.0.0.0で待ち受け、
+# ここを絞らない限り到達範囲の限定(R2)が成立しない。外部から到達できる面は
+# nginxだけに絞る。
+agmsg_server_internal_port: 8787
+agmsg_server_internal_bind: 127.0.0.1
+
+# nginxがTLSを終端して公開する側のポート。Docker側(8787)とは意図的に別番号
+# にし、`ss -ltn` を見たときにどちらがTLS終端でどちらがコンテナ内部かを
+# 取り違えないようにする。
+agmsg_server_public_port: 8788
+
+# 既存のcert_renewが配布・更新しているfullchain(leaf+中間CA)をそのまま参照
+# する。新しい証明書材料は作らない(requirement R11、2026-08-16実測)。値の
+# 正本は roles/homelab_cert_renew/defaults/main.yml の
+# cert_renew_hosts_config.ansy。cert_renew側は変更しない(2026-08-16
+# Yoshinobu決定)ため、このroleは値を複製するだけで、証明書の発行・更新には
+# 一切関与しない。
+agmsg_server_tls_cert_path: /etc/semaphore/tls/ansy.internal.crt
+agmsg_server_tls_key_path: /etc/semaphore/tls/ansy.internal.key
+
+agmsg_server_nginx_site_name: agmsg
+
+# 証明書ファイルの置き換えを検知してnginxへreloadさせる(R10)。cert_renew側は
+# 変更しない制約があるため、検知はansy側のsystemd .path unitで行う
+# (roles/homelab_cert_renew/tasks/deploy_semaphore.yml がSemaphore向けに
+# 行っている「配備直後に自分でrestartする」という設計を、cert_renewの外から
+# 同じ効果になるよう別経路で再現している)。
+agmsg_server_cert_watch_unit: agmsg-cert-reload
+
+agmsg_server_packages:
+  - docker.io
+  - docker-compose-v2
+  - nginx

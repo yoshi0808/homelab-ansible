@@ -1,0 +1,7 @@
+[Unit]
+Description=Reload nginx after the ansy TLS certificate changed (triggered by {{ agmsg_server_cert_watch_unit }}.path)
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/nginx -t
+ExecStart=/usr/bin/systemctl reload nginx.service

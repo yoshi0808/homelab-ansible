@@ -1,0 +1,127 @@
+---
+# R2: サーバに認証機構が無い("reaching it is the permission")ため、到達できる
+# 範囲そのものを絞る。段0(2026-08-16_002_spike.md §5)の実測どおり、Dockerが
+# 直接公開したポートはufwのINPUT chainを素通りするため、絞り込みは「Dockerが
+# 直接公開しない(loopbackのみ)」+「nginxが公開する側のポートだけをufwで
+# 絞る」の二層で行う。
+#
+# quoryのアドレスをrepoへ literal で書かない(docs/ai/core.md「内部IPアドレス
+# を...記載しない」)。inventoryのDNS名(quory.internal)を実行時に解決させる。
+#
+# **ufw自身はホスト名を解決しない**(2026-08-16実測、ansy:
+# `ufw allow from quory.internal to any port ...` は
+# `ERROR: Bad source address` で失敗する)。community.general.ufw モジュール
+# も文字列をそのまま `ufw` CLIへ渡すだけで、解決は行わない。roles/alloy が
+# remote syslogの送信元許可リストで使っている手法(`getent ahostsv4` による
+# 実行時解決、roles/alloy/tasks/main.yml)に倣い、ここで一度だけIPを解決して
+# から渡す。解決はansy自身のローカルな名前解決(DNS/hosts)で完結し、quory
+# ホストへは一切到達しない。解決結果はどのrepoファイルにも書かない — play
+# 実行中のみメモリ上に存在する。
+#
+# **2026-08-16、独立レビュー round3(Critical①)への対応。** 以下のufw健全性
+# 確認は、このtasksファイルの中で最初に、かつ`when: not ansible_check_mode`
+# を付けずに(read-only、TS-014)実行する。`roles/agmsg_server/tasks/main.yml`
+# がfirewallを他の全taskより先に実行する構成にしたのと対になっており、
+# ufwが有効かつdefault-denyでない限り、nginxの公開listenerを含む以降の
+# 全taskが一切実行されない(fail-closed)。
+
+- name: Capture ufw's own status (must be active + default-deny before this role manages anything)
+  ansible.builtin.command:
+    argv:
+      - /usr/sbin/ufw
+      - status
+      - verbose
+  register: agmsg_server_ufw_status_verbose
+  become: true
+  changed_when: false
+  check_mode: false
+
+- name: Require ufw active and default-deny incoming (fail closed -- an allow rule means nothing otherwise)
+  ansible.builtin.assert:
+    that:
+      - agmsg_server_ufw_status_verbose.stdout is search('(?m)^Status:\s*active\s*$')
+      - agmsg_server_ufw_status_verbose.stdout is search('(?m)^Default:\s*deny\s*\(incoming\)')
+    fail_msg: >-
+      ufw must be active with a default-deny incoming policy before this
+      role brings up the agmsg reverse proxy or manages any ufw rule for
+      it -- otherwise an "allow from quory" rule restricts nothing while
+      the port stays reachable from anywhere by ufw's own default.
+      Observed `ufw status verbose`:
+      {{ agmsg_server_ufw_status_verbose.stdout }}
+    quiet: true
+
+- name: Resolve the quory hostname to an IPv4 address (ufw does not resolve hostnames)
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/getent
+      - ahostsv4
+      - "{{ hostvars['quory']['ansible_host'] }}"
+  register: agmsg_server_allowed_source_resolution
+  changed_when: false
+  check_mode: false
+
+- name: Require IPv4 resolution for the allowed source (fail closed, not silently unrestricted)
+  ansible.builtin.assert:
+    that:
+      - agmsg_server_allowed_source_resolution.rc == 0
+      - agmsg_server_allowed_source_resolution.stdout_lines | length > 0
+      - agmsg_server_allowed_source_resolution.stdout is search('(?m)^[0-9]{1,3}(?:\.[0-9]{1,3}){3}\s')
+    fail_msg: >-
+      {{ hostvars['quory']['ansible_host'] }} did not resolve to an IPv4
+      address on ansy. Refuse to deploy a ufw rule with an unresolved
+      source.
+    quiet: true
+
+- name: Determine the allowed source IP for the agmsg reverse proxy (quory only)
+  ansible.builtin.set_fact:
+    agmsg_server_allowed_source: "{{ agmsg_server_allowed_source_resolution.stdout_lines[0].split()[0] }}"
+
+# この role が追加するルールは「今回解決されたアドレスを許可する」だけであり、
+# それ単独では**過去に解決されたアドレスの許可を取り除かない**(quoryのIPが
+# 変わった場合、古いIPへの許可がufw上に残り続ける — 独立レビュー指摘③)。
+# `community.general.ufw`にはこの「このポートについては今の1件だけを残す」
+# という宣言的な操作が無いため、pruneスクリプトで「対象ポートのIPv4許可
+# ルールのうち、現在の解決値と一致しないもの」を先に削除してから、対象の
+# ルールをidempotentに追加する。
+#
+# **round3(Critical②)への対応**: pruneスクリプトは、対象ポートに関する行を
+# 認識できなかった場合、それを「該当なし」として黙って通過させず、
+# 明示的に失敗する(`roles/agmsg_server/files/prune-stale-ufw-rule.py`の
+# docstring参照)。**round3 Suggestion(削除のTOCTOU)への対応**: 削除は
+# `ufw status numbered`が振る番号ではなく、ルールの仕様(送信元IP・ポート・
+# プロトコル)を指定して行う — 番号は他プロセスによる並行変更でずれうるが、
+# 仕様指定はその影響を受けない。
+- name: Deploy the stale ufw rule pruner
+  ansible.builtin.copy:
+    src: prune-stale-ufw-rule.py
+    dest: /usr/local/sbin/agmsg-prune-stale-ufw-rule.py
+    owner: root
+    group: root
+    mode: "0700"
+  become: true
+  when: not ansible_check_mode
+  tags: [destructive]
+
+- name: Remove any ufw allow rule for this port whose source is not the current quory address
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/python3
+      - /usr/local/sbin/agmsg-prune-stale-ufw-rule.py
+      - "{{ agmsg_server_public_port | string }}"
+      - "{{ agmsg_server_allowed_source }}"
+  register: agmsg_server_pruned_ufw_rules
+  become: true
+  changed_when: agmsg_server_pruned_ufw_rules.stdout_lines | length > 0
+  when: not ansible_check_mode
+  tags: [destructive]
+
+- name: Restrict the agmsg reverse-proxy port to quory (ufw INPUT chain)
+  community.general.ufw:
+    rule: allow
+    proto: tcp
+    from_ip: "{{ agmsg_server_allowed_source }}"
+    to_port: "{{ agmsg_server_public_port }}"
+    comment: "agmsg_server (agmsg_remote_ops_channel R2) -- quory only"
+  become: true
+  when: not ansible_check_mode
+  tags: [destructive]

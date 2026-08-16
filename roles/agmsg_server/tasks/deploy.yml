@@ -1,0 +1,83 @@
+---
+- name: Ensure the agmsg-server base directory exists
+  ansible.builtin.file:
+    path: /opt/agmsg-server
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  become: true
+  when: not ansible_check_mode
+  tags: [destructive]
+
+# agmsg本体(クライアント)と同じ流儀で、upstreamのソースはこのrepoへ写さない
+# (docs/ai/context/operations/agent-messaging.md §1「導入版はここへ写さない」
+# と同型)。`build: .` を使うため、compose起動にはソースツリーそのものが要る
+# (requirement 観測事実)。pinしたtagを使い、追随は明示的な version bump で
+# 行う(defaults/main.yml参照)。
+- name: Check out the pinned agmsg server source ({{ agmsg_server_version }})
+  ansible.builtin.git:
+    repo: "{{ agmsg_server_repo_url }}"
+    dest: "{{ agmsg_server_src_dir }}"
+    version: "{{ agmsg_server_version }}"
+    force: false
+  become: true
+  when: not ansible_check_mode
+  tags: [destructive]
+
+- name: Ensure the ansible-managed deploy directory exists (compose file, generated secret)
+  ansible.builtin.file:
+    path: "{{ agmsg_server_deploy_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0750"
+  become: true
+  when: not ansible_check_mode
+  tags: [destructive]
+
+# 上流のcompose.yamlはPOSTGRES_PASSWORDを直書きしている
+# (`agmsg-local-only`)。この値はrepoへ書ける性質のものではない
+# (docs/ai/core.md「公開情報と秘密情報」)。ここで一度だけ生成し、以後は
+# `force: false` で上書きしない — 再生成するとDocker volumeに残っている
+# 既存のPostgresデータのパスワードと食い違い、コンテナが起動しなくなる。
+- name: Generate the PostgreSQL password (one-time — never overwrite an existing secret)
+  ansible.builtin.copy:
+    dest: "{{ agmsg_server_env_path }}"
+    content: "AGMSG_POSTGRES_PASSWORD={{ lookup('ansible.builtin.password', '/dev/null', length=32, chars=['ascii_letters', 'digits']) }}\n"
+    owner: root
+    group: root
+    mode: "0600"
+    force: false
+  become: true
+  no_log: true
+  when: not ansible_check_mode
+  tags: [destructive]
+
+# 上流compose.yamlそのものは使わない。差分(restartポリシー・loopback限定
+# 公開・パスワードのsecret化)を1枚のcompose.yamlとして自前でレンダリングし、
+# 何を上流から変えているかをファイル冒頭のコメントに明記する
+# (Composeのmulti-file merge — `ports:` 等のリストは上書きでなく結合される
+# — に頼ると、上流の"8787:8787"とこちらの"127.0.0.1:8787:8787"が両方
+# 公開されようとしてポート競合になるため、素直に1枚にまとめる)。
+- name: Deploy the ansible-managed compose file
+  ansible.builtin.template:
+    src: compose.yaml.j2
+    dest: "{{ agmsg_server_deploy_dir }}/compose.yaml"
+    owner: root
+    group: root
+    mode: "0644"
+  become: true
+  when: not ansible_check_mode
+  tags: [destructive]
+
+- name: Start the agmsg reference server (postgres + server; builds the image if needed)
+  community.docker.docker_compose_v2:
+    project_src: "{{ agmsg_server_deploy_dir }}"
+    project_name: "{{ agmsg_server_compose_project }}"
+    files:
+      - compose.yaml
+    state: present
+  become: true
+  when: not ansible_check_mode
+  tags: [destructive]

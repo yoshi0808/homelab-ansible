@@ -1,0 +1,46 @@
+# tester-gate: check-mode-native — 全taskがansy自身への状態変更(パッケージ
+# 導入、compose起動、nginx site、systemd unit、ufw rule)であり、既存の本番
+# サービス(Semaphore :3000)を再起動・reloadすることは無い。
+#
+# **read-only診断task(`command`/`assert`/`set_fact`)は`when: not
+# ansible_check_mode`を付けず、`--check`でも常に実行する(TS-014)** —
+# `roles/agmsg_server/tasks/firewall.yml`先頭のufw状態確認・quoryホスト名の
+# IPv4解決とその結果を保持する`set_fact`がこれに当たる。これらはfail-closed
+# の判定そのものであり、ufwが有効かつdefault-denyでない場合や解決に失敗した
+# 場合は`--check`でもplayを停止する(2026-08-16、独立レビューround3
+# Critical①対応)。
+#
+# 状態を変更する全task(`apt`/`git`/`copy`/`template`/
+# `community.docker.docker_compose_v2`/`community.general.ufw`/`systemd`、
+# および`command`でpruneスクリプトを実行するtask)には`when: not
+# ansible_check_mode`と`tags: [destructive]`が個別に付いており、`--check`
+# ではskipされる。**`--check`が保証するのは「read-onlyな事前条件確認は必ず
+# 実行され、状態変更は一切行われない」ことであり、「全taskをskipする」ことでも
+# 「moduleごとの変更予測(`--diff`)を返す」ことでもない。**
+# 詳細は docs/ai/policies/ansible_test_safety_policy.md。
+#
+# agmsg_server_setup.yml
+#
+# 目的: ansy へ agmsg のリファレンスサーバ(HTTPS)を常駐で立てる
+# (requirement `agmsg_remote_ops_channel` §5 R1・R2・R10・R11・R15、
+# AC1・AC2・AC8)。
+#
+# 対象外(段3で扱う): team の作成、E2EE の鍵束、remote 接続、AC3〜AC7、
+# AC1-b(quory からの実到達)。
+#
+# 対象: ansyのみ。quory / pve1 / pve2 / authy / sophos-fw / monnie / sandbox
+# へは一切変更を広げない。
+#
+# 設計・実測の根拠: docs/ai/reviews/agmsg_remote_ops_channel/2026-08-16_002_spike.md
+# 実装記録: docs/ai/reviews/agmsg_remote_ops_channel/2026-08-16_003_implement_stage2.md
+#
+# 実行:
+#   ansible-playbook playbooks/agmsg_server_setup.yml -l ansy
+- name: Deploy the agmsg reference server (ansy only)
+  hosts: ansy
+  gather_facts: true
+  become: false
+  tasks:
+    - name: Run agmsg_server role
+      ansible.builtin.include_role:
+        name: agmsg_server

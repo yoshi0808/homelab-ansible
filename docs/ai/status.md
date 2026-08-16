@@ -11,7 +11,14 @@
 
 ## Now(進行中)
 
-**進行中の案件は無い。** 着手候補は下の Next を参照する。
+**進行中: `agmsg_remote_ops_channel`(2026-08-16 着手)** — 開発↔運用の「伝書鳩」を agmsg で置き換える。**既存の Operator Request Channel(本文・DLP・spool・forced command)は1文字も変えない。** 運ぶのはすり合わせの会話と `request_id` までで、権限は運ばない。正本は `docs/ai/reviews/agmsg_remote_ops_channel/2026-08-16_001_requirement.md`。
+
+- **段0(sandbox 探索)完了** — 設計を変える発見5件。sandbox に検証環境を残置(削除手順は `_002_spike.md` 末尾)
+- **段1(agmsg 本体の更新)完了** — ansy を v1.1.13 → **v1.2.0** へ。team 登録・message DB・codex Reviewer との疎通は無傷。退避は `~/agmsg-backup-20260816_151346.tar.gz`
+- **段2(ansy へのサーバ配備)完了** — Reviewer 3ラウンド(Request Changes ×2 → Approve)、Tester 受入。**未検証は R15(再起動後の復帰)のみ**
+- **残り: 段3**(team `homelab-ops` を E2EE で作成、remote 接続)。識別子は ansy 側 `coordinator` / quory 側 `operator`。**`actas` を使わないこと**(片方の team が無音になる)
+- **quory 側は Yoshinobu の手作業区間** — 鍵束の手運び、watcher の起動(Operator セッションの一部。常駐させない)、AC1-b(quory からの実到達)
+- **申し送り**: 決定記録1本(`ansy-must-not-trigger-production-changes` との線引き)、運用文書、age 鍵束を復旧リストへ追加 — いずれも未着手
 
 **ansy のスナップショットから戻したときに要るもの**(2026-08-09、Semaphore Restore の前に取得)。**リポジトリは `9397fe5` まで commit 済みなので、git の内容は巻き戻らない。** 巻き戻るのは ansy 上の git 管理外だけで、次の7つがそれに当たる。スナップショット取得時点より**古い**世代へ戻した場合にだけ、作り直しが要る。
 

@@ -1,0 +1,45 @@
+# agmsg_server: ansible-managed, derived from upstream server/compose.yaml
+# ({{ agmsg_server_version }}). Re-check this template if the upstream file's
+# shape changes (new service, new required env var).
+#
+# Deltas vs. upstream (roles/agmsg_server, agmsg_remote_ops_channel stage 2):
+#   1. `restart: unless-stopped` on both services (upstream has none -- R15).
+#   2. `server.build` points at the git checkout this role manages
+#      ({{ agmsg_server_src_dir }}/server) instead of a relative `.`.
+#   3. `server.ports` binds {{ agmsg_server_internal_bind }} only -- upstream's
+#      default binds every interface (0.0.0.0 and ::). External reachability
+#      is nginx's job (R2/R11), not Docker's.
+#   4. POSTGRES_PASSWORD / DATABASE_URL come from an ansible-generated,
+#      repo-external secret (loaded via the .env file next to this compose
+#      file) instead of the upstream literal `agmsg-local-only`.
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: agmsg
+      POSTGRES_USER: agmsg
+      POSTGRES_PASSWORD: ${AGMSG_POSTGRES_PASSWORD}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agmsg -d agmsg"]
+      interval: 2s
+      timeout: 2s
+      retries: 20
+    volumes:
+      - agmsg-postgres:/var/lib/postgresql/data
+
+  server:
+    build: {{ agmsg_server_src_dir }}/server
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      - DATABASE_URL=postgresql://agmsg:${AGMSG_POSTGRES_PASSWORD}@postgres:5432/agmsg
+      - HOST=0.0.0.0
+      - PORT={{ agmsg_server_internal_port }}
+    ports:
+      - "{{ agmsg_server_internal_bind }}:{{ agmsg_server_internal_port }}:{{ agmsg_server_internal_port }}"
+
+volumes:
+  agmsg-postgres:

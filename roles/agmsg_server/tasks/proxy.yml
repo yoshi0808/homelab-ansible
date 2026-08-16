@@ -1,0 +1,89 @@
+---
+# nginxを先にenable+startしておく(apt導入直後は既定configで既に起動して
+# いるはずだが、明示しておく)。これを後回しにすると、直後の「サイト配備」
+# taskのhandler(Reload nginx = `state: reloaded`)が「起動していない
+# serviceのreload」という失敗しうる操作になる。
+- name: Enable and start nginx (R15 — must survive an ansy reboot without human action)
+  ansible.builtin.systemd:
+    name: nginx
+    enabled: true
+    state: started
+  become: true
+  when: not ansible_check_mode
+  tags: [destructive]
+
+# agmsgのreference server自体はTLSを終端しない(server/README.md「terminate
+# TLS in front of the service」)。nginxが終端し、既存のfullchain
+# (leaf+中間CA、R11)をそのまま参照する。
+- name: Deploy the agmsg reverse-proxy nginx site
+  ansible.builtin.template:
+    src: nginx-agmsg.conf.j2
+    dest: "/etc/nginx/sites-available/{{ agmsg_server_nginx_site_name }}.conf"
+    owner: root
+    group: root
+    mode: "0644"
+  become: true
+  notify: Reload nginx
+  when: not ansible_check_mode
+  tags: [destructive]
+
+- name: Enable the agmsg reverse-proxy nginx site
+  ansible.builtin.file:
+    src: "/etc/nginx/sites-available/{{ agmsg_server_nginx_site_name }}.conf"
+    dest: "/etc/nginx/sites-enabled/{{ agmsg_server_nginx_site_name }}.conf"
+    state: link
+  become: true
+  notify: Reload nginx
+  when: not ansible_check_mode
+  tags: [destructive]
+
+# 到達できる面をnginxの1サイトだけに絞る(R2の精神)。ufwは既定deny incoming
+# なのでstock defaultサイト(port 80)自体も外部からは到達できないが、
+# listenする面を減らしておく。
+- name: Disable the stock nginx default site
+  ansible.builtin.file:
+    path: /etc/nginx/sites-enabled/default
+    state: absent
+  become: true
+  notify: Reload nginx
+  when: not ansible_check_mode
+  tags: [destructive]
+
+# R10: cert_renew側は変更しない(2026-08-16 Yoshinobu決定)ため、証明書
+# ファイルの置き換わりはansy側のsystemd .path unitで検知する。
+- name: Deploy the certificate-change watcher unit
+  ansible.builtin.template:
+    src: agmsg-cert-reload.path.j2
+    dest: "/etc/systemd/system/{{ agmsg_server_cert_watch_unit }}.path"
+    owner: root
+    group: root
+    mode: "0644"
+  become: true
+  notify: Reload systemd for agmsg_server
+  when: not ansible_check_mode
+  tags: [destructive]
+
+- name: Deploy the certificate-change reload service
+  ansible.builtin.template:
+    src: agmsg-cert-reload.service.j2
+    dest: "/etc/systemd/system/{{ agmsg_server_cert_watch_unit }}.service"
+    owner: root
+    group: root
+    mode: "0644"
+  become: true
+  notify: Reload systemd for agmsg_server
+  when: not ansible_check_mode
+  tags: [destructive]
+
+- name: Flush handlers so nginx config and systemd units are current before enabling
+  ansible.builtin.meta: flush_handlers
+
+- name: Enable and start the certificate-change watcher (R10/R15)
+  ansible.builtin.systemd:
+    name: "{{ agmsg_server_cert_watch_unit }}.path"
+    daemon_reload: true
+    enabled: true
+    state: started
+  become: true
+  when: not ansible_check_mode
+  tags: [destructive]
