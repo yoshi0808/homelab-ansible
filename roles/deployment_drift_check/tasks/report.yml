@@ -21,6 +21,34 @@
     deployment_drift_check_ts_iso: "{{ lookup('pipe', \"TZ='Asia/Tokyo' date '+%Y-%m-%dT%H:%M:%S+09:00'\") }}"
     deployment_drift_check_ts: "{{ lookup('pipe', \"TZ='Asia/Tokyo' date '+%Y%m%d_%H%M%S+0900'\") }}"
 
+# pve_unreachable_handling (2026-08-16, R5/Q4): checked/unverified は
+# `deployment_drift_check_play_hosts_ok`(呼び出し元playの
+# `ansible_play_hosts`)からは求めない。playbooks/deployment_drift_check.yml
+# の `ignore_unreachable: true` は到達不能hostをplayから脱落させないため、
+# 到達不能hostであっても`ansible_play_hosts`に残り続け、
+# `play_hosts_all - play_hosts_ok`は空になり続ける(2026-08-11 task 676で
+# 実際に`unverified: (なし)`のまま`pve1`が`checked`扱いになった。
+# decoyでも再現・確認済み、implement記録参照)。判定は
+# collect.ymlが明示的probeで立てる `deployment_drift_check_reachable`
+# (host単位のfact、到達不能hostにもcontroller側でset_factされる)を正本にする。
+# `checked_counts`(Q4)も同じ理由でこの正しいhostリストからのみ組み立てる
+# — 到達不能hostの`deployment_drift_check_checked_counts`は「何を
+# 検査する予定だったか」の件数であり「実際に検査できたか」ではないため、
+# 到達不能hostを含めると実際には0件しか採れていないのに非0件の
+# checked_countsが出てしまう。
+#
+# 差し戻し対応(2026-08-16): 当初 `map('extract', hostvars) |
+# selectattr('deployment_drift_check_reachable', 'equalto', ...)` を使って
+# いたが、`play_hosts_all` に載っているのに何らかの理由で
+# `deployment_drift_check_reachable` がそのhostのhostvarsに一度も
+# set_factされなかった場合(collect.ymlのprobeまで到達しなかった等)、
+# `selectattr`はそのhostの属性アクセスで即座に例外を投げ、report.yml
+# 全体が失敗することをdecoyで確認した(独立レビューが指摘・再現)。
+# `map('attribute', ..., default)`のような欠落安全なfilterは無いため、
+# 明示的なfor-loopで `| default(false)` を通し、**未定義は
+# unverified側として明示的に分類する**(到達性が確認できない以上、
+# checkedとは言えないため — R5の「未確認として区別する」という
+# 趣旨に沿う)。
 - name: Collect findings from every host that answered
   ansible.builtin.set_fact:
     deployment_drift_check_all_findings: >-
@@ -31,9 +59,22 @@
         {%- endfor -%}
       {%- endfor -%}
       {{ out }}
+    deployment_drift_check_checked_hosts: >-
+      {%- set checked = [] -%}
+      {%- for h in hostvars['localhost'].deployment_drift_check_play_hosts_all | default([]) -%}
+        {%- if hostvars[h].deployment_drift_check_reachable | default(false) -%}
+          {%- set _ = checked.append(h) -%}
+        {%- endif -%}
+      {%- endfor -%}
+      {{ checked }}
     deployment_drift_check_unverified: >-
-      {{ hostvars['localhost'].deployment_drift_check_play_hosts_all | default([])
-         | reject('in', hostvars['localhost'].deployment_drift_check_play_hosts_ok | default([])) | list }}
+      {%- set unverified = [] -%}
+      {%- for h in hostvars['localhost'].deployment_drift_check_play_hosts_all | default([]) -%}
+        {%- if not (hostvars[h].deployment_drift_check_reachable | default(false)) -%}
+          {%- set _ = unverified.append(h) -%}
+        {%- endif -%}
+      {%- endfor -%}
+      {{ unverified }}
 
 - name: Ensure the drift report directory exists
   ansible.builtin.file:
@@ -55,11 +96,20 @@
       controller: "{{ inventory_hostname }}"
       # 到達できなかったホストは「異常なし」ではない。区別して残す
       unverified_hosts: "{{ deployment_drift_check_unverified }}"
-      checked_hosts: "{{ hostvars['localhost'].deployment_drift_check_play_hosts_ok | default([]) }}"
+      checked_hosts: "{{ deployment_drift_check_checked_hosts }}"
+      # 差し戻し対応(2026-08-16): `map('extract', hostvars, attr)` も
+      # 同じ理由(§上のコメント参照)でattrがそのhostに無いと例外を投げる
+      # ことをdecoyで確認したため、for-loop + `| default({})` に変更した。
+      # checked_hosts はreachable==trueのhostだけなので通常は
+      # deployment_drift_check_checked_countsも定義されているはずだが、
+      # 万一(reachable判定後にevaluate.yml側で個別に失敗した等で)未定義でも
+      # クラッシュせず空dictへfail-safeする。
       checked_counts: >-
-        {{ dict(hostvars['localhost'].deployment_drift_check_play_hosts_ok | default([])
-           | zip(hostvars['localhost'].deployment_drift_check_play_hosts_ok | default([])
-                 | map('extract', hostvars, 'deployment_drift_check_checked_counts'))) }}
+        {%- set cc = {} -%}
+        {%- for h in deployment_drift_check_checked_hosts -%}
+          {%- set _ = cc.update({h: hostvars[h].deployment_drift_check_checked_counts | default({})}) -%}
+        {%- endfor -%}
+        {{ cc }}
       findings: "{{ deployment_drift_check_all_findings }}"
       drift_count: "{{ deployment_drift_check_all_findings | length }}"
   become: false
@@ -80,7 +130,7 @@
   ansible.builtin.debug:
     msg:
       - "drift        : {{ deployment_drift_check_all_findings | length }} 件"
-      - "checked      : {{ hostvars['localhost'].deployment_drift_check_play_hosts_ok | default([]) | join(', ') }}"
+      - "checked      : {{ deployment_drift_check_checked_hosts | join(', ') }}"
       - "unverified   : {{ deployment_drift_check_unverified | join(', ') | default('(なし)', true) }}"
       - "report       : {{ deployment_drift_check_report_dir }}/{{ deployment_drift_check_ts }}.json"
 
@@ -93,7 +143,7 @@
     slack_message: |
       配備物がrepoの内容と食い違っています。
 
-      検査対象 : {{ hostvars['localhost'].deployment_drift_check_play_hosts_ok | default([]) | join(', ') }}
+      検査対象 : {{ deployment_drift_check_checked_hosts | join(', ') }}
       {% if deployment_drift_check_unverified | length > 0 %}
       未確認   : {{ deployment_drift_check_unverified | join(', ') }}(到達できず。異常なしではありません)
       {% endif %}

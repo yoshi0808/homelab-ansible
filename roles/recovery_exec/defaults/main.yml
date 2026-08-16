@@ -13,6 +13,16 @@ recovery_exec_action_key: /home/recovery-exec/.ssh/id_recovery_action
 # distinct key prevents mixing up which host a compromised/misused key could
 # reach.
 recovery_exec_investigate_pve_key: /home/recovery-exec/.ssh/id_recovery_investigate_pve
+
+# pve_unreachable_handling(R1/R7): pve targetのTCP到達性probe(target_setup.yml
+# の "Probe TCP reachability of pve target nodes")のタイムアウト秒数。pve1は
+# 夏季平日にシャットダウンする運用にあり、その日でも
+# playbook全体の所要時間を目立って延ばさない値にする(R7)。同一LAN内への
+# TCP接続なので、到達可能な場合の応答はミリ秒オーダー。到達不能な場合の
+# 実測("No route to host")も即座に失敗が返る経路だが、経路上の機器の状態
+# によっては応答が返らず待たされる場合に備え、5秒を上限として打ち切る。
+recovery_exec_pve_probe_timeout: 5
+
 recovery_exec_codex_bin: /usr/bin/codex
 recovery_exec_codex_wrapper: /usr/local/bin/codex-exec-wrapper
 recovery_exec_codex_model: gpt-5.5

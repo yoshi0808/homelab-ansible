@@ -3,6 +3,44 @@
 # 判定・分類・通知は compare.yml(controller側)が行う
 # (docs/ai/context/operations/healthcheck.md)。
 
+# pve_unreachable_handling (2026-08-16, R4/R5): 呼び出し元play
+# (playbooks/deployment_drift_check.yml)の `ignore_unreachable: true` は、
+# 到達不能なhostをplayから脱落させない — decoyで実測すると、到達不能host
+# であっても set_fact/debug のようなcontroller側で完結するtaskは
+# 実行され続け、`ansible_play_hosts`(=`play_hosts_ok`)に残り続ける。この
+# ためreport.ymlが従来 `play_hosts_all - play_hosts_ok` で`unverified`を
+# 求めていた式は、到達不能hostがあっても空になる(実際に2026-08-11の
+# task 676で `unverified: (なし)` のまま`pve1`が`checked`に載った)。
+#
+# fact gathering(このplayは`gather_facts: false`)や上記の暗黙の集合差では
+# 判定できないため、明示的なprobeを1本立てる — roles/proxmox_reachable_nodes
+# と同じ考え方(fact cacheを信用せず実probeで判定する)の再利用だが、
+# 呼び出し規約(hosts:がproxmoxの部分集合であること)が本playの
+# `hosts:`(5 group和集合)と合わないため、role自体は呼ばない
+# (requirement非ゴール参照)。
+#
+# 収集結果は report.yml が `deployment_drift_check_reachable` を読んで
+# unverified_hosts/checked_hosts を組み立てる。evaluate.yml 側は変更不要 —
+# collect.yml の他のtask(stat/command/slurp)は到達不能hostに対しても
+# 引き続き試行され、`ignore_unreachable`により個々にunreachable扱いで
+# ignoreされるが、その register結果は `unreachable: true` を持ったまま
+# 定義される(変数が未定義になるわけではない。decoy実測)。この
+# `unreachable`キーの有無で読み取り失敗の原因を区別できることを
+# 確認済みだが、今回は「到達不能なら1件も採らない」側で判定を一本化する
+# ためevaluate.ymlのJinja分岐そのものには手を入れない(implement記録参照)。
+- name: Probe host reachability (explicit probe, not fact gathering)
+  ansible.builtin.ping:
+  register: deployment_drift_check_ping
+  ignore_unreachable: true
+  ignore_errors: true
+  become: false
+
+- name: Record whether this host actually answered
+  ansible.builtin.set_fact:
+    deployment_drift_check_reachable: >-
+      {{ not (deployment_drift_check_ping.unreachable | default(false) | bool)
+         and not (deployment_drift_check_ping is failed) }}
+
 - name: Select the checks that apply to this host
   ansible.builtin.set_fact:
     deployment_drift_check_my_files: "{{ deployment_drift_check_files | selectattr('hosts', 'contains', inventory_hostname) | list }}"
@@ -127,6 +165,41 @@
   changed_when: false
   failed_when: false
   become: false
+
+# pve_unreachable_handling (2026-08-16, 差し戻し対応, R4/AC4): 先頭の
+# probe(ping)は「この時点で」到達可能だったことしか保証しない。probeの
+# 後・上の8 taskの実行中にhostが到達不能になった場合(mid-runのflap)、
+# 個々のtaskは`ignore_unreachable: true`(呼び出し元play)によりignoreされて
+# 完走するが、その`register`結果は`unreachable: true`を持ったまま残る
+# (Q2で実測済み)。この情報を握りつぶさずに使う — 8つのcollect結果の
+# どれか1件でも`unreachable`キーを持てば、`deployment_drift_check_reachable`
+# を(probeの時点でtrueだったとしても)falseへ格下げする。これにより
+# evaluate.ymlの`when: deployment_drift_check_reachable`gateが正しく
+# 全finding builderをskipし(R4: findingを1件も計上しない)、report.ymlの
+# 集計もこのhostをunverified側へ分類する(R5)。
+#
+# 独立レビュー(2026-08-16)がproduction相当のfixtureで、probe直後は
+# reachable=trueだったhostが後続taskで`unreachable: true`を持つように
+# なっても、格下げ前の実装では`checked`に残ったまま`forced_command`の
+# 誤findingが立つことを再現した。この格下げが無いと、初回実装(2026-08-16
+# _002)はここが直っていなかった(§7の「flapping」を既知リスクとして
+# 受容した判断は撤回。docs/ai/reviews/pve_unreachable_handling/
+# 2026-08-16_002_implement.md「8. 差し戻し対応」参照)。
+- name: Downgrade reachability if any collect task actually observed unreachable (mid-run flap)
+  ansible.builtin.set_fact:
+    deployment_drift_check_reachable: >-
+      {{ deployment_drift_check_reachable
+         and not (
+           (deployment_drift_check_file_stat.results | default([])
+            + deployment_drift_check_unit_show.results | default([])
+            + deployment_drift_check_keys_raw.results | default([])
+            + deployment_drift_check_report_owner.results | default([])
+            + deployment_drift_check_hosts_raw.results | default([])
+            + deployment_drift_check_path_stat.results | default([])
+            + deployment_drift_check_sudoers_listing.results | default([])
+            + deployment_drift_check_dispatch_probe_result.results | default([]))
+           | selectattr('unreachable', 'defined') | list | length > 0
+         ) }}
 
 - name: Publish collected state for the controller-side comparison
   ansible.builtin.set_fact:

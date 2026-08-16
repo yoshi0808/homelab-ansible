@@ -178,6 +178,76 @@
 # read-only Proxmox investigation via a separate dedicated key — §4.6)
 # ---------------------------------------------------------------------------
 
+# pve_unreachable_handling (2026-08-16, R1-R3): pve1 has a scheduled weekday
+# shutdown. Looping the six tasks below directly over
+# recovery_exec_pve_targets with delegate_to: "{{ target_item.name }}"
+# promotes a single unreachable loop item to a task-level UNREACHABLE, which
+# aborts the play for quory before the remaining tasks run - even though the
+# other pve node succeeded within the same loop (observed: task 675,
+# 2026-08-11, rc=4; see requirement doc). This probe filters the loop target
+# down to reachable nodes only, once, before any of the six tasks run.
+#
+# Q1 (probe method, decided here; decoy evidence in the implement record):
+# wait_for's host/port TCP check, not ansible.builtin.ping + delegate_to +
+# ignore_unreachable. ping would still require Ansible to establish a real
+# connection to the delegate target for each loop item - the same
+# delegate_to-loop shape that causes the UNREACHABLE promotion in the first
+# place, and whether ignore_unreachable actually suppresses that promotion in
+# a loop was unverified. wait_for takes only host/port as arguments, so its
+# execution (delegated to localhost - i.e. wherever ansible-playbook itself
+# runs; see the ansible_connection comment in
+# inventories/homelab/host_vars/quory.yml for why this, and not
+# inventory_hostname, is the host that must match where the six tasks'
+# delegate_to connections actually originate from) never opens an Ansible
+# connection to pve1/pve2 at all, so the UNREACHABLE-promotion machinery is
+# never invoked for the probe itself. Confirmed with a decoy reproduction of
+# both the failure and the fix (implement record).
+#
+# wait_for does not support check_mode (attributes.check_mode.support: none):
+# without check_mode: false it auto-skips under --check, and a skipped
+# result's `failed` key is still false - which would make the reachability
+# calculation below misreport every pve target as reachable under --check
+# (confirmed via decoy). check_mode: false forces a real TCP probe every
+# time; it is read-only (a socket connect, no state left on either side) so
+# always running it under --check is safe (same reasoning as TS-017).
+- name: Probe TCP reachability of pve target nodes (explicit probe; establishes no Ansible connection to the target)
+  ansible.builtin.wait_for:
+    host: "{{ target_item.host }}"
+    port: 22
+    timeout: "{{ recovery_exec_pve_probe_timeout }}"
+    state: started
+  loop: "{{ recovery_exec_pve_targets }}"
+  loop_control:
+    loop_var: target_item
+  register: recovery_exec_pve_probe
+  ignore_errors: true
+  delegate_to: localhost
+  become: false
+  check_mode: false
+
+- name: Compute reachable/unreachable pve target lists
+  ansible.builtin.set_fact:
+    recovery_exec_pve_targets_reachable: >-
+      {{ recovery_exec_pve_probe.results
+         | selectattr('failed', 'equalto', false)
+         | map(attribute='target_item') | list }}
+    recovery_exec_pve_targets_unreachable: >-
+      {{ recovery_exec_pve_probe.results
+         | selectattr('failed', 'equalto', true)
+         | map(attribute='target_item') | list }}
+
+# R3: both the targeted and the excluded hosts must be readable from the
+# output by name, including the all-excluded case (AC3 - not a silent
+# success).
+- name: Show which pve target nodes are targeted vs excluded this run
+  ansible.builtin.debug:
+    msg:
+      - "対象としたpveホスト: {{ _reachable_names | join(', ') if (_reachable_names | length > 0) else '(なし)' }}"
+      - "外したpveホスト    : {{ _unreachable_names | join(', ') if (_unreachable_names | length > 0) else '(なし)' }}"
+  vars:
+    _reachable_names: "{{ recovery_exec_pve_targets_reachable | map(attribute='name') | list }}"
+    _unreachable_names: "{{ recovery_exec_pve_targets_unreachable | map(attribute='name') | list }}"
+
 - name: Create recovery-exec user on pve target nodes
   ansible.builtin.user:
     name: "{{ recovery_exec_user }}"
@@ -185,7 +255,7 @@
     create_home: true
     password: "!"
     comment: "Recovery SSH landing account (Proxmox investigation, read-only)"
-  loop: "{{ recovery_exec_pve_targets }}"
+  loop: "{{ recovery_exec_pve_targets_reachable }}"
   loop_control:
     loop_var: target_item
   delegate_to: "{{ target_item.name }}"
@@ -200,7 +270,7 @@
     owner: "{{ recovery_exec_user }}"
     group: "{{ recovery_exec_user }}"
     mode: "0700"
-  loop: "{{ recovery_exec_pve_targets }}"
+  loop: "{{ recovery_exec_pve_targets_reachable }}"
   loop_control:
     loop_var: target_item
   delegate_to: "{{ target_item.name }}"
@@ -215,7 +285,7 @@
     owner: root
     group: root
     mode: "0755"
-  loop: "{{ recovery_exec_pve_targets }}"
+  loop: "{{ recovery_exec_pve_targets_reachable }}"
   loop_control:
     loop_var: target_item
   delegate_to: "{{ target_item.name }}"
@@ -231,7 +301,7 @@
     group: root
     mode: "0440"
     validate: /usr/sbin/visudo -cf %s
-  loop: "{{ recovery_exec_pve_targets }}"
+  loop: "{{ recovery_exec_pve_targets_reachable }}"
   loop_control:
     loop_var: target_item
   delegate_to: "{{ target_item.name }}"
@@ -255,7 +325,7 @@
     owner: "{{ recovery_exec_user }}"
     group: "{{ recovery_exec_user }}"
     mode: "0600"
-  loop: "{{ recovery_exec_pve_targets }}"
+  loop: "{{ recovery_exec_pve_targets_reachable }}"
   loop_control:
     loop_var: target_item
   delegate_to: "{{ target_item.name }}"
@@ -296,7 +366,7 @@
     key: "{{ lookup('pipe', 'ssh-keyscan -H ' + target_item.host) }}"
     path: "{{ recovery_exec_ssh_dir }}/known_hosts"
     state: present
-  loop: "{{ recovery_exec_pve_targets }}"
+  loop: "{{ recovery_exec_pve_targets_reachable }}"
   loop_control:
     loop_var: target_item
   become: true

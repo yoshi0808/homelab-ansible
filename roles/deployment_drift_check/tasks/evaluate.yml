@@ -12,7 +12,17 @@
 # host(= このtaskを実行しているinventory_hostname)を使う。playbookが空の
 # findingでもrun_hostは埋める(スキーマを揃えるだけで、report.yml側では
 # playbookが空のとき参照されない)。
-
+#
+# pve_unreachable_handling (2026-08-16, R4): 以下8本の "Build findings for X"
+# は collect.yml が置く `deployment_drift_check_reachable` が false の
+# ホストではすべてskipする。到達不能hostでは collect.yml の
+# stat/command/slurpが個々にunreachable扱いでignoreされるが、その
+# register結果は `r.content is not defined` / `r.stat.exists|default(false)
+# == false` のような「読み取り失敗」判定と区別が付かない形のまま残る
+# (decoy実測、implement記録) — このためfinding生成そのものを
+# host単位でスキップし、到達不能を「finding 0件」として扱う(R4)。
+# 到達不能hostでこの8本がskipされても "Combine findings for this host" は
+# 各変数に `| default([])` を通すため安全に空へたたむ。
 - name: Build findings for deployed files
   ansible.builtin.set_fact:
     deployment_drift_check_findings_files: >-
@@ -43,6 +53,7 @@
         {%- endif -%}
       {%- endfor -%}
       {{ out }}
+  when: deployment_drift_check_reachable
 
 - name: Build findings for systemd units
   ansible.builtin.set_fact:
@@ -81,6 +92,7 @@
         {%- endif -%}
       {%- endfor -%}
       {{ out }}
+  when: deployment_drift_check_reachable
 
 - name: Build findings for forced-command keys
   ansible.builtin.set_fact:
@@ -117,6 +129,7 @@
         {%- endif -%}
       {%- endfor -%}
       {{ out }}
+  when: deployment_drift_check_reachable
 
 - name: Build findings for report directory ownership
   ansible.builtin.set_fact:
@@ -138,6 +151,7 @@
         {%- endif -%}
       {%- endfor -%}
       {{ out }}
+  when: deployment_drift_check_reachable
 
 - name: Build findings for the hosts file
   ansible.builtin.set_fact:
@@ -167,6 +181,7 @@
         {%- endif -%}
       {%- endfor -%}
       {{ out }}
+  when: deployment_drift_check_reachable
 
 # --- operator_request_channel案件(2026-08-08): 新設3クラス ------------------
 
@@ -206,6 +221,7 @@
         {%- endif -%}
       {%- endfor -%}
       {{ out }}
+  when: deployment_drift_check_reachable
 
 - name: Build findings for sudoers.d absence
   ansible.builtin.set_fact:
@@ -230,6 +246,7 @@
         {%- endif -%}
       {%- endfor -%}
       {{ out }}
+  when: deployment_drift_check_reachable
 
 - name: Build findings for dispatcher allowlist-out-of-band probes
   ansible.builtin.set_fact:
@@ -245,14 +262,20 @@
         {%- endif -%}
       {%- endfor -%}
       {{ out }}
+  when: deployment_drift_check_reachable
 
+# pve_unreachable_handling (2026-08-16, R4): 到達不能hostでは上の8本が
+# すべてskipされ、各 deployment_drift_check_findings_* は未定義のまま
+# なので、`| default([])` を通さないと "'...' is undefined" で
+# ここが落ちる(decoy実測、implement記録)。到達不能hostは
+# 結果として `deployment_drift_check_findings: []` になる。
 - name: Combine findings for this host
   ansible.builtin.set_fact:
     deployment_drift_check_findings: >-
-      {{ deployment_drift_check_findings_files + deployment_drift_check_findings_units + deployment_drift_check_findings_keys
-         + deployment_drift_check_findings_reports + deployment_drift_check_findings_hostsfile
-         + deployment_drift_check_findings_paths + deployment_drift_check_findings_sudoers
-         + deployment_drift_check_findings_dispatch_probes }}
+      {{ (deployment_drift_check_findings_files | default([])) + (deployment_drift_check_findings_units | default([]))
+         + (deployment_drift_check_findings_keys | default([])) + (deployment_drift_check_findings_reports | default([]))
+         + (deployment_drift_check_findings_hostsfile | default([])) + (deployment_drift_check_findings_paths | default([]))
+         + (deployment_drift_check_findings_sudoers | default([])) + (deployment_drift_check_findings_dispatch_probes | default([])) }}
     deployment_drift_check_checked_counts:
       files: "{{ deployment_drift_check_my_files | length }}"
       units: "{{ deployment_drift_check_my_units | length }}"
