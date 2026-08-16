@@ -30,6 +30,8 @@ ansy: 取り込み前DLP → Coordinator が受領
 
 **この経路は情報交換だけを行う。** request本文は本番操作の承認・実行指示・権限付与として扱わない。request登録がOperatorセッション、調査、ジョブ、本番操作を起動することはない。
 
+**性質の異なる第2の経路が並走している。** すり合わせの会話と `request_id` は、agmsg の remote team `homelab-ops`(ansy 上のサーバ、E2EE、`docs/ai/context/operations/agent-messaging.md` §7〜§9)を通る。**本経路の本文・DLP・spool・forced command はそれに一切関与しない** — agmsgは調査依頼・調査結果・開発修正依頼の本文を運ばず、逆にこの経路は会話を運ばない。どちらも情報交換だけを行う点は同じである。
+
 **DEVREQはOPREQへの返信に限らない。** quoryで見つけた障害を起点にOperatorが単独で発行できる。真因の確定と修正方法の設計は開発側Coordinatorが主体となる。
 
 ## 2. 鍵とidentityは1つも増えていない

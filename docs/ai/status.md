@@ -16,19 +16,21 @@
 - **段0(sandbox 探索)完了** — 設計を変える発見5件。sandbox に検証環境を残置(削除手順は `_002_spike.md` 末尾)
 - **段1(agmsg 本体の更新)完了** — ansy を v1.1.13 → **v1.2.0** へ。team 登録・message DB・codex Reviewer との疎通は無傷。退避は `~/agmsg-backup-20260816_151346.tar.gz`
 - **段2(ansy へのサーバ配備)完了** — Reviewer 3ラウンド(Request Changes ×2 → Approve)、Tester 受入。**未検証は R15(再起動後の復帰)のみ**
-- **残り: 段3**(team `homelab-ops` を E2EE で作成、remote 接続)。識別子は ansy 側 `coordinator` / quory 側 `operator`。**`actas` を使わないこと**(片方の team が無音になる)
-- **quory 側は Yoshinobu の手作業区間** — 鍵束の手運び、watcher の起動(Operator セッションの一部。常駐させない)、AC1-b(quory からの実到達)
-- **申し送り**: 決定記録1本(`ansy-must-not-trigger-production-changes` との線引き)、運用文書、age 鍵束を復旧リストへ追加 — いずれも未着手
+- **段3の ansy 側完了** — team `homelab-ops` を E2EE(age-v1)で作成、`coordinator` として登録、remote 接続と sync engine の稼働まで。鍵束は `~/agmsg-homelab-ops-handoff.bundle`(0600、repo外)。**`actas` は使っていない** — 1つの Monitor が `homelab` と `homelab-ops` の両方を覆う
+- **残り: quory 側**(Yoshinobu の手作業区間) — 鍵束と digest の手運び、`pull` → `unlock` → `operator` として join、watcher の起動(Operator セッションの一部。**watcher は常駐させない**)。手順は `docs/ai/context/operations/agent-messaging.md` §9
+- **R5 / AC6 を改訂した**(2026-08-16、Yoshinobu 決定) — sync engine は `nohup` + `disown` で起動し公開 CLI に停止手段が無いため、**quory 側でも engine は常駐する。** 線は「常駐するか」ではなく「**人が見ていないときに AI の文脈へ入るか**」で引く。systemd unit と sudoers は引き続き作らない
+- **未検証**: AC1-b(quory からの実到達)、AC3(双方向)、AC5 の実受信、**R15(再起動後に*サーバ*が戻ること)**、および**それとは別に、再起動後に *sync engine* が `session-start.sh` 経由で戻ること**(engine は Claude Code を起動したシェルの環境から CA を引き継ぐ)。**AC4 は成立**(サーバ DB に `homelab` は存在せず、`homelab-ops` の行は `cipher=age-v1`)
 
-**ansy のスナップショットから戻したときに要るもの**(2026-08-09、Semaphore Restore の前に取得)。**リポジトリは `9397fe5` まで commit 済みなので、git の内容は巻き戻らない。** 巻き戻るのは ansy 上の git 管理外だけで、次の7つがそれに当たる。スナップショット取得時点より**古い**世代へ戻した場合にだけ、作り直しが要る。
+**ansy のスナップショットから戻したときに要るもの**(2026-08-09、Semaphore Restore の前に取得)。**リポジトリは `9397fe5` まで commit 済みなので、git の内容は巻き戻らない。** 巻き戻るのは ansy 上の git 管理外だけで、次の8つがそれに当たる。スナップショット取得時点より**古い**世代へ戻した場合にだけ、作り直しが要る。
 
-1. **agmsg 一式**(`~/.agents/skills/agmsg/`、team `homelab` の登録、message DB)— 再構築手順は `docs/ai/context/operations/agent-messaging.md`
-2. **codex シム**(`~/.agents/bin/codex`)と、`~/.bashrc` の PATH 行(**非対話ガードより上**に置くこと)
+1. **agmsg 一式**(`~/.agents/skills/agmsg/`、team `homelab` と `homelab-ops` の登録、message DB、`homelab-ops` の remote binding)— 再構築手順は `docs/ai/context/operations/agent-messaging.md`
+2. **codex シム**(`~/.agents/bin/codex`)と、`~/.bashrc` の PATH 行・`CURL_CA_BUNDLE` 行(いずれも**非対話ガードより上**に置くこと)
 3. **配送の hook** — `.claude/settings.local.json`(Claude Code 側)と `.codex/hooks.json`(Codex 側)。どちらも gitignored。Codex 側は起動時に「Hooks need review」で信頼を与え直す必要がある
 4. **`~/.semaphore-api-token-ansy`** — UI で再発行する
 5. **`~/.codex/rules/default.rules`** — codex の承認ルール(`ansible-playbook` の許可を含む)
 6. **`new-session.sh`** — gitignored。**2ペイン構成**(左=Coordinator、右=codex Reviewer)。pane 0 の起動処理から `delivery.sh set monitor codex` と `spawn.sh codex reviewer --fresh` を行う。失敗しても Coordinator は立ち上がり、成否は `/tmp/new-session-reviewer-boot.log` に残る
 7. **`/etc/homelab-recovery/semaphore-templates-api-token`**(root 所有 0600、ansy 用 token の複製)— `~/.semaphore-api-token-ansy` から作り直す。これが無いと ansy 向けの Semaphore reconcile が token 読み取りで停止する
+8. **team `homelab-ops` の age 鍵束**(`~/agmsg-homelab-ops-handoff.bundle`、0600)— **サーバ側に復旧手段は無い。** quory が unlock 済みならそちらから `key.sh handoff` で作り直せる(手で運び直す)。**すべての端末とバックアップから鍵が消えた場合だけ**、それ以前の履歴は誰にも読めず、team の作り直しになる
 
 **リブートで必ず失われるもの**(スナップショットの世代に関係なく): tmux セッション `homelab`、Codex Reviewer のペイン、agmsg の Monitor。いずれも次セッションの SessionStart hook と `spawn.sh` で戻る。
 
