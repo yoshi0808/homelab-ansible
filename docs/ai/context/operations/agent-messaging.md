@@ -105,7 +105,7 @@ codex 側には2つの層があり、どちらもリポジトリ外にある。*
 **Node は system trust store を見ない。** サーバは私設 CA の証明書を提示するため、sync engine(Node)は既定では `UNABLE_TO_GET_ISSUER_CERT_LOCALLY` で落ちる。`remote.sh` に `CURL_CA_BUNDLE` を渡すと、`remote-sync.sh` がそれを Node へ `NODE_EXTRA_CA_CERTS` として引き継ぐ。curl 側は system store で通るため、**症状は「curl は通るのに engine だけ起動しない」**という形で出る。
 
 - ansy 側は `~/.bashrc` に `export CURL_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt` を置いてある(**非対話ガードより上**)。
-- **再起動後の復帰は `session-start.sh` が接続済み team の engine を自動起動する**が、これは Claude Code を起動したシェルの環境を引き継ぐ。`.bashrc` を読まない経路から起動すると、engine は上記の理由で立たない。**この自動起動がリブートを跨いで実際に成立するかは未検証である**(下記「リブート後」)。
+- **再起動後の復帰は `session-start.sh` が接続済み team の engine を自動起動する**が、これは Claude Code を起動したシェルの環境を引き継ぐ。`.bashrc` を読まない経路から起動すると、engine は上記の理由で立たない。**この自動起動がリブートを跨いで成立することは 2026-08-17 に ansy で実測した**(下記「リブート後」)。
 - **engine を、エージェントのツール実行から起動しない。** `nohup` + `disown` は SIGHUP からしか守らない。**エージェントのコマンド実行はプロセスグループごと片付けるため、engine は残らない。** 症状は「起動したと報告されるのに同期が始まらない」で、**ログにエラーは残らない**(quory で実測: ログ末尾は capabilities 取得成功の1行だけ、`status` は pidfile を stale と判定、成功した同期の行が出ない)。**通常のシェルから起動すること。** 起動し直せば、溜まっていた join とメッセージはまとめて流れる。
 - **sync engine は `nohup` + `disown` で起動し、シェルもセッションも越えて生き続ける**(`remote.sh` の engine 起動部)。**公開 CLI に停止手段は無い** — 止まるのは `disconnect` / `forget` / `set-endpoint` / `unlock` の副作用としてだけである。したがって **quory 側にも engine は常駐する**(2026-08-16、Yoshinobu 決定。判断の記録は requirement R5 / AC6)。**engine が運ぶのはローカル store までで、AI の文脈へ入れるのは watcher である** — 常駐と非常駐の線はここに引かれている。
 - `connect` は age-v1 の設定をサーバへの通信を伴って行い、**そこが失敗すると binding だけが記録される。** その状態の `sync start` は `authenticated sync configuration is missing` で失敗する。回復は `connect --e2ee` の再実行(登録済みの team は adopt される)であり、`sync start` の再試行ではない。
@@ -139,12 +139,16 @@ codex 側には2つの層があり、どちらもリポジトリ外にある。*
 サーバは ansy にしか無い。**確認は3つで、上から順に見る。**
 
 ```bash
-docker compose -f <deploy dir>/compose.yaml ps    # 2コンテナが up か(restart: unless-stopped)
+docker compose -f <deploy dir>/compose.yaml -p <compose project> ps   # 2コンテナが up か(restart: unless-stopped)
 curl -s -o /dev/null -w '%{http_code}\n' https://ansy.internal:<port>/v1/capabilities
 remote.sh status homelab-ops                       # engine と「最後に成功した同期」
 ```
 
+**`-p` を省くと、コンテナが動いていても空の表が返る。** compose は project 名を既定でディレクトリ名から取るが、**配備先のディレクトリ名と project 名は一致していない**(値の正本は `roles/agmsg_server/defaults/main.yml` の `agmsg_server_deploy_dir` と `agmsg_server_compose_project`)。空表を「落ちている」と読むと、この後の2つを見る前に復旧作業へ入ってしまう。**`.env` が root 専用のため `sudo` も要る。**
+
 **HTTP 応答が返れば nginx とアプリまでは戻っている**(認証前なので 2xx とは限らない。**到達したかどうかだけを見る**)。ここまで人手が要らなければ R15 は成立である。
+
+**2026-08-17 に実測した** — 再起動後 uptime 1分の時点で2コンテナとも `Up`、`/v1/capabilities` は **426**(Upgrade Required。WebSocket 経路なので到達の証拠としてはこれでよい)、engine は `session-start.sh` の自動起動で立ち上がり同期サイクルが進んでいた。**人手はどこにも要らなかった。R15 は成立である。**
 
 **戻らない場合に見る順序** — Docker が boot で上がっているか(`systemctl is-enabled docker`)→ compose の `restart:` が効いているか → nginx。**上流の `compose.yaml` には `restart:` が無く、この repo のテンプレートで足している**(R15)。復旧のたびに手で `up -d` しているなら、それは成立していない。
 
