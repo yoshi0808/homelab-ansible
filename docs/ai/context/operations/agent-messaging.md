@@ -134,7 +134,40 @@ codex 側には2つの層があり、どちらもリポジトリ外にある。*
 
 **quory 側は特に確度が低い。** Operator セッションのツール実行から起動された engine が刈られることは実測済みであり、**セッション開始時の自動起動が同じ経路を通るなら、リブート後の初回は無音のまま繋がらない。** セッションを立てるたびに上記の確認を行う。
 
-## 10. 参照
+## 10. 起動スクリプトが満たすこと(両ホスト共通)
+
+**codex を `monitor` で使うホストでは、起動スクリプトが seat の面倒を見る。** 見ないと、**人が見ているスレッドと配送先が、起動のたびにズレる。**
+
+seat の実体は `run/role-session.<team>__<agent>` の1ファイル(中身は `session=<thread id>`)である。launcher は **seat のある role にだけ bridge を立て**、bridge はその thread を `resume` する。**seat はセッションが終わっても残る** — `session-end.sh` は watcher を畳んで pidfile を消すだけで、seat には触れない(resume のために残す設計)。結果、次のセッションは新しい thread で立ち上がるのに、**bridge は古い thread を起こす。**
+
+満たすことは2つである。
+
+1. **起動の前に掃除する** — seat、残存 bridge の pid(`run/codex-bridge.<team>.<agent>.pid`)、そのプロジェクトの app-server。**app-server は窓が消えたスレッドも loaded のまま抱える**ため、残っていると 2 の特定が曖昧になり、**黙って失敗する**
+2. **起動の後に seat を張り直す**
+
+**ansy** は `spawn.sh --fresh` が両方を担う(§4)。**quory** は pane 0 が人の対話セッションそのものなので spawn を使えず、`new-session.sh` が自前で行う。
+
+```
+rm -f <run>/role-session.homelab-ops__operator     # 1. 掃除
+（残存 bridge と app-server の pid を落とす）
+delivery.sh set monitor codex <project>            #    冪等
+tmux ... で codex を起動
+codex-record-session.sh homelab-ops operator <project>   # 2. 張り直し(数秒リトライ)
+```
+
+**最後の1行は通常シェルから呼べる。AI に実行させる必要はない。** `CODEX_THREAD_ID` が無い文脈で呼ばれると、このスクリプトは app-server へ loaded スレッドを問い、**既に seat のあるものを引き算して、残りが1つならそれを記録する**。1 で掃除してあれば残りは必ず、いま立てた可視スレッドである。
+
+**1 を省くと 2 は黙って何もしない。** 「seat が既にあるなら推論で上書きしない」という規則に当たるためで、エラーは出ない。
+
+**この掃除を欠いたまま運用すると、人が見ていないスレッドが `operator` を名乗って応答しうる** — 2026-08-16 に実際に起きた(`docs/ai/memory/incidents/2026-08-16_headless-codex-thread-replied-as-operator.md`)。
+
+**`turn`(Stop フックで引く)へ落とせば bridge ごと不要になるが、採らない**(2026-08-16、Yoshinobu 決定)。即時性そのものは要件ではないが、**両ホストの配送方式を分岐させない**ほうを取った。したがって安全性は「bridge を使わないこと」ではなく、**上の2つを起動スクリプトが必ず行うこと**に依存する。
+
+なお**起動スクリプト自体は両ホストとも `.gitignore` 済みで、この repo は持たない**(AI 実行環境のローカルスクリプトを入れない線)。**したがって、この節が要件の正本である。** スクリプトを書き直すときはここへ突き合わせる。
+
+**検証済み**(2026-08-17)— quory で改訂版を実行し、Coordinator からの1通が `history.sh` を叩かずに**人が見ているペインへ出ることを目視で確認**した。往復は18秒。
+
+## 11. 参照
 
 - 経路の性質の違いと使い分け — `docs/ai/context/operations/operator-request-channel.md`
 - 判定軸と線引き — `docs/ai/memory/decisions/agmsg-carries-conversation-not-authority.md`
