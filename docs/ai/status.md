@@ -11,22 +11,7 @@
 
 ## Now(進行中)
 
-**観測待ち: `semaphore_db_backup` の初回実行** — 2026-08-18 12:00 が初回。**緑で終わり、保存先に3ファイル揃った世代が1つできれば成立**(AC1)。**pve1 を停止している平日に走れば AC2(pve2 へのフォールバック)も同時に確かめられる。** 案件記録は `docs/ai/reviews/semaphore_db_backup/`、配備と有効化の規則は `docs/ai/context/operations/code-delivery-to-production.md` §7。
-
-**ansy のスナップショットから戻したときに要るもの**(2026-08-09、Semaphore Restore の前に取得)。**リポジトリは `9397fe5` まで commit 済みなので、git の内容は巻き戻らない。** 巻き戻るのは ansy 上の git 管理外だけで、次の8つがそれに当たる。スナップショット取得時点より**古い**世代へ戻した場合にだけ、作り直しが要る。
-
-1. **agmsg 一式**(`~/.agents/skills/agmsg/`、team `homelab` と `homelab-ops` の登録、message DB、`homelab-ops` の remote binding)— 再構築手順は `docs/ai/context/operations/agent-messaging.md`
-2. **codex シム**(`~/.agents/bin/codex`)と、`~/.bashrc` の PATH 行・`CURL_CA_BUNDLE` 行(いずれも**非対話ガードより上**に置くこと)
-3. **配送の hook** — `.claude/settings.local.json`(Claude Code 側)と `.codex/hooks.json`(Codex 側)。どちらも gitignored。Codex 側は起動時に「Hooks need review」で信頼を与え直す必要がある
-4. **`~/.semaphore-api-token-ansy`** — UI で再発行する
-5. **`~/.codex/rules/default.rules`** — codex の承認ルール(`ansible-playbook` の許可を含む)
-6. **`new-session.sh`** — gitignored。**2ペイン構成**(左=Coordinator、右=codex Reviewer)。pane 0 の起動処理から `delivery.sh set monitor codex` と `spawn.sh codex reviewer --fresh` を行う。失敗しても Coordinator は立ち上がり、成否は `/tmp/new-session-reviewer-boot.log` に残る
-7. **`/etc/homelab-recovery/semaphore-templates-api-token`**(root 所有 0600、ansy 用 token の複製)— `~/.semaphore-api-token-ansy` から作り直す。これが無いと ansy 向けの Semaphore reconcile が token 読み取りで停止する
-8. **team `homelab-ops` の age 鍵束**(`~/agmsg-homelab-ops-handoff.bundle`、0600)— **サーバ側に復旧手段は無い。** quory が unlock 済みならそちらから `key.sh handoff` で作り直せる(手で運び直す)。**すべての端末とバックアップから鍵が消えた場合だけ**、それ以前の履歴は誰にも読めず、team の作り直しになる
-
-**リブートで必ず失われるもの**(スナップショットの世代に関係なく): tmux セッション `homelab`、Codex Reviewer のペイン、agmsg の Monitor。いずれも次セッションの SessionStart hook と `spawn.sh` で戻る。
-
-**Operator の Semaphore 能力(2026-08-10)** — quory の Semaphore に `guest` role のユーザーを作り、その API キーで template / schedule を read-only に読める。担保は Semaphore の project role で、task 起動の能力は無い。**quory 側の確認は不要**(Yoshinobu 確認済み)。Operator 側の Semaphore Skill は導入済みだが、**実体は quory 側にありこの repo に無い**。開発側はカタログ(`roles/semaphore_templates/defaults/main.yml`)を正本とする reconcile、運用側はこの read で、両側が同じオブジェクトを指せる。
+進行中の案件・観測待ちは無い。
 
 ## Next(着手候補) — 工程・体制
 
