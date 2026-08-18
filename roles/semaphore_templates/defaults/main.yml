@@ -888,11 +888,7 @@ semaphore_schedules_closed_world: true
 # 選べない。**立てる前に必ず`--check`で`pending_activation`を読み、そこに
 # 並ぶものを全部有効化してよいか確かめること。**
 #
-# 2026-08-18: trueにして有効化する。対象は`pending_activation`で確認した2件 —
-# `SEMI-SAFE: Semaphore db backup daily`(新規)と
-# `UN-SAFE:Proxmox Weekly Full Patch`(休暇中に止めたまま戻し忘れていたもの。
-# Yoshinobu確認済み)。**押したらfalseへ戻すこと。**
-semaphore_schedules_allow_activation: true
+semaphore_schedules_allow_activation: false
 
 # --- R15: allowlist型のcanonical本番URL ---------------------------------------
 # 有効化を許可してよい接続先の判定に使う。**他の変数(semaphore_target等)
