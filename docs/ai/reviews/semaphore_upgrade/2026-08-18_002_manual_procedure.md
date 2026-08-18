@@ -73,6 +73,11 @@ ls -l ~/semaphore-pre-2.19.8
 
 ## 3. `.deb` を取得して照合する
 
+> **次回の版上げでは community 版へ寄せる**(2026-08-19 判断)。`semaphore_community_<版>_linux_amd64.deb` を取る。
+> **理由**: パッケージのメタデータ上ライセンスの区別は宣言されておらず(両方 `License: MIT`)、差は実体である — 非 community は **100.4MB 対 49.6MB** で、使っていない Pro 機能のコードを倍載せている。
+> **単独で切り替えない。** 機能的な見返りがゼロの本番バイナリ差し替えになるため、**バイナリをどのみち入れ替える版上げと同時に行う。**
+> **前提は確認済み**(2026-08-19、quory 実測): `project__template.executor_image` が空、`runner` が0件。**Pro 専用の状態は作られていない。** 切り替える版上げの直前にもう一度この2つを測り、0 でなければ寄せない。
+
 ```bash
 cd ~/semaphore-pre-2.19.8
 curl -fsSLO https://github.com/semaphoreui/semaphore/releases/download/v2.19.8/semaphore_2.19.8_linux_amd64.deb
