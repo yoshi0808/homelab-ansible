@@ -129,6 +129,15 @@ journal に次が出ること:
 
 ## 6. 確認する
 
+**まずエディションが変わっていないことを確かめる。**
+
+```bash
+sha256sum /usr/bin/semaphore
+```
+
+**0. で控えた変種と同じ側であること。** 期待値は upstream の該当リリースの `.deb` を展開して求める(版ごとに変わるため、この文書に固定値を書かない)。**入れる前の照合は「どちらを取るか」を決めるだけで、意図した方が入ったことの確認にはならない。**
+
+
 ```bash
 semaphore version                      # 2.19.8-...
 systemctl is-active semaphore          # active

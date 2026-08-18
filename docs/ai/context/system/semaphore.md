@@ -68,7 +68,7 @@ Semaphoreのジョブ結果はSQLite(`semaphore.db`)にあり、read-onlyのSELE
 
 版の読み取りは `semaphore version` で、出力は `2.19.8-3449a04-1786894505` の形(`X.Y.Z` の後に commit hash とビルド番号が付く)。
 
-**ansy / quory とも非 community 版**(`semaphore_X.Y.Z_linux_amd64.deb`)である。2026-08-18 に両ホストで `/usr/bin/semaphore` の sha256 を upstream の `.deb` と照合して確定した(2.18.4 の非 community 版 = `eeea8b9e…`、community 版とは不一致)。**`.deb` は2種類公開されており、取り違えると版と一緒にエディションまで入れ替わる。** 版上げのたびに照合する。
+**ansy / quory とも非 community 版**(`semaphore_X.Y.Z_linux_amd64.deb`)である。2026-08-18〜19 に**両ホスト・両版**(2.18.4 / 2.19.8)で `/usr/bin/semaphore` の sha256 を upstream の `.deb` から展開したバイナリと照合して確定した。**`.deb` は2種類公開されており(`semaphore_` と `semaphore_community_`)、取り違えると版と一緒にエディションまで入れ替わる。** **版上げのたびに、入れる前(現行バイナリ)と入れた後の両方で照合する。**期待値はここへ書かない — 版ごとに変わるため、upstream の該当リリースの `.deb` を展開して都度求める。
 
 **未確認**: quory の unit と config の中身は測っていない。`quory-investigate` の forced command に apt / dpkg / systemctl-cat 系の操作が無く、この経路では読めない。
 
