@@ -19,7 +19,14 @@
 |---|---|---|
 | `quory` / `pve2` / `authy` | **鍵は ansy にある**(`~/.ssh/id_ann`)。受け側の `authorized_keys` が受け付けない | **相手側で1行足せば復活する。開発側からは観測できない** |
 | `pve1` | **未確認**(平日停止のため到達せず判定できていない)。同じ鍵・同じユーザー・同じ group_vars のため `pve2` と同じと見るのが自然だが、確かめてはいない | 同上 |
-| `sophos-fw` | **鍵ファイルそのものが無い**(`~/.ssh/id_rsa_sophos` は存在しない) | ansy 側で鍵を用意しない限り復活しない |
+| `sophos-fw` | **鍵ファイルそのものが無い**(`~/.ssh/id_rsa_sophos` は存在しない)。これは欠落ではなく規範の実装である(EXEC-006) | ansy 側で鍵を用意しない限り復活しない |
+
+<!-- EXEC-006 -->
+**開発環境から `sophos-fw` へ接続しない**(Yoshinobu、2026-08-18)。`~/.ssh/id_rsa_sophos` が ansy に存在しないのは**この規範を能力で実装したもの**であり、直すべき欠落ではない。**鍵を作らない、置かない、他ホストからコピーしない。**
+
+`sophos_trim.yml` と `time_sync_check.yml` の sophos 分岐は、Ansible の接続プラグインではなく `delegate_to: localhost` + `expect` の中で自前の `ssh -i` を起動する(メニューから advanced shell へ遷移する対話が要るため)。**したがって ansy から流すと必ず ssh の時点で失敗する。これは正しい失敗である。** 両playbookはquoryのSemaphoreから実行する(`roles/semaphore_templates/defaults/main.yml`)。
+
+**`group_vars/sophos.yml` の `ansible_ssh_private_key_file` は、Ansibleの接続設定ではなく `expect` へ渡す `ssh -i` の引数の置き場である。** 変数名から接続設定と読まない。
 
 <!-- EXEC-004 -->
 **受け側で失効させた境界は、日次のドリフト検査の対象外である。** 検査が見ている `authorized_keys` は `recovery-exec` と `dev-investigate` の2つで、`ann` のものは含まない。**「届かない」は、こちらから確かめ続けられる性質ではない**と理解して扱う。
