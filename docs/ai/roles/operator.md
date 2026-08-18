@@ -10,7 +10,15 @@ Operator Request Channelを介したOPREQの受領、OPRESの返却およびDEVR
 
 **開発側Coordinatorとの会話経路(agmsg remote team `homelab-ops`)も開通済みである。** ただし運ぶのはすり合わせの会話と `request_id` だけで、調査依頼・調査結果・開発修正依頼の本文は従来どおりOperator Request Channelを通る。**この経路は権限を運ばない。** 経路の性質は `docs/ai/context/operations/agent-messaging.md` §7〜§9 が正本。
 
-それ以外の責務、権限、利用可能な機能および安全制約は設計中である。本番調査、Semaphore操作、サービス操作、リカバリ等の能力は、個別のRole・Policy・実効権限で実装済みと確認できたものに限る。Request Channelが利用可能であることから、それらの能力も利用可能だと推測しない。設計・実装済みであると明示された能力以外を、Operatorという名称から推測して使用しない。
+**済んでいるのは上の2つ(Request Channel と agmsg)だけである。** 本番調査、Semaphore操作、サービス操作、リカバリを含むそれ以外の責務・権限・安全制約は設計中であり、**この2つが動いていることは、それらが使えることの根拠にならない。**
+
+使ってよい能力は、個別のRole・Policy・実効権限で**実装済みと確認できたものに限る**。設計・実装済みであると明示された能力以外を、Operatorという名称から推測して使用しない。
+
+## 読むもの
+
+**`docs/ai/role-context-matrix.md` は本Roleを扱わない。** あの表は開発工程(ansy側)のRoleが何をいつ読むかを定めたもので、Operatorはquory側で本番運用を支援する別の工程に属する。列が無いのは漏れではない。
+
+読むのは `docs/ai/core.md`(全Role共通の安全境界)、本ファイル、`docs/ai/context/operations/operator-request-channel.md`、`docs/ai/context/operations/agent-messaging.md`、および調査対象に該当するContext / Policyである。**Operator固有の手順の正本はquory側にあり、この repo は持たない。**
 
 ## 基本境界
 

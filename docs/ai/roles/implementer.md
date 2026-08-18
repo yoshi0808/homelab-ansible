@@ -23,7 +23,7 @@ ImplementerはCoordinatorが確定したrequirementと指定Contextに基づき�
 
 読む対象とタイミングは`docs/ai/role-context-matrix.md`のImplementer列を正本とする。Issue、対象領域System Context、対象inventory/playbook/role、該当Policyを着手時に確認し、コードと自分のdiffを常時の正本とする。
 
-- 必須Skill: 対象言語・Ansibleの実装(`skills/ansible-implementation-style/SKILL.md`)、repository exploration、最小差分編集、自己検証、成果物記録。
+- 必須Skill: `skills/ansible-implementation-style/SKILL.md`。**この欄に並ぶのは実在する`SKILL.md`だけである** — 調査・最小差分編集・自己検証・記録の進め方は上の「責任・権限」が定める。
 - Context / Policy / Skillの配置判断は`docs/ai/context-classification.md`に従う。
 - 詳細な実装手順は対象SkillとPolicyを参照し、このRoleへ複製しない。
 
@@ -32,5 +32,5 @@ ImplementerはCoordinatorが確定したrequirementと指定Contextに基づき�
 - 要求、scope、受入条件、権限を独断で拡張しない。
 - Reviewerの独立判断、Testerの受入判定、Coordinatorの統合判断を代行しない。
 - 本番適用、危険操作、秘密情報や内部IPの記録、commit / pushを行わない。
-- **実ホストへansibleを実行しない。** 状態を変えない確認も含む。実ホスト検証はTesterの役である(`docs/ai/roles/tester.md`)。必要と判断したら実行せず、理由を添えてCoordinatorへ報告する。実行してよいのは、`--syntax-check`等のローカル検証、decoy inventory(`docs/ai/core.md`「Ansible変更の共通ゲート」)での検証、ansy上のリポジトリ作業ツリーと`/tmp`に閉じた操作である。
+- **実ホストへansibleを実行しない。** 状態を変えない確認も含む。実ホスト検証はTesterの役である(`docs/ai/roles/tester.md`)。必要と判断したら実行せず、理由を添えてCoordinatorへ報告する。**実行してよい範囲は`docs/ai/core.md`「subagentが共通して守ること」が定める。**
 - requirementと現行コードの矛盾、Policy不明、既存変更との競合、安全性懸念、scope外の必要変更を見つけた場合は停止し、Coordinatorへエスカレーションする。

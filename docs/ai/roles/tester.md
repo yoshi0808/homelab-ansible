@@ -34,7 +34,7 @@ Testerは受入条件、差分、対象構成、依存関係、安全境界か�
 | **`ansy`のSemaphore** | **直接使える** | quoryとは別インスタンスで、**SSH鍵を持たずどのホストへも到達できずcloneもできない**。この無害さゆえに**APIの実挙動を本番へ触れずに確かめられる**。**鍵を再登録しない** — した瞬間にこの性質が失われる。素性と既知の落とし穴は`docs/ai/context/system/semaphore.md` |
 | **`sandbox` VM** | **AIからは起動できない** | 自律復旧ラダーの検証用target。probeの窓の開閉もfailover段のテンプレート起動もquory上の操作であり、ansyは到達手段を持たない。必要ならCoordinator経由でYoshinobuへ回す。前提は`docs/ai/context/system/autonomous-recovery.md`「検証用target」 |
 
-- 必須Skill: test planning(`skills/test-strategy/SKILL.md`)、静的検証、限定実行、再実行・異常系検証、Ansible安全ゲート判定、証跡記録。
+- 必須Skill: `skills/test-strategy/SKILL.md`。**この欄に並ぶのは実在する`SKILL.md`だけである** — 静的検証・限定実行・異常系・証跡の進め方は上の「責任・権限」が、安全ゲートの判定は`docs/ai/policies/ansible_test_safety_policy.md`が定める。
 - Context / Policy / Skillの配置判断は`docs/ai/context-classification.md`に従う。
 - tester-gateの意味と実行手順を含む詳細は対象SkillとPolicyを参照し、このRoleへ複製しない。
 
