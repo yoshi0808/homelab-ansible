@@ -22,9 +22,9 @@ AIは実装、レビュー、テスト、調査、論点整理を支援する。
 **Yoshinobuは判断者であって実行者ではない。** リスクを理解して採否を決めるのが役目であり、コマンドを組み立てて流すことではない。人の手に残すのは判断だけになるよう設計する。
 
 - 運用上の採否、本番適用の可否、危険操作に踏み込む方針、確定、commitはYoshinobuが判断する。
-- patch、reboot、restart、migration、firewall変更、inventory変更など本番影響を生む操作を、暗黙の承認や推測で実行しない。Yoshinobuの明示的承認か、承認済みscope内であることを確認したCoordinatorの承認が要る。判断の3分類は `docs/ai/roles/coordinator.md`「実ホストへの非冪等操作の承認」を正本とする。
+- patch、reboot、restart、migration、firewall変更、inventory変更など本番影響を生む操作を、暗黙の承認や推測で実行しない。Yoshinobuの明示的承認か、承認済みscope内であることを確認したCoordinatorの承認が要る。**承認区分、ホストの区分、Roleごとの実行可否の正本は `docs/ai/policies/execution_boundary_policy.md` である。**
 - 許可の範囲が不明な場合、または安全性に懸念がある場合は停止し、根拠と未確認事項を示して確認する。
-- **打鍵を伴う承認の入口を増やさない。** ansyでYoshinobuに押させてよいのは `git` の確定だけとし、本番実行の承認はquory側で押す。承認面は能力の所在に従わせる。判断を要さない打鍵が混ざるとゲートは薄まり、この機構は確認プロンプトが希少であることで機能している。**方針・採否・安全境界の変更をYoshinobuへ確認することは、ここでいう入口に当たらない**(それらは打鍵ではなく対話で決まる)。
+- **打鍵を伴う承認の入口を増やさない。** 承認面は能力の所在に従わせる。具体的な線引きは `docs/ai/policies/execution_boundary_policy.md` が定める。
 
 ### 安全機構がブロックしたとき
 
@@ -79,7 +79,7 @@ quory = Gitから取得した確定済みコードの本番実行基盤
 情報は必要な範囲だけを、次の順序で選ぶ。
 
 1. 本ファイルで共通原則を確認する。
-2. **自分のRole文書 `docs/ai/roles/<role>.md` を読む。** 対話セッションのCoordinatorは `docs/ai/roles/coordinator.md` が該当し、あわせて `docs/ai/status.md` で現在地を確認する(SessionStart hookが自動で載せる。載っていなければ読む)。
+2. **`docs/ai/policies/execution_boundary_policy.md` と、自分のRole文書 `docs/ai/roles/<role>.md` を読む。** 実行境界のPolicyは、対象業務に関わらず全Roleが起動時に読む(4項の「対象業務のPolicyだけ」の例外はこれ1本である)。 対話セッションのCoordinatorは `docs/ai/roles/coordinator.md` が該当し、あわせて `docs/ai/status.md` で現在地を確認する(SessionStart hookが自動で載せる。載っていなければ読む)。
 3. requirement、review、test_planなど、依頼で指定された案件記録を読む。
 4. 対象領域のSystem / Repository / Operations Contextと、対象業務のPolicyだけを辿る(分類の定義は `docs/ai/context-classification.md`、誰がいつ読むかは `docs/ai/role-context-matrix.md`)。
 5. 作業内容に一致するSkillを使う。
@@ -129,7 +129,7 @@ Role間の連携はCoordinatorを起点とするsubagentの起動と、その最
 - **自分でさらにsubagentを起動しない。** 起動単位を決めるのはCoordinatorの責務である。
 - **先行成果物・先行subagentの主張を、現物で確かめずに引き継がない。** 説明だけを信頼せず、指定されたファイルと現在のdiffを自分で読む。「検証済み」「無改修で流用できる」といった記述も、file:line・commitの参照も、自分で読むか実行して裏を取る。このリポジトリは短期間に文書が大幅改訂されるため、記録に書かれた参照が既に無効になっていることがある。
 - **本番Slackへ通知が送られた状態で報告を返さない。** 通知経路を動かす検証では抑止変数を使うか、送信先が本番でないことを自分で確かめる。
-- **実ホストへ触れてよい範囲は自分のRole文書が定める。** 依頼文がそれより狭い場合は依頼文が優先する。広げる方向へ解釈しない。**実ホストへ触れないRoleでも、次の3つは実行してよい** — `--syntax-check`等のローカル検証、decoy inventoryでの検証、ansyのリポジトリ作業ツリーと`/tmp`に閉じた操作。
+- **実ホストへ触れてよい範囲は `docs/ai/policies/execution_boundary_policy.md` が定める。** 依頼文がそれより狭い場合は依頼文が優先する。広げる方向へ解釈しない。
 - 上記に反しそうな状況になったとき、および**記録どうしの不一致や他Agentの変更との競合を見つけたとき**は、別の手段で同じ結果へ到達せず、勝手に統合せず、止めてCoordinatorへ返す(「安全機構がブロックしたとき」と同じ扱い)。
 
 これで塞げるのは書き落としまでで、解釈による逸脱は塞げない。

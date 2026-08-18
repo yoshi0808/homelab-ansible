@@ -26,13 +26,7 @@ Testerは受入条件、差分、対象構成、依存関係、安全境界か�
 
 ### 使ってよい検証環境
 
-到達可否が環境ごとに違う。**足りないと判断したら、権限や経路を自分で広げずCoordinatorへ返す。**
-
-| 環境 | 到達 | 用途 |
-|---|---|---|
-| decoy inventory | 直接使える(承認不要) | 実ホストへ触れずに実行経路を通す。成立条件は`docs/ai/core.md`「Ansible変更の共通ゲート」 |
-| **`ansy`のSemaphore** | **直接使える** | quoryとは別インスタンスで、**SSH鍵を持たずどのホストへも到達できずcloneもできない**。この無害さゆえに**APIの実挙動を本番へ触れずに確かめられる**。**鍵を再登録しない** — した瞬間にこの性質が失われる。素性と既知の落とし穴は`docs/ai/context/system/semaphore.md` |
-| **`sandbox` VM** | **AIからは起動できない** | 自律復旧ラダーの検証用target。probeの窓の開閉もfailover段のテンプレート起動もquory上の操作であり、ansyは到達手段を持たない。必要ならCoordinator経由でYoshinobuへ回す。前提は`docs/ai/context/system/autonomous-recovery.md`「検証用target」 |
+**正本は `docs/ai/policies/execution_boundary_policy.md` 4.3 である。** decoy inventory / `ansy`のSemaphore / `sandbox` VM の到達可否と用途をそちらが定める。**表をここへ写さない。**
 
 - 必須Skill: `skills/test-strategy/SKILL.md`。**この欄に並ぶのは実在する`SKILL.md`だけである** — 静的検証・限定実行・異常系・証跡の進め方は上の「責任・権限」が、安全ゲートの判定は`docs/ai/policies/ansible_test_safety_policy.md`が定める。
 - Context / Policy / Skillの配置判断は`docs/ai/context-classification.md`に従う。
@@ -42,9 +36,8 @@ Testerは受入条件、差分、対象構成、依存関係、安全境界か�
 
 - 検証目的で対象実装を変更せず、受入条件や期待値を独断で変えない。
 - 許可のない本番適用、patch、restart、reboot、migration、firewall / inventory変更を行わない。
-- **保護対象ホストへの非冪等操作は、着手前に計画をCoordinatorへ提示して承認を得る。** 保護対象の範囲と提示不要の操作は`docs/ai/roles/coordinator.md`「実ホストへの非冪等操作の承認」が正本であり、ホスト名をここへ写さない(`.claude/settings.json`の`autoMode`と対応させて維持される値である)。
+- **保護対象ホストへの非冪等操作は、着手前に計画をCoordinatorへ提示して承認を得る。** 保護対象の範囲と提示不要の操作は`docs/ai/policies/execution_boundary_policy.md`が正本であり、ホスト名をここへ写さない。
 - `check-mode-native` / `dry-run-aware`を`--check`なしで実行しない。秘密情報や内部IPを証跡へ記録しない。
 - **認証情報を伴う検証で、要求ヘッダを出力する手段を使わない**(`curl -v` / `-i` / `--trace`等)。露出先は成果物ファイルだけでなく、自分のツール出力とtranscriptを含む。実装側の`no_log`は、手で叩く検証経路を守らない。
-- **実行identityを昇格しない。** `sudo --become-user`等で別のidentityを引き受けない。到達できないと分かったら、権限の足りる経路を探さず止めてCoordinatorへ返す。「正しいidentityを使っただけで迂回ではない」という整理でこれを越えない。
 - 通知経路を含むplaybookを`--check`なしで実行するときも、`skip_notifications=true`を付与する。`roles/common_slack/tasks/notify.yml`はAIエージェントセッション(`CLAUDECODE`環境変数)を検出した場合も既定で抑止するが、この検出は取得失敗時に送信側へ倒れる設計であり、`skip_notifications`の付与を省略してよい理由にはしない。
 - tester-gate不明、安全な検証範囲を確定できない、本番影響の可能性がある、期待値と実測が重大に乖離する場合は停止し、Coordinatorへエスカレーションする。

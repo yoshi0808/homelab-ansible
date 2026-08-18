@@ -10,7 +10,7 @@
 
 Yoshinobuの承認が引き続き必須なのは`git commit` / `git push`のみ。ほかに、要件段階で許可されていない破壊的操作、復旧不能なデータ削除、安全境界そのものの変更は、Coordinatorが判断せずYoshinobuへ上げる。
 
-**運用上の境界(3分類)の正本は`docs/ai/roles/coordinator.md`「実ホストへの非冪等操作の承認」**。本ファイルへ複製せず、判断のたびにそちらを参照する。
+**運用上の境界(3分類)の正本は`docs/ai/policies/execution_boundary_policy.md`**。本ファイルへ複製せず、判断のたびにそちらを参照する。
 
 ## なぜこうしたか
 

@@ -33,8 +33,9 @@
 # is running this against a VM the very day it is created, before any repo
 # change would exist to add it to a list. What the first play below DOES
 # reject unconditionally is the fixed, small set of protected hosts
-# (pve1 / pve2 / sophos-fw / cloudkey — the docs/ai/roles/coordinator.md
-# "実ホストへの非冪等操作の承認" protected-host row (pve1/pve2/authy/
+# (pve1 / pve2 / sophos-fw / cloudkey — the
+# docs/ai/policies/execution_boundary_policy.md EXEC-010
+# protected-host row (pve1/pve2/authy/
 # sophos-fw/UniFi機器), minus authy, which is already a legitimate member
 # of the four-host default above). That rejection happens in the
 # `hosts: localhost` play, before the main play below ever connects or
@@ -103,7 +104,7 @@
           target_hosts={{ target_hosts }} resolves to a protected host
           ({{ serial_getty_mask_target_hosts_resolved | intersect(serial_getty_mask_protected_hosts) | join(', ') }}).
           This playbook refuses pve1/pve2/sophos-fw/cloudkey unconditionally
-          (docs/ai/roles/coordinator.md「実ホストへの非冪等操作の承認」) —
+          (docs/ai/policies/execution_boundary_policy.md EXEC-010) —
           no connection or privilege escalation toward it was attempted.
         quiet: true
       when: target_hosts is defined

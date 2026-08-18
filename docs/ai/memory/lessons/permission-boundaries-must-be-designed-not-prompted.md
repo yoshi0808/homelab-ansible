@@ -89,5 +89,5 @@ Coordinatorの寄与も記録する。「globを使わず名前を明示指定�
 - **能力の不在という設計が前提とするもの**(列挙が漏れれば境界は成立しない): [[enumerate-credentials-that-reach-you-not-those-you-placed]]
 - 一次記録: `docs/ai/reviews/incident_auto_capture/2026-07-28_028_u5_test_result.md` §T8・§4
 - 先行事例: 2026-07-26 decoy inventoryへの無許可実行
-- 承認境界の正本: `docs/ai/roles/coordinator.md`「実ホストへの非冪等操作の承認」
+- 承認境界の正本: `docs/ai/policies/execution_boundary_policy.md`
 - 実行機構: `.claude/settings.json` の `permissions.defaultMode` / `autoMode`(設定そのものが正本。`docs/ai/core.md`「安全機構がブロックしたとき」も参照)

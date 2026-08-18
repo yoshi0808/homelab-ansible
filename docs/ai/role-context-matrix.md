@@ -22,7 +22,8 @@
 | 該当するOperations Context(`docs/ai/context/operations/`) | 着手時(該当するもの) | 着手時(該当するもの) | 着手時(該当するもの) | 着手時(該当するもの) |
 | `docs/ai/context/ansible/repository-overview.md` | 着手時 | 必要時 | 必要時 | 必要時 |
 | 対象inventory(`inventories/homelab/hosts.yml`等)・playbook・role本体(現物を直接参照) | 着手時(対象特定に必須) | 着手時(対象特定に必須) | 着手時(対象特定に必須) | 着手時(対象特定に必須) |
-| Policy(`docs/ai/policies/`、対象分野のみ) | 着手時(該当分野) | 着手時(該当分野) | 着手時(該当分野) | 着手時(該当分野) |
+| **`docs/ai/policies/execution_boundary_policy.md`(実行境界)** | **起動時** | **起動時** | **起動時** | **起動時** |
+| Policy(`docs/ai/policies/`、対象分野のみ。上記1本を除く) | 着手時(該当分野) | 着手時(該当分野) | 着手時(該当分野) | 着手時(該当分野) |
 | Issue / 受入条件(案件の依頼文) | 起動時点で自分が起点 | 着手時(必須) | 着手時(必須) | 着手時(必須) |
 | PR / diff | 必要時 | 自分の実装(常時) | 着手時(必須、レビュー対象そのもの) | 着手時(必須、検証対象そのもの) |
 | Knowledge(`docs/ai/memory/`、Claude Memoryを含む) | 着手時(重要Decisionは常に前提とする) | **不要**(読まない) | **不要**(読まない) | **不要**(読まない) |

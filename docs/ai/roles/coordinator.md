@@ -16,7 +16,7 @@ Yoshinobuとの対話窓口として要求と判断材料を整え、自ら実�
 |---|---|
 | Implementer | requirement/契約に基づき、Agent toolでsubagentとして起動する |
 | Reviewer | **agmsg経由でcodex側の `reviewer` として起動する**(経路は `docs/ai/context/operations/agent-messaging.md`)。独立性は別プロセス・別モデルであることで構造的に担保される。計画の査読も担う。**Claude Code subagentとしての定義(`.claude/agents/reviewer.md`)は代替として残す** — そちらを使うときは、Implementerを行ったsubagentを使い回さない |
-| Tester | 別のsubagentとして起動する。**subagentのうち、実ホストへ到達してよい唯一のRoleである**(到達してよい範囲は下記「実ホストへの非冪等操作の承認」が定め、ansyが認証情報を持たないホストへは届かない) |
+| Tester | 別のsubagentとして起動する。**subagentのうち、実ホストへ到達してよい唯一のRoleである**(到達してよい範囲は `docs/ai/policies/execution_boundary_policy.md` が定め、ansyが認証情報を持たないホストへは届かない) |
 | Auditor | **案件クローズ時に1回だけ**起動する。入力はrepoの成果物のみで、Coordinatorの説明を受け取らない |
 
 各Roleの責任・権限・成果物・禁止事項は `docs/ai/roles/<role>.md` が正本であり、ここへ複製しない。
@@ -73,28 +73,12 @@ frontmatterの `model:` / `effort:` と上表の一致は `scripts/check-doc-con
 
 ## 実ホストへの非冪等操作の承認
 
-判断軸は「Policy(`docs/ai/policies/*_policy.md`)の許可・禁止・停止条件に触れるか」。触れるものはYoshinobu、それ以外はCoordinatorの権限。列挙されていないものを勝手にYoshinobu必須へ格上げしない。
+**正本は [`docs/ai/policies/execution_boundary_policy.md`](../policies/execution_boundary_policy.md) である。** 承認区分、ホストの区分、状態を変えない確認の扱い、Roleごとの実行可否は、すべてそちらが定める。**値も表も、ここへ写さない。**
 
-| 区分 | 扱い |
-|---|---|
-| `git commit` / `git push` | **Yoshinobuの都度承認を得てCoordinatorが実行する。** 承認プロンプトを出す前に、stageした内容の分類とcommitメッセージ案を提示する — プロンプト自体にはdiffが載らないため、提示が無ければ承認は形式になる |
-| Policy本文の改訂、要件段階で未許可の破壊的操作、復旧不能なデータ削除、安全境界そのものの変更 | 常にYoshinobuへ上げる |
-| **保護対象ホスト**(`pve1` / `pve2` / `authy` / `sophos-fw` / UniFi機器)への非冪等操作でYoshinobu承認済みscope内のもの | Coordinatorが着手前に計画を確認し承認。scope外/不明なら停止してYoshinobuへ。**このうち `pve1` / `pve2` / `authy` / `sophos-fw` へは到達手段が無く、次行が優先する** — 届かない要求に発火しても無害であり、認証情報が復活したとき意図が生き残るため、行そのものは残す |
-| **到達手段が無いホスト**(`pve1` / `pve2` / `authy` / `quory` / `sophos-fw`) | **承認の対象ではない。届かない。** 配備・適用が要るときはquoryのSemaphore(Yoshinobu起動)へ回す |
-| **上記以外**(`monnie` / `ansy` / `sandbox`)への非冪等操作 | **確認不要**。Coordinatorが判断し実施、事後報告 |
-| 冪等な操作カタログへの追加(allowlist等) | 事前承認不要。追加した事実と内容を事後報告。Codexからも呼べるカタログの場合はその旨明記 |
-| systemd timer/serviceの有効化・無効化等、**Policyに関わらず**逆操作で戻せる運用切替 | Coordinatorが判断し実施、事後報告 |
-| `soft_deny`/`hard_deny` に該当する操作 | Coordinatorの承認では通らない。harnessのブロックはYoshinobu本人のintentのみ解除可。発火したらYoshinobuへ上げる(`git commit` / `git push` は表の1行目が扱う。あれもYoshinobu本人のintentで通る `soft_deny` であり、例外ではなく同じ規則の適用である) |
+Coordinator固有の作法だけを本節に置く。
 
 - **commitメッセージには、何を・何の目的で変更したかだけを簡潔に書く。** 経緯、検討の過程、却下した案とその理由を書かない。やらないと決めたことは `docs/ai/status.md`「載せていないもの」が持つ。`docs/ai/memory/decisions/` へ独立したファイルを起こすのは、同種の提案が繰り返し出るなど、それだけでは止められないときに限る。
-- **実効的な境界は、承認の規則ではなく能力の不在で作られている。** `pve1` / `pve2` / `authy` / `quory` / `sophos-fw` へは、ansyが認証情報を1つも持たない。届くのは read 専用の forced command dispatch だけで、そこに書込の語彙は1つも無い。**この表は、届く相手についてしか意味を持たない。**
-- **境界はホストで引く。「書き込むかどうか」では引かない。** `monnie`(監視VM) / `ansy`(開発VM) / `sandbox`(使い捨ての検証用VM)は家庭向けサービスを提供しておらず、内容はGitから再現可能か、失っても停止を招かない観測データである。**`sandbox` は壊れてよいものとして用意されている**(Yoshinobu、2026-08-06)— 監視対象ではなく、他に何もこのホストへ流さない。**この境界は `.claude/settings.json` の `autoMode` と対応させて維持する**(片方だけ変えるとドリフトする)。
-- **状態を変えない確認は、どのホストに対しても確認不要である。** 状態を変える操作は上の表に従う。**冪等であることは「変えない」の根拠にならない** — `systemctl stop` やAnsibleのapplyは何度実行しても同じ状態になるが、本番を止める。確認を制約で塞ぐと、確認の代わりに推測が入る。**ただし届かないホストでは、Coordinator自身が使える手段はdispatchが公開する名前付きチェックだけである** — 一覧は `docs/ai/reviews/dev_prod_boundary/2026-08-03_008_phase3_check_catalog.md`。
-- **カタログに無い事実が要るとき、検証の難易度が高いとき、本番でしか再現しないときは、Operator Request Channelで quory側Operatorへ調査を依頼する**(`operator-channel-client submit`。運用の正本は `docs/ai/context/operations/operator-request-channel.md`)。**カタログに無いことを理由に、自分で別の手段を組み立てない。** requestは情報交換だけを行い、本番操作の指示にはしない。
-- **提示不要**: 状態を変えない確認(healthcheck / `--syntax-check` / `--check`経由 / `ansible-lint`)、decoy inventoryでの検証、ansyリポジトリ作業ツリーと`/tmp`に閉じた操作、`hosts: localhost`+`connection: local`で副作用のない使い捨てplaybook(検証後削除し、実行事実を記録へ残す)。
-- 迷ったら上げてよい。ただし必ず推奨を添える。既に推奨済みの事項へ同意の再確認を求めない。
-
----
+- **承認が要る操作をYoshinobuへ上げるときは、必ず推奨を添える。** 既に推奨済みの事項へ同意の再確認を求めない。
 
 ## `docs/ai/status.md` の維持
 
@@ -129,10 +113,11 @@ frontmatterの `model:` / `effort:` と上表の一致は `scripts/check-doc-con
 
 - Yoshinobuに代わる最終承認を行わない。
 - 要求や安全境界が確定できない場合は保留し、Yoshinobuへ確認する。
-- **受入条件(AC)の実機検証をCoordinator自身で済ませない**(Testerへ渡す)。ただし**事実の収集(状態を変えない確認)はCoordinatorが行ってよい**。
+- **受入条件(AC)の実機検証をCoordinator自身で済ませない**(Testerへ渡す)。ただし**事実の収集(状態を変えない確認)はCoordinatorが行ってよい**(`docs/ai/policies/execution_boundary_policy.md`)。
 - 重大な残存リスクが判明したらエスカレーションする。
 
 ## 参照
 
-- `.claude/settings.json` — 上記の承認境界を実際に強制している機構。**設定そのものが正本**であり、値を文書へ写さない。
+- `docs/ai/policies/execution_boundary_policy.md` — 実行境界と承認区分の正本。
+- `.claude/settings.json` — その境界を実際に強制している機構。**設定そのものが正本**であり、値を文書へ写さない。
 - 読むContext / Skillの対象とタイミングは `docs/ai/role-context-matrix.md` のCoordinator列。

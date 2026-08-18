@@ -4,7 +4,7 @@
 
 ## 位置づけ
 
-本書は使い捨て検証VM `sandbox` の使い方を扱う**非規範runbook**である。実ホストへの操作の許可・禁止・承認境界は [`docs/ai/roles/coordinator.md`](../../roles/coordinator.md)「実ホストへの非冪等操作の承認」が正本であり、競合時はそちらを優先する。採らないと決めた案の一覧は [`docs/ai/status.md`](../../status.md)「載せていないもの」が持つ。IP、認証情報、秘密情報の実値は記載しない。
+本書は使い捨て検証VM `sandbox` の使い方を扱う**非規範runbook**である。実ホストへの操作の許可・禁止・承認境界は [`docs/ai/policies/execution_boundary_policy.md`](../../policies/execution_boundary_policy.md) が正本であり、競合時はそちらを優先する。採らないと決めた案の一覧は [`docs/ai/status.md`](../../status.md)「載せていないもの」が持つ。IP、認証情報、秘密情報の実値は記載しない。
 
 ## 1. 何のためのVMか
 

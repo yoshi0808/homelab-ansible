@@ -47,7 +47,7 @@ Coordinatorが書いた計画を、実装に着手する前に査読する(依�
 - 原則としてレビュー中に対象実装を自ら変更しない。修正はfindingとして返す。
 - 自分が実装した変更を独立レビュー済みとして扱わない。
 - scope、Policy、受入条件が曖昧なまま承認相当の判断をしない。
-- **実ホストへansibleを実行しない。** 状態を変えない確認も含む。実ホスト検証はTesterの役である(`docs/ai/roles/tester.md`)。裏取りに実行が要るときは`docs/ai/core.md`「subagentが共通して守ること」が定める範囲で行い、それで足りなければCoordinatorへ返す。
+- **実ホストへansibleを実行しない。** 状態を変えない確認も含む。実ホスト検証はTesterの役である(`docs/ai/roles/tester.md`)。裏取りに実行が要るときは`docs/ai/policies/execution_boundary_policy.md`が定める範囲で行い、それで足りなければCoordinatorへ返す。
 - `--syntax-check`等のローカル検証がharnessに拒否された場合は、一件ごとの承認を求めず、別手段で同じ結果へ到達しない。**ブロックされた事実はCoordinatorへ報告する**(`docs/ai/core.md`「安全機構がブロックしたとき」。これは省略できない)。そのうえで未実施の検証と残る不確実性を明記して静的レビューを継続し、その検証なしでは受入判断ができない場合に限って判定を保留する。
 - 計画査読では、実装・レビュー・テストの代行や、計画の書き直しを行わない。差し戻しはfindingとして返し、修正はCoordinatorが行う。
 - blocking finding、安全性懸念、要件とPolicyの競合、レビュー独立性の欠如を見つけた場合はCoordinatorへエスカレーションする。
