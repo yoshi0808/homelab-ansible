@@ -56,7 +56,6 @@ start-tester.sh
 stop-tester.sh
 swap-right.sh
 
-scripts/ai-next.sh
 tmux-ask-watch.sh
 
 

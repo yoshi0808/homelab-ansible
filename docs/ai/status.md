@@ -11,20 +11,7 @@
 
 ## Now(進行中)
 
-**観測待ち: `semaphore_db_backup`(2026-08-18 配備完了)** — quory の Semaphore を `semaphore.db` / `projects export` / `config.json` の3点セットで Synology NFS へ日次退避する(12:00、30世代)。**quory は VM でないため Proxmox のバックアップに乗らず、Semaphore 自身の退避手段が無かった。** 案件記録は `docs/ai/reviews/semaphore_db_backup/`。
-
-- **配備は完了している** — template と schedule はカタログ経由で登録・有効化済み(schedule id 21、`unchanged 20 件` / 管理外 0 件を実測)。有効化の旗は `false` へ戻してある
-- **待っているのは初回実行(AC1)だけである。** 緑で終わり、保存先に3ファイル揃った世代が1つできれば成立。**pve1 を停止している平日に走れば AC2(pve2 へのフォールバック)も同時に確かめられる**
-- **AC5 / AC6 は実施しない**(quory の sqlite3 を消す・NFS を切る破壊的操作が要る)。**AC7 の復元は隔離インスタンスで確認済みだが、稼働中サービスを止めて差し替える経路そのものは未実施** — 災害復旧時に初めて踏む経路として残す(2026-08-18 判断)
-- **`--check` の差分に `pending_activation` が出たら、そこに並ぶ全部を有効化してよいか先に確かめる。** 旗は個別の schedule を選べない(2026-08-18、無関係な `UN-SAFE:Proxmox Weekly Full Patch` が同時に並んだ)
-
-**進行中: `agmsg_remote_ops_channel`(2026-08-16 着手)** — 開発↔運用の「伝書鳩」を agmsg で置き換える。**既存の Operator Request Channel(本文・DLP・spool・forced command)は1文字も変えない。** 運ぶのはすり合わせの会話と `request_id` までで、権限は運ばない。正本は `docs/ai/reviews/agmsg_remote_ops_channel/2026-08-16_001_requirement.md`。
-
-- **段0〜段3は完了** — ansy へのサーバ配備、team `homelab-ops` の E2EE(age-v1)作成、quory の `operator` join、双方向疎通まで。**2026-08-17 に、quory 側の自動配送が「人が見ているセッションへ届く」ところまで目視で確認した。** 構成・立ち上げ手順・落とし穴は `docs/ai/context/operations/agent-messaging.md` が正本(値をここへ写さない)
-- **R5 / AC6 を改訂した**(2026-08-16、Yoshinobu 決定) — 線は「常駐するか」ではなく「**人が見ていないときに AI の文脈へ入るか**」で引く。sync engine は公開 CLI に停止手段が無いため**両ホストとも常駐する**。systemd unit と sudoers は作らない
-- **その線を seat 記録が跨いだ**(2026-08-16 の事故) — 人が見ていない Codex スレッドが `operator` を名乗って応答した。**是正・確認とも完了。** 経緯は `docs/ai/memory/incidents/2026-08-16_headless-codex-thread-replied-as-operator.md`、**再発防止の実体は起動スクリプトが seat を掃除して張り直すこと**で、要件は `agent-messaging.md` §10
-- **リブート後の復帰は両ホストとも確認済み** — ansy は 2026-08-17 の再起動で実測し、**R15(サーバが人手なしで戻ること)と ansy 側 sync engine の復帰の両方が成立した**。engine を戻すのはセッション開始時の自動起動であって boot 時の仕掛けではない点は両ホスト共通(quory は 2026-08-16 に実測、無音42秒)。**確認手順と実測値は `agent-messaging.md` §9 が正本**
-- **申し送り(未着手)**: 運用文書は書いたが、**quory 側の規範**(承認を求める前の提示義務)は quory の管轄として残っている
+**観測待ち: `semaphore_db_backup` の初回実行** — 2026-08-18 12:00 が初回。**緑で終わり、保存先に3ファイル揃った世代が1つできれば成立**(AC1)。**pve1 を停止している平日に走れば AC2(pve2 へのフォールバック)も同時に確かめられる。** 案件記録は `docs/ai/reviews/semaphore_db_backup/`、配備と有効化の規則は `docs/ai/context/operations/code-delivery-to-production.md` §7。
 
 **ansy のスナップショットから戻したときに要るもの**(2026-08-09、Semaphore Restore の前に取得)。**リポジトリは `9397fe5` まで commit 済みなので、git の内容は巻き戻らない。** 巻き戻るのは ansy 上の git 管理外だけで、次の8つがそれに当たる。スナップショット取得時点より**古い**世代へ戻した場合にだけ、作り直しが要る。
 
@@ -55,7 +42,6 @@
 | 項目 | 内容 | 根拠 |
 |---|---|---|
 | **Operator Request Channel の後続2件** | MVPは2026-08-09にクローズ。**残存リスク4件と設計上の申し送りは `docs/ai/reviews/operator_request_channel/2026-08-09_018_closeout.md` §4 が正本**(quory側ライブラリのhash照合手段が無いこと、checkpoint 4のreject方向が原理的に検証不能なこと、spoolに試験messageが4件残ること、**書き込みの門をPOSIX ACLだけと仮定していたこと**)。後続は①**ID専用の通知**(本文はDLP経路だけ、通知は `request_id` しか運ばない) ②**storeの簡素化**(容量会計・イベントログ・conversation索引)。②はquory側Operatorが「一定期間使ってから判断」としていた。**実バグ4件はいずれもstoreと権限の層で、DLPでは1件も出ていない** — 芯と帳簿の切り分けが実測で裏づいた形であり、②の設計入力になる | Yoshinobu決定(2026-08-09にクローズ)。案件記録は `docs/ai/reviews/operator_request_channel/` |
-| **`worktree-sync.sh` 本体の内容ドリフトが検査できない** | **timerの生存は2026-08-03に日次ドリフト検査へ入れた**(`deployment_drift_check_units`)。残るのは**スクリプト本体の内容**で、`template` 配備物であるため期待値を得るのに描画が要り、`deployment_drift_check` の Tier 2(未着手)に属する。同じ制約が dispatch script・sudoers・unit本体・authorized_keys・**`codex-exec-wrapper`** にもかかる**構造的な穴であり、`worktree_sync` 固有ではない**。あわせて `deployed-hash` の対応表(8件)にも無いため、手での突合もできない。**2026-08-06 の codex 調査で実際に詰まった** — 配備済み wrapper が repo と一致するかをCoordinatorから確認できず、Yoshinobuに `sed` を打っていただいた。**単独で追わず、Tier 2 に着手するときにまとめて閉じる** | `roles/deployment_drift_check/defaults/main.yml` 冒頭の但し書き、`docs/ai/reviews/dev_prod_boundary/2026-08-03_005_plan_phase2.md` |
 | **証明書の更新が、週次・期限駆動で実際に回るか** | **repo・Semaphore とも配備完了**(2026-08-06)。カタログの `force_renew` 既定値は `false` へ変更し reconcile 済み(`changed: cert_renew` を確認)、`cert_renew_quory.timer` は `Persistent=true` で quory に入り(`unit-cat` で実測)、`cert_renew.yml` の schedule も Yoshinobu が週次・週末へ調整済み。**残るのは観測だけ。** ①次の週次実行が緑で終わること(証明書は8/5に全ノード更新済みで残り45日なので、**当面は「更新せずに緑」が正しい**) ②**実際に更新が走るのは9月上旬**(残り15日を切る頃)で、そこが本番の答え合わせになる。規範は `docs/ai/policies/cert_renew_policy.md` CERT-024。**承知の上の残存リスク** — `prepare_ca_apply`(CA鍵のtmpfs展開)は `cert_needs_renewal` ではなく `not ansible_check_mode` だけでgateされているため、更新不要な週も毎回展開される(年12回→52回)。抑えるなら `issue_check` を全ホストで先に回す形になるが、playの順序組み替えを伴うので別案件 | Yoshinobu決定(2026-08-06)。数値は `roles/homelab_cert_renew/defaults/main.yml`(valid 45 / threshold 15) |
 | **一次調査成果物の保持期間と、滞留の検知** | `_investigations/` は消す仕組みを持たず、拾われないまま溜まった成果物を知る経路も無い(IC-021の一次調査への適用)。**Policy §8が「未決」として明示している項目のうち、一次調査が本番稼働に入ったことで実際に効き始めた2件**である。バンドル本体は `incident_capture_retention_days`(30日)で消えるため、成果物だけが残り続ける | `docs/ai/policies/incident_capture_policy.md` §8 |
 | Jinjaの`strftime`フィルタが**コントローラの暗黙システムTZに依存**している(**2箇所**) | `roles/proxmox_snapshot_check/tasks/main.yml:57` と `playbooks/recovery_monitoring_check.yml:103,137`。Jinjaの既定(`utc=False`)を使うため、ansyのシステムTZが変わると出力もずれる。**「repo内で唯一」ではない** — 2026-08-03の独立レビューが2件目を検出した(1件目しか知らないまま規範文書へ「唯一」と書き、その誤りが同レビューで指摘された)。**急がない、かつ安易に直すと悪化する** — `%z` が実オフセットを出すので**TZが変わっても嘘にはならない**。`+09:00` の直書きは UTC の値に JST ラベルを付ける「詐称」になる。規約そのものは `skills/ansible-implementation-style/SKILL.md` が正本 | `docs/ai/reviews/ubuntu_nightly_reboot_check/2026-07-30_004_review_jst_sweep.md`、`docs/ai/reviews/norm_docs_convention_relocation/2026-08-03_001_review.md` |

@@ -15,7 +15,7 @@ Ansible専用の公式Skillは存在しないため、内部で使う個別言�
 
 - shellは小規模ユーティリティ・単純なラッパースクリプトに限定して使う。
 - 100行を超える、または制御フローが複雑になった場合は構造化言語(Python)へ書き直す。
-- 現行core.mdの「shell責務は収集とJSON整形のみ」を補強する根拠として使う。
+- `docs/ai/core.md`「Ansible変更の共通ゲート」の「check系shellは観測に留め、判定・分類・通知・保存をshellへ持たせない」を補強する根拠として使う(正本は`docs/ai/context/operations/healthcheck.md`)。
 
 ## Python
 

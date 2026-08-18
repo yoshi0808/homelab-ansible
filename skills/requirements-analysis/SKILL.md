@@ -13,7 +13,7 @@ https://github.com/anthropics/knowledge-work-plugins/blob/main/product-managemen
 
 1. 問題定義
 2. ゴール
-3. 非ゴール(現行core.mdの「初回実装で含める範囲／除外する範囲」と同義。名称をPRD標準へ揃えたもの)
+3. 非ゴール(今回やらないと決めたこと。**やらない判断もここへ書く** — 書かないと次のセッションが再提案する)
 4. ユーザーストーリー
 5. 要件(P0/P1/P2でMoSCoW優先順位付け: Must/Should/Could/Won't)
 6. 成功指標

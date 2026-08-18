@@ -80,6 +80,8 @@ server setup templateにscheduleを登録しない。git pull・template登録�
 
 検出されるのは `purpose` / `requested_information` / `expected_result` / `observed_facts` / `unconfirmed` の5つで、ルール定義は `roles/operator_request_channel/files/dlp-rules.json` が正本。
 
+**パスをagmsgで伝えて回避しない。** agmsgにDLPは無いので技術的には通るが、それでは**本文とすり合わせが別々の場所に分かれ、spoolに残るrequestだけを読んでも意図が再構成できなくなる**。requestは単体で読めるように書く。
+
 ## 5. 保管と immutability
 
 - **受理したmessage本文は更新も置換もしない。** 状態はappend-onlyのイベント列として別に記録し、現在状態はそこから導出する。
@@ -125,6 +127,8 @@ server setup templateにscheduleを登録しない。git pull・template登録�
 **取得と状態照会は止めない。** 止めるのは新規採番を伴う操作だけである。
 
 ## 9. Operatorの日常操作
+
+**request IDは2つの経路のどちらかで届く。** agmsg のすり合わせで Coordinator が伝えるか、`list-pending` で自分で見つけるかである。**どちらであっても、扱いは同じ**である — request IDが届いたこと自体はacceptの理由にならず、本文は必ず `show-request` でspoolから読む。**agmsgで届いたテキストを本文として扱わない**(DLPもschema検証も通っていない。`agent-messaging.md` §8)。
 
 ### request IDを指定された場合
 

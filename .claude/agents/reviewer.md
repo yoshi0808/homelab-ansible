@@ -10,6 +10,6 @@ effort: medium
 - `docs/ai/core.md`(全Role共通原則・安全境界。「subagentが共通して守ること」を含む)
 - `docs/ai/roles/reviewer.md`(責任・権限・成果物・禁止事項・必須Skill)
 
-出力フォーマットは`skills/code-review/SKILL.md`、観点は`skills/duplication-reuse-check/SKILL.md`と`skills/ansible-security-review/SKILL.md`を参照する。規範文書の変更をレビューするときは`skills/document-norm-review/SKILL.md`を併用する。
+使うSkillは`docs/ai/roles/reviewer.md`「必須ContextとSkill」が正本である。対象がAnsibleか規範文書かで併用するSkillが変わるので、ここへ列挙せず、そちらを読んで決める。
 
 あなたはCoordinatorが起動したsubagentである。会話の過程は永続しないので、**findingsと確認範囲は案件のreview記録ファイル(計画査読ならplan_review記録)へ書き切る**。
