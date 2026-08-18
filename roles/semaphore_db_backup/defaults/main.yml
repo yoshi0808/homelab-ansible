@@ -1,0 +1,80 @@
+---
+# semaphore_db_backup role defaults.
+# quory の Semaphore を3点セット(semaphore.db / projects export JSON /
+# config.json)で1世代として Synology NFS へ退避する。
+# 詳細は docs/ai/reviews/semaphore_db_backup/2026-08-17_001_requirement.md。
+# 2026-08-17差し戻し対応(独立レビュー`2026-08-17_003_review.md` Critical
+# #1〜#3)は `docs/ai/reviews/semaphore_db_backup/2026-08-17_002_implement.md`
+# を参照。
+
+# quory側(退避元)。quory は常に固定のinventoryホスト名で、このroleの呼び出し元
+# playが対象とするhost(選定済みpveノード)とは別に `delegate_to: quory` で扱う。
+#
+# **これらはextra-vars等で変更してよい値ではない。** tasks/main.yml
+# Phase 0.2がこの既定値そのものと厳密一致することを確認してから使う
+# (Critical #2、2026-08-18 round2差し戻し対応 — round1はbinary pathの2つ
+# しか検査しておらず、`semaphore_db_backup_config_path`を任意の
+# root-readableファイルへ向けると、その内容を"config.json"の名でNFSへ
+# 搬出できてしまう抜け穴が残っていた)。
+semaphore_db_backup_db_path: /var/lib/semaphore/semaphore.db
+semaphore_db_backup_config_path: /etc/semaphore/config.json
+semaphore_db_backup_sqlite_bin: /usr/bin/sqlite3
+semaphore_db_backup_semaphore_bin: /usr/bin/semaphore
+
+# `semaphore projects export --project-name <name> --file <path>` に渡す
+# project名。IDはインスタンスごとに異なる(ansy=2 / quory=1、
+# docs/ai/context/system/semaphore.md)ため、IDではなく名前で指定する。
+# quoryのproject名がこの既定値と一致するかは未確認
+# (roles/semaphore_templates/defaults/main.yml の
+# semaphore_templates_project_name と同じ前提に揃えた、同ファイルのコメント
+# 参照)。誤っていれば export task がエラーで停止し、推測で先には進まない。
+semaphore_db_backup_project_name: homelab-ansible
+
+# **quory側の作業ディレクトリと、controller側の一時受け渡し先は、ここでは
+# 既定値を持たない。** 実行のたびに `ansible.builtin.tempfile` で安全な
+# run固有ディレクトリとして確保する(tasks/main.yml Phase 0.3)。
+#
+# 2026-08-17差し戻し前は固定path
+# (`/var/lib/semaphore-db-backup/.work` / `/tmp/semaphore_db_backup.
+# controller-fetch`)を既定値として持っていたが、独立レビューCritical #3が
+# 次の2点を指摘した。
+#   (1) controller側は `/tmp` 直下の予測可能な固定名であり、symlink事前設置
+#       による内容の漏えい・差し替えが構造的に否定できない
+#   (2) 固定pathを複数run(手動再実行とschedule実行の重なり等)が共有すると、
+#       Suggestion #1のとおり互いのcleanup/上書きが競合しうる
+# `tempfile` module(Python `tempfile.mkdtemp()` 相当)は、生成と同時に
+# 0700・非symlinkの新規ディレクトリを原子的に作るため、両方を同時に解消する。
+# 値そのものをdefaultへ固定してしまうと、そのdefault名がまた
+# extra-varsの上書き対象になり得る(Critical #1と同じ構造)ため、
+# あえてここへは置かない。
+
+# 選定されたpveノード上で退避先NFSが実際にマウントされているかを確認する
+# マウントポイント。書き込み対象ディレクトリ(dest_dir)はこの配下だが、
+# マウントされていない場合にマウントポイント自体がローカルディスク上の空
+# ディレクトリとして存在してしまい、退避が「NFSではなくpveのローカルディスク」
+# へ書かれて成功したように見えるおそれがある(roles/proxmox_patch_apply_node
+# の findmnt チェックと同じ理由・同じ手段)。
+#
+# **この値も既定値との厳密一致をtasks/main.yml Phase 0.2が検査する
+# (Critical #2)。** ただし厳密一致だけでは足りない — `/`のような実在の
+# 非NFSマウント点を渡されても`findmnt -T /`は「マウントされている」を
+# 返してしまう。したがってPhase 1のfindmntは`TARGET`に加え`FSTYPE`も見て、
+# マウント先が本当にNFSであることまで確認する。
+semaphore_db_backup_nfs_mount_path: /mnt/pve/Synology-nfs
+
+# 保存先(pve1/pve2上の既存Synology NFSマウント)。末尾スラッシュは付けない。
+# **この値を独立に上書きしてはならない。** tasks/main.yml Phase 1が
+# findmntで実マウントを確認した直後、この値がちょうど
+# `semaphore_db_backup_nfs_mount_path ~ '/user-backup/semaphore-db'` と
+# 完全一致することを検証する(Critical #1)。単なる「mount配下であること」
+# (containment)ではなく完全一致を要求するのは、同じNFSマウント配下に
+# 他playbook(unifi_backup_fetch等)の退避先も同居しており、containmentだけ
+# だとPhase 6のローテーションが無関係な兄弟ディレクトリの既存世代を削除
+# しうるため。site固有に変えたい場合は`semaphore_db_backup_nfs_mount_path`
+# の方を変える(この値の既定式にも同じ変更が伝播する)。
+semaphore_db_backup_dest_dir: "{{ semaphore_db_backup_nfs_mount_path }}/user-backup/semaphore-db"
+
+# 残す世代数(日次実行を想定、Q2: 約1.5GB)。**1以上の整数であること**を
+# tasks/main.yml Phase 0が検証する(0や負数だとローテーションが今回確定した
+# 世代自身まで削除しうる。Suggestion #2 (c))。
+semaphore_db_backup_keep_generations: 30

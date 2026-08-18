@@ -149,10 +149,10 @@ semaphore_templates_catalog:
   # 場面がある(ROOT CA差し替え後の全ホスト再発行など)。既定をfalseにするだけで、
   # 打てば従来どおりtrueにできる。
   #
-  # **schedule側は repo の外にあり、ここを変えても自動では変わらない。**
-  # Semaphoreのscheduleが force_renew の値を自分で持っている場合、この既定値は
-  # 効かない。実行間隔(月次→週次)と曜日の調整とあわせて、Yoshinobuが
-  # Semaphore UI で確認する。**曜日は週末を選ぶこと** — pve1は夏季に平日
+  # **scheduleは下の`semaphore_schedules_catalog`が持つ(2026-08-10)。** 該当
+  # エントリの`environment`が`force_renew`の値を自分で持つため、**このsurvey
+  # 既定値はschedule実行には効かない。** 変えるときは両方を合わせること。
+  # **曜日は週末を選ぶこと** — pve1は夏季に平日
   # シャットダウンされるため、平日に走らせると週次にしてもpve1だけ毎回外す。
   - playbook: playbooks/cert_renew.yml
     class: SEMI-SAFE
@@ -192,6 +192,15 @@ semaphore_templates_catalog:
   - playbook: playbooks/unifi_backup_fetch.yml
     class: SEMI-SAFE
     legacy_name: "SEMI-SAFE:Unifi backup fetch"
+
+  # semaphore_db_backup案件(2026-08-17)。quoryのSemaphoreを3点セット
+  # (semaphore.db / projects export JSON / config.json)でSynology NFSへ退避
+  # する。unifi_backup_fetchと同じ骨格(quoryのSemaphoreから起動→pveが
+  # NFSへ書く→世代ローテーション→Slack通知)のためclass・survey_vars/argumentsの
+  # 有無ともunifi_backup_fetchに揃える(引数・surveyなし。対象ノードの選定は
+  # roles/proxmox_exec_nodeに委ねplaybook自身のhosts:には現れない)。
+  - playbook: playbooks/semaphore_db_backup.yml
+    class: SEMI-SAFE
 
   - playbook: playbooks/proxmox_snapshot_check.yml
     class: SAFE
@@ -833,6 +842,29 @@ semaphore_schedules_catalog:
   - name: "UN-SAFE:Proxmox Weekly Full Patch"
     template: "UN-SAFE: Proxmox patch weekly full"
     cron: "00 06 * * 6"
+    active: true
+    task_params:
+      environment: "{}"
+
+  # --- semaphore_db_backup案件(2026-08-17追加): 第4バッチ後、初のclosed-world
+  # 下での新規追加 ---------------------------------------------------------------
+  #
+  # quoryのSemaphore自身を退避する新規template(上のsemaphore_templates_catalog
+  # 参照)のschedule。template・scheduleの両方を同じ変更で登録する
+  # (R10「新しいplaybookを足すときはtemplateとscheduleをここで同時に決める」)。
+  # 日次 "0 12 * * *"。**02時台は選ばない**(2026-08-18 Yoshinobu指摘で変更) —
+  # そこはUniFiのAP・スイッチ自動Updateの窓であり、この playbook は quory →
+  # 選定pveノード → NFS と3ホストをまたいで通信するため、スイッチの更新中に
+  # 重ねない。加えて01時台(UniFi Console更新・Proxmoxローカルバックアップ)、
+  # 03時台(UniFi Protect更新・quoryの条件付き自動reboot)、05-06時台
+  # (healthcheck群)、金17-19時台(週次群)も埋まっている。
+  # **06:30〜17:00は日次・週次・月次のいずれも入っていない**ため、その中央を取る。
+  # 窓の一覧はSemaphoreの外(UniFi・Proxmox・systemd timer)にも広がっており、
+  # このカタログだけでは衝突を判定できない。**Yoshinobuが別途管理している
+  # バッチ処理工程管理表が全体の正本である。**
+  - name: "SEMI-SAFE: Semaphore db backup daily"
+    template: "SEMI-SAFE: Semaphore db backup"
+    cron: "0 12 * * *"
     active: true
     task_params:
       environment: "{}"

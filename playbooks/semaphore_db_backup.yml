@@ -1,0 +1,291 @@
+---
+# semaphore_db_backup.yml - quory の Semaphore(制御平面)を定期的に退避する。
+# 変更系: quory上でDBスナップショット(sqlite3 .backup)・projects export・
+#         config.jsonコピーを作り、選定されたpveノードがSynology NFSへ原子的に
+#         確定・世代ローテーションする。quoryの稼働中サービスへの変更は行わない
+#         (semaphore.dbは.backupで読み取るのみ、config.jsonはremote_srcコピーの
+#         み)。
+#
+# 対象: 実行ノードは共通role roles/proxmox_exec_node で選定する(pve1優先、
+#       到達不能ならpve2にフェイルオーバー。どちらもSynology NFSマウントを持つ
+#       実行ホスト)。quory側の処理は roles/semaphore_db_backup が
+#       `delegate_to: quory` で行う。
+# 実行元: quoryのSemaphore(quoryがVMでないためProxmoxのバックアップに乗らない。
+#       ansyからquoryへは到達手段が無い)。
+# 詳細は docs/ai/reviews/semaphore_db_backup/2026-08-17_001_requirement.md。
+#
+# 通知: 結果をSlackへ通知する(退避・確定 OK = info/ok、失敗 = alerts/error)。
+#       pve1/pve2が両方到達不能で実行ノードを選定できなかった場合も
+#       alerts/errorへ通知する(AC6)。
+#
+# tester-gate: risk-accepted — この playbook に dry-run 区分はない。--check
+# を渡すと pre_tasks の停止 assert により変更を一切行わずに停止する。
+# --check なしの通常実行では常に本実行する。
+# tester-gate-condition2: sqlite3 .backupによるスナップショット取得・
+# semaphore projects export・NFSへの原子的確定・世代ローテーションという一連の
+# 非冪等操作そのものが検証対象であり、それを省いた検証には意味がない
+# (unifi_backup_fetch / proxmox_backup_restore_verifyと同じ理由)。
+# 理由: 退避先はこのplaybook専用のディレクトリに閉じ、既存の管理対象VM・
+# サービスには一切触れない(semaphore.dbはsqlite3 .backupで読み取るのみ、
+# config.jsonはremote_srcコピーのみで、quoryの稼働中Semaphoreサービスを
+# stop/restartしない)。最悪ケースは退避先ディレクトリの世代1件分の書き損じ、
+# または(keep_generationsの設定次第で)このディレクトリ内の古い世代が
+# 意図した保持数まで削除されることに留まる。
+#
+# **この「自己完結」という主張は、2026-08-17差し戻し前は実際には成立して
+# いなかった**(独立レビュー`docs/ai/reviews/semaphore_db_backup/
+# 2026-08-17_003_review.md` Critical #1)。extra-varsで内部計算用の変数
+# (保存先path・世代名など)を外部から差し替えられ、検証済みNFSマウント外の
+# 任意のディレクトリに対してroot権限のcreate/rename/deleteが実行されうる
+# 状態だった。是正の第1版(role呼び出し前に予約変数の事前定義を拒否する
+# preflight)は、拒否した外部値をこのplaybook側の`always:`がそのまま
+# 削除するという新たな穴を生んだ(2026-08-18 round2差し戻し、独立レビュー
+# `2026-08-18_004_review_round2.md` Critical #1)。**このplaybook自身は
+# もう一時ディレクトリのcleanupを持たない** — cleanupは
+# `roles/semaphore_db_backup/tasks/main.yml`側の、Phase 2-6を包む単一の
+# blockのalwaysへ移した。そのblockはPhase 0(予約変数preflightを含む)が
+# 成功した後でなければ開始されないため、cleanupが参照する値は「preflightを
+# 通過した後にrole自身が作った値」以外にあり得ない(validationの強さでは
+# なく到達可能性=構造で閉じる。詳細は実装記録`2026-08-17_002_implement.md`)。
+
+# ---------------------------------------------------------------------------
+# Play 1: 実行ノードを選定する。候補ノード(inventory group: proxmox)のうち
+#         pve1 を優先し、到達不能なら到達可能な方(pve2)へフェイルオーバー
+#         する。共通role roles/proxmox_exec_node の選定ロジックの正本は
+#         docs/ai/reviews/proxmox_exec_node_selection/2026-07-29_002_plan.md
+#         §1-1。外部から見た挙動(pve1優先・pve2フォールバック)はこの寄せ替え
+#         で変更しない。
+#
+# 両方到達不能な場合の通知(AC6)は、このplay自身のblock/rescueで行う —
+# 「後続playへ切り出したガード」ではない。decoy inventoryで実測した結果、
+# ansible-playbookは、あるplayが失敗したhostを1つでも残したまま終わると、
+# 対象hostが完全に別集合(hosts: localhost等、当該playに一切登場しない
+# host)であっても後続playを一切実行しない(2026-08-17実測、
+# `roles/unifi_backup_fetch`のようなpre_tasks assertの話ではなく、
+# ansible-playbookのplay間継続そのものの挙動)。したがって
+# 「対象0件をhosts: localhostの後続playで検知して通知する」設計は、
+# 検知したい状況そのもので発火しない死んだコードになる
+# (skills/ansible-implementation-style/SKILL.md「ガードtaskが発火しない
+# 条件」と同型の罠だが、対象は同一play内のtaskではなくplay跨ぎ)。
+# proxmox_exec_node自身のfail()(run_once + delegate_to: localhost)を
+# block/rescueで捕まえ、rescue側でSlack通知とfail()の再送出を行うことで、
+# 通知は「失敗したplayと同じplay」の中で完結させる。
+# ---------------------------------------------------------------------------
+- name: Select semaphore_db_backup execution host (pve1 preferred, pve2 fallback)
+  hosts: proxmox
+  gather_facts: false
+  become: false
+  tasks:
+    - name: Select execution node via proxmox_exec_node
+      block:
+        - name: Run proxmox_exec_node role
+          ansible.builtin.import_role:
+            name: proxmox_exec_node
+          vars:
+            pen_prefer: pve1
+            pen_target_group: semaphore_db_backup_target
+            pen_caller: semaphore_db_backup
+      rescue:
+        # include_tasks は become/delegate_to を直接持てない
+        # (skills/ansible-implementation-style/SKILL.md「include_tasks /
+        # blockに付けられない属性」)。notify.yml自身の各taskが独自に
+        # delegate_to: localhostを持つため、ここではrun_onceだけを付ける
+        # (1回だけ通知すればよい。どのhostが「代表」としてincludeを起動する
+        # かは、実際のSlack送信先には影響しない)。
+        - name: Notify alerts/error when no execution node was selected (AC6)
+          ansible.builtin.include_tasks: "{{ playbook_dir }}/../roles/common_slack/tasks/notify.yml"
+          vars:
+            slack_channel: alerts
+            slack_status: error
+            slack_title: "[semaphore_db_backup] execution node selection failed"
+            slack_message: |
+              semaphore_db_backup could not select an execution node: neither
+              pve1 nor pve2 was reachable. No backup generation was created.
+
+              pve1 reachable: {{ hostvars['pve1'].pen_reachable | default('n/a') }}
+              pve2 reachable: {{ hostvars['pve2'].pen_reachable | default('n/a') }}
+              Executed at: {{ lookup('pipe', "TZ='Asia/Tokyo' date '+%Y-%m-%dT%H:%M:%S+09:00'") }}
+          run_once: true
+
+        - name: Stop the run (execution node selection failed, AC6)
+          ansible.builtin.fail:
+            msg: >-
+              semaphore_db_backup: no proxmox execution node (pve1/pve2) was
+              reachable; no backup generation was created.
+          run_once: true
+          delegate_to: localhost
+
+# ---------------------------------------------------------------------------
+# Play 2: 選定された1ホストに対してのみ、退避処理を実行する。
+# ---------------------------------------------------------------------------
+# **round5 High #2: `ignore_unreachable: true`をplay自身へ設定する。**
+# Ansibleの実処理主体(controller)はquory上のSemaphore processで、この
+# playが対象とする選定pveノードはあくまでremote targetである。pveが
+# 実行中にUNREACHABLEになっても、controller(quory)自身は生きている ——
+# quory delegateに対して行った対処(host自体を死なせない
+# `ignore_unreachable` + 明示的な`is unreachable`検査で通常のfailureへ
+# 変換する)が、pve側にもそのまま使える。play自身へ設定することで、
+# このplayの全task(role内部でtask個別に上書きしたものを除く)へ一括で
+# 継承させる — quory delegate用に個別付与した`ignore_unreachable`
+# (`roles/semaphore_db_backup/tasks/main.yml`)とは独立に効く。実際に
+# 「is unreachable」を検査して通常のfailureへ変換するtaskはroleの
+# Phase 1/4/5/6・cleanupに個別に置いてある(詳細はrole header)。
+#
+# **round6 High #1: `gather_facts: true`(暗黙のGathering Facts)は観測
+# できなかった。** play-level `ignore_unreachable: true`と組み合わせると、
+# 暗黙のGathering FactsがUNREACHABLEになってもhostは維持される
+# (host自体は死なない)が、その結果を`register`できないため`is
+# unreachable`を検査するtaskが存在せず、通常のfailureへ変換されないまま
+# 後続へ進んでいた。持続的な接続断ならこの後のtask(role内の各check)が
+# いずれ失敗を検出するが、**gather時だけ一時的にUNREACHABLEで、その後
+# 復旧するケース**では、gather自身のUNREACHABLEを一度も失敗として扱わない
+# まま成功通知・rc 0へ進みうる(fact cacheの経路も同じ形で塞がれる —
+# 明示`setup`を自前で`register`する以上、cacheへのフォールバックに
+# 依存しない)。対処: `gather_facts: false`にし、`tasks:`のblock内(=
+# 失敗時に必ず外側`rescue`へ届く場所)で明示的に`ansible.builtin.setup`
+# を実行・`register`し、直後に専用assertで`is unreachable`を検査する。
+# `pre_tasks:`には置かない — `pre_tasks`の失敗は`tasks:`のblockが持つ
+# `rescue:`の対象外であり、ここに置くとgather失敗時にまたSlack通知が
+# 出ない経路を作ってしまう。
+- name: semaphore_db_backup
+  hosts: semaphore_db_backup_target
+  become: true
+  gather_facts: false
+  ignore_unreachable: true
+  pre_tasks:
+    - name: "[migration] --check has no dry-run here — refuse and stop before any changes"
+      ansible.builtin.assert:
+        that: not (ansible_check_mode | bool)
+        fail_msg: >-
+          This playbook (tester-gate: risk-accepted) has no --check dry-run:
+          every task always applies for real, so --check would look like a
+          simulation while actually making the change (see
+          docs/ai/memory/incidents/2026-07-31_subagent-unintended-deploy-risk-accepted-check.md).
+          Re-run without --check to apply for real. To suppress Slack
+          notifications during that real run, add -e skip_notifications=true.
+          See docs/ai/reviews/check_mode_semantics/2026-07-31_001_requirement.md.
+        quiet: true
+
+    # Critical #1(独立レビュー2026-08-17_003_review.md)対応の一部。この
+    # playbook自身が持つ「成功/失敗どちらの通知summaryか」を決める変数も、
+    # role内部の予約変数(roles/semaphore_db_backup/tasks/main.yml Phase 0.1)
+    # と同じ理由で事前定義を拒否する。判定は値ではなく変数名の存在で行う
+    # (`varnames`、2026-08-18 round2差し戻し対応 Suggestion #1 —
+    # 固定sentinel文字列との値比較では、外部値がsentinelそのものと一致する
+    # 場合に事前定義を見逃す)。
+    - name: "Reject external predefinition of playbook-level internal variables (Critical #1)"
+      ansible.builtin.assert:
+        that: (query('varnames', '^' ~ item ~ '$') | length) == 0
+        fail_msg: >-
+          '{{ item }}' must not be pre-defined (via -e, environment, or any
+          other source) before this playbook runs. This run creates no
+          backup and touches nothing.
+        quiet: true
+      loop:
+        - semaphore_db_backup_run_error
+        - semaphore_db_backup_success_summary
+        - semaphore_db_backup_failure_summary
+        - semaphore_db_backup_setup_result
+  tasks:
+    # Critical #2(同レビュー)対応: 成功/失敗の分岐を、単一の真偽値変数
+    # (旧`semaphore_db_backup_failed`)で作らない。extra-varsは`set_fact`より
+    # 常に優先されるため、`-e semaphore_db_backup_failed=false`のような
+    # 上書きで失敗を成功として通知させ、最終`fail()`もwhenごと迂回できて
+    # しまっていた(2026-08-17、Coordinatorのscratchpadで実測)。
+    #
+    # 代わりに、成功時の通知(block末尾)と失敗時の通知+再送出(rescue)を
+    # 構造的に別のtask列として持つ。どちらが実行されるかは、実際に
+    # block内でtaskが失敗したかどうかというAnsibleエンジン自身の制御であり、
+    # いかなる変数値によっても書き換えられない。rescue内の`fail()`は`when:`
+    # を持たない — rescueへ入った時点で必ず再送出し、rcを非ゼロへ確定する。
+    #
+    # **cleanupはSlack通知より前に終わっている(round2 Suggestion #2)。**
+    # `include_role`が呼ぶroleの内部で、Phase 2-6を包むblockのalwaysが
+    # cleanupを行ってから制御が戻る(`roles/semaphore_db_backup/tasks/
+    # main.yml`参照)。そのcleanup自体が失敗すれば`include_role`taskが
+    # 失敗として扱われ、この下の「Build success summary」には到達せず
+    # rescueへ入る — 「backup本体は成功したがcleanupに失敗した」状態が
+    # info/okとして通知されることはない。
+    - name: Back up quory Semaphore (DB + export + config) to Synology NFS
+      check_mode: false
+      block:
+        # round6 High #1: 明示setup。これがblock内の最初のtaskであるため、
+        # UNREACHABLEになった場合も必ずこのblockの`rescue:`へ届く
+        # (`pre_tasks:`には置かない、理由はPlay見出しのコメント参照)。
+        - name: Gather facts explicitly so a connection failure is observable (R6/round6)
+          ansible.builtin.setup:
+          register: semaphore_db_backup_setup_result
+          ignore_unreachable: true
+
+        - name: "Stop if the pve execution node was unreachable while gathering facts (R6/round6)"
+          ansible.builtin.assert:
+            that: not (semaphore_db_backup_setup_result is unreachable)
+            fail_msg: >-
+              The pve execution node was unreachable while gathering facts.
+              This run creates no backup. (R6: a connection failure must
+              still reach quory-side cleanup and the alerts/error Slack
+              notification, not fail silently.)
+            quiet: true
+
+        - name: Run semaphore_db_backup role
+          ansible.builtin.include_role:
+            name: semaphore_db_backup
+
+        - name: Build success summary
+          ansible.builtin.set_fact:
+            semaphore_db_backup_success_summary: |
+              execution node: {{ inventory_hostname }}
+              pve1 reachable: {{ hostvars['pve1'].pen_reachable | default('n/a') }}
+              pve2 reachable: {{ hostvars['pve2'].pen_reachable | default('n/a') }}
+              dest: {{ semaphore_db_backup_dest_dir | default('n/a') }}
+              result: generation created
+              generation: {{ semaphore_db_backup_generation_name | default('n/a') }}
+              files: semaphore.db, semaphore_projects_export.json, config.json
+              kept generations: {{ semaphore_db_backup_kept | default('n/a') }}
+              deleted generations: {{ semaphore_db_backup_deleted_summary | default('none') }}
+
+        - name: Send Slack notification (success)
+          ansible.builtin.include_tasks: "{{ playbook_dir }}/../roles/common_slack/tasks/notify.yml"
+          vars:
+            slack_channel: info
+            slack_status: ok
+            slack_title: "[semaphore_db_backup] quory Semaphore backup completed"
+            slack_message: |
+              quory Semaphore backup run completed.
+
+              Results:
+              {{ semaphore_db_backup_success_summary }}
+              Executed on: {{ inventory_hostname }}
+              Executed at: {{ lookup('pipe', "TZ='Asia/Tokyo' date '+%Y-%m-%dT%H:%M:%S+09:00'") }}
+      rescue:
+        - name: Record backup failure detail
+          ansible.builtin.set_fact:
+            semaphore_db_backup_run_error: "{{ ansible_failed_result.msg | default('unknown error') }}"
+
+        - name: Build failure summary
+          ansible.builtin.set_fact:
+            semaphore_db_backup_failure_summary: |
+              execution node: {{ inventory_hostname }}
+              pve1 reachable: {{ hostvars['pve1'].pen_reachable | default('n/a') }}
+              pve2 reachable: {{ hostvars['pve2'].pen_reachable | default('n/a') }}
+              dest: {{ semaphore_db_backup_dest_dir | default('n/a') }}
+              result: FAILED
+              error: {{ semaphore_db_backup_run_error }}
+
+        - name: Send Slack notification (failure)
+          ansible.builtin.include_tasks: "{{ playbook_dir }}/../roles/common_slack/tasks/notify.yml"
+          vars:
+            slack_channel: alerts
+            slack_status: error
+            slack_title: "[semaphore_db_backup] quory Semaphore backup completed"
+            slack_message: |
+              quory Semaphore backup run completed.
+
+              Results:
+              {{ semaphore_db_backup_failure_summary }}
+              Executed on: {{ inventory_hostname }}
+              Executed at: {{ lookup('pipe', "TZ='Asia/Tokyo' date '+%Y-%m-%dT%H:%M:%S+09:00'") }}
+
+        - name: "Fail the run (unconditional — cannot be suppressed by any variable, Critical #2)"
+          ansible.builtin.fail:
+            msg: "quory Semaphore backup failed: {{ semaphore_db_backup_run_error }}"
