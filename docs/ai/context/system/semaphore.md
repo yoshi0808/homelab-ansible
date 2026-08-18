@@ -25,7 +25,7 @@ SemaphoreはAnsible playbookをGUIから手動またはschedule実行し、job�
 
 ## ansy の Semaphore(検証用インスタンス、2026-08-04)
 
-**ansy にも Semaphore が動いており、quory とは別インスタンスである。** 素性は**quory のバックアップからの復元**で、quory が VM でないため Semaphore のバックアップが必要になり、その復元手順を ansy で検証した経緯による(Yoshinobu 談、2026-08-04)。そのため project 名・inventory 名・repository 名は quory と同じだが、**id は異なる**(ansy=2 / quory=1)。**id を固定値として扱わない。**
+**ansy にも Semaphore が動いており、quory とは別インスタンスである。** 素性は**quory のバックアップからの復元**で、quory が VM でないため Semaphore のバックアップが必要になり、その復元手順を ansy で検証した経緯による(Yoshinobu 談、2026-08-04)。そのため project 名・inventory 名・repository 名は quory と同じだが、**id は異なる**(2026-08-18時点で ansy=3 / quory=1。ansy は 2026-08-04 の実測では 2 で、**その後変わっている**)。**id を固定値として扱わない。この行の値も、読んだ時点で古い可能性がある。**
 
 - 接続は `https://ansy.internal:3000`。**HTTPS である**(httpで叩くと400が返る)。証明書は `homelab_cert_renew` が配っている。
 - **2026-08-04 に SSH 鍵を2本(サーバ群向け / github)削除した。** 残るのは `type=none` の1本のみで、inventory と repository はそれを指す。**したがってこのインスタンスは、どのホストへも到達できず、リポジトリを clone することもできない。**
@@ -44,7 +44,7 @@ Semaphoreのジョブ結果はSQLite(`semaphore.db`)にあり、read-onlyのSELE
 - **`template-list <n>`(2026-08-04追加)は、`project__template` の CREATE TABLE 文と行の中身を並べて返す。** 列名を推測しないための形である — `id` / `name` / `playbook` は既存クエリで実在が確定しているが、引数の有無を表す列がこのバージョンに在るか・名前が何かは**未確認**である。スキーマ本文と `SELECT *` を突き合わせれば列の対応がとれる。
 - 既存の `recent-failed` は `substr(t.start,1,19)` を返すため、**タイムゾーンを決める末尾を切り落とす**。生の保存形式を見るには `task-time <id>` を使う。
 - `semaphore.db` は `recovery-exec` の権限でのみ読める(ACL)。ansyの接続ユーザーのままでは `unable to open database` になる。
-- ansy / quory ともSemaphoreのバージョンとサービス実行ユーザーは一致している(2026-07-27時点)。スキーマ調査は開発側(ansy)で先に行い、本番の読み取りを最小化する。
+- ansy / quory ともSemaphoreのバージョンとサービス実行ユーザーは一致している(**2026-08-18に両方を 2.19.8 へ上げた**。案件: `docs/ai/reviews/semaphore_upgrade/`)。スキーマ調査は開発側(ansy)で先に行い、本番の読み取りを最小化する。**両者の版が揃っていることがこの前提を支えているので、片方だけ上げた状態を作ったら、その間は ansy のスキーマを quory のものとして読まない。**
 
 ## UIは新しいテンプレートを即座に表示しない(2026-08-05 Yoshinobu実測)
 
@@ -60,15 +60,17 @@ Semaphoreのジョブ結果はSQLite(`semaphore.db`)にあり、read-onlyのSELE
 
 **この `.deb` が持つファイルは `/usr/bin/semaphore` の1つだけで、maintainer script を持たない**(`/var/lib/dpkg/info/semaphore.list`、postinst / prerm ともに存在しない)。したがって:
 
-- **`apt install` はサービスを再起動しない。** 稼働中のプロセスは削除済み inode の旧バイナリを実行し続け、`systemctl restart semaphore` を明示的に打つまで版は切り替わらない。**版上げの playbook が自分の足を撃つ危険があるのは `apt install` ではなく、この restart タスク1つだけである。**
+- **`apt install` は `needrestart` 経由でサービスを再起動する**(2026-08-18 ansy 実測)。`.deb` 自身は maintainer script を持たないが、Ubuntu の apt hook である `needrestart` が `systemctl restart semaphore.service` を打つため、**install した瞬間にマイグレーションまで走る**。**`NEEDRESTART_MODE=l` を付けると抑止でき**(同日、同じ `.deb` の `--reinstall` で MainPID が変わらないことを確認)、install と restart を分離できる。**版上げの playbook は、この抑止を明示しない限り install と restart を分けられない。**
 - `/etc/systemd/system/semaphore.service` と `/etc/semaphore/config.json` は **dpkg の管理外**(`dpkg -S` が一致なし)。パッケージを入れ替えても unit と config は変化しない。
-- unit は `KillMode=control-group` なので、restart で死ぬのは `semaphore.service` の cgroup だけである。**別セッションから手で流している `ansible-playbook` は巻き添えにならない。** 巻き添えになるのは Semaphore job として流したときに限る。
+- unit は `KillMode=control-group` なので、restart で死ぬのは `semaphore.service` の cgroup だけである。**別セッションから手で流している `ansible-playbook` は巻き添えにならない。** 巻き添えになるのは Semaphore job として流したときに限る。**そして `setsid` / `nohup` による切り離しでは逃げられない**(2026-08-18 実測) — cgroup の所属は fork で継承されるため、非同期化しても同じ cgroup に留まり一緒に殺される。**逃げる唯一の方法は `systemd-run` で PID1 に別 unit を作らせることである。** 実績は `roles/ubuntu_vm_full_upgrade/tasks/reboot_quory.yml`(quory が自分を reboot する同型の問題)。
 
 **不可逆なのはプロセスではなく DB である。** dialect は `sqlite`、実体は `/var/lib/semaphore/semaphore.db`。`semaphore server` は起動時にマイグレーションを実行するため、restart した時点でスキーマが上がる。バイナリを戻しても旧版が動く保証は無い。**退避すべきはバイナリではなく `semaphore.db`。** なお `semaphore migrate` サブコマンドが独立に存在するので、マイグレーションを `server` の起動任せにせず明示のタスクへ切り出せる。
 
-版の読み取りは `semaphore version` で、出力は `2.18.4-7ca373d-1779131064` の形(`X.Y.Z` の後に commit hash とビルド番号が付く)。
+版の読み取りは `semaphore version` で、出力は `2.19.8-3449a04-1786894505` の形(`X.Y.Z` の後に commit hash とビルド番号が付く)。
 
-**未確認**: quory 側の版・unit・config は測っていない。`quory-investigate` の forced command に apt / dpkg / systemctl-cat 系の操作が無く、この経路では読めない。上記は ansy の実測であり、quory も同じ入れ方であるという前提に立っている。
+**ansy / quory とも非 community 版**(`semaphore_X.Y.Z_linux_amd64.deb`)である。2026-08-18 に両ホストで `/usr/bin/semaphore` の sha256 を upstream の `.deb` と照合して確定した(2.18.4 の非 community 版 = `eeea8b9e…`、community 版とは不一致)。**`.deb` は2種類公開されており、取り違えると版と一緒にエディションまで入れ替わる。** 版上げのたびに照合する。
+
+**未確認**: quory の unit と config の中身は測っていない。`quory-investigate` の forced command に apt / dpkg / systemctl-cat 系の操作が無く、この経路では読めない。
 
 ## 可用性
 
