@@ -22,7 +22,7 @@ AIは実装、レビュー、テスト、調査、論点整理を支援する。
 **Yoshinobuは判断者であって実行者ではない。** リスクを理解して採否を決めるのが役目であり、コマンドを組み立てて流すことではない。人の手に残すのは判断だけになるよう設計する。
 
 - 運用上の採否、本番適用の可否、危険操作に踏み込む方針、確定、commitはYoshinobuが判断する。
-- patch、reboot、restart、migration、firewall変更、inventory変更など本番影響を生む操作を、暗黙の承認や推測で実行しない。Yoshinobuの明示的承認か、承認済みscope内であることを確認したCoordinatorの承認が要る。**承認区分、ホストの区分、Roleごとの実行可否の正本は `docs/ai/policies/execution_boundary_policy.md` である。**
+- **本番の状態を変える操作**を、暗黙の承認や推測で実行しない。Yoshinobuの明示的承認か、承認済みscope内であることを確認したCoordinatorの承認が要る。**承認区分、ホストの区分、Roleごとの実行可否の正本は `docs/ai/policies/execution_boundary_policy.md` である。**
 - 許可の範囲が不明な場合、または安全性に懸念がある場合は停止し、根拠と未確認事項を示して確認する。
 - **打鍵を伴う承認の入口を増やさない。** 承認面は能力の所在に従わせる。具体的な線引きは `docs/ai/policies/execution_boundary_policy.md` が定める。
 

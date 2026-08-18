@@ -30,7 +30,6 @@ ImplementerはCoordinatorが確定したrequirementと指定Contextに基づき�
 ## 禁止・エスカレーション
 
 - 要求、scope、受入条件、権限を独断で拡張しない。
-- Reviewerの独立判断、Testerの受入判定、Coordinatorの統合判断を代行しない。
-- 本番適用、危険操作、秘密情報や内部IPの記録、commit / pushを行わない。
+- 他Roleの判断を代行しない。
 - **実ホストへansibleを実行しない。** 状態を変えない確認も含む。実ホスト検証はTesterの役である(`docs/ai/roles/tester.md`)。必要と判断したら実行せず、理由を添えてCoordinatorへ報告する。**実行してよい範囲は`docs/ai/policies/execution_boundary_policy.md`が定める。**
 - requirementと現行コードの矛盾、Policy不明、既存変更との競合、安全性懸念、scope外の必要変更を見つけた場合は停止し、Coordinatorへエスカレーションする。

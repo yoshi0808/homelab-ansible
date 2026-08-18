@@ -51,6 +51,16 @@ grep -rn "<撤回した文言>" docs/ai/ skills/ roles/ playbooks/ inventories/ 
 
 根拠: `docs/ai/memory/lessons/sweep-all-documents-stating-a-changed-boundary.md` 根拠2の3件。
 
+### 3.5 規範が依拠している事実の未検証
+
+規範が事実を根拠にしているとき、**その事実を何が支えているかを問う。** 支えが機構(assert、forced command、ACL、機械検査)なら破れない。支えが誰かの申告や過去の作業なら、**気づかれずに崩れうる。**
+
+- **文面からは両者を区別できない。** 「〜を禁止しているため」「〜を持たないため」は、機構に支えられていても願望に支えられていても同じ強さに見える。
+- **支えを名指ししていない根拠は、指摘の対象である。** 名指しできるなら1句で足りる。名指しできないなら、それは根拠として使えない。
+- **機械検査が支えていると書かれている場合は、その検査が対象を実際に含むかを確かめる。** カタログ・対象ホスト・パスを開いて突き合わせる。
+
+根拠: 2026-08-18。`docs/ai/policies/execution_boundary_policy.md` EXEC-002 が「ansyが認証情報を1つも持たない」を境界の根拠として述べていたが、実測すると秘密鍵は ansy にあり、境界は受け側の `authorized_keys` にあった。**その `authorized_keys` は日次ドリフト検査の対象外**であり、崩れても検出されない。同日の `cert_renew_policy.md` CERT-017「両 Playbook とも quory 以外での実行を禁止しているため」は同じ文型だが、支えが `assert: ansible_facts['hostname'] == 'quory'` という実在する機構だったため成立していた(`docs/ai/reviews/role_prompt_optimization/2026-08-18_004_layer_survey.md`)。
+
 ### 4. 判定ラダーの全域性・一意性
 
 上から順に問い最初のYesで止める形式の判定手順は、**先取り**と**到達不能分岐**が生じる。
