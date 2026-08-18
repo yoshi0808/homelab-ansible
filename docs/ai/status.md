@@ -23,12 +23,15 @@
 - **良くなる確証は双方とも持っていない**(Yoshinobu、2026-08-18)。やってみる価値はあるという判断で始めた
 - **やめる条件は現段階では定めない**(Yoshinobu、2026-08-18)。Coordinatorが「効かなかったことを観測可能にするため先に決めるべき」と進言し、**現段階では不要と判断された**。再提案しない
 
-**観測待ち: quory の鍵が 2.19.8 のマイグレーション後も本番へ届くか(2026-08-18)** — Semaphore は ansy / quory とも **2.18.4 → 2.19.8 へ上げ済み**。受入条件 AC1〜AC7 は満たし、`templates` / `schedules` / `active_schedules` は 52 / 20 / 20 で版上げ前と一致した。
+**`homelab-semaphore-query` をAPIへ移すか(2026-08-19)** — Semaphore は ansy / quory とも **2.19.8 へ上げ済み**。版上げ自体は完了し、**鍵の移行も schedule 実行 #750 / #751 の正常終了で確認できた**(OQ2 クローズ)。
 
-- **未決は OQ2(鍵の移行)だけである。** DB に `access_key` が残っていることと、**その鍵で実際にホストへ到達できることは別**。2.19 は keyring と key rotation に手を入れている
-- **ansy では原理的に確かめられない** — ansy の鍵は `type=none` の1本だけで、それは ansy を無害にしている性質そのものである
-- **次の schedule 実行が緑で終われば閉じる。** 緑にならなければ `semaphore-final.db` からの書き戻しが復旧手段(手順は案件記録の8節)
-- 記録は `docs/ai/reviews/semaphore_upgrade/`(requirement / 手順 / 結果の3本)
+- **上げたことで壊れたものが1つある。** 2.19.8 が SQLite を **WAL モード**で開くようになり、`semaphore.db-shm` / `-wal` が現れた。**この2ファイルに ACL は付かない**ため、`semaphore.db` に `r--` を持つだけの `recovery-exec` / `incident-inspect` / `dev-investigate` は `unable to open database file (14)` になる
+- **ファイル個別に ACL を足しても直らない** — 起動のたびに WAL へ戻され作り直される(ansy 実測)
+- **直読みは Semaphore がサポートする接し方ではない**(公開された口は API)。**復旧させる方向は次の版上げでまた壊れる**ので採らない
+- **7クエリ中5つは API でそのまま賄える**(`recent-failed` / `running` / `task-time` → `GET /tasks`、`task-output`、`template-list`)。`task-hosts` / `task-errors` は API に無く、**`task-output` の `PLAY RECAP` からの導出へ格下げ**になる
+- **管理者権限は要らない** — project role `guest` が読み取り専用で、**quory の Operator へ guest トークンを渡す形は実装済み**。同じ方法を使う
+- **forced command への追加は不要。** dispatch の契約は `semaphore-query <enum> <整数>` のままで、中が SQLite か API かを知らない。**enum は2値減る方向**
+- **急ぎではない。** 本番の運転は止まっておらず、効くのは次に incident 調査をするとき。記録は `docs/ai/reviews/semaphore_upgrade/2026-08-18_003_result.md`
 
 ## Next(着手候補) — 工程・体制
 
