@@ -187,7 +187,7 @@ pve1 / pve2 を例外とする理由は、夏季にpve1を平日シャットダ�
 
 `cert_renew_quory.yml` が月次かつ強制のままでよい理由は、対象がquory自身であり「**対象ホストが落ちている**」経路を持たないことにある。代わりに「**実行主体そのものが落ちている**」経路があり、頻度を上げても解けない。ここは `Persistent=true` で埋める。**2つの入口は脆さの種類が違うため、同じ対処を適用しない。**
 
-**scheduleそのものはrepoの外にある。** `cert_renew.yml` の頻度・曜日・survey値はSemaphoreが持ち、`roles/semaphore_templates/defaults/main.yml` のカタログ既定値は**既存のscheduleへ遡って効かない**。頻度や強制の要否を変えたときは、カタログとSemaphore UIの両方を合わせる。
+**scheduleもrepoにある**(2026-08-10、`semaphore_schedules_as_code`)。`cert_renew.yml` の頻度・曜日と、scheduleが自分で持つ実行パラメータは `roles/semaphore_templates/defaults/main.yml` の `semaphore_schedules_catalog` が正本である。**ただしtemplate側のsurvey既定値は、scheduleの実行には効かない** — 該当scheduleの `environment` が `force_renew` の値を自分で持つため。頻度や強制の要否を変えたときは、**カタログの2箇所(templateのsurvey既定値とscheduleの `environment`)を合わせる。**
 
 ## 5. ライフサイクル・処理フロー
 
