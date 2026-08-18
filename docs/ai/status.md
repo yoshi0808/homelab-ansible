@@ -11,6 +11,13 @@
 
 ## Now(進行中)
 
+**観測待ち: `semaphore_db_backup`(2026-08-18 配備完了)** — quory の Semaphore を `semaphore.db` / `projects export` / `config.json` の3点セットで Synology NFS へ日次退避する(12:00、30世代)。**quory は VM でないため Proxmox のバックアップに乗らず、Semaphore 自身の退避手段が無かった。** 案件記録は `docs/ai/reviews/semaphore_db_backup/`。
+
+- **配備は完了している** — template と schedule はカタログ経由で登録・有効化済み(schedule id 21、`unchanged 20 件` / 管理外 0 件を実測)。有効化の旗は `false` へ戻してある
+- **待っているのは初回実行(AC1)だけである。** 緑で終わり、保存先に3ファイル揃った世代が1つできれば成立。**pve1 を停止している平日に走れば AC2(pve2 へのフォールバック)も同時に確かめられる**
+- **AC5 / AC6 は実施しない**(quory の sqlite3 を消す・NFS を切る破壊的操作が要る)。**AC7 の復元は隔離インスタンスで確認済みだが、稼働中サービスを止めて差し替える経路そのものは未実施** — 災害復旧時に初めて踏む経路として残す(2026-08-18 判断)
+- **`--check` の差分に `pending_activation` が出たら、そこに並ぶ全部を有効化してよいか先に確かめる。** 旗は個別の schedule を選べない(2026-08-18、無関係な `UN-SAFE:Proxmox Weekly Full Patch` が同時に並んだ)
+
 **進行中: `agmsg_remote_ops_channel`(2026-08-16 着手)** — 開発↔運用の「伝書鳩」を agmsg で置き換える。**既存の Operator Request Channel(本文・DLP・spool・forced command)は1文字も変えない。** 運ぶのはすり合わせの会話と `request_id` までで、権限は運ばない。正本は `docs/ai/reviews/agmsg_remote_ops_channel/2026-08-16_001_requirement.md`。
 
 - **段0〜段3は完了** — ansy へのサーバ配備、team `homelab-ops` の E2EE(age-v1)作成、quory の `operator` join、双方向疎通まで。**2026-08-17 に、quory 側の自動配送が「人が見ているセッションへ届く」ところまで目視で確認した。** 構成・立ち上げ手順・落とし穴は `docs/ai/context/operations/agent-messaging.md` が正本(値をここへ写さない)
