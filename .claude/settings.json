@@ -34,7 +34,22 @@
           }
         ]
       }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PROJECT_DIR:-.}/scripts/session-recurrence-record.py\"",
+            "timeout": 120,
+            "statusMessage": "再発記録の照合中"
+          }
+        ]
+      }
     ]
+  },
+  "env": {
+    "CLAUDE_CODE_SESSIONEND_HOOKS_TIMEOUT_MS": "120000"
   },
   "autoMode": {
     "classifyAllShell": true,
