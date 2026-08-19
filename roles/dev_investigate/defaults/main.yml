@@ -15,5 +15,10 @@ dev_investigate_dispatch_dest: /usr/local/sbin/recovery-investigate-dispatch-quo
 
 # 既存 recovery-exec / incident-inspect と同一パス・同一権限(traverse only)。
 dev_investigate_yoshi_home: /home/yoshi
-dev_investigate_semaphore_dir: /var/lib/semaphore
-dev_investigate_semaphore_db: /var/lib/semaphore/semaphore.db
+
+# homelab-semaphore-query は Semaphore REST API 経由へ移行済み
+# (docs/ai/reviews/semaphore_query_api/2026-08-19_001_requirement.md R9)。
+# dev_investigate_semaphore_dir / dev_investigate_semaphore_db は無くなった
+# — dev-investigateはもう/var/lib/semaphoreへ触れない。既存 recovery-exec /
+# incident-inspect と同一パス・同一権限(read only)。
+dev_investigate_semaphore_query_token: /etc/homelab-recovery/semaphore-query-token

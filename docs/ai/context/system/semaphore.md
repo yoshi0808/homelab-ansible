@@ -34,16 +34,17 @@ SemaphoreはAnsible playbookをGUIから手動またはschedule実行し、job�
 
 **quory 側の鍵を、ansy と同じ判断で消してはならない。** Semaphore は inventory の `ssh_key_id` を通じて ansible へSSH鍵を渡すため、quory 側の鍵は本番の認証経路そのものでありうる。ansy で消して無害だったのは、ansy が本番ジョブを走らせないからにすぎない。
 
-## ジョブ結果の読み取り(2026-07-27 実測)
+## ジョブ結果の読み取り(2026-08-19、SQLite直読みからAPI経由へ移行)
 
-Semaphoreのジョブ結果はSQLite(`semaphore.db`)にあり、read-onlyのSELECTで読める。AIが読む経路は名前付き操作 `homelab-semaphore-query`(`recovery_exec` が配備)に限る。
+**Semaphoreのジョブ結果はREST API(`GET /project/{id}/tasks` 等)で読む。** AIが読む経路は名前付き操作 `homelab-semaphore-query`(`recovery_exec` が配備)に限る。**project role `guest`(読み取り専用)のトークンを使い、admin権限は持ち込まない。** project idは名前(`homelab-ansible`)で解決し固定値を持たない。トークンファイルは `/etc/homelab-recovery/semaphore-query-token`(root所有、named-user POSIX ACL read — Semaphoreが再作成するファイルではないため通常のACLで足りる)。設計の正本は `docs/ai/reviews/semaphore_query_api/2026-08-19_001_requirement.md`。
 
-- **時刻の保存形式は `YYYY-MM-DD HH:MM:SS.nnnnnnnnn +0000 UTC`**(Goの `time.Time.String()`)。**RFC3339ではなく、`Z` 表記でもない。** ナノ秒9桁・空白区切りのオフセット・末尾のゾーン名という3点が標準パーサを素通りしないため、扱うときは専用のパースが要る。
-- **オフセットは常に `+0000` で、保存は実質UTC。** `/etc/semaphore/config.json` の `Asia/Tokyo`(ansy / quory とも)は**保存形式を支配していない**。リポジトリの時刻表記はJSTが正のため、読み出した値は変換して使う。設定ファイルの記述からタイムゾーンを推定しない。
-- `task` テーブルには `start` と `end` の両方が存在する(`end` はSQLの予約語のため、列参照は引用が要る)。`status` の語彙は `success` / `error` / `stopped`。
-- **`template-list <n>`(2026-08-04追加)は、`project__template` の CREATE TABLE 文と行の中身を並べて返す。** 列名を推測しないための形である — `id` / `name` / `playbook` は既存クエリで実在が確定しているが、引数の有無を表す列がこのバージョンに在るか・名前が何かは**未確認**である。スキーマ本文と `SELECT *` を突き合わせれば列の対応がとれる。
-- 既存の `recent-failed` は `substr(t.start,1,19)` を返すため、**タイムゾーンを決める末尾を切り落とす**。生の保存形式を見るには `task-time <id>` を使う。
-- **2.19.8 以降、`semaphore.db` の直読みは ACL 経由の識別子からはできない**(2026-08-19、quory / ansy とも実測)。2.19.8 は SQLite を **WAL モード**で開き(上げる前は `journal_mode=delete`)、`semaphore.db-shm` / `semaphore.db-wal` が現れる。**この2ファイルに ACL は付かず、WAL では読み手も `-shm` を読み書きできる必要がある**ため、`semaphore.db` に `r--` を持つだけの `recovery-exec` / `incident-inspect` / `dev-investigate` は `unable to open database file (14)` になる。**ファイル個別に ACL を足しても直らない** — 停止中に `journal_mode=delete` へ戻しても、起動時に必ず WAL へ戻され `-shm` / `-wal` が ACL なしで作り直される。**そもそも SQLite の直読みは Semaphore がサポートする接し方ではない**(公開された口は API であり、ストレージの内部形式は上流が自由に変えてよい)。復旧させるなら API 側へ移す。代替可能性の実測は `docs/ai/reviews/semaphore_upgrade/2026-08-18_003_result.md`。
+**このtokenを直接読む識別子は4つ**(2026-08-19、R13): `recovery-exec` / `incident-inspect` / `dev-investigate`(R9)に加え、`incident_investigate_run_user`(`yoshi`。旧設計ではsemaphore.dbの所有者として直接読めていたが、token file方式では明示ACLが要る——R13で追加)。**ただしincident-inspect自身のCodexセッションはこのtokenを実際には使わない**(R14)。incident-inspectのsandbox(`--sandbox read-only`)は外向き通信を塞ぐため、`homelab-semaphore-query`をこのセッションの中から呼んでも必ず失敗する(2026-08-19実測)。Semaphoreの情報はyoshi(`roles/incident_investigate`)がsandboxの外で先読みし、incident-inspect専用のcontext directoryへジョブ番号入りのファイル名(`semaphore-context-<job-id>.txt`)で渡す——workspaceとは別のディレクトリで、AGENTS.md(LLMが従う指示書)と同居させない設計にしている(独立レビューround2 High #1/#2/#3を参照、`docs/ai/reviews/semaphore_query_api/2026-08-19_002_implement.md`)。
+
+- **時刻はAPIが返すRFC3339をそのまま出力する。** SQLite直読み時代の保存形式(`YYYY-MM-DD HH:MM:SS.nnnnnnnnn +0000 UTC`、Goの `time.Time.String()`)は、下記の移行後はもう出力されない。
+- `status` の語彙は `success` / `error` / `stopped`(終端3値)、それ以外は実行中側とみなす。
+- **`task-hosts` / `task-errors` はAPIに構造化エンドポイントが無い**(`GET /project/{id}/tasks/{task_id}/hosts` と `.../errors` はいずれも404、2.19で追加された `/stages` もstage単位でホスト内訳を持たない)。ジョブ出力テキスト(`task-output` と同じ取得元)からの導出になっている — `task-hosts` は `PLAY RECAP` 行以降、`task-errors` は `fatal:` で始まる行。出力にはANSI SGRエスケープが埋め込まれるため、導出前に除去する。`PLAY RECAP` が見つからない場合は0件の正常終了ではなく非ゼロ終了とする(完了したjobの出力には必ずPLAY RECAPがあるはずなので、無い場合は取得・整形側の異常とみなす)。
+- **`template-list <n>`は、テンプレート1件ごとに自己記述的なJSON1行を返す**(2026-08-19、旧: `project__template` の CREATE TABLE文+行dumpの2文形式から変更。APIの応答が既にフィールド名付きJSONであるため、列名を推測しない目的はより直接に満たせる)。
+- **2.19.8 で `semaphore.db` の直読みが壊れたことが、この移行の理由である**(2026-08-19、quory / ansy とも実測)。2.19.8 は SQLite を **WAL モード**で開き(上げる前は `journal_mode=delete`)、`semaphore.db-shm` / `semaphore.db-wal` が現れる。**この2ファイルに ACL は付かず、WAL では読み手も `-shm` を読み書きできる必要がある**ため、`semaphore.db` に `r--` を持つだけの `recovery-exec` / `incident-inspect` / `dev-investigate` は `unable to open database file (14)` になっていた。**ファイル個別に ACL を足しても直らない** — 停止中に `journal_mode=delete` へ戻しても、起動時に必ず WAL へ戻され `-shm` / `-wal` が ACL なしで作り直される。**そもそも SQLite の直読みは Semaphore がサポートする接し方ではない**(公開された口は API であり、ストレージの内部形式は上流が自由に変えてよい)。当時の実測は `docs/ai/reviews/semaphore_upgrade/2026-08-18_003_result.md`。
 - ansy / quory ともSemaphoreのバージョンとサービス実行ユーザーは一致している(**2026-08-18に両方を 2.19.8 へ上げた**。案件: `docs/ai/reviews/semaphore_upgrade/`)。スキーマ調査は開発側(ansy)で先に行い、本番の読み取りを最小化する。**両者の版が揃っていることがこの前提を支えているので、片方だけ上げた状態を作ったら、その間は ansy のスキーマを quory のものとして読まない。**
 
 ## UIは新しいテンプレートを即座に表示しない(2026-08-05 Yoshinobu実測)

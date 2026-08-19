@@ -2,6 +2,17 @@
 
 **Status:** Accepted(2026-07-29。対象案件が本番で成立してクローズしたことに伴う実態への追随。捕捉=quory・転送=ansy `ansible-incident-sync.timer`・評価=月次 `ansible-knowledge-review.timer` の3段が稼働中。一次記録は `docs/ai/reviews/incident_auto_capture/` と `.../incident_auto_capture_step2/`)
 
+> **【2026-08-19 部分supersede】Context冒頭の1・2行(「固定SQLを引く」「`recovery-exec`のACLに依存する」)は、Semaphore
+> 2.19.8への版上げに伴う移行(`docs/ai/reviews/semaphore_query_api/2026-08-19_001_requirement.md`)で成立しなくなった。**
+> `homelab-semaphore-query`はSQLiteの直読みをやめ、Semaphore REST APIを`guest`ロールのtokenで呼ぶ形へ移行した
+> (2.19.8がSQLiteをWALモードで開き、直読みがACL経由の全識別子で不可能になったため)。読み取りが依存する先は
+> `recovery-exec`のDB read ACLではなく、token file(`/etc/homelab-recovery/semaphore-query-token`)への
+> named-user ACLになり、対象識別子も`recovery-exec`単独から`recovery-exec`/`incident-inspect`/`dev-investigate`/
+> yoshi(`incident_investigate_run_user`、R13)の4つへ広がっている。**この決定(a-1: Pythonスクリプト+systemd
+> timer、User=recovery-exec)自体は現在も有効**——変わったのはSemaphoreの取得経路の内部実装であり、収集器の
+> 実行形態・identityの結論には触れない。恒久の決定としてContext本文は書き換えない — 現状は
+> `docs/ai/reviews/semaphore_query_api/2026-08-19_002_implement.md` が正本。
+
 対象案件: `docs/ai/reviews/incident_auto_capture/2026-07-27_002_requirement.md`(Step 1)
 前提決定: 同 `..._001_design_agreement.md` のD1(名前付き操作のみ)、D4(収集はquory・LLMなし)、D5(排他はflock)、D6(捕捉の起点は2つ)、D7(要約と生ログの両方)
 調査の一次記録: 同 `..._003_investigation.md`

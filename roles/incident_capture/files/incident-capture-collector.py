@@ -30,7 +30,10 @@ R5b(捕捉停止の検出): Semaphoreに新規の失敗ジョブ記録がある�
 spoolディレクトリが完全に空だった場合、T1(common_slack/capture.yml)が
 壊れている可能性を collection_errors へ記録する。厳密な「全ステータス」の
 Semaphore活動ではなく「失敗ジョブ」を基準にしている理由: 既存の
-homelab-semaphore-query に新規SQLを追加しない制約(ADR-003 (c))の下では、
+homelab-semaphore-query に新規クエリを追加しない制約(ADR-003 (c)。
+2026-08-19、実装がSQL直読みからREST API呼び出しへ移ったため文言は「新規クエリ」
+へ改めたが、制約の中身(カタログ登録は1本ずつ人が判断する)は変わっていない)
+の下では、
 `recent-failed`(status IN error/stopped のみ)が唯一のバルク一覧クエリであり、
 これを起点にするのが最も安価で正確。
 
@@ -42,8 +45,8 @@ Semaphoreジョブの失敗が一件も起きていなければ実害は発生�
 ちょうどT1も壊れている」場合であり、そのときは `recent-failed` に新規の
 失敗行が現れると同時にspoolが空になるため、このR5bの条件(新規失敗ジョブ
 あり かつ spool総数ゼロ)で確実に検出できる。「全ステータスのSemaphore活動」
-を捕捉するには新規SQL(または `task-time` でのID逐次walk)が要り、
-ADR-003 (c) の「新規SQLを増やさない」制約およびD1/D2(カタログ登録は1本ずつ
+を捕捉するには新規クエリ(または `task-time` でのID逐次walk)が要り、
+ADR-003 (c) の「新規クエリを増やさない」制約およびD1/D2(カタログ登録は1本ずつ
 人が判断する)を超えるため、この限定は要件不足ではなく制約から来る意図的な
 線引きである。カタログ拡張はしない(2026-07-27 Coordinator判断)。
 requirement.mdが言う3層防御の第3層であり、唯一の防御ではない。
@@ -108,11 +111,17 @@ EXIT_INTERNAL_ERROR = 3
 
 JST = timezone(timedelta(hours=9))
 
-# Semaphoreの保存形式(Goの time.Time.String()): 'YYYY-MM-DD HH:MM:SS[.nnnnnnnnn]
-# +0000 UTC'。RFC3339でもZ表記でもない(2026-07-27 W0実測、
-# docs/ai/reviews/incident_auto_capture/2026-07-27_004_observation.md)。
-GO_TIME_RE = re.compile(
-    r"^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2}):(\d{2})(?:\.(\d+))? \+0000 UTC$"
+# homelab-semaphore-query は Semaphore REST API 経由へ移行済み
+# (docs/ai/reviews/semaphore_query_api/2026-08-19_001_requirement.md R3、
+# 2026-08-19)。start/end はAPIが返すRFC3339をそのまま出力する — 旧来の
+# 'YYYY-MM-DD HH:MM:SS[.nnnnnnnnn] +0000 UTC'(Goの time.Time.String()、
+# semaphore.db直読み時代の保存形式。2026-07-27 W0実測、
+# docs/ai/reviews/incident_auto_capture/2026-07-27_004_observation.md)は
+# もう出力されない。RFC3339は秒未満の桁数と、末尾が'Z'か数値オフセット
+# (+HH:MM/-HH:MM)かのどちらも取りうる形として書く — 'Z'限定にすると
+# 数値オフセット形の応答を取りこぼす。
+RFC3339_RE = re.compile(
+    r"^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d+))?(Z|[+-]\d{2}:\d{2})$"
 )
 
 REQUIRED_SPOOL_FIELDS = {
@@ -137,19 +146,28 @@ NON_NOTABLE_SLACK_STATUS = {"", "ok"}
 # ---------------------------------------------------------------------------
 # 時刻
 # ---------------------------------------------------------------------------
-def parse_go_time(raw):
-    """Semaphore生値 -> aware UTC datetime。形式が一致しなければ ValueError。
+def parse_semaphore_time(raw):
+    """homelab-semaphore-query生値(RFC3339) -> aware datetime。
 
-    握りつぶさない(R5)。呼び出し側で except して collection_errors へ積む。
+    形式が一致しなければ ValueError。握りつぶさない(R5)。呼び出し側で
+    except して collection_errors へ積む。Python 3.11未満でも動くよう
+    datetime.fromisoformatの'Z'対応には頼らず、'Z'/数値オフセットの両方を
+    自前の正規表現(RFC3339_RE)で受ける。
     """
     if not raw:
         raise ValueError("empty timestamp value")
-    m = GO_TIME_RE.match(raw.strip())
+    m = RFC3339_RE.match(raw.strip())
     if not m:
-        raise ValueError(f"does not match Go time.Time.String() format: {raw!r}")
-    y, mo, d, h, mi, s, frac = m.groups()
+        raise ValueError(f"does not match RFC3339 format: {raw!r}")
+    y, mo, d, h, mi, s, frac, tz = m.groups()
     micros = int((frac or "0").ljust(6, "0")[:6])
-    return datetime(int(y), int(mo), int(d), int(h), int(mi), int(s), micros, tzinfo=timezone.utc)
+    if tz == "Z":
+        offset = timezone.utc
+    else:
+        sign = 1 if tz[0] == "+" else -1
+        oh, om = tz[1:].split(":")
+        offset = timezone(sign * timedelta(hours=int(oh), minutes=int(om)))
+    return datetime(int(y), int(mo), int(d), int(h), int(mi), int(s), micros, tzinfo=offset)
 
 
 def to_rfc3339_jst(dt):
@@ -162,7 +180,9 @@ def now_jst_str():
 
 
 # ---------------------------------------------------------------------------
-# homelab-semaphore-query 呼び出し(D1: 名前を呼ぶだけ、新規SQLを増やさない)
+# homelab-semaphore-query 呼び出し(D1: 名前を呼ぶだけ、新規クエリを増やさない。
+# 2026-08-19、実装はREST API呼び出しへ移行済み — 制約の対象は「新規クエリ」
+# であって「新規SQL」ではない)
 # ---------------------------------------------------------------------------
 def run_semaphore_query(bin_path, timeout, *args):
     try:
@@ -554,12 +574,12 @@ def build_semaphore_bundle(cfg, row):
             end_raw=task["end_raw"],
         )
         try:
-            semaphore_meta["start"] = to_rfc3339_jst(parse_go_time(task["start_raw"]))
+            semaphore_meta["start"] = to_rfc3339_jst(parse_semaphore_time(task["start_raw"]))
         except ValueError as e:
             bundle_errors.append({"what": f"task {row['id']} start timestamp unparseable", "why": str(e)})
         try:
             if task["end_raw"]:
-                semaphore_meta["end"] = to_rfc3339_jst(parse_go_time(task["end_raw"]))
+                semaphore_meta["end"] = to_rfc3339_jst(parse_semaphore_time(task["end_raw"]))
         except ValueError as e:
             bundle_errors.append({"what": f"task {row['id']} end timestamp unparseable", "why": str(e)})
 
@@ -669,7 +689,9 @@ def main():
                         f"recent-failed returned the full batch of {cfg['recent_failed_batch']} rows; "
                         "some failed jobs older than the returned window may have been skipped "
                         "(recent-failed has no id-based pagination, and this collector does not add "
-                        "new SQL to homelab-semaphore-query — ADR-003 (c))"
+                        "new queries to homelab-semaphore-query — ADR-003 (c); 2026-08-19: "
+                        "the tool moved from direct SQL to a REST API call, but the "
+                        "\"don't add new named operations\" constraint is unchanged)"
                     ),
                 }
             )

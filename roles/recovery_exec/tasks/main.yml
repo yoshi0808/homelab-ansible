@@ -298,24 +298,54 @@
   when: not ansible_check_mode
   tags: [destructive]
 
-- name: Grant recovery-exec ACL traverse on /var/lib/semaphore (no sudo)
+# homelab-semaphore-query moved off direct semaphore.db access to the
+# Semaphore REST API (docs/ai/reviews/semaphore_query_api/
+# 2026-08-19_001_requirement.md R9; semaphore.md documents why: 2.19.8
+# opens the DB in WAL mode and the -shm/-wal companion files never get an
+# ACL). recovery-exec no longer touches /var/lib/semaphore at all — what
+# it needs instead is read access to the API token file, which
+# /etc/homelab-recovery (mode 0755, see roles/recovery_probe/tasks/main.yml)
+# is already world-traversable enough to reach without an extra ACL — only
+# the token file itself needs a named-user grant. The old
+# traverse-on-/var/lib/semaphore and read-on-semaphore.db grants are removed
+# explicitly, below (they are not simply absent from this task list — a host
+# already deployed before this migration keeps them until revoked).
+- name: Grant recovery-exec ACL read on the Semaphore query token file (no sudo; R9)
   ansible.posix.acl:
-    path: /var/lib/semaphore
+    path: /etc/homelab-recovery/semaphore-query-token
     entity: "{{ recovery_exec_user }}"
     etype: user
-    permissions: x
+    permissions: r
     state: present
   become: true
   when: not ansible_check_mode
   tags: [destructive]
 
-- name: Grant recovery-exec ACL read on semaphore.db (no sudo; journal_mode=delete, no -wal/-shm to also grant)
+# The old semaphore.db / /var/lib/semaphore grants are not removed by
+# deploying the task above — `state: present` for a *different* ACL entry
+# does not touch pre-existing entries on a different path, so a host that
+# was already set up before this migration keeps recovery-exec's old
+# read/traverse ability until it is explicitly revoked (found by review
+# 2026-08-19_003, High #1). New grant first, old grants removed after: if
+# a run is interrupted between these tasks, re-running converges (the new
+# grant is idempotent; removing an already-absent entry is a no-op) without
+# ever leaving recovery-exec with neither the new nor the old access.
+- name: Remove recovery-exec ACL read on the old semaphore.db (superseded by the token file grant above; R9)
   ansible.posix.acl:
     path: /var/lib/semaphore/semaphore.db
     entity: "{{ recovery_exec_user }}"
     etype: user
-    permissions: r
-    state: present
+    state: absent
+  become: true
+  when: not ansible_check_mode
+  tags: [destructive]
+
+- name: Remove recovery-exec ACL traverse on the old /var/lib/semaphore (superseded by the token file grant above; R9)
+  ansible.posix.acl:
+    path: /var/lib/semaphore
+    entity: "{{ recovery_exec_user }}"
+    etype: user
+    state: absent
   become: true
   when: not ansible_check_mode
   tags: [destructive]
@@ -409,7 +439,7 @@
   when: not ansible_check_mode
   tags: [destructive]
 
-- name: Deploy homelab-semaphore-query wrapper (fixed queries, reads semaphore.db directly)
+- name: Deploy homelab-semaphore-query wrapper (fixed queries, reads via Semaphore REST API)
   ansible.builtin.copy:
     src: homelab-semaphore-query
     dest: /usr/local/bin/homelab-semaphore-query

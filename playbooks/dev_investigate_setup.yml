@@ -15,8 +15,11 @@
 # under /usr/local/sbin/ and /usr/local/bin/ for Q1-Q7/Q11 to have anything
 # to call.
 # This playbook does not redeploy those; it only adds POSIX ACL grants for
-# dev-investigate's own UID on the same paths recovery-exec already reads
-# (semaphore.db, /home/yoshi traverse).
+# dev-investigate's own UID: read on the Semaphore query token file
+# (homelab-semaphore-query talks to the Semaphore REST API, not
+# semaphore.db directly, since 2026-08-19 —
+# docs/ai/reviews/semaphore_query_api/2026-08-19_001_requirement.md) and
+# traverse on /home/yoshi.
 #
 # Target: quory only (this identity and dispatch script exist nowhere else).
 #

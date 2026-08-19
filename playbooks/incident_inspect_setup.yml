@@ -13,9 +13,11 @@
 # Prerequisite: roles/recovery_exec must already be deployed on this host
 # (playbooks/recovery_exec_setup.yml) — homelab-semaphore-query and
 # homelab-reports must already exist at /usr/local/bin/. This role only adds
-# POSIX ACL grants for incident-inspect's own UID on the same paths
-# recovery-exec already reads (semaphore.db, /home/yoshi traverse); it does
-# not redeploy those wrapper scripts.
+# POSIX ACL grants for incident-inspect's own UID: read on the Semaphore
+# query token file (homelab-semaphore-query talks to the Semaphore REST API,
+# not semaphore.db directly, since 2026-08-19 —
+# docs/ai/reviews/semaphore_query_api/2026-08-19_001_requirement.md) and
+# traverse on /home/yoshi; it does not redeploy those wrapper scripts.
 #
 # **ansy(dev_nodes)は対象にしない**(2026-08-06)。開発機へ本番ランタイムを配る
 # 設計をやめたため。検証が要るときは sandbox を使う

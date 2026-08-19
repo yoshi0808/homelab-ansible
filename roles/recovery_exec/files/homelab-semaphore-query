@@ -1,113 +1,468 @@
-#!/usr/bin/env bash
-# homelab-semaphore-query: read-only Semaphore failed-task lookup (SQLite).
-#
-# Codex selects a fixed query name plus an integer parameter only. The SQL
-# text is fixed in this script and never built from caller-supplied strings.
-# The finished SQL is passed to sqlite3 as a single argv element via exec
-# (no shell string concatenation / no `sh -c`), so shell metacharacters in
-# an argument can never be reinterpreted (same lesson as the Sophos expect
-# script: build the argv array in-process, don't hand a string to a shell).
-#
-# No sudo: Codex invokes this wrapper inside a sandbox with no_new_privileges
-# set, which blocks sudo unconditionally regardless of sudoers config
-# (confirmed via a live failure: "sudo: The 'no new privileges' flag is
-# set..."). Instead, recovery-exec gets a POSIX ACL grant (traverse on
-# /var/lib/semaphore, read on semaphore.db — see
-# roles/recovery_exec/tasks/main.yml) for direct, non-elevated read access.
-# semaphore.db uses journal_mode=delete (confirmed, not WAL), so there are
-# no -wal/-shm companion files to also grant.
-set -euo pipefail
+#!/usr/bin/env python3
+"""homelab-semaphore-query: read-only Semaphore job lookup via the REST API.
 
-DB=/var/lib/semaphore/semaphore.db
-SQLITE=/usr/bin/sqlite3
+Codex/dev-investigate select a fixed query name plus an integer parameter
+only (same CLI contract as before this rewrite). No caller-supplied string
+is ever concatenated into a URL path or shell command — `<n>`/`<id>` are
+validated as plain unsigned integers and interpolated only into a URL whose
+other components are all fixed string literals.
 
-usage() {
-  echo "usage: homelab-semaphore-query <recent-failed <n>|running <n>|task-errors <id>|task-hosts <id>|task-output <id>|task-time <id>|template-list <n>>" >&2
-  exit 1
-}
+--- Why this exists (superseded design) -------------------------------------
+This script used to open /var/lib/semaphore/semaphore.db directly with
+sqlite3 under a POSIX ACL read grant. Semaphore 2.19.8 switched the DB to
+WAL mode; the -shm/-wal companion files WAL requires get no ACL and are
+re-created without one on every restart, so the ACL-only readers
+(recovery-exec / incident-inspect / dev-investigate) could no longer open
+the file at all ("unable to open database file (14)"). SQLite's on-disk
+format was never a supported integration point for Semaphore in the first
+place (the supported surface is the REST API) — restoring direct-file
+access would just break again on the next upgrade that touches storage.
+See docs/ai/reviews/semaphore_query_api/2026-08-19_001_requirement.md and
+docs/ai/reviews/semaphore_upgrade/2026-08-18_003_result.md.
 
-is_uint() {
-  [[ "$1" =~ ^[0-9]+$ ]]
-}
+--- Auth (R4/R8) --------------------------------------------------------
+The token is read from TOKEN_FILE below, never taken from an argument or
+environment variable, and never written to stdout/stderr/log — including
+inside error messages. The Semaphore user behind this token holds project
+role `guest` (read-only) and is provisioned separately from any token an
+Operator or the semaphore_templates role uses, so it can be revoked
+independently (R4). This script does not create or validate the token
+file's ownership/mode itself: it is placed and ACL-granted by Ansible
+(roles/recovery_exec, roles/incident_inspect, roles/dev_investigate — see
+each role's "Grant ... ACL read on the Semaphore query token file" task),
+and a bare-UID read either succeeds or fails; there is no privileged bypass
+inside this script that a permission check could meaningfully add.
 
-query="${1:-}"
-param="${2:-}"
+--- API base / project (R5) ----------------------------------------------
+project id is NOT a fixed value — it has been observed to differ between
+ansy and quory, and to change over time on the same host (see the
+requirement doc above). It is resolved by name (PROJECT_NAME) via
+GET /projects on every invocation, the same approach
+roles/semaphore_templates/tasks/resolve.yml uses.
 
-case "$query" in
-  recent-failed)
-    is_uint "$param" || usage
-    # 10# forces base-10 so a leading zero (e.g. "008") isn't read as octal.
-    if (( 10#$param < 1 || 10#$param > 200 )); then
-      echo "denied: n out of range (1-200)" >&2
-      exit 1
-    fi
-    sql="SELECT t.id, tpl.name AS template, tpl.playbook, t.status, substr(t.start,1,19) AS start FROM task t LEFT JOIN project__template tpl ON t.template_id = tpl.id WHERE t.status IN ('error','stopped') ORDER BY t.id DESC LIMIT ${param};"
-    ;;
-  running)
-    is_uint "$param" || usage
-    # 10# forces base-10 (same reason as recent-failed).
-    if (( 10#$param < 1 || 10#$param > 200 )); then
-      echo "denied: n out of range (1-200)" >&2
-      exit 1
-    fi
-    # 「実行中」を status の肯定的な列挙で書かない。Semaphore が実行中を表す
-    # 値(waiting / starting / running 等)はこの環境で観測されておらず、
-    # 列挙すると観測漏れがそのまま「動いていない」という誤答になる。終端3値
-    # (success / error / stopped)は実測済み(docs/ai/context/system/
-    # semaphore.md)なので、「終端でないものを実行中とみなす」向きに倒す。
-    # 未知の値が現れたら安全側(実行中とみなす側)へ落ちる。
-    #
-    # start は substr で19文字に切っていない。recent-failed が切り落として
-    # いる末尾のゾーン表記こそ、保存形式(Go の time.Time.String())を判断
-    # する材料になるため(task-time と同じ理由)。
-    sql="SELECT t.id, tpl.name AS template, tpl.playbook, t.status, t.start FROM task t LEFT JOIN project__template tpl ON t.template_id = tpl.id WHERE t.status NOT IN ('success','error','stopped') ORDER BY t.id DESC LIMIT ${param};"
-    ;;
-  task-errors)
-    is_uint "$param" || usage
-    sql="SELECT task, host, substr(error,1,500) AS error_head FROM task__ansible_error WHERE task_id = ${param};"
-    ;;
-  task-hosts)
-    is_uint "$param" || usage
-    sql="SELECT * FROM task__ansible_host WHERE task_id = ${param};"
-    ;;
-  task-output)
-    is_uint "$param" || usage
-    sql="SELECT time, output FROM task__output WHERE task_id = ${param} ORDER BY time;"
-    ;;
-  task-time)
-    is_uint "$param" || usage
-    # Unlike recent-failed, start/end are NOT substr()-truncated here: the
-    # point of this query is to see whatever suffix (Z / +09:00 / none)
-    # Semaphore actually persisted, which substr(...,1,19) would strip.
-    # `end` is quoted as [end] because it is a SQL keyword (CASE/TRIGGER);
-    # unquoted it fails to parse as a column reference in SQLite.
-    sql="SELECT t.id, tpl.name AS template, tpl.playbook, t.status, t.start, t.[end] FROM task t LEFT JOIN project__template tpl ON t.template_id = tpl.id WHERE t.id = ${param};"
-    ;;
-  template-list)
-    is_uint "$param" || usage
-    # 10# forces base-10 (same reason as recent-failed).
-    if (( 10#$param < 1 || 10#$param > 200 )); then
-      echo "denied: n out of range (1-200)" >&2
-      exit 1
-    fi
-    # 「本番で押せるボタン」の一覧。テンプレートはSemaphoreのUIで手作りされて
-    # おりrepoに正本が無いため、設計の入力をここから取る(2026-08-04)。
-    #
-    # 2文を返す。1文目は project__template の CREATE TABLE 文そのもの、2文目が
-    # 行の中身である。**列名を推測しないため**にこの形にしている — 既存クエリが
-    # 使っている id / name / playbook は実在が確定しているが、引数の有無を表す
-    # 列(arguments 等)がこのバージョンに存在するか、名前が何かは未確認である。
-    # スキーマ本文と `SELECT *` を並べれば、列の並び順で対応がとれて1回の配備で
-    # 済む(推測して外すと再配備が要り、そのたびに人のRunを1回消費する)。
-    #
-    # この表を選ぶのは、押せるボタンの定義がここにあるからである。秘密は
-    # access_key(暗号化)と project__environment 側にあり、いずれもこの
-    # スクリプトの対象ではない。`SELECT *` は task-hosts と同じ流儀。
-    sql="SELECT sql FROM sqlite_master WHERE type='table' AND name='project__template'; SELECT * FROM project__template ORDER BY id LIMIT ${param};"
-    ;;
-  *)
-    usage
-    ;;
-esac
+The API host is derived from this host's own short hostname
+(quory -> https://quory.internal:3000/api, ansy -> https://ansy.internal:3000
+/api) rather than hardcoded, so the identical file can be deployed to both
+(roles/recovery_exec copies this file verbatim to both quory and ansy).
+This mirrors the existing `hostname -s` pattern used by other deployed
+files/ scripts (e.g. roles/proxmox_patch_dryrun/files/proxmox-dryrun-
+collect.sh). TLS is verified with Python's default certificate store; the
+internal CA is already trusted host-wide (confirmed working for the
+Ansible `uri` module against the same hosts — see
+roles/semaphore_templates/defaults/main.yml).
 
-exec "$SQLITE" -readonly "$DB" "$sql"
+--- task-hosts / task-errors (R6) -----------------------------------------
+The API has no per-host or per-error structured endpoint
+(GET /tasks/{id}/hosts and .../errors both 404; the 2.19-era /stages
+endpoint is 200 but keyed by stage, not by host, confirmed against a real
+quory task). Both queries are therefore derived from the same raw job
+output text used by task-output: task-hosts returns the "PLAY RECAP"
+section onward, task-errors returns lines beginning with "fatal:". This is
+a best-effort text derivation, not a structured re-implementation of the
+old SQL query — callers (incident-capture-collector.py) already store this
+output as an opaque raw log and do not structurally parse it (R6). If
+neither pattern is found, the query prints nothing and exits 0, matching
+the old "0 matching rows" behavior of the equivalent SQL query (an
+underlying fetch failure is a separate, non-zero-exit code path — see R7
+below).
+
+--- Output format (R2/R3) --------------------------------------------------
+recent-failed / running / task-time keep their original pipe-separated
+field counts (5 / 5 / 6). Timestamps are the RFC3339 strings the API
+returns, unmodified — Semaphore's previous on-disk format
+('YYYY-MM-DD HH:MM:SS[.nnnnnnnnn] +0000 UTC', a bespoke Go
+time.Time.String() rendering) is not something the API emits, and
+re-synthesizing it here would mean inventing a format the API never
+actually returned (R3). incident-capture-collector.py's time parser was
+updated in the same change to parse RFC3339 instead.
+
+--- Failure semantics (R7) -------------------------------------------------
+Any failure to authenticate, reach the API, or parse its response prints a
+message to stderr (never including the token) and exits non-zero with
+empty stdout. A query that legitimately has no matching rows/lines (e.g.
+task-hosts on a task with no PLAY RECAP) exits 0 with empty stdout — this
+is the same "empty but successful" shape the old SQL queries had for zero
+matching rows, and is distinct from a failure to fetch.
+"""
+import json
+import re
+import socket
+import sys
+import urllib.error
+import urllib.request
+
+QUERIES = (
+    "recent-failed",
+    "running",
+    "task-errors",
+    "task-hosts",
+    "task-output",
+    "task-time",
+    "template-list",
+)
+
+# R9: placed and ACL-granted by Ansible (root:root base + named-user ACL
+# read entries for recovery-exec / incident-inspect / dev-investigate — see
+# each role's tasks/main.yml). Not created or chmod'd by this script.
+TOKEN_FILE = "/etc/homelab-recovery/semaphore-query-token"
+
+# R5: resolved by name, not by a fixed id (ansy=3, quory=1, observed to
+# change over time — see the requirement doc). The name itself is the one
+# fixed assumption, shared with semaphore_templates_project_name in
+# roles/semaphore_templates/defaults/main.yml.
+PROJECT_NAME = "homelab-ansible"
+
+API_TIMEOUT_S = 20
+
+QUERY_RANGE_QUERIES = ("recent-failed", "running", "template-list")
+N_MIN, N_MAX = 1, 200
+
+UINT_RE = re.compile(r"^[0-9]+$")
+
+# This script does not itself parse the RFC3339 timestamps the API returns
+# (R3: pass through verbatim, see task_row() below). The consuming parser
+# lives in roles/incident_capture/files/incident-capture-collector.py.
+
+# Job output entries come back with ANSI SGR (color) escapes embedded
+# (2026-08-19 re-test on ansy task 20: a `fatal:` line's first bytes were
+# b'\x1b[1;31mfatal: [p...', and PLAY RECAP host summary lines were wrapped
+# the same way). This broke `line.startswith("fatal:")` outright.
+# task-hosts/task-errors line-match against the stripped text (see
+# fetch_output_text()); task-output is returned stripped too, for the same
+# reason task-output's earlier "\n"-join fix was needed: readability and
+# consistent downstream text-matching are worth more here than
+# byte-for-byte preservation, which R6 does not require for these three
+# queries. Matches SGR codes ('\x1b[...m') and, defensively, any other CSI
+# sequence ('\x1b[...<letter>') rather than only the 'm'-terminated form
+# actually observed.
+ANSI_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+
+
+def strip_ansi(text):
+    return ANSI_RE.sub("", text)
+
+
+class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Refuses to follow HTTP redirects.
+
+    Found by review 2026-08-19_003 (Medium #4): the standard library's
+    default `HTTPRedirectHandler.redirect_request()` copies non-content
+    headers — including `Authorization` — onto the follow-up request
+    regardless of whether the redirect target is same-origin. Since
+    `api_base()` returns a fixed, self-derived origin and Semaphore's API
+    has no legitimate reason to redirect a GET, any 3xx response is treated
+    as a failure (via `HTTPError`, caught in `api_get()`) instead of being
+    followed — the token is never sent to a second URL.
+    """
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+_OPENER = urllib.request.build_opener(_NoRedirectHandler())
+
+
+def die(msg):
+    print(f"homelab-semaphore-query: {msg}", file=sys.stderr)
+    sys.exit(1)
+
+
+def usage():
+    print(
+        "usage: homelab-semaphore-query <recent-failed <n>|running <n>|"
+        "task-errors <id>|task-hosts <id>|task-output <id>|task-time <id>|"
+        "template-list <n>>",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+
+
+def is_uint(s):
+    return bool(UINT_RE.match(s or ""))
+
+
+def load_token():
+    try:
+        with open(TOKEN_FILE, "r", encoding="utf-8") as f:
+            token = f.read().strip()
+    except OSError as e:
+        die(f"cannot read token file {TOKEN_FILE}: {e.strerror or e}")
+    if not token:
+        die(f"token file {TOKEN_FILE} is empty")
+    return token
+
+
+def api_base():
+    # Bare short hostname is used deliberately (not the FQDN), matching
+    # the `hostname -s` convention already used by other deployed files/
+    # scripts on these hosts (e.g. proxmox-dryrun-collect.sh). The
+    # certificate SAN list includes both the bare and .internal forms
+    # (roles/homelab_cert_renew/defaults/main.yml cert_renew_hosts_config).
+    host = socket.gethostname().split(".")[0]
+    return f"https://{host}.internal:3000/api"
+
+
+def api_get(base, token, path):
+    url = base.rstrip("/") + path
+    req = urllib.request.Request(
+        url,
+        headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
+    )
+    try:
+        with _OPENER.open(req, timeout=API_TIMEOUT_S) as resp:
+            body = resp.read()
+    except urllib.error.HTTPError as e:
+        if e.code in (401, 403):
+            die(f"semaphore api rejected the request for {path} (HTTP {e.code})")
+        die(f"semaphore api error for {path}: HTTP {e.code} {e.reason}")
+    except urllib.error.URLError as e:
+        die(f"cannot reach semaphore api at {base}: {e.reason}")
+    except (TimeoutError, OSError) as e:
+        die(f"semaphore api request to {path} failed: {e}")
+    try:
+        return json.loads(body)
+    except json.JSONDecodeError as e:
+        die(f"semaphore api returned a non-JSON response for {path}: {e}")
+
+
+def require_array(body, path):
+    # Found by review 2026-08-19_003 (High #2): a single-object fallback
+    # used to be accepted here (borrowed from
+    # roles/semaphore_templates/tasks/resolve.yml, which tolerates it for
+    # a genuinely ambiguous endpoint). None of the endpoints this script
+    # calls are ambiguous that way — /projects, /project/{id}/tasks,
+    # /project/{id}/tasks/{id}/output and /project/{id}/templates are all
+    # observed to be arrays — so a non-array response here means the API
+    # contract has changed or the response is an error body shaped like
+    # `{"error": "..."}`, either of which must fail closed rather than be
+    # silently reshaped into a 1-element list.
+    if not isinstance(body, list):
+        die(f"semaphore api returned an unexpected response shape for {path} (expected a JSON array)")
+    return body
+
+
+def require_int(value, what):
+    # `bool` is a subclass of `int` in Python; explicitly excluded so a
+    # stray JSON `true`/`false` can never pass as a ordinary integer id.
+    if isinstance(value, bool) or not isinstance(value, int):
+        die(f"semaphore api returned a missing or non-integer {what}")
+    return value
+
+
+def require_str(value, what, allow_empty=False):
+    if not isinstance(value, str) or (not allow_empty and not value):
+        die(f"semaphore api returned a missing or empty {what}")
+    return value
+
+
+def resolve_project_id(base, token):
+    path = "/projects"
+    projects = require_array(api_get(base, token, path), path)
+    for p in projects:
+        if not isinstance(p, dict):
+            die(f"semaphore api returned a non-object project entry from {path}")
+        if p.get("name") == PROJECT_NAME:
+            return require_int(p.get("id"), "project id")
+    die(f"project {PROJECT_NAME!r} not found via GET {base}{path}")
+
+
+def fetch_tasks(base, token, proj_id):
+    # All entries are validated up front, before any query prints a single
+    # row (R7/High #2: fail before stdout starts, not partway through).
+    path = f"/project/{proj_id}/tasks"
+    tasks = require_array(api_get(base, token, path), path)
+    validated = []
+    for t in tasks:
+        if not isinstance(t, dict):
+            die(f"semaphore api returned a non-object task entry from {path}")
+        require_int(t.get("id"), "task id")
+        require_str(t.get("status"), f"status for task {t.get('id')}")
+        validated.append(t)
+    return validated
+
+
+def task_row(t):
+    # `t` has already been validated by fetch_tasks(): `id` is an int and
+    # `status` is a non-empty string. The remaining fields (start/end/
+    # playbook/template name) are legitimately optional (e.g. `end` is
+    # empty until a task finishes), so they keep the tolerant
+    # fallback-to-empty-string handling.
+    template_id = t.get("template_id")
+    template = t.get("tpl_alias") or (
+        f"template-{template_id}" if template_id is not None else "unknown"
+    )
+    # `playbook` on the task object itself is the task's own override (empty
+    # for a normal run that just uses the template's playbook — confirmed
+    # empty on a real ansy task, 2026-08-19 re-test). The value the old
+    # sqlite3 query returned (`tpl.playbook` via a join to
+    # project__template) corresponds to `tpl_playbook` here, which is the
+    # template's playbook path. Prefer that, and fall back to `playbook`
+    # only if `tpl_playbook` is itself empty (e.g. an ad-hoc run with no
+    # template) so a real per-task override is never silently discarded.
+    playbook = t.get("tpl_playbook") or t.get("playbook") or ""
+    return {
+        "id": t["id"],
+        "template": template,
+        "playbook": playbook,
+        "status": t["status"],
+        "start": t.get("start") or "",
+        "end": t.get("end") or "",
+    }
+
+
+def cmd_recent_failed(base, token, proj_id, n):
+    rows = [task_row(t) for t in fetch_tasks(base, token, proj_id)]
+    rows = [r for r in rows if r["status"] in ("error", "stopped")]
+    rows.sort(key=lambda r: r["id"], reverse=True)
+    for r in rows[:n]:
+        print(f"{r['id']}|{r['template']}|{r['playbook']}|{r['status']}|{r['start']}")
+
+
+def cmd_running(base, token, proj_id, n):
+    # Same "not a known terminal status" logic as before the rewrite: an
+    # unrecognized status falls on the "running" side rather than being
+    # silently treated as finished (an observation gap must not read as a
+    # negative answer).
+    rows = [task_row(t) for t in fetch_tasks(base, token, proj_id)]
+    rows = [r for r in rows if r["status"] not in ("success", "error", "stopped")]
+    rows.sort(key=lambda r: r["id"], reverse=True)
+    for r in rows[:n]:
+        print(f"{r['id']}|{r['template']}|{r['playbook']}|{r['status']}|{r['start']}")
+
+
+def cmd_task_time(base, token, proj_id, task_id):
+    match = None
+    for t in fetch_tasks(base, token, proj_id):
+        if t["id"] == task_id:
+            match = t
+            break
+    if match is None:
+        die(f"task {task_id} not found via GET {base}/project/{proj_id}/tasks")
+    r = task_row(match)
+    print(f"{r['id']}|{r['template']}|{r['playbook']}|{r['status']}|{r['start']}|{r['end']}")
+
+
+def fetch_output_text(base, token, proj_id, task_id):
+    path = f"/project/{proj_id}/tasks/{task_id}/output"
+    rows = require_array(api_get(base, token, path), path)
+    # Every entry is validated before any text is assembled (R7/High #2):
+    # each must be an object with a string `output` field. A non-object
+    # entry, or one missing `output`, means the response does not match
+    # the shape this script depends on to reconstruct the log — that is a
+    # failure to fetch, not "no output for this line".
+    for entry in rows:
+        if not isinstance(entry, dict) or not isinstance(entry.get("output"), str):
+            die(f"semaphore api returned a malformed output entry from {path}")
+    # Sort by time when present so out-of-order delivery can't reorder the
+    # reconstructed log; entries missing a usable time sort stably to the
+    # position they arrived in (Python's sort is stable).
+    rows = sorted(rows, key=lambda entry: entry.get("time") or "")
+    # One entry == one log line (2026-08-19 re-test on ansy task 20: 74
+    # entries, only 9 carried their own trailing newline — most entries do
+    # NOT end in "\n"). Joining with "" (the original implementation)
+    # collapsed most of the log into one line, which in turn broke
+    # PLAY RECAP / fatal: line-based matching below. Each entry's own
+    # trailing newline (if any) is stripped first so exactly one "\n" ends
+    # up between entries either way — this is what sqlite3's list mode did
+    # for the old `SELECT time, output FROM task__output ...` query (one
+    # output row -> one printed line, regardless of what the row's own text
+    # contained).
+    text = "\n".join(entry["output"].rstrip("\n") for entry in rows)
+    return strip_ansi(text)
+
+
+def cmd_task_output(base, token, proj_id, task_id):
+    text = fetch_output_text(base, token, proj_id, task_id)
+    if not text:
+        return  # no rows: matches old "0 matching rows" behavior, exit 0
+    sys.stdout.write(text)
+    if not text.endswith("\n"):
+        sys.stdout.write("\n")
+
+
+def cmd_task_errors(base, token, proj_id, task_id):
+    text = fetch_output_text(base, token, proj_id, task_id)
+    for line in text.splitlines():
+        if line.startswith("fatal:"):
+            print(line)
+
+
+def cmd_task_hosts(base, token, proj_id, task_id):
+    # Found by review 2026-08-19_003 (High #3, requirement RSK2): a
+    # completed ansible-playbook run always ends with a PLAY RECAP section.
+    # Its absence means the derivation could not find what it expects, not
+    # that the task legitimately has zero hosts — that is a fetch/format
+    # failure and must not exit 0 with empty stdout (unlike task-errors
+    # above, where zero `fatal:` lines is a normal, expected outcome for a
+    # task with no per-host failures).
+    text = fetch_output_text(base, token, proj_id, task_id)
+    lines = text.splitlines()
+    start = None
+    for i, line in enumerate(lines):
+        if line.strip().startswith("PLAY RECAP"):
+            start = i
+            break
+    if start is None:
+        die(f"task {task_id} output has no PLAY RECAP section")
+    for line in lines[start:]:
+        print(line)
+
+
+def cmd_template_list(base, token, proj_id, n):
+    path = f"/project/{proj_id}/templates"
+    rows = require_array(api_get(base, token, path), path)
+    for r in rows:
+        if not isinstance(r, dict):
+            die(f"semaphore api returned a non-object template entry from {path}")
+        require_int(r.get("id"), "template id")
+    rows = sorted(rows, key=lambda r: r["id"])
+    for r in rows[:n]:
+        # One self-describing JSON object per line: field names come from
+        # the API response itself, so there is nothing here to guess at
+        # (same "don't guess column names" goal the old CREATE-TABLE-plus-
+        # rows dump served, met differently because the API is already
+        # self-describing per row).
+        print(json.dumps(r, sort_keys=True, ensure_ascii=False))
+
+
+def main():
+    query = sys.argv[1] if len(sys.argv) > 1 else ""
+    param = sys.argv[2] if len(sys.argv) > 2 else ""
+
+    if query not in QUERIES:
+        usage()
+    if not is_uint(param):
+        usage()
+    n = int(param, 10)
+
+    if query in QUERY_RANGE_QUERIES and not (N_MIN <= n <= N_MAX):
+        print(f"denied: n out of range ({N_MIN}-{N_MAX})", file=sys.stderr)
+        sys.exit(1)
+
+    token = load_token()
+    base = api_base()
+    proj_id = resolve_project_id(base, token)
+
+    if query == "recent-failed":
+        cmd_recent_failed(base, token, proj_id, n)
+    elif query == "running":
+        cmd_running(base, token, proj_id, n)
+    elif query == "task-time":
+        cmd_task_time(base, token, proj_id, n)
+    elif query == "task-output":
+        cmd_task_output(base, token, proj_id, n)
+    elif query == "task-errors":
+        cmd_task_errors(base, token, proj_id, n)
+    elif query == "task-hosts":
+        cmd_task_hosts(base, token, proj_id, n)
+    elif query == "template-list":
+        cmd_template_list(base, token, proj_id, n)
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except SystemExit:
+        raise
+    except Exception as e:  # noqa: BLE001 - fail closed on any unexpected error (R7)
+        die(f"unexpected error: {e}")

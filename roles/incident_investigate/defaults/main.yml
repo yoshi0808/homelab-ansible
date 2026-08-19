@@ -36,6 +36,24 @@ incident_investigate_inspect_user: incident-inspect
 incident_investigate_inspect_wrapper: /usr/local/bin/codex-investigate-wrapper
 incident_investigate_inspect_workspace: /var/lib/incident-inspect/workspace
 
+# Semaphore先読み専用のcontext directory(R14。requirement:
+# docs/ai/reviews/semaphore_query_api/2026-08-19_001_requirement.md)。
+# **incident-inspectのworkspaceとは意図的に別のdirectoryである**
+# (round2独立レビューHigh #1: workspaceにはincident-inspect所有の
+# AGENTS.md——LLMが従う指示書——が同居しており、workspace directory全体
+# へのwrite権限を証拠書き込みidentity(yoshi)へ渡すと、AGENTS.mdの
+# unlink/rename置換まで許すことになるため)。
+#
+# このdirectoryはroles/incident_investigate/tasks/main.ymlが単独で
+# 作成・所有する(owner=yoshi)。roles/incident_inspectはこのdirectoryの
+# mode/ACLに一切触れない——2roleがmode/ACLを競合して設定する状態を
+# 作らないことで、どちらのroleを後から再実行しても実効権限が退行しない
+# (round2 High #3是正)。roles/incident_inspect/defaults/main.ymlの
+# `incident_inspect_semaphore_context_dir`と**値が一致していなければ
+# ならない**(U1/U2の結合値。ただしU1側はAGENTS.md.j2のレンダリングにのみ
+# 使い、このdirectory自体の作成・権限には関与しない)。
+incident_investigate_semaphore_context_dir: /var/lib/incident-inspect/semaphore-context
+
 # sudoers(yoshi → incident-inspect、wrapper 1本に限定)は**このroleでは
 # 配備しない**。U1の成果物を確認した結果、roles/incident_inspect/templates/
 # sudoers-incident-inspect.j2 が既に
@@ -49,15 +67,29 @@ incident_investigate_inspect_workspace: /var/lib/incident-inspect/workspace
 incident_investigate_llm_timeout_s: 300
 
 # ---------------------------------------------------------------------------
-# 既存の読み取り口(ADR-003 (c) c-1と同じ流儀: 新規SQLを増やさず、既存の
-# homelab-semaphore-query を引数付きで呼ぶだけ)。recovery_exec_setup.yml が
-# 事前にこのroleを配備し、かつ yoshi がSemaphore(User=yoshi)と同じ所有者
-# としてsemaphore.dbを直接読める前提(ACLを新規に要求しない — ADR-009
-# Consequences「新しいACL 2件」はいずれもincident-inspect側のもので、
-# yoshiへの新規権限はここでは不要)。
+# 既存の読み取り口(ADR-003 (c) c-1と同じ流儀: 新規クエリを増やさず、既存の
+# homelab-semaphore-query を引数付きで呼ぶだけ)。recovery_exec_setup.ymlが
+# 事前にこのroleを配備している前提。
+#
+# **2026-08-19、homelab-semaphore-queryはSemaphore REST API経由へ移行した**
+# (docs/ai/reviews/semaphore_query_api/2026-08-19_001_requirement.md)。
+# homelab-semaphore-queryはもうsemaphore.dbを読まず、代わりに
+# `incident_investigate_semaphore_query_token`(下記)を読む。
+#
+# **R13(Yoshinobu決定、2026-08-19)**: トークンファイルのACLは元々
+# recovery-exec / incident-inspect / dev-investigateの3識別子にしか
+# 付与されておらず、yoshi(`incident_investigate_run_user`)は含まれて
+# いなかった——機構が変わって初めて現れた4人目の消費者であり、権限が
+# 広がるわけではない。`roles/incident_investigate/tasks/main.yml`が
+# yoshiへ同トークンファイルのread ACLを付与する(2026-08-19_003独立
+# レビューで発見、Yoshinobuが付与を決定して解消)。
 # ---------------------------------------------------------------------------
 incident_investigate_semaphore_query_bin: /usr/local/bin/homelab-semaphore-query
 incident_investigate_semaphore_query_timeout_s: 15
+# R9/R13で3識別子+yoshiへACL readが付与される、同一の絶対path
+# (roles/recovery_exec, roles/incident_inspect, roles/dev_investigateの
+# 各defaults/main.ymlが持つ同名の値と一致していること)。
+incident_investigate_semaphore_query_token: /etc/homelab-recovery/semaphore-query-token
 
 # ---------------------------------------------------------------------------
 # R3の扱い: 証拠バンドル(summary.json)は既に出現しているが、Semaphore DB側の

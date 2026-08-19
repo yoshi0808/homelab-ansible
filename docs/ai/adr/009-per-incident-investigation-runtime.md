@@ -100,6 +100,24 @@
 | execpolicy | **安全境界として数えない**(U0の結果)。2026-07-31の追測で、config.tomlに `[execpolicy]` というキーがそもそも存在せず、`.rules` へ移してもallowlistは表現できないことが確定したため、**書くこともやめて設定から削除した**(Incident参照) |
 | 認証 | `codex login` を**このユーザーとして1回**行う。`recovery-exec` の `auth.json` を**複製しない**(`docs/ai/core.md`: tokenの複製を行わない) |
 
+> **【2026-08-19 部分supersede】「読取に要る権限」行は、Semaphore 2.19.8への
+> 版上げに伴う移行(`docs/ai/reviews/semaphore_query_api/2026-08-19_001_requirement.md`)
+> で成立しなくなった。** `semaphore.db` の読み取りACLはこのユーザーに
+> 付与されなくなり(2.19.8がSQLiteをWALモードで開き、ACLの付かない
+> `-shm`/`-wal`補助ファイルが必要になったため、直読み自体が全識別子で
+> 不可能になった)、代わりにR9でSemaphore API tokenファイルへのread ACLが
+> 付与された。**さらにR14(同requirement)で、このユーザー自身の
+> Codexセッションはそのtokenを使ったAPI呼び出しすら行わない**
+> (`--sandbox read-only`が外向き通信を塞ぐため)。Semaphoreの情報は
+> 別identity(yoshi、`roles/incident_investigate`)がsandboxの外で先読みし、
+> このユーザー専用のcontext directoryへファイルとして渡す。**このユーザーの
+> 実際の権限surfaceは「API tokenファイルのread ACL(未使用)+
+> `reports/`へのtraverse ACL + 先読みcontext directoryへのtraverse ACL(`x`のみ、listは持たない)」**
+> であり、この表の「semaphore.dbの読み取りACL」という記述はもう実態と
+> 一致しない。恒久の決定としてこの表自体は書き換えない — 経緯と現状は
+> 上記requirementおよび `docs/ai/reviews/semaphore_query_api/
+> 2026-08-19_002_implement.md` が正本。
+
 ## Trade-off Analysis
 
 **受け入れる代償**

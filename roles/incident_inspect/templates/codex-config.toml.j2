@@ -2,8 +2,10 @@ model = "{{ incident_inspect_codex_model }}"
 approval_policy = "never"
 
 # Sandbox (ADR-009 (c) c-3): this account only ever runs local, read-only
-# lookups (homelab-semaphore-query, homelab-reports) — it has no SSH keys and
-# no reason to reach a network. The actual enforcement point is
+# lookups (homelab-reports) and reads a locally pre-fetched, per-job file
+# (semaphore-context-<job-id>.txt in a dedicated context directory — R14,
+# see below) — it has no SSH keys and no reason to reach a network. The
+# actual enforcement point is
 # codex-investigate-wrapper's hardcoded `--sandbox read-only` flag, which the
 # caller cannot override (same non-negotiable-flags design as
 # roles/recovery_exec/templates/codex-exec-wrapper.j2). The
@@ -29,5 +31,38 @@ network_access = false
 # The layers that do hold for this account: no SSH keys exist at all (so
 # homelab-recover-*/homelab-investigate-* fail before anything is consulted),
 # the wrapper's hardcoded `--sandbox read-only`, and POSIX ACL grants covering
-# only semaphore.db + /home/yoshi traverse (no write anywhere reachable by this
-# UID).
+# the Semaphore query token file (read-only, per R9), /home/yoshi traverse,
+# and — since R14 (below) — traverse only (`x`, no `r`) on the Semaphore
+# pre-fetch context directory (roles/incident_investigate/tasks/main.yml).
+# `x` without `r` permits opening a file whose exact path is already known
+# but not listing the directory's contents — this account is always given
+# the exact path to read (never asked to discover it), so directory listing
+# is a capability it has no legitimate use for and is not granted. None of
+# these three grants include write anywhere reachable by this UID.
+#
+# **R14 (2026-08-19, Yoshinobu decision)**: this account's own sandboxed
+# session never calls homelab-semaphore-query — measured directly (curl from
+# inside `codex exec --sandbox read-only` to the Semaphore API got no
+# response at all; the same request outside the sandbox succeeded), and
+# `sandbox_workspace_write.network_access` only applies to the
+# `workspace-write` sandbox mode, so there is no way to unblock this while
+# staying on `--sandbox read-only`. Rather than loosen the sandbox to
+# `workspace-write` just to allow that one network call, Semaphore job data
+# (task-output/task-hosts/task-errors) is fetched by a *separate* process
+# outside this sandbox (incident-investigate.py, running as yoshi) before
+# this session starts, and handed to this account as a plain file — see
+# roles/incident_inspect/templates/AGENTS.md.j2 for the path and naming.
+#
+# **2026-08-19, independent review round 2**: that file used to live inside
+# this account's own workspace under a fixed name. Both were findings: a
+# fixed name meant a job whose pre-fetch failed could read *stale content
+# from a previous job* instead of noticing the failure (now: the filename
+# includes the job id, so a failed pre-fetch means the file for *this* job
+# simply does not exist); and granting yoshi write access to the workspace
+# directory itself would have let it unlink/replace this account's own
+# AGENTS.md (the instructions this account follows), not just create the
+# context file (now: the pre-fetch is written to a directory dedicated to
+# that purpose, entirely separate from the workspace — see
+# roles/incident_investigate/tasks/main.yml). The Semaphore query token
+# file grant above is retained (R9 still requires it), even though this
+# account's own sandboxed session does not currently exercise it.

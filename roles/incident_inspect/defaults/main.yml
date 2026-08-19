@@ -38,6 +38,22 @@ incident_inspect_caller_user: yoshi
 # incident_capture_user の踏襲と同じ理由で、実行するたびに無関係なroleが
 # 再実行経路に乗ることを避ける。前提条件はplaybooks/incident_inspect_setup.yml
 # のコメントで明示する)。
-incident_inspect_semaphore_db: /var/lib/semaphore/semaphore.db
-incident_inspect_semaphore_dir: /var/lib/semaphore
+# homelab-semaphore-query moved off direct semaphore.db access to the
+# Semaphore REST API (docs/ai/reviews/semaphore_query_api/
+# 2026-08-19_001_requirement.md R9). incident_inspect_semaphore_db /
+# incident_inspect_semaphore_dir are gone with it — this UID no longer
+# touches /var/lib/semaphore at all, only the API token file below.
+incident_inspect_semaphore_query_token: /etc/homelab-recovery/semaphore-query-token
 incident_inspect_yoshi_home: /home/yoshi
+
+# R14(requirement: docs/ai/reviews/semaphore_query_api/
+# 2026-08-19_001_requirement.md)。roles/incident_investigateが単独で
+# 作成・所有するSemaphore先読み専用directory——**このroleはmode/ACLに
+# 一切触れない**(round2独立レビューHigh #1/#3是正: workspaceと分離し、
+# かつ単一roleに所有を一体化することで、どちらのroleを後から再実行しても
+# 実効権限が退行しない設計にした)。ここでは
+# roles/incident_inspect/templates/AGENTS.md.j2 のレンダリングにのみ使う
+# ——値は roles/incident_investigate/defaults/main.yml の
+# `incident_investigate_semaphore_context_dir` と**一致していなければ
+# ならない**(U1/U2の結合値)。
+incident_inspect_semaphore_context_dir: /var/lib/incident-inspect/semaphore-context

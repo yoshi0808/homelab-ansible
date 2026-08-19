@@ -77,6 +77,15 @@
 # 既存helper(recovery-reports-helper / incident-bundle-helper /
 # homelab-semaphore-query、いずれもroles/recovery_exec配備済み)を自分の
 # UIDで直接読むにはこのACLが要る。
+#
+# homelab-semaphore-query は Semaphore REST API 経由へ移行済み
+# (docs/ai/reviews/semaphore_query_api/2026-08-19_001_requirement.md R9)。
+# 以前あった /var/lib/semaphore へのtraverse ACLとsemaphore.dbへのread ACL
+# はもう要らない — dev-investigateはもうそのパスへ触れない(下の
+# 明示的な state: absent task で撤去する)。代わりに要るのは
+# APIトークンファイルへのread。/etc/homelab-recovery自体は0755
+# (roles/recovery_probe/tasks/main.yml)でtraverse済みのため、トークン
+# ファイル自体へのnamed-user ACLだけを付与する。
 # ---------------------------------------------------------------------------
 
 - name: Install acl package (setfacl/getfacl; self-contained, idempotent even if already installed)
@@ -98,24 +107,39 @@
   when: not ansible_check_mode
   tags: [destructive]
 
-- name: Grant dev-investigate ACL traverse on /var/lib/semaphore (no sudo)
+- name: Grant dev-investigate ACL read on the Semaphore query token file (no sudo; R9)
   ansible.posix.acl:
-    path: "{{ dev_investigate_semaphore_dir }}"
+    path: "{{ dev_investigate_semaphore_query_token }}"
     entity: "{{ dev_investigate_user }}"
     etype: user
-    permissions: x
+    permissions: r
     state: present
   become: true
   when: not ansible_check_mode
   tags: [destructive]
 
-- name: Grant dev-investigate ACL read on semaphore.db (no sudo; journal_mode=delete, no -wal/-shm to also grant)
+# The old semaphore.db / /var/lib/semaphore grants are not removed by
+# deploying the task above — a host already set up before this migration
+# keeps dev-investigate's old read/traverse ability until it is explicitly
+# revoked (found by review 2026-08-19_003, High #1). New grant first, old
+# grants removed after (converges on re-run after an interrupted apply; see
+# roles/recovery_exec/tasks/main.yml for the same pattern and rationale).
+- name: Remove dev-investigate ACL read on the old semaphore.db (superseded by the token file grant above; R9)
   ansible.posix.acl:
-    path: "{{ dev_investigate_semaphore_db }}"
+    path: /var/lib/semaphore/semaphore.db
     entity: "{{ dev_investigate_user }}"
     etype: user
-    permissions: r
-    state: present
+    state: absent
+  become: true
+  when: not ansible_check_mode
+  tags: [destructive]
+
+- name: Remove dev-investigate ACL traverse on the old /var/lib/semaphore (superseded by the token file grant above; R9)
+  ansible.posix.acl:
+    path: /var/lib/semaphore
+    entity: "{{ dev_investigate_user }}"
+    etype: user
+    state: absent
   become: true
   when: not ansible_check_mode
   tags: [destructive]

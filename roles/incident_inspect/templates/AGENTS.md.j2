@@ -21,33 +21,46 @@ sandbox — nothing you write to disk is read back by the caller.
   このコメントはJinjaコメントであり、配備されるAGENTS.mdには出力されない。
 #}
 
-## Available Tools
+## Available Tools and Files
 
-Two read-only lookups are installed on this host. **Call only the commands
-listed below.** No other command is offered as an option here: if a task
-seems to need something else, say so in your response instead of trying it.
+This host has no network access from within this session (`--sandbox
+read-only` blocks it — confirmed 2026-08-19: a request from inside this
+sandbox to the Semaphore API gets no response at all, the same request
+from outside succeeds). Semaphore's own CLI (`homelab-semaphore-query`) is
+**not offered as a command here for that reason — it would only fail.**
+One read-only lookup command and one pre-fetched file are available
+instead. **Call only the command listed below.** No other command is
+offered as an option here: if a task seems to need something else, say so
+in your response instead of trying it.
 
-### Semaphore failure lookup (homelab-semaphore-query)
+### Semaphore job context (pre-fetched file)
 
-Use to see why the Semaphore-run playbook you are investigating failed.
-Read-only against `semaphore.db`.
+The job's Semaphore data (job output, per-host results, per-host errors)
+was fetched **before this session started**, by a separate process running
+outside this sandbox. That process fetches once, before this session
+starts, and does not perform any further fetches while this session is
+running — the file will not be refreshed during it. (This is a statement
+about what that process does, not about what it is capable of: it keeps
+running with network access after this session starts, it simply does not
+use it again for this investigation.)
 
-```
-homelab-semaphore-query recent-failed <n>
-homelab-semaphore-query task-errors <id>
-homelab-semaphore-query task-hosts <id>
-homelab-semaphore-query task-output <id>
-homelab-semaphore-query task-time <id>
-```
+Read `{{ incident_inspect_semaphore_context_dir }}/semaphore-context-<job-id>.txt`,
+where `<job-id>` is the Semaphore job number given in your task
+instructions (the exact path is also given there directly). It has three
+sections (`=== task-output ===`, `=== task-hosts ===`, `=== task-errors
+===`), each either the fetched text or a `(fetch failed: ...)` /
+`(empty)` marker if that particular query did not return data — treat a
+failure marker as "could not be obtained", not as "nothing happened".
+**If the file does not exist at all, the pre-fetch itself failed for this
+job.** Do not read a file for a different job number as a substitute, even
+if one happens to exist in this directory — leftover files from earlier
+investigations are cleaned up on a best-effort basis and are not
+guaranteed to be absent, but a file for a different job number is never
+evidence for *this* job regardless of whether it exists.
 
-- `recent-failed <n>` — last `n` (1-200) tasks with status error/stopped: id,
-  template name, playbook, status, start time.
-- `task-errors <id>` — ansible error messages for that task id.
-- `task-hosts <id>` — per-host result rows for that task id.
-- `task-output <id>` — full task output log, chronological.
-- `task-time <id>` — id, template name, playbook, status, and untruncated
-  `start`/`end` for that task id.
-- `<n>` / `<id>` must be plain integers; there is no free-form SQL access.
+The job's identifying metadata (template, playbook, status, start/end
+time) is not in this file — it is in the evidence bundle's `summary.json`,
+reachable via the Reports lookup below.
 
 ### Reports lookup (homelab-reports)
 
@@ -81,8 +94,8 @@ This host also has SSH-based investigate/recovery wrappers
 account (`recovery-exec`). This session's own account has no SSH keys at
 all, so those wrappers are not reachable from here even though their
 filenames are on the system — attempting them will only fail and waste
-time. Use the two tools above instead; the evidence bundle already contains
-the host-state snapshot the capture pipeline recorded.
+time. Use the file and command above instead; the evidence bundle already
+contains the host-state snapshot the capture pipeline recorded.
 
 ## What to output
 

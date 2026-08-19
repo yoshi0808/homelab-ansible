@@ -63,6 +63,79 @@
   tags: [destructive]
 
 # ---------------------------------------------------------------------------
+# R13/R14 (docs/ai/reviews/semaphore_query_api/2026-08-19_001_requirement.md):
+# yoshi(incident_investigate_run_user、このroleのプロセス実行identity)の
+# 読み取り・書き込みACL。sudoは使わない — incident-investigate.pyは
+# yoshi自身のUIDでhomelab-semaphore-queryをsubprocess実行するだけで、
+# 別identityへ切り替える経路がそもそも無い。
+#
+# R13: yoshiはSemaphore query tokenファイルを読む必要がある
+# (homelab-semaphore-queryがこれを読むのはyoshiとして実行されたときも
+# 同じ)。旧設計ではyoshiがsemaphore.dbの所有者として直接読めていたため
+# ACLが要らなかったが、token file方式ではACLの明示付与が要る(3識別子
+# しか付与されていなかった——このroleのdefaults/main.yml「既存の読み取り
+# 口」節を参照)。
+#
+# R14(2026-08-19、独立レビューround2 High #1/#3是正): yoshiはSemaphoreの
+# 先読み結果を書く必要があるが、**incident-inspectのworkspaceへは書かない**。
+# workspaceにはincident-inspect所有のAGENTS.md(LLMが従う指示書)が同居して
+# おり、workspace directory全体へのwrite権限は、そのAGENTS.mdをunlink/
+# renameして別内容へ差し替える能力まで与えてしまう(round2 High #1)。
+# 代わりに、このroleが単独で所有するSemaphore先読み専用directory
+# (`incident_investigate_semaphore_context_dir`)を新設する。
+#
+# **このdirectoryのmode/ACLは、このrole(incident_investigate)だけが
+# 触れる。** roles/incident_inspectはこのdirectoryの存在すら関知しない
+# ——2roleが同じdirectoryのmode/ACLを別々に設定する状態を作らないことで、
+# `incident_inspect → incident_investigate → incident_inspect`のように
+# 再配備順が入れ替わっても、後から実行されたroleが先に設定したACLの
+# 実効maskを狭めるという退行が構造的に起きない(round2 High #3是正
+# ——POSIX access ACLではgroup class bitsがmaskになるため、`mode:`の
+# 再適用はnamed-user entryの実効権限を狭め得る。ここでは`mode:`を
+# 設定するtaskと`ansible.posix.acl`のtaskが同一role・同一実行順に
+# 常に一緒に走るため、この2つの間でmaskが古いまま取り残される状態を
+# 経由しない)。
+- name: Install acl package (setfacl/getfacl; self-contained, idempotent even if another role already installed it)
+  ansible.builtin.apt:
+    name: acl
+    state: present
+  become: true
+  when: not ansible_check_mode
+  tags: [destructive]
+
+- name: Grant yoshi ACL read on the Semaphore query token file (R13)
+  ansible.posix.acl:
+    path: "{{ incident_investigate_semaphore_query_token }}"
+    entity: "{{ incident_investigate_run_user }}"
+    etype: user
+    permissions: r
+    state: present
+  become: true
+  when: not ansible_check_mode
+  tags: [destructive]
+
+- name: Create the Semaphore pre-fetch context directory (R14; owned solely by this role)
+  ansible.builtin.file:
+    path: "{{ incident_investigate_semaphore_context_dir }}"
+    state: directory
+    owner: "{{ incident_investigate_run_user }}"
+    mode: "0750"
+  become: true
+  when: not ansible_check_mode
+  tags: [destructive]
+
+- name: Grant incident-inspect ACL traverse on the Semaphore pre-fetch context directory (R14; x only, no r — least privilege)
+  ansible.posix.acl:
+    path: "{{ incident_investigate_semaphore_context_dir }}"
+    entity: "{{ incident_investigate_inspect_user }}"
+    etype: user
+    permissions: x
+    state: present
+  become: true
+  when: not ansible_check_mode
+  tags: [destructive]
+
+# ---------------------------------------------------------------------------
 # スクリプト・設定・systemd unit
 # ---------------------------------------------------------------------------
 - name: Deploy incident-investigate.py
