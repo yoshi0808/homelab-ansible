@@ -2,7 +2,7 @@
 
 作成: 2026-08-19 / Coordinator
 実行: Yoshinobu(quory 上)
-対象 commit: `0196087`
+対象 commit: `0196087`(実装)/ `16e568a`(本手順書)
 
 **ansy では検証済み。実ホストでしか確認できないのは AC9 と AC10 の2つで、それがこの手順の目的である。**
 
@@ -10,11 +10,17 @@
 
 ## 0. 前提の確認
 
+**ディレクトリを明示して実行する。** quory には少なくとも2つのチェックアウトがあり、**Semaphore はジョブのたびに GitHub から `/opt` 配下へ自分で clone する**(`docs/ai/context/operations/code-delivery-to-production.md` §3.1)。同期の対象は前者だけである。
+
 ```bash
-git log --oneline -1
+cd /home/yoshi/homelab-ansible
+git log --oneline -1     # 16e568a 以降であること
+git status --short       # 空であること
 ```
 
-`0196087` になっていること(quory は1分間隔で pull する)。
+**`16e568a` は本手順書自身が入った commit である。** これより古ければ同期がまだ届いていない(1分間隔)。
+
+**作業ツリーが汚れていたら止める。** `worktree_sync` は汚れた木を直さずに停止する規範であり、汚れている状態自体が異常である。同期が回っているかは `journal-unit worktree-sync.service` で読める。
 
 ## 1. 読み取り専用の Semaphore ユーザーとトークンを作る
 
