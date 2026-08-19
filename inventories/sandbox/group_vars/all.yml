@@ -1,9 +1,13 @@
 ---
 # sandbox インベントリ用。`inventories/homelab/group_vars/` は別インベントリなので
-# 適用されない — 接続方法をここで持つ必要がある。値は homelab 側と同じ
-# (sandbox は ansy / quory の双方から同じ `ann` 鍵で繋がる)。
+# 適用されない — 接続方法をここで持つ必要がある。
+#
+# **鍵は `id_sandbox` で、ansy から sandbox だけを開ける**(2026-08-19)。
+# それ以前は homelab 側と同じ `id_ann` を共用していたが、**同じ鍵が monnie の扉も
+# 開けていたため、ansy から id_ann を削除した際にこのファイルも一緒に効かなくなる**。
+# quory はこの鍵を持たない(quory から sandbox へ流す運用は無い)。
 ansible_user: ann
-ansible_ssh_private_key_file: ~/.ssh/id_ann
+ansible_ssh_private_key_file: ~/.ssh/id_sandbox
 
 # homelab 側の group_vars/all.yml と同じ値を置く。playbook のロジックを試すのが
 # 目的であり、パスの違いで挙動を変えたくないため。**このパスは sandbox 上には

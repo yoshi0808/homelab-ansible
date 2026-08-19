@@ -1,5 +1,12 @@
 ---
-# ansy / quory の双方から `ann` 鍵で繋がる(Yoshinobu、2026-08-06)。
-# 他のグループと同じ接続方式であり、このホスト固有の事情は無い。
+# **ansyがこのホストへ使う鍵は `id_sandbox` で、開くのはsandboxだけである**
+# (2026-08-19)。それ以前は他グループと同じ `id_ann` を共用していたが、
+# **同じ鍵がmonnieの扉も開けていたため、鍵の不在で境界を表現できなかった**
+# (`docs/ai/policies/execution_boundary_policy.md` EXEC-005)。用途で分けた。
+#
+# **quoryはこの鍵を持たない。** quoryの `ann` 鍵はsandboxのauthorized_keysに
+# 残っているが、quoryからこのホストへ何かを流す運用は無い(inventoryの
+# sandbox_nodes の注記が正本)。quoryから流す必要が出たら、そのときに
+# quory側の鍵をここへ書く形にする。
 ansible_user: ann
-ansible_ssh_private_key_file: ~/.ssh/id_ann
+ansible_ssh_private_key_file: ~/.ssh/id_sandbox
