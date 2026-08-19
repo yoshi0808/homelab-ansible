@@ -56,6 +56,18 @@ Semaphore ジョブは **#758 / #759 / #760〜#762** の5本、いずれも正�
 
 ただし **「`semaphore.db` に ACL が付け直されていないか」を開発側から観測する手段は失われた。** ACL を消すのが目的である以上、実害は小さいが、**付け直されても分からない**という性質は記録しておく。
 
+## recovery-exec 側の経路も通った(2026-08-19)
+
+**`roles/recovery_exec/templates/AGENTS.md.j2` の Semaphore 節は今回の差分で書き換えたが、配備まで一度も実行していなかった。** Slack 経由で recovery-exec の Codex へ直近の失敗ジョブを尋ね、**dispatch 経由で見えるものと完全に一致する3件(675 / 631 / 607、playbook・状態・時刻とも)** が返った。
+
+これで3つが同時に確定した。
+
+1. `recovery-exec` のトークン ACL が効いている
+2. **`workspace-write` + `network_access = true` の Codex sandbox から API へ到達できる**(incident-inspect 側の `read-only` とは設定が違う)
+3. 書き換えた `AGENTS.md` の記述で、LLM が実際に正しく使える
+
+**incident-inspect 側の AC10 はこれでは埋まらない。** sandbox の種類が違い、あちらは通信を塞いだうえで先読みファイルを読ませる設計である。
+
 ## 残るもの
 
 **AC10 のみ。** 次に Semaphore ジョブが失敗して incident 調査が動いたとき、その成果物で Semaphore の情報が引用できているかを見る。
