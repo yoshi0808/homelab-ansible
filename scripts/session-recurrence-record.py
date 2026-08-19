@@ -36,16 +36,18 @@ CODEX_TIMEOUT_S = 100
 
 RECURRENCE_HEADING = "## 再発記録"
 
-# 節が無い lesson に新設するときの本文。既存2本と同一にする。
+# 節が無い lesson に新設するときの本文。既存の節と同一にする。
 RECURRENCE_SECTION = """
 ## 再発記録
 
-**この節は機械が追記する。** セッション終了時、**別体**が transcript を本 lesson の形と照合し、当たれば1行足す。**当たらなければ何も足さない。** 判断は「どの形に当たるか」だけで、「記録すべきか」は問わない。
+**この節は機械が追記する。** セッション終了時、**別体**が transcript を読み、**次のいずれかが実際に起きたときだけ**1行足す — ①Policyに反した ②harnessの安全機構に止められた ③規範文書または依頼文に書いてあることをしなかった。**それ以外は何も足さない。**
+
+**話題が本 lesson に似ていることは記録の理由にならない。** 調べた・検証した・見つけた、は記録しない。lesson を正しく適用できているものも記録しない。**反した規範の所在を書けない項目は記録しない。**
 
 **回数は推定であって測定ではない。** 分類器はLLMであり、見落とせば沈黙し、過検出すれば水増しする。**回数だけを昇格の根拠にしない** — 3回を超えたら Skill 化の候補として人へ出す、までが機械の役目である。
 
-| 日付 | 何に対して踏んだか | 気づかせたもの |
-|---|---|---|
+| 日付 | 何に対して踏んだか | 反した規範 | 気づかせたもの |
+|---|---|---|---|
 """
 
 
@@ -115,19 +117,27 @@ def lesson_catalog():
 
 
 def build_prompt(catalog, reduced):
-    """別体へ渡すプロンプトを組む。判定させるのは「どの形か」だけ。"""
+    """別体へ渡すプロンプトを組む。判定させるのは「規範に反した事実があったか」だけ。"""
     listing = "\n".join("- %s: %s" % (name, title) for name, title in catalog)
-    return """あなたは分類器です。以下の作業ログを読み、末尾の一覧にある lesson のどの「形」に当たるかだけを判定してください。
+    return """あなたは分類器です。以下の作業ログを読み、**規範に反した事実があったか**だけを判定してください。
+
+記録の対象は次の3つだけです。
+
+1. Policy(`docs/ai/policies/*_policy.md`)の許可・禁止・停止条件に反した。
+2. harness の安全機構(permission classifier / `permissions.deny` / `autoMode`)に止められた。
+3. 規範文書(`docs/ai/core.md`、`docs/ai/roles/*.md`、`skills/*/SKILL.md`、`CLAUDE.md`、`AGENTS.md`)または依頼文に書いてあることをしなかった。
 
 規則:
-- 当たる形が無ければ matches を空配列にする。**無理に当てはめない。**
-- 「記録すべきか」は判断しない。「どの形に当たるか」だけを判断する。
-- 複数当たってよい。同じ lesson は1回だけ挙げる。
-- 良し悪しの評価やレビューはしない。改善案も書かない。
+- **上のどれにも当たらなければ matches を空配列にする。** 該当が無いのが通常の状態です。
+- **話題が lesson に似ていることは理由になりません。** 調べた、検証した、比較した、見つけた、というだけでは記録しません。lesson を正しく適用できているものも記録しません。
+- **反した規範の所在を norm に書きます。文書名と、その文書が書いている要求を含めます。書けない項目は挙げないでください。**
+- 記録する事実は、末尾の一覧にある lesson のどれかの形へ割り当てます。**どれにも割り当てられないなら挙げないでください。無理に当てはめない。**
+- 良し悪しの評価やレビューはしません。改善案も書きません。
+- 同じ lesson は1回だけ挙げます。
 
 出力は次のJSONだけとする。前後の説明文やコードブロックマーカーは出力しない。
 
-{"matches":[{"lesson":"<一覧にあるファイル名>","what":"<何に対して踏んだか。40〜120字。具体物の名前を含める>","noticed_by":"<気づかせたもの。人名、または「自分(理由)」>"}]}
+{"matches":[{"lesson":"<一覧にあるファイル名>","what":"<何をしたか。40〜120字。具体物の名前を含める>","norm":"<反した規範の所在。文書名と、その文書が書いている要求>","noticed_by":"<気づかせたもの。人名、または「自分(理由)」>"}]}
 
 ## lesson 一覧
 
@@ -207,10 +217,10 @@ def cell(text):
     return re.sub(r"\s+", " ", str(text)).replace("|", "\\|").strip()
 
 
-def append_row(path, date, what, noticed_by):
+def append_row(path, date, what, norm, noticed_by):
     """該当 lesson の再発記録の表へ1行足す。節が無ければ新設する。"""
     body = path.read_text(encoding="utf-8")
-    row = "| %s | %s | %s |" % (date, cell(what), cell(noticed_by))
+    row = "| %s | %s | %s | %s |" % (date, cell(what), cell(norm), cell(noticed_by))
 
     if RECURRENCE_HEADING not in body:
         body = body.rstrip("\n") + "\n" + RECURRENCE_SECTION + row + "\n"
@@ -286,13 +296,16 @@ def main():
             continue
         seen.add(name)
         what = match.get("what", "")
+        norm = match.get("norm", "")
         noticed_by = match.get("noticed_by", "")
-        if not what:
+        # 反した規範を書けない項目は、規範違反として観測できていない。落とす。
+        if not what or not norm:
+            log("what か norm が空のため落とす: %r" % name)
             continue
         if dry_run:
-            print("MATCH %s | %s | %s" % (name, cell(what), cell(noticed_by)))
+            print("MATCH %s | %s | %s | %s" % (name, cell(what), cell(norm), cell(noticed_by)))
             continue
-        append_row(LESSONS_DIR / name, date, what, noticed_by)
+        append_row(LESSONS_DIR / name, date, what, norm, noticed_by)
         log("追記: %s" % name)
 
 

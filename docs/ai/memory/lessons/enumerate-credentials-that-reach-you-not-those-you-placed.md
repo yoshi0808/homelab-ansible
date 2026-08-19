@@ -49,13 +49,3 @@ Phase 4 の掃引を「全鍵 × 全保護対象ホスト × (root / ann)」で�
 一次記録: `docs/ai/memory/incidents/2026-08-06_retired-generation-credentials-survived-phase4.md`
 
 関連: [[verify-the-outside-of-a-claimed-boundary]]、[[permission-boundaries-must-be-designed-not-prompted]]、[[sweep-all-documents-stating-a-changed-boundary]]
-
-## 再発記録
-
-**この節は機械が追記する。** セッション終了時、**別体**が transcript を本 lesson の形と照合し、当たれば1行足す。**当たらなければ何も足さない。** 判断は「どの形に当たるか」だけで、「記録すべきか」は問わない。
-
-**回数は推定であって測定ではない。** 分類器はLLMであり、見落とせば沈黙し、過検出すれば水増しする。**回数だけを昇格の根拠にしない** — 3回を超えたら Skill 化の候補として人へ出す、までが機械の役目である。
-
-| 日付 | 何に対して踏んだか | 気づかせたもの |
-|---|---|---|
-| 2026-08-19 | semaphore-query-tokenのACL対象を3識別子だけと数え、実際の消費者incident-investigate_run_userを漏らした | Implementer |

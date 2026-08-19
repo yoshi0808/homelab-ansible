@@ -18,13 +18,3 @@
 3. **新スタック導入時は、ローカルで実parser/実runtimeを再現できる検証手段を最初に確保する**(バイナリをローカル環境に導入する等)。
 4. レビュー定型観点に「多層エスケープ文脈の列挙」「rc規約(grep/journalctlはno-match=1等)」「check-modeで評価されない条件分岐の列挙」を加える(`skills/ansible-security-review/SKILL.md`・`skills/code-review/SKILL.md`と合わせて運用する)。
 5. Alloyの`stage.match`セレクタは、ダブルクォートのSTRING literalを使う(backtick raw literalは`unexpected IDENTIFIER`でAlloy起動自体が失敗し、`alloy validate`はこれを検出できない)。
-
-## 再発記録
-
-**この節は機械が追記する。** セッション終了時、**別体**が transcript を本 lesson の形と照合し、当たれば1行足す。**当たらなければ何も足さない。** 判断は「どの形に当たるか」だけで、「記録すべきか」は問わない。
-
-**回数は推定であって測定ではない。** 分類器はLLMであり、見落とせば沈黙し、過検出すれば水増しする。**回数だけを昇格の根拠にしない** — 3回を超えたら Skill 化の候補として人へ出す、までが機械の役目である。
-
-| 日付 | 何に対して踏んだか | 気づかせたもの |
-|---|---|---|
-| 2026-08-19 | agmsgのsend.shへダブルクォートで渡したReviewer依頼中のバックティックがシェル展開され、本文が壊れた | 自分(送信後のメッセージ欠落を確認) |

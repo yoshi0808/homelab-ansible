@@ -34,13 +34,3 @@
 
 - `docs/ai/memory/lessons/sweep-all-documents-stating-a-changed-boundary.md`(層間でなく文書間に同じ操作を適用したもの)
 - `docs/ai/memory/lessons/verify-the-outside-of-a-claimed-boundary.md`(「確認済み」の主張が何を確認していないか)
-
-## 再発記録
-
-**この節は機械が追記する。** セッション終了時、**別体**が transcript を本 lesson の形と照合し、当たれば1行足す。**当たらなければ何も足さない。** 判断は「どの形に当たるか」だけで、「記録すべきか」は問わない。
-
-**回数は推定であって測定ではない。** 分類器はLLMであり、見落とせば沈黙し、過検出すれば水増しする。**回数だけを昇格の根拠にしない** — 3回を超えたら Skill 化の候補として人へ出す、までが機械の役目である。
-
-| 日付 | 何に対して踏んだか | 気づかせたもの |
-|---|---|---|
-| 2026-08-19 | docs/ai/context/system/semaphore.mdの版・project id・apt再起動に関する常時参照情報が実環境より古かった | 自分(ansyとquoryの実測値をContext記述と照合) |
