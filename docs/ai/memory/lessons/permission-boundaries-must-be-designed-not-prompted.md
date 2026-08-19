@@ -91,3 +91,13 @@ Coordinatorの寄与も記録する。「globを使わず名前を明示指定�
 - 先行事例: 2026-07-26 decoy inventoryへの無許可実行
 - 承認境界の正本: `docs/ai/policies/execution_boundary_policy.md`
 - 実行機構: `.claude/settings.json` の `permissions.defaultMode` / `autoMode`(設定そのものが正本。`docs/ai/core.md`「安全機構がブロックしたとき」も参照)
+
+## 再発記録
+
+**この節は機械が追記する。** セッション終了時、**別体**が transcript を本 lesson の形と照合し、当たれば1行足す。**当たらなければ何も足さない。** 判断は「どの形に当たるか」だけで、「記録すべきか」は問わない。
+
+**回数は推定であって測定ではない。** 分類器はLLMであり、見落とせば沈黙し、過検出すれば水増しする。**回数だけを昇格の根拠にしない** — 3回を超えたら Skill 化の候補として人へ出す、までが機械の役目である。
+
+| 日付 | 何に対して踏んだか | 気づかせたもの |
+|---|---|---|
+| 2026-08-19 | incident-inspect用workspaceへyoshiのrwxを与える設計が、同居するAGENTS.mdの置換能力まで許していた | Reviewer |

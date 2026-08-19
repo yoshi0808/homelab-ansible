@@ -43,3 +43,4 @@
 | 日付 | 何に対して踏んだか | 気づかせたもの |
 |---|---|---|
 | 2026-08-18 | status.md全体をSessionStartで渡しているという境界主張に対し、受信側の文脈を測って10,000文字超過時の切断を発見した | Yoshinobu |
+| 2026-08-19 | incident-inspectのread-only sandboxが通信を遮断する主張を、sandbox内の失敗と外側のHTTP 200で比較した | 自分(curlの内外対照試験) |

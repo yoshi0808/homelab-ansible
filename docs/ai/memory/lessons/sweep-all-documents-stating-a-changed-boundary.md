@@ -49,3 +49,13 @@ grep -rn "<変更した境界のキーワード>" docs/ai/ CLAUDE.md AGENTS.md s
 - `docs/ai/memory/lessons/verify-the-outside-of-a-claimed-boundary.md`(境界の検証そのものの落とし穴)
 - `docs/ai/memory/decisions/approval-authority-for-real-host-operations.md`(この掃引の対象となった決定)
 - `docs/ai/memory/lessons/multilayer-escaping-and-novel-stack-verification.md`(同クラス全面掃引という同じ発想を、実装の欠陥クラスに適用したもの)
+
+## 再発記録
+
+**この節は機械が追記する。** セッション終了時、**別体**が transcript を本 lesson の形と照合し、当たれば1行足す。**当たらなければ何も足さない。** 判断は「どの形に当たるか」だけで、「記録すべきか」は問わない。
+
+**回数は推定であって測定ではない。** 分類器はLLMであり、見落とせば沈黙し、過検出すれば水増しする。**回数だけを昇格の根拠にしない** — 3回を超えたら Skill 化の候補として人へ出す、までが機械の役目である。
+
+| 日付 | 何に対して踏んだか | 気づかせたもの |
+|---|---|---|
+| 2026-08-19 | semaphore.db直読みからAPIへ境界を変更した後も、旧SQLite前提の記述がContextや運用入口に残っていた | Reviewer |

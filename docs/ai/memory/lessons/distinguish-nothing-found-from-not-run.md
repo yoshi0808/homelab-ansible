@@ -52,3 +52,4 @@
 | 日付 | 何に対して踏んだか | 気づかせたもの |
 |---|---|---|
 | 2026-08-18 | SessionEnd hookはOOMやSIGKILLでは起動せず、再発記録が無い状態だけでは「該当なし」と「未実行」を区別できない | 自分(Claude Codeのshutdown経路とOOM記録を照合) |
+| 2026-08-19 | 存在しないincident-capture.serviceの起動失敗後、systemctl showが0を返し成功したように見えた | 自分(journalと実際のunit名を再確認) |

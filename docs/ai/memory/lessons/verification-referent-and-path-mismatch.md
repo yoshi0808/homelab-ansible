@@ -36,3 +36,4 @@
 |---|---|---|
 | 2026-08-18 | `group_vars/sophos.yml` の `ansible_ssh_private_key_file` を**Ansibleの接続設定と読み**、playbook本体を開かずに「必ず失敗する」と断定した。実体は `expect` へ渡す `ssh -i` の引数だった | Yoshinobu |
 | 2026-08-18 | 「status.mdのnext」をNext節と解釈したが、実際の参照対象はNow節で、正しい調査でも対象を取り違えた | Yoshinobu |
+| 2026-08-19 | quoryでgit logを実行するディレクトリを指定せず、同期対象外の別checkoutのcommit 2b40ed7を参照した | Yoshinobu |
