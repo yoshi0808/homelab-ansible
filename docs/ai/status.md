@@ -23,16 +23,14 @@
 - **良くなる確証は双方とも持っていない**(Yoshinobu、2026-08-18)。やってみる価値はあるという判断で始めた
 - **やめる条件は現段階では定めない**(Yoshinobu、2026-08-18)。Coordinatorが「効かなかったことを観測可能にするため先に決めるべき」と進言し、**現段階では不要と判断された**。再提案しない
 
-**配備待ち: `homelab-semaphore-query` のAPI移行(2026-08-19 実装完了、commit `0196087`)** — 2.19.8のWAL化でACL経由の3識別子から直読みできなくなった件の対処。**直読みはサポート外の接し方なので復旧させず、APIへ移した。**
+**観測待ち: incident調査のLLMが先読みファイルを読めるか(AC10、2026-08-19)** — `homelab-semaphore-query` のAPI移行は**quoryへ配備完了**(commit `0196087`、Semaphoreジョブ #758〜#762)。**AC10以外すべて充足した。**
 
-- **手順の正本は `docs/ai/reviews/semaphore_query_api/2026-08-19_006_deploy_procedure.md`。** 読み取り専用トークンを置いてから、quoryのボタンを4つ押す(35 → 34 → 40 → 39)。**トークンが先** — ACLタスクの対象がそのファイルである
-- **ansyでは検証済み。** guest相当の非adminトークンで7クエリ、quoryの実データに対する読み取り、消費側パーサ、fail-closedの4パターンまで実測した
-- **実ホストでしか確認できないのは2つ** — `yoshi` がトークンを読めるか(AC9)と、**LLMが先読みファイルを読めるか(AC10)**。後者は次にincident調査が走るまで分からない
-- **incident-inspect の codex sandbox は外向き通信を塞ぐ**(実測)。緩めず、sandboxの外で先読みして専用ディレクトリのファイルで渡す形にした。**書き手が自分のディレクトリを所有し、読み手には traverse だけを与える** — 証拠を書くidentityがLLMの指示書へ届かないようにするため
-- **独立レビュー3回でHigh 7件・Medium 5件を是正した。** 2回目の3件は**1回目の後に足した新しい面から全部出ている** — 面を足すたびに同じ密度で見る必要がある
-- **`task-hosts` / `task-errors` は構造を失い、ジョブ出力からの導出になった。** APIに対応物が無いことをquoryの実タスクで確認済み。消費側は生テキスト保存なので実害は無い
+- **壊れていたことと直ったことの両方が実測で残っている** — `homelab-incident-capture.service` が5分ごとに `status=2` で失敗し続け、配備を境に緑になった。版上げ(8/18 20:29)から約14時間、本番の証拠収集が動いていなかった
+- **残るのはAC10だけ** — codex sandbox の中のLLMが、sandboxの外で先読みしたファイルを実際に読めるか。**次にSemaphoreジョブが失敗して調査が動くまで確定しない**。成果物でSemaphoreの情報が引用できているかを見る
+- **旧 `semaphore.db` ACL は3識別子とも撤去済み**(`/var/lib/semaphore` に named-user エントリなし)
+- **`acl-status semaphore-db` は恒久的に `Permission denied` になった。** `dev-investigate` が traverse を失ったためで異常ではないが、**「ACLが付け直されていないか」を開発側から観測する手段は失われた**
 - **残存リスク**: タスク一覧が将来ページングされたとき、`task-time` は非ゼロで騒ぐが **`recent-failed` は静かに古い分を落とす**。現在757件で頭打ちは観測されていない
-- **ansyには検証用のSemaphoreユーザー `semaphore-query`(guest)とトークンが残してある**(Yoshinobu判断、2026-08-19)。次回の検証に使う
+- 記録は `docs/ai/reviews/semaphore_query_api/`(requirement / 実装 / レビュー3本 / 配備手順 / 配備結果)
 
 ## Next(着手候補) — 工程・体制
 

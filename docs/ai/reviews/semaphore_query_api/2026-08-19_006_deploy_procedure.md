@@ -66,14 +66,21 @@ rm -f /tmp/.oc /tmp/.qt; unset A PW
 
 **トークンを置いた後で押す。** ACL タスクの対象がトークンファイルであり、無ければ失敗する。
 
+**テンプレートから新規に起動する。** 過去のタスクの「再実行」は**そのときの commit を掴む**ため、新しい commit の配備にならない(`docs/ai/context/operations/code-delivery-to-production.md` §3.1)。
+
 | 順 | template | 何が入るか |
 |---|---|---|
-| 1 | `SEMI-SAFE: Recovery exec setup`(id=35) | `homelab-semaphore-query` 本体、トークンへの ACL、**旧 `semaphore.db` ACL の撤去** |
-| 2 | `SEMI-SAFE: Incident investigate setup`(id=34) | 先読み用の専用ディレクトリ、`yoshi` へのトークン ACL |
-| 3 | `SEMI-SAFE: Incident inspect setup`(id=40) | 書き換えた `AGENTS.md` |
-| 4 | `SEMI-SAFE: Incident capture setup`(id=39) | 収集器(時刻パースの追随) |
+| 1 | `SEMI-SAFE: Recovery exec setup`(id=35) | `homelab-semaphore-query` 本体、トークンへの ACL、**`recovery-exec` の旧 ACL 撤去** |
+| 2 | `SEMI-SAFE: Dev investigate setup`(id=36) | **`dev-investigate` のトークン ACL と旧 ACL 撤去。これが無いと調査経路が通らない** |
+| 3 | `SEMI-SAFE: Incident investigate setup`(id=34) | 先読み用の専用ディレクトリ、`yoshi` へのトークン ACL |
+| 4 | `SEMI-SAFE: Incident inspect setup`(id=40) | 書き換えた `AGENTS.md`、`incident-inspect` の旧 ACL 撤去 |
+| 5 | `SEMI-SAFE: Incident capture setup`(id=39) | 収集器(時刻パースの追随) |
 
-**2と3のあいだに順序依存は無い**(専用ディレクトリを1つの role が排他的に所有する形へ直したため)。1が最初、4が最後であればよい。
+**旧 ACL は、それを付けた role がそれぞれ撤去する。** 1本流しただけでは自分の分しか消えない。
+
+**3と4のあいだに順序依存は無い**(専用ディレクトリを1つの role が排他的に所有する形へ直したため)。1と2が先、5が最後であればよい。
+
+> **`dev_investigate_setup` は pre-commit の「配備が要る」に出ない。** あの検査はカタログに載る `copy` 配備物を見るもので、この role の変更は `tasks` と `defaults`(ACL の付与と撤去)だけだからである。**配備の要否は `git diff --stat` で変更された role を見て決める** — pre-commit の出力をそのまま配備リストにしない(2026-08-19、実際にこれで1本落とした)。
 
 ## 3. 確認する
 
@@ -100,18 +107,23 @@ homelab-semaphore-query task-time 675
 ### 旧 ACL が消えたこと
 
 ```bash
-getfacl -p /var/lib/semaphore/semaphore.db | grep -E "recovery-exec|incident-inspect|dev-investigate"
+getfacl -p /var/lib/semaphore | grep -E "^user:[a-z]"
 ```
 
-**1行も返らないこと**(返れば撤去タスクが効いていない)。
+**named-user エントリが1つも返らないこと**(返れば撤去タスクが効いていない)。
+
+> **ansy 側の `acl-status semaphore-db` は、この配備以降ずっと `Permission denied` になる。** `dev-investigate` がディレクトリへの traverse を失うためで、**能力が消えたことの証拠であって異常ではない。** ただし **「semaphore.db に ACL が付け直されていないか」を開発側から観測する手段は失われる**(§5)。
 
 ### AC6 — incident capture が復旧する
 
-収集器を1周期動かし、heartbeat を見る。
+収集器を1周期動かす。**unit 名は `homelab-incident-capture.service`**(テンプレートのファイル名は `incident-capture.service.j2` だが、配備先の名前は `homelab-` が付く)。
 
 ```bash
-sudo systemctl start incident-capture.service   # unit 名は現物で確認すること
+sudo systemctl start homelab-incident-capture.service
+sudo systemctl show homelab-incident-capture.service -p ExecMainStatus --value
 ```
+
+**存在しない unit 名を渡すと、`systemctl show` は既定値の `0` を返す。** 直前の「Unit not found」と並ぶと成功に見えるので、unit 名を先に確かめること。
 
 **`has_errors` が `false` であること。** `true` なら run report に理由が出る。
 
