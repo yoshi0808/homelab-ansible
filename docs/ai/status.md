@@ -11,6 +11,8 @@
 
 ## Now(進行中)
 
+**実施予定: monnie の unpoller をメジャー更新する(2026-08-22の週末、Yoshinobu が quory の Semaphore から手動apply)** — `3.3.4+git → 4.0.0+git`。#800 で `REVIEW_REQUIRED` として検出された。**メジャー跨ぎの破壊的変更は未確認**(設定ファイル形式やUniFi API周りは当てる前に upstream を見る)。unpoller が止まるとネットワーク機器の観測が欠ける(`docs/ai/context/system/monitoring.md`)。同じ月次で **prometheus 3.13.2 → 3.14.0 も非apt側で保留中**であり、こちらは別作業(手動インストール)。発端の記録は `docs/ai/reviews/ubuntu_vm_notify_impact_placement/2026-08-22_004_result.md`
+
 **観測待ち: 誤りの再発を機械が刻む仕組み(2026-08-18 実装)** — **規範に書いても守れない誤りがあり、それを自己申告でしか検出できていない**という問題への手探り。**2回目の発火で過検出が確定し、2026-08-19に門を2段階で差し替えた。過検出は大きく下がったが、残っており、合否を判定する手段がまだ無い。**
 
 - **形式は `docs/ai/memory/lessons/` の「再発記録」節**。契約は「**別体**がセッション終了時に transcript を読み、**規範に反した事実があったときだけ**1行足す。無ければ何もしない」。**門は①Policy違反 ②harnessの安全機構に止められた ③規範文書または依頼文に書いてあることをしなかった、の3つだけ**で、**反した規範の所在を書けない項目は落とす**(`norm` が空なら機械が捨てる)。定型文の正本は `scripts/session-recurrence-record.py` の `RECURRENCE_SECTION`
