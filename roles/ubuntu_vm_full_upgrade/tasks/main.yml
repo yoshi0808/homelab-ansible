@@ -230,6 +230,42 @@
           {% endif %}
           {% endif %}
 
+    # ------------------------------------------------------------------
+    # UV-084「他候補に埋没させない」— 主力serviceへの影響を、Slackが畳む前の
+    # 位置(本文の先頭)へ出すための整形。product_impact.packages は名前しか
+    # 持たないため、版は一覧と同じ inst_detail / remv_detail から引く
+    # (値を二重に持たない)。**「該当なし」は残す** — 全製品を常に出すのは
+    # 該当なしと未実施を区別するための classify.yml の意図であり、位置を
+    # 変えてもその意図は変わらない。
+    # 1パッケージ1行にしているのは、携帯で読むため(2026-08-22)。
+    # 1つのpackageは inst / remv のどちらか一方にしか載らないため、下の
+    # 探索は排他である。**両方に載った場合はinst側を採る**が、これは
+    # 想定外入力への防御であって優先順位の設計ではない。
+    # ------------------------------------------------------------------
+    - name: Build per-product impact block (with versions) for notifications
+      ansible.builtin.set_fact:
+        ubuntu_vm_full_upgrade_product_impact_block: "{{ _impact | default('', true) | trim }}"
+      vars:
+        _impact: |-
+          {% for p in ubuntu_vm_full_upgrade_product_impact %}
+          {% if p.packages | length == 0 %}
+          {{ p.label }}{{ '(' + p.note + ')' if p.note | default('') else '' }}: 該当なし
+          {% else %}
+          {{ p.label }}{{ '(' + p.note + ')' if p.note | default('') else '' }}:
+          {% for name in p.packages %}
+          {% set _i = ubuntu_vm_full_upgrade_sim.simulation.inst_detail | selectattr('name', 'equalto', name) | list %}
+          {% set _r = ubuntu_vm_full_upgrade_sim.simulation.remv_detail | selectattr('name', 'equalto', name) | list %}
+          {% if _i | length > 0 %}
+            {{ name }} {{ _i[0].old if _i[0].old else '(新規)' }} → {{ _i[0].new }}
+          {% elif _r | length > 0 %}
+            {{ name }} {{ _r[0].version if _r[0].version else '?' }} (remove)
+          {% else %}
+            {{ name }}
+          {% endif %}
+          {% endfor %}
+          {% endif %}
+          {% endfor %}
+
     - name: Ensure report directory exists
       ansible.builtin.file:
         path: "{{ ubuntu_vm_full_upgrade_report_dir }}"
@@ -303,6 +339,7 @@
         slack_title: >-
           [ubuntu_vm_full_upgrade] {{ 'dry-run (monthly)' if (dry_run | bool) else 'apply target' }} - {{ inventory_hostname }}: {{ ubuntu_vm_full_upgrade_status }}
         slack_message: |
+          {{ ubuntu_vm_full_upgrade_product_impact_block }}
           {{ ubuntu_vm_full_upgrade_status_reason }}
           候補: install={{ ubuntu_vm_full_upgrade_sim.simulation.inst | length }} remove={{ ubuntu_vm_full_upgrade_sim.simulation.remv | length }} / 保留(phasing)={{ ubuntu_vm_full_upgrade_sim.simulation.phased_detail | length }}
           {% if ubuntu_vm_full_upgrade_sim.simulation.hold | length > 0 %}
@@ -320,9 +357,6 @@
           {% if ubuntu_vm_full_upgrade_notify_detail_block %}
           {{ ubuntu_vm_full_upgrade_notify_detail_block }}
           {% endif %}
-          {% for p in ubuntu_vm_full_upgrade_product_impact %}
-          {{ p.label }}{{ '(' + p.note + ')' if p.note | default('') else '' }}: {{ (p.packages | join(', ')) if p.packages | length > 0 else '該当なし' }}
-          {% endfor %}
 
 - name: Reject manual apply if Status forbids it (BLOCKED / MAJOR_UPGRADE_DETECTED)
   ansible.builtin.assert:
