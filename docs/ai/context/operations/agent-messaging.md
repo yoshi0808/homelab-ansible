@@ -63,6 +63,10 @@ codex 側には2つの層があり、どちらもリポジトリ外にある。*
 
 **この2層は、Coordinator側の `.claude/settings.json`(`permissions` / `autoMode`)に対応する。** 両者を非対称にしない — 一方だけを広げると、Role文書が同じことを定めていても実効的な能力が食い違う。
 
+**Ansible を扱わせるなら `~/.ansible/tmp` が writable_roots に要る**(Yoshinobu、2026-08-22 に追加)。`ansible-playbook` は既定の一時ディレクトリをここへ作るため、無いと**コードを評価する前に停止する**。**症状は「レビューが始まらない」ではなく「途中で昇格を求めてくる」**で、codex は迂回せず正しく止まる。Coordinator 側は同じ場所へ元から書けるので、これは非対称を**減らす**変更である。
+
+**`~/.codex/config.toml` は Ansible 管理外である。** repo からは配備されず、`git` にも現れない。ここを変えたことは記録に残さないと、次に読む者は現物を見るまで知りようがない。
+
 ## 6. 依頼文
 
 型は [`skills/subagent-briefing/SKILL.md`](../../../../skills/subagent-briefing/SKILL.md) に従い、ここへ複製しない。codex 固有として書き添えるのは次の2つである。
