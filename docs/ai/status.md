@@ -11,7 +11,15 @@
 
 ## Now(進行中)
 
-**実施予定: monnie の unpoller をメジャー更新する(2026-08-22の週末、Yoshinobu が quory の Semaphore から手動apply)** — `3.3.4+git → 4.0.0+git`。#800 で `REVIEW_REQUIRED` として検出された。**メジャー跨ぎの破壊的変更は未確認**(設定ファイル形式やUniFi API周りは当てる前に upstream を見る)。unpoller が止まるとネットワーク機器の観測が欠ける(`docs/ai/context/system/monitoring.md`)。同じ月次で **prometheus 3.13.2 → 3.14.0 も非apt側で保留中**であり、こちらは別作業(手動インストール)。発端の記録は `docs/ai/reviews/ubuntu_vm_notify_impact_placement/2026-08-22_004_result.md`
+**観測待ち: 月次 full-upgrade が conffile プロンプトで止まらないこと(2026-08-22 実装)** — 当日 monnie のジョブ #802 が `/etc/unpoller/up.conf` の conffile プロンプトで**無期限に停止した**。`DEBIAN_FRONTEND=noninteractive` が抑止するのは debconf であって dpkg の conffile プロンプトではない。**プロンプトの stdin は Ansible の SSH セッションにあり、誰も答えられない。** 入れたのは `-o Dpkg::Options::=--force-confold` と `timeout --kill-after` と `NEEDRESTART_MODE=l`。**効いたことが確定するのは、ローカル変更のある conffile が更新対象に入る次の月**である。案件記録は `docs/ai/reviews/ubuntu_vm_apply_conffile_prompt/`
+
+- **timeout は 3600秒。** 短いほうが危険という非対称性で選んだ — 短すぎると健全に進んでいる apt を kill して 当日と同じ壊れた dpkg 状態を自作する。長すぎても気づくのが遅れるだけ。mute の120分に対して60分の余裕
+- **どの conffile を保持したかは出せていない。** 通知に出るのは「保持する設定で適用した」という静的な一文だけ。特定は `docs/ai/reviews/ubuntu_vm_conffile_held_report/` へ分割した(着手時期未定)。**apply 前後の状態比較では原理的に届かない**ことが3ラウンドのレビューで確定している
+- **孤児プロセスの後始末は自動化していない。** 当日、Semaphore がジョブを停止しても monnie の `apt-get` は残った
+
+**残: prometheus 3.13.2 → 3.14.0(非apt、手動インストール)** — monnie。unpoller とは別作業で、2026-08-22 の月次では当てていない。手順は Notion『Prometheus / Grafana / unifi-poller セットアップ手順』
+
+**未確認: unpoller の Prometheus scrape cache** — 4.0.0 の起動ログに `Prometheus scrape cache enabled, refresh interval: 1m0s` が出る。3.3.4 から在ったのか 4.0.0 で入ったのかを測っていない。4.0.0 で入ったのなら、scrape 間隔15秒に対して値の更新が60秒になり**メトリクスの時間分解能が落ちる**(counter の総量は保たれるため alert rule 4本の発火条件は成立したまま)。確認は monnie の journal に残っている 2026-08-07 03:30 前後の起動ログ
 
 **観測待ち: 誤りの再発を機械が刻む仕組み(2026-08-18 実装)** — **規範に書いても守れない誤りがあり、それを自己申告でしか検出できていない**という問題への手探り。**2回目の発火で過検出が確定し、2026-08-19に門を2段階で差し替えた。過検出は大きく下がったが、残っており、合否を判定する手段がまだ無い。**
 

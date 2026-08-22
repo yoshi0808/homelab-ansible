@@ -19,6 +19,43 @@
 # playbook). ansy/quory are not recovery targets; muting them would just
 # write an unconsumed /var/lib/homelab-recovery/mute/<host>.json (2026-07-11
 # review).
+#
+# conffile / needrestart prompts (docs/ai/reviews/ubuntu_vm_apply_conffile_prompt/
+# 2026-08-22_001_requirement.md, incident: monnie job #802, 2026-08-22):
+# `DEBIAN_FRONTEND=noninteractive` only suppresses debconf prompts, not
+# dpkg's own conffile prompt — that one still blocks on stdin, which this
+# SSH session holds and nothing else can answer, forever (requirement §1).
+# R1/R5 below close both known interactive-prompt sources for `apt-get
+# full-upgrade`; R4 bounds the whole call so an unknown third source fails
+# loudly instead of hanging indefinitely.
+#
+# 2026-08-22_003_review.md (F1/F4) and 2026-08-22_004_review.md (S1)
+# revised R4's timeout handling below (see 2026-08-22_002_implement.md):
+# F1 added --kill-after + a positive-duration assert to `timeout` (a bare
+# `timeout N` only sends TERM, which a maintainer script can ignore or
+# catch, leaving the exact indefinite-hang class this requirement exists to
+# close). F4 rewrote the timeout failure message to describe a
+# partial-apply state, not just an orphaned-process hunt. S1 stopped
+# asserting that rc=137 always means "our own kill-after fired" — GNU
+# timeout cannot distinguish that from an external SIGKILL.
+#
+# 2026-08-22_005_review.md (3rd re-review, High 3) found that R2/R3 (which
+# conffile did --force-confold actually keep this run) sit on a structural
+# ceiling: an apply-time pre/post snapshot diff cannot distinguish "the
+# postinst script that runs immediately after a *kept* conffile touched
+# it" from "the postinst script that runs after an *applied* new default
+# touched it" — both look identical from outside dpkg. Holding this
+# requirement to a fail-closed indeterminate standard (as F3/G1-G3 tried
+# to do) would make ordinary applies that touch any postinst-managed
+# conffile fail routinely, which is worse than the prompt-hang this
+# requirement exists to close. Coordinator split the case: R2/R3 (and the
+# script, and all snapshot/diff/indeterminate/held-conffile machinery this
+# file used to contain) moved to a future requirement; only R1/R4/R5 (and
+# G4, an unrelated real bug in reboot_quory.yml's notification gating)
+# ship here. See 2026-08-22_002_implement.md for the full history —
+# including the two implementations of R2/R3 that were built and then
+# removed, so this is not unexplored ground for whoever picks R2/R3 back
+# up.
 - name: Set recovery mute before full-upgrade (authy/monnie only)
   ansible.builtin.include_tasks: "{{ playbook_dir }}/../roles/recovery_mute/tasks/set.yml"
   when: inventory_hostname in ['authy', 'monnie']
@@ -27,13 +64,120 @@
     recovery_mute_minutes: 120
     recovery_mute_reason: "ubuntu_vm_full_upgrade: {{ inventory_hostname }} full-upgrade + reboot in progress"
 
+# F1: GNU timeout(1) disables its own limit entirely when given a duration
+# of 0 — fail closed before relying on it. Checked here (not just left as a
+# doc comment on the default) because a caller could still override the var
+# to 0 via -e.
+- name: Assert apply timeout values are positive (fail-closed — R4/F1)
+  ansible.builtin.assert:
+    that:
+      - ubuntu_vm_full_upgrade_apply_timeout_seconds | int > 0
+      - ubuntu_vm_full_upgrade_apply_kill_after_seconds | int > 0
+    fail_msg: >-
+      ubuntu_vm_full_upgrade_apply_timeout_seconds and
+      ubuntu_vm_full_upgrade_apply_kill_after_seconds must both be positive
+      integers — GNU coreutils timeout(1) treats a duration of 0 as "no
+      limit", which would silently disable R4's timeout enforcement
+      entirely. Got
+      timeout_seconds={{ ubuntu_vm_full_upgrade_apply_timeout_seconds }}
+      kill_after_seconds={{ ubuntu_vm_full_upgrade_apply_kill_after_seconds }}.
+    quiet: true
+
+# R1: --force-confold makes dpkg keep the locally-modified conffile instead
+# of prompting (this environment's conffiles are manually managed by design
+# — requirement §3 non-goal, "conffileを配布元版へ更新する経路を作らない").
+# R5: NEEDRESTART_MODE=l (list-only) closes needrestart's own interactive
+# prompt without letting it restart services itself — reboot/restart
+# timing for this role is UV-051/UV-052's job (reboot-required flag check
+# below), and needrestart auto-restarting services here would duplicate
+# that decision with a different policy.
+# R4/F1: `timeout --kill-after` bounds the whole call two ways — TERM at
+# ..._apply_timeout_seconds, escalating to KILL after a further
+# ..._apply_kill_after_seconds grace if the target ignores or catches TERM
+# (a bare `timeout N` only sends TERM and then waits indefinitely for exit
+# if the target survives it — that is the same indefinite-hang class this
+# requirement exists to close, not a fix for it). argv (not a shell string)
+# fixes each token's boundary explicitly (Suggestion 2, 2026-08-22_003_review.md)
+# now that there are enough moving parts (two duration vars) to make that
+# worth the extra clarity, even though apt option/package tokens here never
+# contain whitespace.
 - name: Run apt full-upgrade
   ansible.builtin.command:
-    cmd: apt-get -y full-upgrade
+    argv:
+      - timeout
+      - "--kill-after={{ ubuntu_vm_full_upgrade_apply_kill_after_seconds }}"
+      - "{{ ubuntu_vm_full_upgrade_apply_timeout_seconds }}"
+      - apt-get
+      - -y
+      - full-upgrade
+      - -o
+      - Dpkg::Options::=--force-confold
   environment:
     DEBIAN_FRONTEND: noninteractive
+    NEEDRESTART_MODE: l
   register: ubuntu_vm_full_upgrade_apply_result
   changed_when: true
+  failed_when: false
+
+# F4/S1: rc=124 (TERM took effect) and rc=137 (128+9 — the process ended
+# via SIGKILL) both route here (Suggestion 1, 2026-08-22_003_review.md),
+# but rc=137's wording no longer asserts a specific cause. S1
+# (2026-08-22_004_review.md): GNU coreutils documents that `timeout`
+# cannot distinguish a KILL it sent itself (via --kill-after, after TERM
+# was ignored/caught) from a SIGKILL delivered by something else entirely
+# (the OOM killer, an operator running `kill -9`) — the exit code is
+# identical either way. Asserting "TERM was ignored, so we escalated" as
+# fact when only the former is confirmed by rc=124/137 alone is exactly
+# the "treated old/assumed information as confirmed current state" error
+# this whole incident chain started from — so rc=137's message states
+# what rc=137 actually proves (SIGKILL termination) and what it does not
+# (which of the possible causes). The message itself was rewritten from
+# "look for an orphaned apt-get" (which only covers the process-survival
+# half of what a TERM/KILL mid-run can leave) to name the three things a
+# partial apply can actually require checking: the process/lock, the
+# package database state, and that reboot/post-check was never reached —
+# without prescribing which fix applies, since that depends on what's
+# actually found.
+- name: Fail clearly if apt full-upgrade timed out (R4/F1/F4/S1 — rc=124/137 both stopped the process, cause is not fully confirmed by rc alone)
+  ansible.builtin.fail:
+    msg: >-
+      ubuntu_vm_full_upgrade: apt-get full-upgrade TIMED OUT or was
+      SIGKILLed on {{ inventory_hostname }}
+      ({{ 'TERM took effect after ' + (ubuntu_vm_full_upgrade_apply_timeout_seconds | string) + 's (rc=124)'
+          if ubuntu_vm_full_upgrade_apply_result.rc == 124
+          else 'process ended via SIGKILL (rc=137). Consistent with '
+               + (ubuntu_vm_full_upgrade_apply_kill_after_seconds | string)
+               + 's kill-after escalation after TERM at '
+               + (ubuntu_vm_full_upgrade_apply_timeout_seconds | string)
+               + 's was ignored or caught — but GNU timeout(1) cannot '
+               + 'distinguish a KILL it sent itself from an externally '
+               + 'delivered SIGKILL (OOM killer, an operator running '
+               + '`kill -9`, etc). rc alone does not confirm which '
+               + 'occurred; check dmesg/journalctl for an OOM kill before '
+               + 'assuming this was the timeout' }}).
+      This is a PARTIAL APPLY, not a clean stop: apt-get may have been
+      terminated mid-unpack/mid-configure, so some packages can be fully
+      installed, some half-configured, and the package database may need
+      repair before any further apt/dpkg operation succeeds safely. This
+      host has NOT proceeded to reboot or post-check (that only happens
+      after this task). Before deciding what to do next, check on
+      {{ inventory_hostname }}: (1) whether an apt-get/dpkg process is
+      still running (2026-08-22 monnie incident: even a graceful Ansible
+      session stop left an orphaned apt-get behind — do not assume a
+      timeout-triggered TERM/KILL cleaned up any differently until you
+      have actually checked), (2) whether
+      /var/lib/dpkg/lock-frontend or /var/lib/apt/lists/lock is held by a
+      dead process, and (3) `dpkg --audit` / `dpkg -C` for a
+      half-configured package. Do not assume which of these applies —
+      check, then decide.
+  when: ubuntu_vm_full_upgrade_apply_result.rc in [124, 137]
+
+- name: Fail if apt full-upgrade failed for a non-timeout reason
+  ansible.builtin.fail:
+    msg: >-
+      ubuntu_vm_full_upgrade: apt-get full-upgrade failed on
+      {{ inventory_hostname }} (rc={{ ubuntu_vm_full_upgrade_apply_result.rc }}).
+  when: ubuntu_vm_full_upgrade_apply_result.rc not in [0, 124, 137]
 
 - name: Check reboot-required flag (post-apply, authoritative — dry-run's reboot_expected was only a prediction)
   ansible.builtin.stat:

@@ -166,6 +166,78 @@ ubuntu_vm_full_upgrade_expected_codename: ""
 ubuntu_vm_full_upgrade_notify_detail_max_lines: 100
 
 # ---------------------------------------------------------------------------
+# apply full-upgrade timeout (docs/ai/reviews/ubuntu_vm_apply_conffile_prompt/
+# 2026-08-22_001_requirement.md R4, revised per 2026-08-22_003_review.md F1).
+# Bounds `apt-get -y full-upgrade` via `timeout --kill-after=...`(1) so an
+# unexpected interactive prompt or a stuck maintainer script fails loudly
+# instead of hanging forever like 2026-08-22's monnie incident (job #802).
+#
+# ubuntu_vm_full_upgrade_apply_timeout_seconds (TERM sent here) — 3600s
+# (60 min, Coordinator decision 2026-08-22, raised from an initial 1800s):
+# the two failure directions this value trades off are NOT symmetric, so it
+# is deliberately biased toward the longer side.
+# - Too short kills a healthy, still-progressing apt-get. That does not
+#   just fail the job — it recreates the exact broken dpkg state the
+#   2026-08-22 monnie incident needed manual `dpkg --configure -a` recovery
+#   for (a `timeout`-sent TERM/KILL mid-unpack/mid-configure is exactly the
+#   "partial apply" the F4/S1 failure message above warns about). This
+#   environment has an observed, dated precedent for full-upgrade downloads
+#   being much slower than expected for reasons outside this role's control
+#   (docs/ai/memory — Proxmox's CDN was observed routing this network's
+#   traffic to a Singapore endpoint instead of a local one, inflating
+#   transfer time for reasons apt-get itself cannot detect or report); a
+#   300MB-class monthly full-upgrade hitting that same routing could
+#   plausibly still be downloading at 30 minutes without anything being
+#   wrong.
+# - Too long only delays *noticing* a genuine hang — it does not corrupt
+#   anything by itself, since the process is still legitimately running.
+# Given that asymmetry (short = self-inflicted damage, long = slower
+# detection only), the value is set toward the generous end rather than
+# the tight end that minimizes wait time.
+# - BLOCKED / MAJOR_UPGRADE_DETECTED can never reach apply (main.yml
+#   "Reject manual apply if Status forbids it"), so every apply run is
+#   already bounded to well under ubuntu_vm_full_upgrade_major_total_threshold
+#   (100 packages) / ..._major_remove_threshold (30 packages) — this is not
+#   a release-upgrade-sized apply; the risk being budgeted for here is slow
+#   transfer, not an unusually large package set.
+# - Must still stay inside the 120-minute recovery_mute window this role
+#   sets before touching apt (see tasks/apply.yml): 60 min timeout + 60s
+#   kill-after leaves roughly 60 minutes of margin before mute expires and
+#   the autonomous recovery pipeline could engage (requirement §1 point 3)
+#   — tighter than the original 1800s's margin, but still a full hour, and
+#   this is the deliberate trade Coordinator made against the
+#   kill-a-healthy-apt risk above.
+#
+# ubuntu_vm_full_upgrade_apply_kill_after_seconds (grace before KILL,
+# F1) — 60s, unchanged by the above: F1 found that a bare `timeout N` only
+# sends TERM at N and then waits indefinitely if the target ignores or
+# catches it — the exact indefinite-hang class this requirement exists to
+# close, left open. A short-but-real grace period gives apt/dpkg
+# maintainer scripts a chance to exit cleanly on TERM (rc=124) before
+# timeout escalates to KILL (rc=137, handled identically in tasks/apply.yml
+# — both are "timed out", not a normal apt failure).
+ubuntu_vm_full_upgrade_apply_timeout_seconds: 3600
+ubuntu_vm_full_upgrade_apply_kill_after_seconds: 60
+
+# ---------------------------------------------------------------------------
+# Static conffile notice (docs/ai/reviews/ubuntu_vm_apply_conffile_prompt/
+# 2026-08-22_001_requirement.md R2, scope reduced 2026-08-22 after
+# 2026-08-22_005_review.md found an apply-time pre/post snapshot diff
+# structurally unable to fail-closed-distinguish a kept-conffile postinst
+# touch from an applied-conffile postinst touch — see
+# 2026-08-22_002_implement.md for the full history, including the two
+# built-then-removed implementations). Which specific conffile, if any,
+# was held is NOT reported by this notice — that detection/reporting is a
+# separate, not-yet-implemented future requirement. This line only states
+# what actually happened this run (R1: --force-confold was the invocation
+# flag), which is always true regardless of whether any conffile actually
+# conflicted, and does not claim to identify anything.
+# ---------------------------------------------------------------------------
+ubuntu_vm_full_upgrade_conffile_notice: >-
+  conffile はローカル変更があれば既存を保持する設定(--force-confold)で適用しました。
+  保持したファイルの特定は未実装です(別案件で対応予定)。
+
+# ---------------------------------------------------------------------------
 # Manual apply (dry_run=false) safety
 # ---------------------------------------------------------------------------
 # Confirmation required for manual apply: the caller must pass

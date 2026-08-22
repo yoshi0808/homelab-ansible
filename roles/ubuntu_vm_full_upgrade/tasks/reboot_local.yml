@@ -51,6 +51,17 @@
     # (2026-07-12_014 §実施5).
     # Normal outcome goes to #patches like the other patch-cycle reports;
     # post-reboot criticals stay on #alerts (2026-07-12_019 §実施2).
+    # ubuntu_vm_full_upgrade_conffile_notice leads the body (matching
+    # UV-084's product-impact placement — Slack collapses long bodies, so
+    # this goes first, not after the candidate list). It is a static,
+    # always-true one-liner (defaults/main.yml) — which conffile, if any,
+    # was actually held is not identified here; that detection/reporting
+    # (requirement R2/R3) was split into a separate future requirement
+    # after 2026-08-22_005_review.md found the apply-time pre/post
+    # snapshot approach structurally unable to fail-closed-distinguish a
+    # kept-conffile postinst touch from an applied-conffile postinst touch
+    # (see docs/ai/reviews/ubuntu_vm_apply_conffile_prompt/
+    # 2026-08-22_002_implement.md for the full history).
     - name: Send apply summary notification
       ansible.builtin.include_tasks: "{{ playbook_dir }}/../roles/common_slack/tasks/notify.yml"
       vars:
@@ -59,6 +70,7 @@
         slack_title: >-
           [ubuntu_vm_full_upgrade] apply {{ 'CRITICAL' if ubuntu_vm_full_upgrade_postreboot_criticals | length > 0 else 'OK' }} - {{ inventory_hostname }}
         slack_message: |
+          {{ ubuntu_vm_full_upgrade_conffile_notice }}
           Host: {{ inventory_hostname }}
           full-upgrade 実施完了。
           reboot: {{ '実施' if ubuntu_vm_full_upgrade_reboot_required else '不要' }}
