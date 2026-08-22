@@ -14,6 +14,8 @@
 
 ## 記録
 
+- **prometheus を 3.14 系へ上げること** — 2026-08-22 Yoshinobu決定、**3.13 LTS に留まる**。3.13.0 が LTS で、現在の 3.13.2 はその最新パッチ(CVE 2件の修正を含む)。**3.14.0 は通常の機能リリースであり、上げることは「上げる」ではなく「LTS から降りる」ことになる。** 3.14.0 の `[CHANGE]` 5件は、当環境の dashboard・alert rule・scrape 設定がいずれも使っていない — 危険だから見送ったのではなく、得るものが無い。**次に当てるのは 3.13.3 が出たとき。**
+  **制約: 月次の非apt判定は今後も毎回「更新あり」と言い続ける。** 比較先が GitHub の `releases/latest` で、そこに LTS という概念が無いため(`roles/ubuntu_vm_full_upgrade/defaults/main.yml`)。**毎月出る `REVIEW_REQUIRED` を無視し続ける形になっており、その扱いは未決である。**
 - **Codexのstop-time review gate**(Stop hookで直前ターンを審査) — 2026-08-09 Yoshinobu撤回。機構は正しく動いていた(誤検知0)。**退けられたのは検出能力ではなく繋ぎ方** — requirement・Policy・Contextと照合しないためReviewerの代わりにならず、工程を1層積むだけ。採る形はagmsg経由でcodexへReviewerを依頼する側。**制約: `/codex:review` と `/codex:adversarial-review` は `disable-model-invocation: true` で登録されており、Coordinatorからもsubagentからも起動できない**(呼ぶなら `codex-companion.mjs` を直接実行)
 - **quoryのCodex向けSemaphore read-only MCPの案件化** — 2026-08-09 Yoshinobu保留。Reviewerからの依頼であり職掌の外。**ansy側には既に実体があり、codex側ReviewerはansyのSemaphore APIへread-onlyで到達できる**(`~/.codex/tools/semaphore-readonly-mcp.py`、repo外・GETのみ・`~/.codex/config.toml` に登録済み)。依頼文で「読み取りのみ可」と書いたときの実効性が変わる。再開時に決めるのはidentity / 能力境界 / 配備経路 / GETのallowlistの4点。**`semaphore-templates-api-token` は書込能力を持ちうるため流用しない**
 - **`deployment_drift_check` にquoryの作業ツリーのclean判定を足すこと** — 2026-08-07 Yoshinobu却下。**退けられたのは検査の当否ではなく積み増しそのもの**(「場当たり的な対応でよく分からなくなるのが一番困る」)。**同種の提案の前に、それが「乱立」を1つ増やす側かを先に問う。** 検知の穴は `docs/ai/memory/incidents/2026-08-07_incident-investigation-notification-silent-since-deploy.md`
