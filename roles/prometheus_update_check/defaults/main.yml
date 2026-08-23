@@ -4,6 +4,17 @@ prometheus_update_check_repo: prometheus/prometheus
 prometheus_update_check_api_url: "https://api.github.com/repos/{{ prometheus_update_check_repo }}/releases/latest"
 prometheus_update_check_api_timeout: 15
 prometheus_update_check_target_version: "{{ prometheus_target_version | default('') }}"
+# LTS track this environment operates (docs/ai/reviews/prometheus_lts_track/
+# 2026-08-22_001_requirement.md R1/R3). This is the single place the track
+# default lives — Semaphore schedule/template vars must not carry a copy.
+# -e prometheus_track=<major.minor> overrides; -e prometheus_track= (empty)
+# restores the pre-track behavior of comparing against the unrestricted
+# GitHub "latest" release. When Yoshinobu moves the operated LTS line,
+# change only this line.
+prometheus_update_check_track: "{{ prometheus_track | default('3.13') }}"
+prometheus_update_check_releases_per_page: 100
+prometheus_update_check_releases_url: >-
+  https://api.github.com/repos/{{ prometheus_update_check_repo }}/releases?per_page={{ prometheus_update_check_releases_per_page }}
 prometheus_update_check_arch: linux-amd64
 prometheus_update_check_download_base: "https://github.com/{{ prometheus_update_check_repo }}/releases/download"
 prometheus_update_check_release_page_base: "https://github.com/{{ prometheus_update_check_repo }}/releases/tag"
@@ -16,3 +27,15 @@ prometheus_update_check_health_url: http://localhost:9090/-/healthy
 prometheus_update_check_lock_dir: /run/lock/prometheus_update_check.lock
 prometheus_update_check_rollback: "{{ rollback | default(false) | bool }}"
 prometheus_update_check_rollback_to: "{{ rollback_to | default('') }}"
+
+# Single canonical (pattern, replacement) pair used everywhere this role
+# extracts an X.Y major.minor prefix out of an X.Y.Z version string
+# (docs/ai/reviews/prometheus_lts_track/2026-08-22_011_review.md): the
+# regression guard in tasks/main.yml and both production call sites (the
+# input-validation assert and the installed/track mismatch check) all
+# reference these two variables rather than each carrying its own copy of
+# the literal regex_replace(...) text. Reverting either variable here
+# breaks production AND the guard together, by construction -- there is no
+# longer a second, independent copy for either side to diverge from.
+prometheus_update_check_major_minor_pattern: '^([0-9]+[.][0-9]+)[.][0-9]+$'
+prometheus_update_check_major_minor_replacement: '\g<1>'

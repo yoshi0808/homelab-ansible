@@ -4,12 +4,12 @@
   vars:
     slack_channel: >-
       {{ 'alerts' if prometheus_update_check_status in
-         ['collection_failed', 'upgrade_failed', 'rollback_failed',
-          'lock_release_failed'] else 'info' }}
+         ['collection_failed', 'track_not_found', 'track_installed_mismatch',
+          'upgrade_failed', 'rollback_failed', 'lock_release_failed'] else 'info' }}
     slack_status: >-
       {{ 'error' if prometheus_update_check_status in
-         ['collection_failed', 'upgrade_failed', 'rollback_failed',
-          'lock_release_failed'] else 'info' }}
+         ['collection_failed', 'track_not_found', 'track_installed_mismatch',
+          'upgrade_failed', 'rollback_failed', 'lock_release_failed'] else 'info' }}
     slack_title: "[prometheus_update_check] {{ prometheus_update_check_status }}"
     prometheus_update_check_binary_diagnostic: >-
       {{ (prometheus_update_check_current_raw.stderr | default('', true))
@@ -18,6 +18,9 @@
     prometheus_update_check_api_diagnostic: >-
       {{ (prometheus_update_check_latest_raw.msg | default('', true))
          or '(no module message)' }}
+    prometheus_update_check_track_diagnostic: >-
+      {{ (prometheus_update_check_track_releases_raw.msg | default('', true))
+         or '(no module message)' }}
     slack_message: |
       Prometheus update operation
       - host: {{ inventory_hostname }}
@@ -25,6 +28,27 @@
       {% if prometheus_update_check_status == 'update_available' %}
       - update available (not applied{{ ' under --check' if ansible_check_mode else '' }}): {{ prometheus_update_check_current_version }} → {{ prometheus_update_check_effective_target_version }}
       - release: {{ prometheus_update_check_release_page_base }}/v{{ prometheus_update_check_effective_target_version }}
+      - track: {{ prometheus_update_check_track if prometheus_update_check_track | length > 0 else 'unrestricted' }}
+      {% elif prometheus_update_check_status == 'track_installed_mismatch' %}
+      - installed version: {{ prometheus_update_check_current_version }}
+      - configured track: {{ prometheus_update_check_track }}
+      - the installed version is not on the configured track. This role will not move it by
+        itself: apply is blocked while installed and track disagree, and this gate compares
+        installed against the track, not against any -e prometheus_target_version pin — a pin
+        alone does not clear it.
+      - to move to a different track deliberately, lift the restriction for that run with
+        -e prometheus_track= (empty) together with an explicit -e prometheus_target_version=X.Y.Z,
+        or use a separate human-directed upgrade procedure. Setting the track override to the
+        destination track alone does not help — installed still won't match it until after the
+        apply. Afterwards, update the configured track default so future weekly runs agree with
+        the new installed line.
+      {% elif prometheus_update_check_status == 'track_not_found' %}
+      - track: {{ prometheus_update_check_track }}
+      - current version: {{ prometheus_update_check_current_version | default('?', true) }}
+      - no release in {{ prometheus_update_check_repo }} matches this track. This is not "up to date" —
+        check for a typo in prometheus_track, or whether this track has reached EOL and the
+        operated line should move (see docs/ai/reviews/prometheus_lts_track/2026-08-22_001_requirement.md §7).
+      - track release list collection: {{ 'FAILED (HTTP status=' ~ (prometheus_update_check_track_releases_raw.status | default('unknown') | string) ~ ')' if (prometheus_update_check_track_releases_raw.status | default(-1) | int) != 200 else 'FAILED (not a JSON list)' if (prometheus_update_check_track_releases_raw.json | default('') | type_debug) != 'list' else 'OK (0 matching releases)' }}
       {% elif prometheus_update_check_status == 'upgraded' %}
       - upgraded: {{ prometheus_update_check_current_version }} → {{ prometheus_update_check_result_version }}
       - health: active / version matched / HTTP 200
@@ -56,11 +80,15 @@
       - lock release error: {{ prometheus_update_check_error }}
       - action: verify the transaction is no longer active, then follow the stale-lock recovery procedure
       {% elif prometheus_update_check_status == 'collection_failed' %}
-      - version: {{ prometheus_update_check_current_version | default('?', true) }} → {{ prometheus_update_check_latest_version | default('?', true) }}
+      - installed version: {{ prometheus_update_check_current_version | default('?', true) }}
       - installed version collection: {{ 'FAILED (rc=' ~ (prometheus_update_check_current_raw.rc | default('unknown') | string) ~ ')' if (prometheus_update_check_current_raw.rc | default(1) | int) != 0 else 'FAILED (version parse)' if not (prometheus_update_check_current_version is match('^[0-9]+[.][0-9]+[.][0-9]+$')) else 'OK' }}
       - GitHub latest release collection: {{ 'FAILED (HTTP status=' ~ (prometheus_update_check_latest_raw.status | default('unknown') | string) ~ ')' if (prometheus_update_check_latest_raw.status | default(-1) | int) != 200 else 'FAILED (tag_name parse)' if not (prometheus_update_check_latest_version is match('^[0-9]+[.][0-9]+[.][0-9]+$')) else 'OK' }}
       - installed diagnostic: {{ (prometheus_update_check_binary_diagnostic | trim)[:200] }}
       - GitHub API diagnostic: {{ (prometheus_update_check_api_diagnostic | trim)[:200] }}
+      {% if prometheus_update_check_track | length > 0 %}
+      - track release list collection: {{ 'FAILED (HTTP status=' ~ (prometheus_update_check_track_releases_raw.status | default('unknown') | string) ~ ')' if (prometheus_update_check_track_releases_raw.status | default(-1) | int) != 200 else 'FAILED (not a JSON list)' if (prometheus_update_check_track_releases_raw.json | default('') | type_debug) != 'list' else 'OK' }}
+      - track diagnostic: {{ (prometheus_update_check_track_diagnostic | trim)[:200] }}
+      {% endif %}
       {% endif %}
 
       config/storage/unit/retentionは変更していません。

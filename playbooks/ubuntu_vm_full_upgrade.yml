@@ -56,10 +56,13 @@
 #   checked by read-only HTTP GET and rendered as `apt外:` lines. The first
 #   registry entry is monnie's manually installed Prometheus: current from
 #   localhost:9090 buildinfo, latest stable from GitHub Releases API. A
-#   confirmed newer release raises Status to at least REVIEW_REQUIRED and
-#   appends the version transition to status_reason. Collection/parse/
-#   comparison failures are visible in the line/report but fail-quiet and do
-#   not affect Status. No artifact is downloaded or installed.
+#   confirmed newer release appends the version transition to status_reason
+#   but does not raise Status (UV-032, revised by
+#   docs/ai/reviews/prometheus_lts_track/2026-08-22_001_requirement.md R5 —
+#   that judgment now belongs solely to roles/prometheus_update_check's
+#   weekly track-scoped check). Collection/parse/comparison failures are
+#   visible in the line/report but fail-quiet and do not affect Status. No
+#   artifact is downloaded or installed.
 # - Known observation: monnie's unpoller repository can advertise
 #   `3.3.1+git -> 3.3.1+git` (the same version string) every month. This is
 #   retained in the raw apt plan as repository metadata behaviour; no

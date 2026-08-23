@@ -83,6 +83,58 @@ healthcheck playbookはmanualで単体実行してよい。
 
 ## 4. 判断軸
 
+### アップデートとアップグレード
+
+<!-- UV-085 -->
+**アップデートとアップグレードを同じ判定に混ぜない。**
+
+| | アップデート | アップグレード |
+|---|---|---|
+| 動くもの | 系統内のリビジョン・シリアル番号 | バージョン(系統を跨ぐ) |
+| aptの担い手 | Ubuntu Pro / unattended-upgradesが当てる。**その対象外はmonthly full-upgradeへ回る**(UV-018) | monthly full-upgrade |
+| apt以外の担い手 | 週次に機械が検知する(UV-035〜UV-038) | monthlyの判定で提示する |
+
+**aptはこの2つのレーンに跨がる。** Ubuntu Pro / unattended-upgradesが当てない通常更新はmonthlyへ回るため、apt側は周期だけでレーンを決められない。
+
+<!-- UV-086 -->
+**Ubuntu Pro / unattended-upgradesが対象とするaptのアップデートは、人の判断を経ずに当たる。** Semaphoreは関与しない。**その対象外のapt更新はmonthly full-upgradeへ回り、適用は人が行う**(UV-018、UV-085)。**apt以外のアップデートは機械が検知するところまでとし、適用は人が`dry_run=false`を明示して行う**(UV-035〜UV-038)。
+
+<!-- UV-087 -->
+**アップグレードの採否と適用する版の指定は人が行う。** 機械は検知して提示するところまでとし、**「上げるべき」を表すStatusを持たない。** 系統を移すかどうかを機械に判定させない。
+
+<!-- UV-088 -->
+**アップデートの検知は、運用中の系統の中だけを見る。系統外の版を、週次の通知に出さない。**
+**ただし、検知の対象が系統の外にあることを伝えるときは、いま入っている版を示してよい。**
+系統が古びたことは、アップグレード側の判定が示す。
+
+<!-- UV-089 -->
+**apt以外のプロダクトが運用する系統は、明示された値で持つ。** release本文などの自由文から系統の性質を判定しない。系統に該当する版が1件も無い場合は、更新なしと区別できる状態として扱う。
+
+### Statusとreason
+
+<!-- UV-090 -->
+**Statusはmonthly full-upgradeの判定結果を1語で表す。取りうる値は次の5つだけである。**
+
+| Status | 意味 | apply | 通知先 | 重大度 |
+|---|---|---|---|---|
+| `BLOCKED` | 判定が信用できない、または止めるべき理由がある | 不可 | `#alerts` | critical |
+| `MAJOR_UPGRADE_DETECTED` | 通常の月次では起こらない規模の変化を検出した | 不可 | `#patches` | warning |
+| `REVIEW_REQUIRED` | 適用してよいが、当てる前に人が中身を見る | 可 | `#patches` | warning |
+| `UPGRADE_READY` | 重要コンポーネントの更新もremoveも無い | 可 | `#patches` | ok |
+| `NO_UPDATES` | 適用候補が無い | 可 | `#patches` | info |
+
+<!-- UV-091 -->
+**`UPGRADE_READY`は適用の推奨ではない。** 重要コンポーネントに該当が無いことだけを表す。適用するかどうかは人が決める(UV-087)。
+
+<!-- UV-092 -->
+**判定は上から順に当て、最初に該当したものを採る。** 個々の判定条件と閾値は実装を正本とし、本Policyへ写さない。
+
+<!-- UV-093 -->
+**reasonはそのStatusになった理由を人へ伝える自由文である。** Statusと対で出し、reasonを根拠にした自動判定を行わない。**Statusが同じでも理由が異なる場合があるため省略しない。**
+
+<!-- UV-094 -->
+**Statusを昇格させてよいのは、applyの可否・通知先・重大度のいずれかを変える必要があるときだけである。** 人に知らせることだけを理由に昇格させない。知らせる場所はreasonと通知本文とする。
+
 ### Monthly full-upgradeとnon-apt
 
 <!-- UV-018 -->
@@ -104,7 +156,7 @@ hold一覧をStatus、重要package、件数閾値、apply判断に使用しな�
 non-apt versionはcurrentとlatestをread-only GETし、両方を数値versionとして取得できた場合だけ比較する。
 
 <!-- UV-032 -->
-両方の取得成功と数値比較によりupdateありが確定した場合だけ、Statusを最低`REVIEW_REQUIRED`へ昇格し、reasonを追加する。
+両方の取得成功と数値比較によりupdateありが確定した場合、reasonを追加する。**Statusは昇格させない**(UV-094)。apt以外のプロダクトのアップグレードの採否は人が決めるものであり(UV-087)、monthlyの判定は事実の提示に留める。
 
 <!-- UV-033 -->
 既存の`BLOCKED`または`MAJOR_UPGRADE_DETECTED`をnon-apt結果によって降格させない。
@@ -321,3 +373,4 @@ Prometheusのupdateとrollbackは、人間が`prometheus_update_check.yml`を`-e
 | 2026-07-24 | Git HEADの旧289行版を標準8節へ再編。Policy核を維持して非規範のSystem / Repository / Operations情報をContextへ分離し、§3.4の既知実装不一致を未解決のまま見える化 |
 | 2026-07-25 | UV-035〜UV-039を`prometheus_update_check.yml`の現行実装(dry_run gate・manual update・rollback)に合わせて再定義し、Policy/実装不一致を解消 |
 | 2026-07-25 | UV-079〜UV-082をSemaphore移行済みの実態に合わせて再定義し、具体的な時刻表記をOperations Contextへ委譲。単独で浮いていたUV-083をUV-079へ統合し削除。主力product明示の規範としてUV-084を追加し、`ubuntu_vm_full_upgrade`のunpoller対応(実装)と対応付け |
+| 2026-08-23 | アップデート(系統内のリビジョン)とアップグレード(系統を跨ぐバージョン)の軸をUV-085〜UV-089として明文化。aptが両レーンに跨がることと、apt以外の適用が人の明示を要すること(UV-035〜UV-038)を、現行の境界どおりに書いた。実装にしか無かったStatus 5値とreasonの定義をUV-090〜UV-094として取り込み、`UPGRADE_READY`が適用の推奨でないことを明記。UV-032からapt以外の結果によるStatus昇格を外し、事実の提示に留めた |

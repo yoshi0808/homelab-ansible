@@ -115,11 +115,20 @@
     _remv_count: "{{ ubuntu_vm_full_upgrade_sim.simulation.remv | length }}"
 
 # ---------------------------------------------------------------------------
-# Status determination (requirement §5.4). First preserve the existing apt
-# decision exactly, then layer the non-apt registry result on top. A confirmed
-# non-apt update raises NO_UPDATES/UPGRADE_READY to REVIEW_REQUIRED; it never
-# lowers BLOCKED/MAJOR_UPGRADE_DETECTED/REVIEW_REQUIRED. Failed/incomparable
-# collection is fail-quiet and leaves both Status and reason unchanged.
+# Status determination (requirement §5.4). Status is the apt decision alone
+# (UV-032, revised by docs/ai/reviews/prometheus_lts_track/
+# 2026-08-22_001_requirement.md R5): a confirmed non-apt update no longer
+# raises NO_UPDATES/UPGRADE_READY to REVIEW_REQUIRED. The non-apt registry
+# still surfaces its current/latest facts by appending to the reason string
+# below — it just no longer makes the "should a human look at this" call.
+# That judgment belongs to the product's own dedicated role where one exists
+# (prometheus_update_check, which owns apply/rollback and — unlike this
+# monthly read-only registry — compares against the operated LTS track, not
+# GitHub's repository-wide "latest"). UV-033 (BLOCKED/MAJOR_UPGRADE_DETECTED
+# is never lowered by a non-apt result) is unaffected: this registry never
+# lowered Status, so removing the only thing it *did* do to Status leaves
+# UV-033 vacuously true. Failed/incomparable collection remains fail-quiet
+# and leaves both Status and reason unchanged (UV-034).
 # ---------------------------------------------------------------------------
 - name: Determine apt Status
   ansible.builtin.set_fact:
@@ -149,13 +158,9 @@
       {{ ubuntu_vm_full_upgrade_nonapt_results
          | selectattr('state', 'equalto', 'update_available') | list }}
 
-- name: Apply non-apt update promotion to Status
+- name: Add non-apt update facts to the reason without promoting Status
   ansible.builtin.set_fact:
-    ubuntu_vm_full_upgrade_status: >-
-      {{ ubuntu_vm_full_upgrade_apt_status
-         if (ubuntu_vm_full_upgrade_apt_status in ['BLOCKED', 'MAJOR_UPGRADE_DETECTED', 'REVIEW_REQUIRED']
-             or (ubuntu_vm_full_upgrade_nonapt_updates | length) == 0)
-         else 'REVIEW_REQUIRED' }}
+    ubuntu_vm_full_upgrade_status: "{{ ubuntu_vm_full_upgrade_apt_status }}"
     ubuntu_vm_full_upgrade_status_reason: >-
       {{ ubuntu_vm_full_upgrade_apt_status_reason
          + (('; ' + (_nonapt_reasons | join('; ')))

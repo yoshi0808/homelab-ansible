@@ -28,6 +28,8 @@
     that:
       - prometheus_update_check_target_version | length == 0 or prometheus_update_check_target_version is match('^[0-9]+[.][0-9]+[.][0-9]+$')
       - prometheus_update_check_rollback_to | length == 0 or prometheus_update_check_rollback_to is match('^[0-9]+[.][0-9]+[.][0-9]+$')
+      - prometheus_update_check_track | length == 0 or prometheus_update_check_track is match('^[0-9]+[.][0-9]+$')
+      - prometheus_update_check_track | length == 0 or prometheus_update_check_target_version | length == 0 or (prometheus_update_check_target_version | regex_replace(prometheus_update_check_major_minor_pattern, prometheus_update_check_major_minor_replacement)) == prometheus_update_check_track
       - (dry_run | string | lower) in ['true', 'false']
       - prometheus_update_check_rollback | bool or prometheus_update_check_rollback_to | length == 0
       - prometheus_update_check_arch == 'linux-amd64'
@@ -41,8 +43,78 @@
       - prometheus_update_check_release_page_base == 'https://github.com/' + prometheus_update_check_repo + '/releases/tag'
       - prometheus_update_check_health_url is match('^http://localhost:[0-9]+/-/healthy$')
       - prometheus_update_check_lock_dir == '/run/lock/prometheus_update_check.lock'
-    fail_msg: "Invalid Prometheus target, rollback, path, service, or download configuration."
+    fail_msg: >-
+      Invalid Prometheus target, rollback, track, path, service, or download
+      configuration. prometheus_track must be empty or major.minor
+      (e.g. 3.13); when both prometheus_track and prometheus_target_version
+      are set, the target's major.minor must match the track.
     quiet: true
+
+# Regression guard (docs/ai/reviews/prometheus_lts_track/2026-08-22_009_
+# test_result.md, _010_review.md, _011_review.md, and
+# 2026-08-22_002_implement.md §2): "Validate Prometheus update-check
+# inputs" above and "Judge whether the installed Prometheus version matches
+# the configured track" below both need to pull an X.Y major.minor prefix
+# out of an X.Y.Z version string, but run through two DIFFERENT Ansible
+# evaluation paths (a bare assert `that:` conditional vs a {{ }}-templated
+# set_fact) that were verified (real ansible.builtin.assert/set_fact
+# modules, not template rendering alone) to require different backslash
+# counts for the identical effect -- see defaults/main.yml for the fuller
+# account. \g<1> was verified to behave identically across the set_fact,
+# assert `that:`, and `when:` paths, so both production sites now use it.
+#
+# _011_review.md Finding: an earlier version of this guard duplicated the
+# pattern/replacement as its OWN literal text instead of consuming what
+# production actually uses. Reverting only the two production call sites
+# back to a broken form (e.g. '\\1') left the guard's independent copy
+# untouched, so the guard kept passing while production was broken again --
+# it was checking itself, not the thing it exists to protect. There is now
+# exactly ONE definition of the (pattern, replacement) pair anywhere in
+# this role: prometheus_update_check_major_minor_pattern/_replacement in
+# defaults/main.yml. Both production call sites and both checks below
+# reference those same two variables -- there is no second copy left for
+# either side to diverge from. Reverting the shared variables breaks
+# production and this guard together, by construction; this was verified
+# by actually doing so (docs/ai/reviews/prometheus_lts_track/
+# 2026-08-22_002_implement.md §3).
+#
+# This guard still exercises BOTH evaluation paths, because \g<1> is the
+# fix for the backslash-count asymmetry, not a guarantee that some future
+# replacement value chosen for the shared variable will also be
+# path-independent: a set_fact computes the canary the same way "Judge
+# whether the installed Prometheus version matches the configured track"
+# does, and a separate assert `that:` condition embeds the same
+# regex_replace call directly, matching how "Validate Prometheus
+# update-check inputs" evaluates it. Needs no real Prometheus install,
+# GitHub reachability, or track/target input, and runs on every single
+# invocation of this role (not just in CI/Tester fixtures).
+- name: Compute the regex_replace canary through the set_fact (curly-brace) path
+  ansible.builtin.set_fact:
+    prometheus_update_check_regex_replace_canary_setfact_result: >-
+      {{ _regex_replace_canary_input | regex_replace(prometheus_update_check_major_minor_pattern,
+                                                       prometheus_update_check_major_minor_replacement) }}
+  vars:
+    _regex_replace_canary_input: '3.13.9'
+
+- name: Guard against a regex_replace backreference escaping regression
+  ansible.builtin.assert:
+    that:
+      - prometheus_update_check_regex_replace_canary_setfact_result == '3.13'
+      - (_regex_replace_canary_input | regex_replace(prometheus_update_check_major_minor_pattern, prometheus_update_check_major_minor_replacement)) == '3.13'
+      - ('3.14.0' | regex_replace(prometheus_update_check_major_minor_pattern, prometheus_update_check_major_minor_replacement)) != '3.13'
+    fail_msg: >-
+      prometheus_update_check_major_minor_pattern/_replacement
+      (defaults/main.yml) is not substituting the captured major.minor
+      group correctly in at least one of the two evaluation paths this
+      role depends on -- check both call sites in this file: "Validate
+      Prometheus update-check inputs" above (a bare assert `that:`
+      conditional) and "Judge whether the installed Prometheus version
+      matches the configured track" below (a curly-brace-templated
+      set_fact). setfact_result={{
+      prometheus_update_check_regex_replace_canary_setfact_result | default('undefined') }}
+    quiet: true
+  vars:
+    _regex_replace_canary_input: '3.13.9'
 
 - name: Initialize Prometheus update operation facts
   ansible.builtin.set_fact:
@@ -104,15 +176,149 @@
          | regex_replace('^v', '') }}
 
 # ---------------------------------------------------------------------------
-# Phase 3/3.5: classify collection and select the requested target
+# Phase 2.5 (docs/ai/reviews/prometheus_lts_track/2026-08-22_001_requirement.md
+# R1/R2/R6): when a track is configured, list releases and keep only the ones
+# whose tag is exactly "<track>.<patch>" — a numeric version match, never a
+# free-text read of release notes (requirement §3 non-goal). Skipped during
+# rollback: rollback restores from a local backup and never fetches from
+# GitHub, so track filtering has nothing to gate there.
 # ---------------------------------------------------------------------------
+- name: Collect Prometheus releases within the configured track
+  ansible.builtin.uri:
+    url: "{{ prometheus_update_check_releases_url }}"
+    method: GET
+    return_content: true
+    timeout: "{{ prometheus_update_check_api_timeout }}"
+  register: prometheus_update_check_track_releases_raw
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  when:
+    - prometheus_update_check_track | length > 0
+    - not (prometheus_update_check_rollback | bool)
+
+- name: Judge Prometheus track release collection status
+  ansible.builtin.set_fact:
+    prometheus_update_check_track_collected: >-
+      {{ (prometheus_update_check_track | length == 0)
+         or ((prometheus_update_check_track_releases_raw.status | default(-1) | int) == 200
+             and (prometheus_update_check_track_releases_raw.json | default('') | type_debug) == 'list') }}
+
+- name: Extract Prometheus release versions within the configured track
+  ansible.builtin.set_fact:
+    prometheus_update_check_track_versions: >-
+      {{ (prometheus_update_check_track_releases_raw.json | default([]))
+         | selectattr('tag_name', 'defined')
+         | map(attribute='tag_name') | map('string') | map('regex_replace', '^v', '')
+         | select('match', '^' + (prometheus_update_check_track | regex_escape) + '[.][0-9]+$')
+         | list }}
+  when:
+    - prometheus_update_check_track | length > 0
+    - prometheus_update_check_track_collected | bool
+
+- name: Judge whether the configured Prometheus track has any release
+  ansible.builtin.set_fact:
+    prometheus_update_check_track_found: >-
+      {{ (prometheus_update_check_track | length > 0)
+         and (prometheus_update_check_track_collected | bool)
+         and (prometheus_update_check_track_versions | default([]) | length > 0) }}
+
+- name: Select the highest Prometheus release within the configured track
+  ansible.builtin.set_fact:
+    prometheus_update_check_track_latest_version: >-
+      {{ prometheus_update_check_track ~ '.' ~
+         (prometheus_update_check_track_versions
+          | map('regex_replace', '^[0-9]+[.][0-9]+[.]', '') | map('int') | max) }}
+  when: prometheus_update_check_track_found | bool
+
+# ---------------------------------------------------------------------------
+# Phase 3/3.5: classify collection and select the requested target. When a
+# track is configured, the track's own latest release — not the repository-
+# wide "latest" — is the comparison/apply basis (R2: detection and apply
+# agree). The repository-wide latest is kept only as the comparison basis
+# for the track="" (unrestricted) fallback path (R1) — it is never shown to
+# a human as a candidate (R4, revised 2026-08-22: the weekly notification
+# does not surface out-of-track versions; see notify.yml).
+# ---------------------------------------------------------------------------
+- name: Judge whether the installed Prometheus version was read successfully
+  ansible.builtin.set_fact:
+    prometheus_update_check_current_readable: >-
+      {{ (prometheus_update_check_current_raw.rc | default(1) | int) == 0
+         and (prometheus_update_check_current_version is match('^[0-9]+[.][0-9]+[.][0-9]+$')) }}
+
+# docs/ai/reviews/prometheus_lts_track/2026-08-22_003_review.md Finding 2
+# (High): the track filter only ever considered GitHub's release list — it
+# never checked whether the *installed* version is even on the configured
+# track. An installed version on a different track (older or newer) is a
+# cross-track state this weekly role must never resolve by itself: moving
+# tracks is an upgrade, reserved for a human with an explicit target
+# version (requirement §8), not something the weekly "update" check may
+# pick or apply. This check only needs the locally-read installed version
+# and the configured track string — no network round-trip — so it is
+# evaluated before, and independently of, whether the GitHub fetches
+# succeeded this run.
+- name: Judge whether the installed Prometheus version matches the configured track
+  ansible.builtin.set_fact:
+    prometheus_update_check_track_installed_mismatch: >-
+      {{ (prometheus_update_check_track | length > 0)
+         and (prometheus_update_check_current_readable | bool)
+         and ((prometheus_update_check_current_version
+               | regex_replace(prometheus_update_check_major_minor_pattern,
+                                prometheus_update_check_major_minor_replacement))
+              != prometheus_update_check_track) }}
+
+
+# docs/ai/reviews/prometheus_lts_track/2026-08-22_004_review.md Finding 4
+# (Medium): when a track is configured, the track-scoped judgment must not
+# depend on the unrestricted `releases/latest` endpoint succeeding — that
+# endpoint is only actually consulted as the comparison basis in the
+# track="" fallback path (see the comment above). Requiring it to succeed
+# even when track releases were read fine meant a transient failure or
+# parse error on the *other* endpoint alone forced 'collection_failed' and
+# stalled the in-track judgment it had nothing to do with. `latest_raw`'s
+# success is therefore required only when track is empty; when a track is
+# set, only the track-scoped fetch (`track_collected`) gates collection.
+- name: Judge Prometheus remote version collection status
+  ansible.builtin.set_fact:
+    prometheus_update_check_remote_collected: >-
+      {{ (prometheus_update_check_track_collected | bool)
+         and ((prometheus_update_check_track | length > 0)
+              or ((prometheus_update_check_latest_raw.status | default(-1) | int) == 200
+                  and (prometheus_update_check_latest_version is match('^[0-9]+[.][0-9]+[.][0-9]+$')))) }}
+
 - name: Judge Prometheus version collection status
   ansible.builtin.set_fact:
     prometheus_update_check_collected: >-
-      {{ (prometheus_update_check_current_raw.rc | default(1) | int) == 0
-         and (prometheus_update_check_latest_raw.status | default(-1) | int) == 200
-         and (prometheus_update_check_current_version is match('^[0-9]+[.][0-9]+[.][0-9]+$'))
-         and (prometheus_update_check_latest_version is match('^[0-9]+[.][0-9]+[.][0-9]+$')) }}
+      {{ (prometheus_update_check_current_readable | bool)
+         and (prometheus_update_check_remote_collected | bool) }}
+
+- name: Judge whether the configured Prometheus track gates an upgrade
+  ansible.builtin.set_fact:
+    prometheus_update_check_track_gate_ok: >-
+      {{ ((prometheus_update_check_track | length == 0) or (prometheus_update_check_track_found | default(false) | bool))
+         and not (prometheus_update_check_track_installed_mismatch | bool) }}
+
+
+# Finding 4's relaxation of remote_collected means `prometheus_update_check_
+# latest_version` can now be unparsed/empty (releases/latest failed) even
+# while this task still runs (e.g. a set track with 0 matching releases —
+# track_not_found — where latest_raw's failure no longer forces
+# collection_failed first). The `else` branch below must not hand a
+# non-semver string to a later `is version(...)` test (Jinja would raise,
+# not fail closed). Falling back to the installed version itself is safe:
+# `is version(current, '>')` against itself is always false, i.e. "no
+# update" rather than a crash — and this branch is only ever a display/
+# no-op value anyway, since whichever status wins in this run (
+# collection_failed or track_not_found) already has track_gate_ok=false and
+# never reaches an apply.
+- name: Select Prometheus track comparison basis
+  ansible.builtin.set_fact:
+    prometheus_update_check_track_comparison_basis: >-
+      {{ prometheus_update_check_track_latest_version
+         if ((prometheus_update_check_track | length > 0) and (prometheus_update_check_track_found | default(false) | bool))
+         else prometheus_update_check_latest_version
+         if (prometheus_update_check_latest_version is match('^[0-9]+[.][0-9]+[.][0-9]+$'))
+         else prometheus_update_check_current_version }}
 
 - name: Select Prometheus target version
   ansible.builtin.set_fact:
@@ -120,27 +326,49 @@
     prometheus_update_check_effective_target_version: >-
       {{ prometheus_update_check_target_version
          if (prometheus_update_check_target_version | length > 0)
-         else prometheus_update_check_latest_version }}
+         else prometheus_update_check_track_comparison_basis }}
 
 - name: Judge whether a Prometheus upgrade is wanted
   ansible.builtin.set_fact:
     prometheus_update_check_update_available: >-
-      {{ (prometheus_update_check_latest_version is version(prometheus_update_check_current_version, '>'))
+      {{ (prometheus_update_check_track_comparison_basis is version(prometheus_update_check_current_version, '>'))
          if (prometheus_update_check_collected | bool) else false }}
     prometheus_update_check_upgrade_wanted: >-
       {{ (prometheus_update_check_collected | bool)
+         and (prometheus_update_check_track_gate_ok | bool)
          and ((prometheus_update_check_effective_target_version != prometheus_update_check_current_version)
               if (prometheus_update_check_target_pinned | bool)
-              else (prometheus_update_check_latest_version is version(prometheus_update_check_current_version, '>'))) }}
+              else (prometheus_update_check_track_comparison_basis is version(prometheus_update_check_current_version, '>'))) }}
 
 - name: Record normal-mode pre-apply status
   ansible.builtin.set_fact:
     prometheus_update_check_status: >-
-      {{ 'collection_failed' if not (prometheus_update_check_collected | bool)
+      {{ 'collection_failed' if not (prometheus_update_check_current_readable | bool)
+         else 'track_installed_mismatch' if (prometheus_update_check_track_installed_mismatch | bool)
+         else 'collection_failed' if not (prometheus_update_check_remote_collected | bool)
+         else 'track_not_found' if not (prometheus_update_check_track_gate_ok | bool)
          else 'update_available' if (prometheus_update_check_upgrade_wanted | bool)
          else 'up_to_date' }}
     prometheus_update_check_result_version: "{{ prometheus_update_check_current_version }}"
   when: not (prometheus_update_check_rollback | bool)
+
+- name: Record the reason for a non-mutating Prometheus track anomaly
+  ansible.builtin.set_fact:
+    prometheus_update_check_error: >-
+      {{ ('installed Prometheus ' + prometheus_update_check_current_version
+          + ' is not on the configured track ' + prometheus_update_check_track
+          + '; this gate compares installed against the track, not against any target pin,'
+          + ' so -e prometheus_target_version alone will not clear it — lift the restriction'
+          + ' with -e prometheus_track= (empty) together with an explicit target pin,'
+          + ' or use a separate human-directed upgrade procedure')
+         if (prometheus_update_check_status == 'track_installed_mismatch')
+         else ('no release in ' + prometheus_update_check_repo + ' matches track '
+               + prometheus_update_check_track)
+         if (prometheus_update_check_status == 'track_not_found')
+         else prometheus_update_check_error }}
+  when:
+    - not (prometheus_update_check_rollback | bool)
+    - prometheus_update_check_status in ['track_installed_mismatch', 'track_not_found']
 
 # ---------------------------------------------------------------------------
 # Phase M/R discovery: rollback target selection is read-only and also runs
@@ -222,6 +450,9 @@
       status: "{{ prometheus_update_check_status }}"
       current: "{{ prometheus_update_check_current_version | default('') }}"
       target: "{{ prometheus_update_check_effective_target_version | default('') }}"
+      track: "{{ prometheus_update_check_track }}"
+      track_latest: "{{ prometheus_update_check_track_latest_version | default('') }}"
+      overall_latest: "{{ prometheus_update_check_latest_version | default('') }}"
       result: "{{ prometheus_update_check_result_version | default('') }}"
       error: "{{ prometheus_update_check_error | default('') }}"
 
@@ -238,17 +469,29 @@
 # ---------------------------------------------------------------------------
 - name: Send Prometheus update operation notification
   when: prometheus_update_check_status in [
-          'update_available', 'collection_failed', 'upgraded', 'upgrade_failed',
+          'update_available', 'collection_failed', 'track_not_found',
+          'track_installed_mismatch',
+          'upgraded', 'upgrade_failed',
           'rollback_available', 'rolled_back', 'rollback_failed',
           'lock_release_failed']
   block:
     - name: Build and send Prometheus Slack notification
       ansible.builtin.include_tasks: notify.yml
 
-- name: Fail the play after notifying about an apply or rollback failure
+# docs/ai/reviews/prometheus_lts_track/2026-08-22_003_review.md Finding 4
+# (Medium): track_not_found / track_installed_mismatch already block mutation
+# via track_gate_ok, but a blocked mutation alone left the scheduled job
+# exiting 0 — common_slack's notification send is best-effort (rescued), so
+# even a lost Slack message would not have surfaced. AC5's "explicit
+# anomaly, distinguishable from success" needs a machine-checkable signal
+# independent of whether the notification itself was delivered, so both
+# statuses fail the play after the notification attempt (whether or not
+# that attempt succeeded).
+- name: Fail the play after notifying about an apply, rollback, or track anomaly
   ansible.builtin.fail:
     msg: >-
       prometheus_update_check {{ prometheus_update_check_status }}:
       {{ prometheus_update_check_error | default('unknown failure', true) }}
   when: prometheus_update_check_status in [
-          'upgrade_failed', 'rollback_failed', 'lock_release_failed']
+          'upgrade_failed', 'rollback_failed', 'lock_release_failed',
+          'track_not_found', 'track_installed_mismatch']
