@@ -24,6 +24,20 @@ group所属は `inventories/homelab/hosts.yml`、認証基盤の依存は [`radi
 
 旧Policyの2026-05-27時点snapshotには、`authy` / `monnie`のAutomatic-Rebootがfalse、`quory`がtrueかつ固定時刻と記録されていた。これは移行時点の証跡であり、現在値を保証しない。現在の設定値は対象host上のunattended-upgrades設定を正本とし、本件では実機確認を行っていない。
 
+## 製品ごとの更新の当たり方
+
+**「誰が当てるか」は3つとも同じで、人である。** 違うのは検知の経路と、系統を固定するかどうか。
+
+| 製品 | apt管理か | 誰が当てるか | 系統の扱い |
+|---|---|---|---|
+| **unpoller** | apt | **人**(月次 full-upgrade)。**メジャーでも同じ** | 固定しない。上流の最新が候補に出る |
+| **prometheus** | **apt管理外**(手動インストール) | **人**(週次検知 → Semaphoreで押す) | **3.13 に固定**(上流がLTSと宣言、`prometheus_update_check_track`) |
+| **Semaphore** | **apt管理外**(aptリポジトリが存在しない) | **人**(検知そのものが未実装) | 固定する値は**我々が決める** — 上流にLTSの区分が無い |
+
+**unpoller が自動適用されないことは、設定を読んで確定している**(2026-08-23、Operatorの調査 `req-20260823T211007+0900-9926b0b05c91d150`)。`unattended-upgrades` の `Allowed-Origins` は Ubuntu 本体と Ubuntu ESM の4系統だけで、unpoller の配布元はそこに含まれない。**したがって apt パッケージであっても月次まで当たらない。**
+
+**他の2つの「誰が当てるか」は、実装と決定の記録から言えるもので、設定を読んだ結果ではない。**
+
 ## Service依存
 
 - `authy`のpost-checkはFreeRADIUS serviceとRADIUS待受を対象にする。
