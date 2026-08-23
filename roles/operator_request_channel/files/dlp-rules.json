@@ -1,6 +1,6 @@
 {
   "engine_version": "1",
-  "ruleset_version": "2026-08-08.1",
+  "ruleset_version": "2026-08-23.2",
   "rules": [
     {
       "id": "pem-or-ssh-private-key",
@@ -71,9 +71,9 @@
   "entropy": {
     "id": "high-entropy-string",
     "category": "high_entropy",
-    "min_length": 20,
+    "min_length": 16,
     "min_bits_per_char": 3.8,
-    "candidate_pattern": "[A-Za-z0-9+/_=.-]{20,}",
+    "candidate_pattern": "[A-Za-z0-9+]{16,}",
     "scan_field_pointers": [
       "/purpose",
       "/observed_facts/*",

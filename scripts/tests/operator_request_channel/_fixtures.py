@@ -17,7 +17,9 @@ string, don't -- that reintroduces exactly the commit-blocking pattern
 this file exists to avoid.
 """
 
+import random
 import secrets
+import string
 
 
 def pem_private_key_block() -> str:
@@ -97,7 +99,36 @@ def ipv6_link_local_text() -> str:
 
 
 def high_entropy_text() -> str:
-    return secrets.token_urlsafe(24)
+    """A high-entropy candidate that is *guaranteed* to be detected by the
+    production ruleset, not merely likely to be.
+
+    This used to be `secrets.token_urlsafe(24)`. That is genuinely
+    high-entropy, but URL-safe base64 uses `-` and `_`, and both are
+    delimiters under the shipped `candidate_pattern`
+    ([A-Za-z0-9+]{16,}) -- R1 deliberately made it so, to stop
+    delimited real vocabulary (paths, systemd `key=value` lines) from
+    being treated as one long candidate (2026-08-23,
+    docs/ai/reviews/oprc_dlp_false_positive/). A `-`/`_` landing inside a
+    24-byte token splits it, and the surviving piece on either side is
+    sometimes too short (< 16 chars) or too uniform (< 3.8 bits/char) to
+    still trigger. Measured at ~16-17% of draws not blocked -- a unit
+    test that expects an unconditional BLOCK must not depend on that
+    draw (2026-08-23, Reviewer Finding 2: `test_high_entropy_in_observed_
+    facts_array_element` actually failed this way in the full suite).
+
+    Fix: use every character of the candidate alphabet exactly once, in a
+    fixed (not per-run-random) shuffle. With no repeats, the Shannon
+    entropy is exactly log2(63) ~= 5.98 bits/char every time -- not
+    "probably above 3.8", but structurally unable to be anything else,
+    regardless of shuffle order. The shuffle is still generated in code
+    (not a literal in this file's source text) to keep the same
+    anti-gitleaks-literal discipline as the rest of this module; unlike
+    the `secrets`-based fixtures elsewhere in this file, determinism here
+    is the point, not an accident to avoid.
+    """
+    alphabet = list(string.ascii_uppercase + string.ascii_lowercase + string.digits + "+")
+    random.Random(b"oprc-dlp-fixture-high-entropy-v1").shuffle(alphabet)
+    return "".join(alphabet)
 
 
 def benign_prose() -> str:

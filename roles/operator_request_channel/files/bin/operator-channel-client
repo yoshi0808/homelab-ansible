@@ -54,6 +54,19 @@ def _deny(message):
     sys.exit(1)
 
 
+def _findings_summary(result):
+    """Render a DLP ScanResult's findings as "rule_id at pointer" pairs for
+    a denial message. `Finding` carries category/rule_id/pointer only --
+    never the matched text (oprc/dlp.py's own discipline) -- so joining
+    those two fields (rule_id, pointer; category is left out on purpose)
+    cannot leak payload content; it tells the sender where in their own
+    payload to look, not what was there (requirement §16 / R3: "検出した
+    値そのものは...出ない" still holds, this only adds location, not
+    content).
+    """
+    return "; ".join("{} at {}".format(f.rule_id, f.pointer) for f in result.findings)
+
+
 def _error(message):
     print("error: {}".format(message), file=sys.stderr)
     sys.exit(1)
@@ -174,7 +187,7 @@ def cmd_submit(cfg):
     except dlp.ScanTimeout:
         _deny("dlp scan did not complete in time")
     if result.blocked:
-        _deny("dlp blocked this payload before it was sent")
+        _deny("dlp blocked this payload before it was sent: {}".format(_findings_summary(result)))
 
     payload_bytes = json.dumps(raw, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
     if len(payload_bytes) > cfg["max_payload_bytes"]:
@@ -242,7 +255,7 @@ def cmd_get(cfg, request_id):
     except dlp.ScanTimeout:
         _deny("dlp scan did not complete in time")
     if result.blocked:
-        _deny("dlp blocked this message on intake; not displayed")
+        _deny("dlp blocked this message on intake; not displayed: {}".format(_findings_summary(result)))
 
     print(json.dumps({"message": message, "state": response.get("state")}))
 

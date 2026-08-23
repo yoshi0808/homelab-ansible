@@ -124,6 +124,20 @@ class SubmitTests(OperatorChannelClientTestCase):
         mock_ssh.assert_not_called()
         self.assertNotIn(secret, result.stdout)
         self.assertNotIn(secret, result.stderr)
+        # R3/AC3 (2026-08-23_006_review.md Suggestion 1): the denial must
+        # name where the finding was (rule_id + pointer, requirement's
+        # "どこが引っかかったか"), but not what category of thing it is or
+        # what the matched text was. This pins the client's OWN output
+        # contract -- it does not read docs/ai/context/operations/
+        # operator-request-channel.md, so it cannot detect that Context's
+        # prose drifted from this (2026-08-23_009_review.md Finding 4:
+        # an earlier version of this comment claimed it would catch such
+        # drift, which was wrong -- Context could regress to describing
+        # a 3rd field and this test would still pass). Whether Context's
+        # description still matches this output is a documentation-review
+        # question, not something this assertion can answer.
+        self.assertIn("credential-in-url at /purpose", result.stderr)
+        self.assertNotIn("credential_url", result.stderr)  # category, not shown
 
     def test_submit_shape_error_is_caught_locally_before_calling_ssh(self):
         # purpose exceeds request-schema-v1.json's maxLength (4096)
@@ -207,6 +221,10 @@ class GetTests(OperatorChannelClientTestCase):
         self.assertNotEqual(result.exit_code, 0)
         self.assertNotIn(secret, result.stdout)
         self.assertNotIn(secret, result.stderr)
+        # Same pin as test_submit_dlp_blocks_secret_before_calling_ssh, for
+        # the other checkpoint (pull-before DLP inside cmd_get).
+        self.assertIn("jwt at /purpose", result.stderr)
+        self.assertNotIn("bearer_or_jwt", result.stderr)  # category, not shown
 
     def test_get_rejects_malformed_request_id_before_calling_ssh(self):
         with mock.patch.object(self.module, "_run_ssh") as mock_ssh:

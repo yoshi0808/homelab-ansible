@@ -67,16 +67,32 @@ server setup templateにscheduleを登録しない。git pull・template登録�
 
 - **DLPを外すoptionは存在しない。** 通信処理から任意に無効化できない。
 - **判定できないときは通さない。** プログラムが起動できない、ルールセットが読めない、engine versionやruleset hashが期待値と違う、timeoutする、上限を超える — いずれもmessageを送らず・保存せず・取り込まない。
-- **拒否したpayloadは全体を捨てる。** 自動マスキングしない。返るのは検出カテゴリ・JSON上の位置・ルールIDだけで、**検出した値そのものは標準出力・標準エラー・ログ・監査・通知のどこにも出ない**。
+- **拒否したpayloadは全体を捨てる。** 自動マスキングしない。返るのは**ルールIDとJSON上の位置(`rule_id at pointer`)の2つだけ**で、**検出した値そのものは標準出力・標準エラー・ログ・監査・通知のどこにも出ない**。
 - 受入前に拒否されたpayloadにはrequest IDを発行しない。`rejected` 状態のrequestとしても残さない。
 
 **期待するhashは配備時にrepoから算出して各ホストのconfigへ埋まる。** ホスト上でルールセットを書き換えると、次回起動時にhash不一致で止まる。
 
-### 依頼文に長いパスを書かない
+### 依頼文とDLPの境界
 
-ルール `high-entropy-string` の候補パターンは20文字以上の `[A-Za-z0-9+/_=.-]` 連続であり、**リポジトリ内のパスやAPIのパスがそのまま当たる**。秘密情報を含まない依頼文でも `high_entropy` で拒否される。
+**2026-08-23に候補パターンから区切り文字(`/` `_` `-` `.`)と `=` を外した**(`docs/ai/reviews/oprc_dlp_false_positive/`)。`high-entropy-string` が測るのは**区切りで区切られた個々の断片**であり、通常のパスやAnsible識別子は短い語に分かれて下限(16文字)を割る。**この形なら依頼文からパスを外す必要は無い。**
 
-対処はパス文字列を依頼文から外すことである。ルールセットは書き換えない(書き換えるとhash不一致で経路ごと止まる)。**書き直したpayloadは、送る前に同じスキャナへ通して通過を確認してから submit する。**
+**`=` を外したのは、それが base64 の末尾paddingにしか現れないためである。** 秘密の検出では末尾数文字を失うだけで済む一方、残しておくと `Description=Reload` のような `key=value` がひと続きの断片になる。
+
+**ただし「パスなら当たらない」ではない。** **16文字以上、区切りを含まない断片**は今も候補になる — 長いファイル名や、区切りの無い長い識別子を含むパスがこれに当たる。**将来 deny されたときに、設計違反ではなく境界どおりの動作である**と読めるよう、ここに線を書いておく。
+
+**それ以前この節は「パスを書かない、ルールセットは書き換えない(hash不一致で経路が止まる)」と指示していたが、後半は誤りだった。** `expected_dlp_ruleset_sha256` は配備時に `stat.checksum` から再計算されるため、ruleset を直して両側へ配備すれば hash は一致する。**この誤った制約が、回避策を正しい対処のように見せていた。**
+
+**送る前に同じスキャナへ通して確認できる。** `oprc.dlp.scan()` は dict を受ける(bytes を渡すと結果が変わる)。拒否時は `rule_id at pointer` が出るため、どこが当たったかは拒否メッセージから分かる。
+
+**区切りを含む未知形式の秘密は見逃す。** 構造で切ることの裏返しであり、承知のうえで採っている。実測は上記案件記録にある。
+
+### rulesetを変えるときは、未取得messageを先に読む
+
+**受理時のruleset hashはmessageのmetadataへ不変で保存され、取得時に現在のhashと照合される。** そのため**旧rulesetで作られた未取得messageは、新rulesetを配備した時点で取得できなくなる。** 一時的な不一致ではなく、本文は更新されず、通常経路に削除も無い。
+
+**channelを静止させる操作は存在しない。** `channel_enabled` の切替はruleset copyを含む同じplaybookの再実行でしか行えず、独立した停止操作にならない。**「drain」もできない** — この経路に「読んだ」を記録する操作が無く、`get` を実行してもstateは `submitted` のまま変わらない。ライフサイクルは `submitted` → `expired`(TTL)だけである。
+
+**したがって、rulesetを変える者は毎回こうする。** ①`operator-channel-client list` で未取得を列挙する ②`operator-channel-client get <request-id>` で全件の内容を読む ③対応が要るものが無いかを確かめる ④2つのplaybookを間を空けずに完走させる ⑤両ホストのruleset/config hashと往復を確認する。**①〜③を飛ばすと、読まれないまま取得不能になるmessageが出る。**
 
 検出されるのは `purpose` / `requested_information` / `expected_result` / `observed_facts` / `unconfirmed` の5つで、ルール定義は `roles/operator_request_channel/files/dlp-rules.json` が正本。
 

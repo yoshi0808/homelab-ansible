@@ -205,6 +205,65 @@ class NoFalsePositiveTests(unittest.TestCase):
         self.assertNotIn("/repo_commit", pointers)
 
 
+class KnownVocabularyRegressionTests(unittest.TestCase):
+    """Pins concrete false-positive examples that came up while deciding
+    `entropy.candidate_pattern` (2026-08-23,
+    docs/ai/reviews/oprc_dlp_false_positive/), instead of leaving the
+    decision only in review prose. Two different outcomes are pinned on
+    purpose:
+
+    - The systemd `key=value` lines are the bug this case fixed (R1: `=`
+      removed from the candidate class, requirement 2026-08-23). They
+      must NOT block. If a future ruleset change makes them block again,
+      this is the regression the whole R1/H1 fix exists to prevent.
+    - `UNREACHABLE+report` is a *known, accepted* false positive
+      (Reviewer Finding 1, 2026-08-23_005_review.md): `+` stays in the
+      class because removing it only saves 2 BLOCKed candidates across
+      the ~1,760 tracked files requirement §8 measured (`docs/ai/
+      reviews/oprc_dlp_false_positive/2026-08-23_001_requirement.md`
+      §8; an earlier version of this comment cited a stale "3 hits
+      across 1,809 files" figure from before that measurement was
+      redone excluding docs/ai/memory/ -- 2026-08-23_009_review.md
+      Finding 1) while costing real base64 detection coverage
+      (Yoshinobu decision, same date). It is pinned as MUST block, not
+      as a bug -- if a future change flips this without a deliberate
+      decision to revisit `+`, this test should fail and force that
+      decision to be made on purpose again, not slide by unnoticed.
+    """
+
+    def setUp(self):
+        self.ruleset = _load_real_ruleset()
+
+    def _scan_purpose(self, text):
+        return dlp.scan(_message(purpose=text), self.ruleset, timeout_seconds=5)
+
+    def test_systemd_description_reload_not_blocked(self):
+        result = self._scan_purpose(
+            "Description=Reload nginx after the ansy TLS certificate changed"
+        )
+        self.assertFalse(result.blocked, [f.to_dict() for f in result.findings])
+
+    def test_systemd_description_monthly_not_blocked(self):
+        result = self._scan_purpose("Description=Monthly knowledge review (timer)")
+        self.assertFalse(result.blocked, [f.to_dict() for f in result.findings])
+
+    def test_systemd_lock_personality_not_blocked(self):
+        result = self._scan_purpose("LockPersonality=yes")
+        self.assertFalse(result.blocked, [f.to_dict() for f in result.findings])
+
+    def test_unreachable_plus_report_is_a_known_accepted_false_positive(self):
+        result = self._scan_purpose("UNREACHABLE+report")
+        self.assertTrue(
+            result.blocked,
+            "UNREACHABLE+report stopped blocking -- candidate_pattern changed. "
+            "If '+' was deliberately removed from the class, update this test "
+            "(and the implement record's '+ を外しません' rationale) together; "
+            "do not just flip the assertion.",
+        )
+        categories = {f.category for f in result.findings}
+        self.assertIn("high_entropy", categories)
+
+
 class TimeoutTests(unittest.TestCase):
     def test_alarm_guard_raises_scan_timeout(self):
         with self.assertRaises(dlp.ScanTimeout):
