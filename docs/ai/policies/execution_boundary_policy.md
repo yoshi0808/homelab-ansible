@@ -41,13 +41,6 @@
 
 **`inventories/homelab/group_vars/` の6本は `~/.ssh/id_ann` を指したまま残してある。整理の対象にしないこと。** これらを読むのは quory の Semaphore でもあり、そこでは quory 自身のホームへ解決される — 削除当日のジョブ #763 が pve1 / pve2 へ `unreachable=0` で到達している。**ansy から見ると存在しないファイルを指すが、それがansy側で失敗する正しい形である。** (quory 上にそのパスの実体があるかどうかは、開発側からは確かめられない。dispatch のカタログにファイルを見る手段が無い。)
 
-<!-- EXEC-007 -->
-**ansyが自分自身を対象にするplaybookは、SSHを経由せずlocalで実行する。** `dev_nodes` のgroup_varsが指す鍵はEXEC-005で削除済みであり、**ansyからansy自身へのSSHも成立しない**。2026-08-23、`operator_request_channel_client_setup.yml` の配備がこれで止まった。**EXEC-005が「正しい失敗」と述べているのは到達してはならないホストについてであって、ansyが自分自身を配備する経路ではない。**
-
-設定は `inventories/homelab/host_vars/ansy.yml` に置き、**group_varsの6本には触れない**(EXEC-005)。**これは境界を広げる設定ではない** — localhost実行はansy自身にしか届かず、到達不能なホストへの経路は1つも増えない。
-
-**引数(`-e ansible_connection=local`)でその場だけ越えない。** 鍵の不在は意図して作られた境界であり、越え方をinventoryへ書いて残すことと、実行のたびに引数で外すことは別物である。
-
 ## 2. 対象と実行範囲
 
 <!-- EXEC-010 -->
@@ -155,6 +148,5 @@
 
 | 版 | 日付 | 内容 |
 |---|---|---|
-| v1.2 | 2026-08-23 | **EXEC-007を追加。** `id_ann` 削除以降、`dev_nodes` のgroup_varsが指す鍵が無いため**ansyからansy自身へのSSHも成立しなくなっていた**ことが `operator_request_channel_client_setup.yml` の配備で表面化した。ansy自身への配備はSSHを経由せずlocalで行うこと、設定はhost_varsへ置きgroup_varsの6本には触れないこと、**引数でその場だけ越えないこと**を明記した |
 | v1.1 | 2026-08-19 | **`id_ann` を ansy から削除**し、`sandbox` 専用の `id_sandbox` へ分けた。EXEC-003 に `monnie` の行を足し、**「相手側で1行足せば復活する」経路が消えた**ことを書いた。EXEC-005 を過渡期の記述から実施済みの内容へ差し替え、EXEC-010 の「到達手段が無い」へ `monnie` を加えた |
 | v1.0 | 2026-08-18 | 新設。`docs/ai/roles/coordinator.md`「実ホストへの非冪等操作の承認」、`docs/ai/core.md`、`docs/ai/roles/tester.md`「使ってよい検証環境」、`implementer.md` / `reviewer.md` の禁止節に分散していた実行境界を1本へ集約した。**分散していたのは単一の問いの答えであり、6箇所のうち2箇所が実際にドリフトしていた。** 移設した規範に追加・削除は無い。**EXEC-020 だけが新規である** — `# tester-gate:` 分類と本書が直交することは、分散していた間はどの文書も書いていなかった |

@@ -8,16 +8,3 @@
 # the ansible-core package. See
 # docs/ai/reviews/ubuntu_vm_full_upgrade/2026-07-11_009_test_result.md.
 ubuntu_vm_full_upgrade_ansible_managed_by: apt
-
-# ansyが自分自身を対象にするplaybook(operator_request_channel_client_setup.yml
-# など)は、SSHを経由せずlocalで実行する。2026-08-19に`~/.ssh/id_ann`を削除して
-# 以降(EXEC-005)、`dev_nodes`のgroup_varsが指す鍵が存在しないため、ansyから
-# ansy自身へのSSHが成立しなくなっていた。
-#
-# **これは境界を広げる設定ではない。** localhost実行はansy自身にしか届かず、
-# monnieその他の到達不能なホストへの経路は一切増えない。group_varsの6本
-# (EXEC-005が「整理の対象にしない」と明記)には触れず、host_vars側で閉じる。
-#
-# quoryのSemaphoreがこのinventoryを読むときは、そちらのhost_varsではなく
-# 各hostのgroup_varsが効くため、この設定はansyローカルの実行にだけ作用する。
-ansible_connection: local
