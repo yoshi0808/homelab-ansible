@@ -1,22 +1,5 @@
 # playbookをrisk-accepted/check-mode-nativeに分類する基準
 
-**分類**: Lesson
-**由来**: tester_mode廃止・ansible_check_mode移行作業(`proxmox_backup_restore_verify.yml`の分類判断)。
+Policy `docs/ai/policies/ansible_test_safety_policy.md`「risk-accepted の許可条件」へ昇格済み(2026-08-25の月次Knowledge振り返りで、既に移送されていたことを確認して縮約した)。**実行コストを分類理由にしない**という判断もそちらが持つ。
 
-## 規約
-
-playbookを「`--check`時に何を本実行し、何をゲートするか」で分類する際、判断基準は次の2点のみとする。**実行コスト(時間・ストレージI/O等)の大小を独立した理由にしてはいけない。**
-
-1. **本番サービス・他システムへの影響があるか**(実質的な破壊性)
-2. **危険な本体操作を省いても、検証として意味が残るか**(テストとしての価値)
-
-## 背景
-
-`proxmox_backup_restore_verify.yml`(月次バックアップリストア検証)で、「実際のqmrestoreは本物のディスクI/O+数分の実行時間を要し、これまでのrisk-accepted候補(SSH鍵生成等)より重い」という実行コストを理由にcheck-mode-native(リストア本体をゲート)にする案が出たが、却下された。理由: 一時的にリソースを使って最後に確実に削除されるなら気にする必要はなく、本質的にはこのplaybookの存在意義そのものが「バックアップが本当にリストアできるかの実地検証」であり、リストア本体を省いたテストには意味がない。これはProxmoxパッチやVM rebootのように「危険な本体操作をスキップしてもタグ再検証等に価値が残る」ケースとは構造が異なる。
-
-## 適用条件
-
-新しいplaybookを`risk-accepted`(常時本実行) / `check-mode-native`(危険操作のみゲート) / `dry-run-aware`(ネイティブdry-runフラグに差し替え)に分類する際、「実行に時間がかかる」「実ストレージ帯域を使う」等のコストは分類理由に含めない。
-
-- 本番サービスへの影響がゼロで、かつ本体操作を省いても検証価値が残らない(または本体操作自体が検証の目的そのもの)なら、実行コストが多少重くてもrisk-accepted側に倒してよい。
-- 本体操作を省いてもタグ検証・対象選定等で十分なテスト価値が残るなら(自律復旧ラダー3段、Proxmoxパッチ/evacuate/restore等)、check-mode-nativeでゲートする。
+基準が決まったのは、tester_mode廃止・`ansible_check_mode`移行のときの `proxmox_backup_restore_verify.yml` の分類判断。「実際のqmrestoreは重い」という実行コストを理由にcheck-mode-nativeへ倒す案が出たが、**このplaybookの存在意義そのものがリストアの実地検証であり、本体を省いたテストには意味がない**として却下された経緯がある。

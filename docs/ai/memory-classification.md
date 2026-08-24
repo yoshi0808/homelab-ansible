@@ -42,6 +42,22 @@ Claude Memoryの`user`/`feedback`/`project`/`reference`とは別の分類体系�
 
 `incidents/`のファイル形式(ファイル名規則・記載項目・原因分類タグ・`状態`)は`skills/incident-recording/SKILL.md`が正本。**記録は気づいた時点で開始し、原因判明後に同じファイルを完成させる2段階。**
 
+### `lessons/`の「再発記録」節
+
+**本節が契約の正本である。** 各lessonの`## 再発記録`節は機械だけが書き、人は手で書かない。節の中身は見出しと表だけとし、この契約を各ファイルへ複製しない。
+
+追記するのは**別体**であり、セッション終了時にtranscriptを読み、**次のいずれかが実際に起きたときだけ**1行足す。無ければ何もしない。
+
+1. Policy(`docs/ai/policies/*_policy.md`)の許可・禁止・停止条件に反した。
+2. harnessの安全機構(permission classifier / `permissions.deny` / `autoMode`)に止められた。
+3. 規範文書または依頼文に書いてあることをしなかった。
+
+**話題がlessonに似ていることは記録の理由にならない。** 調べた・検証した・見つけた、は記録しない。lessonを正しく適用できているものも記録しない。**反した規範の所在を書けない項目は記録しない**(機械が落とす)。
+
+**回数は推定であって測定ではない。** 分類器はLLMであり、見落とせば沈黙し、過検出すれば水増しする。**回数だけを昇格の根拠にしない。**
+
+実装は`scripts/session-recurrence-record.py`(`SessionEnd` hook、`.claude/settings.json`に登録)。
+
 ## 3. 昇格・廃止ルール
 
 ```text

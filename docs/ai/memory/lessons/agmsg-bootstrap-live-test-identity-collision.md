@@ -19,7 +19,7 @@
 
 ## 適用条件(今後この種のテストをする場合)
 
-1. **本番で実際に使われているidentity名(reviewer/reviewer2/implementer/implementer2/tester/tester2/techlead2)をテストで再利用しない**。別agmsgチームで`join.sh`しても、`prep-agent.sh`のチーム固定・codex側の登録挙動により本番のロールセッション記録まで書き換わりうる。
+1. **本番で実際に使われているidentity名をテストで再利用しない**。別agmsgチームで`join.sh`しても、`prep-agent.sh`のチーム固定・codex側の登録挙動により本番のロールセッション記録まで書き換わりうる。**現在 team `homelab` に居るのは `claude`(claude-code)と `reviewer`(codex)の2つだけである**(正本は `docs/ai/context/operations/agent-messaging.md`。この事故の当時に居た implementer / tester / techlead 系の identity は既に無い)。
 2. どうしても特定roleのメッセージ内容(case分岐)を検証したい場合は、**実際にagmsg経由で送信・kickする代わりに、静的にメッセージ文字列を抽出して内容を確認する**(本ファイルの由来となった検証では、静的確認は事前に完了していた)。
 3. 実際にend-to-endで送受信まで検証したい場合は、本番に存在しない架空のidentity名(例: `tester-canary`)を使う。ただしその場合`prep-agent.sh`のcase分岐は汎用メッセージにフォールバックするため、role固有メッセージの実地検証にはならない。
-4. 異変に気づいたら、まず`scripts/lib/role-session.sh`の`agmsg_role_session_uuid <team> <agent>`で現在の記録スレッドを確認し、本番の既知スレッドIDと突き合わせる。ズレていたら`agmsg_role_session_record`で正しい値へ書き戻せば、bridge-launcherが自動修復する。
+4. 異変に気づいたら、まず`agmsg_role_session_uuid <team> <agent>`で現在の記録スレッドを確認し、本番の既知スレッドIDと突き合わせる。ズレていたら`agmsg_role_session_record`で正しい値へ書き戻せば、bridge-launcherが自動修復する。**agmsg本体はリポジトリの外**(`~/.agents/skills/agmsg/scripts/`)にあり、この2関数は同ディレクトリの `lib/role-session.sh`、launcher は `drivers/types/codex/codex-bridge-launcher.sh` である。

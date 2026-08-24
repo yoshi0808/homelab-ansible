@@ -17,13 +17,11 @@
 - **どの conffile を保持したかは出せていない。** 通知に出るのは「保持する設定で適用した」という静的な一文だけ。特定は `docs/ai/reviews/ubuntu_vm_conffile_held_report/` へ分割した(着手時期未定)。**apply 前後の状態比較では原理的に届かない**ことが3ラウンドのレビューで確定している
 - **孤児プロセスの後始末は自動化していない。** 当日、Semaphore がジョブを停止しても monnie の `apt-get` は残った
 
-**未確認: unpoller の Prometheus scrape cache** — 4.0.0 の起動ログに `Prometheus scrape cache enabled, refresh interval: 1m0s` が出る。3.3.4 から在ったのか 4.0.0 で入ったのかを測っていない。4.0.0 で入ったのなら、scrape 間隔15秒に対して値の更新が60秒になり**メトリクスの時間分解能が落ちる**(counter の総量は保たれるため alert rule 4本の発火条件は成立したまま)。確認は monnie の journal に残っている 2026-08-07 03:30 前後の起動ログ
-
 **観測待ち: Semaphore の新版検知が初めて発火すること(2026-08-25 実装)** — `SAFE: Semaphore update check monthly`、**毎月10日 20:00**。**初回は 2026-09-10。** ansy / quory とも現在 2.19.8 で `releases/latest` と一致しているため、**鳴らずに静かに終わるのが正常**(「動いていない」と疑わないこと)。apt リポジトリが無く GitHub Releases からしか取れないため、この経路が唯一の検知手段である。**適用は手動**で、手順は `docs/ai/reviews/semaphore_upgrade/2026-08-18_002_manual_procedure.md`。**本番で1回手動実行して `up_to_date` を確認済み**(ジョブ #827)。案件記録は `docs/ai/reviews/semaphore_update_check/`。**同日、schedule の有効化ゲートを撤去した**(`docs/ai/reviews/semaphore_activation_gate_removal/`) — カタログが `active: true` と書けば1回の適用で有効になる
 
 **観測待ち: 誤りの再発を機械が刻む仕組み(2026-08-18 実装)** — **規範に書いても守れない誤りがあり、それを自己申告でしか検出できていない**という問題への手探り。**2回目の発火で過検出が確定し、2026-08-19に門を2段階で差し替えた。過検出は大きく下がったが、残っており、合否を判定する手段がまだ無い。**
 
-- **形式は `docs/ai/memory/lessons/` の「再発記録」節**。契約は「**別体**がセッション終了時に transcript を読み、**規範に反した事実があったときだけ**1行足す。無ければ何もしない」。**門は①Policy違反 ②harnessの安全機構に止められた ③規範文書または依頼文に書いてあることをしなかった、の3つだけ**で、**反した規範の所在を書けない項目は落とす**(`norm` が空なら機械が捨てる)。定型文の正本は `scripts/session-recurrence-record.py` の `RECURRENCE_SECTION`
+- **形式は `docs/ai/memory/lessons/` の「再発記録」節**。**契約の正本は `docs/ai/memory-classification.md`「`lessons/`の「再発記録」節」**(2026-08-25に移設 — それまで各lessonへ12行の定型文を複製しており、8本で96行の二重化になっていた)。節が持つのは見出し・正本へのポインタ1行・表だけである。書き込む実装は `scripts/session-recurrence-record.py`
 - **機構は `SessionEnd` hook と `scripts/session-recurrence-record.py`**(`.claude/settings.json` に登録)。決めた3点は①hookは `SessionEnd`、`reason` が `resume` のときだけ対象外とし **`clear` は含める**(この環境では境界の大半が `/clear` のため)②別体は**役を着せない `codex exec` を1回**(Reviewer役は着せない — 「findingsを重大度別に返せ」が過検出へ引くため)③渡すのは user/assistant の本文と `tool_use` の入力のみで **`tool_result` は捨てる**。transcript のパスは codex へ渡さず stdin で流す(境界を依頼文でなく入力経路に置く)
 - **異常終了では発火しない。** OOM・SIGKILL・電源断は `shutdown()` を通らず hook が起動しないため、**取りこぼしは沈黙として現れる。対象外とすることをYoshinobuが決めた**(2026-08-18)
 - **`/clear` のたびに codex が1回走り、最大120秒待つ。** 待ち時間の上限は `.claude/settings.json` の `CLAUDE_CODE_SESSIONEND_HOOKS_TIMEOUT_MS`
@@ -38,10 +36,15 @@
 - **良くなる確証は双方とも持っていない**(Yoshinobu、2026-08-18)。やってみる価値はあるという判断で始めた
 - **やめる条件は現段階では定めない**(Yoshinobu、2026-08-18)。Coordinatorが「効かなかったことを観測可能にするため先に決めるべき」と進言し、**現段階では不要と判断された**。再提案しない
 
-**観測待ち: incident調査のLLMが先読みファイルを読めるか(AC10、2026-08-19)** — `homelab-semaphore-query` のAPI移行は**quoryへ配備完了**(commit `0196087`、Semaphoreジョブ #758〜#762)。**AC10以外すべて充足した。**
+**壊れている: 一次調査の先読みファイルが書けていない(AC10は不合格、2026-08-25判明)** — `homelab-semaphore-query` のAPI移行は**quoryへ配備完了**(commit `0196087`、Semaphoreジョブ #758〜#762)だが、**同じ配備が入れた先読み機構は導入以来1度も動いていない。**
 
 - **壊れていたことと直ったことの両方が実測で残っている** — `homelab-incident-capture.service` が5分ごとに `status=2` で失敗し続け、配備を境に緑になった。版上げ(8/18 20:29)から約14時間、本番の証拠収集が動いていなかった
-- **残るのはAC10だけ** — codex sandbox の中のLLMが、sandboxの外で先読みしたファイルを実際に読めるか。**次にSemaphoreジョブが失敗して調査が動くまで確定しない**。成果物でSemaphoreの情報が引用できているかを見る
+- **8/19以降の初発火(ジョブ #802、8/22)で失敗した。** 成果物の `notes` に `failed to write pre-fetched Semaphore context file for the LLM: [Errno 13] Permission denied: '/var/lib/incident-inspect/semaphore-context/semaphore-context-802.txt'`。LLMはSemaphoreのジョブ出力・ホスト結果・エラー本文を一切読めず、所見は「失敗タスクや直接エラーは特定不能」で終わった。`known_condition.suspected` も先読み欠落を理由に `false` へ落ちている
+- **回帰ではない。** `semaphore_context_dir` とディレクトリ作成タスクは `0196087`(8/19)が初出で、それ以前の #631(8/8)・#675(8/11)は旧経路で正常に所見を出していた。**配備した機能が最初から動いていない。**
+- **AC10が問おうとしていた層には到達していない。** 失敗は「sandbox内のLLMが外のファイルを読めるか」ではなく、その1段手前の**sandboxの外でyoshiがファイルを書く**ところである。unitは `User=yoshi`、roleはこのディレクトリを `owner: yoshi` / `mode: 0750` で作る建付け(`roles/incident_investigate/tasks/main.yml`)なので、**repo側の意図と本番の現物が食い違っている**
+- **配備物は最新である** — `deployed-hash incident-investigate` は repo と一致(`3a22c979…`)。差分ではなくディレクトリ側の問題
+- **開発側から現物を観測する手段が無い。** `acl-status` の対象は `yoshi-home` / `semaphore-dir` / `semaphore-db` / `reports-root` の固定4件で、`/var/lib/incident-inspect/` 配下の arm が無い。**下の `acl-status semaphore-db` と同じクラスの穴が、もう1件効いている**
+- **着手は別案件。** 原因の切り分けに観測手段の追加(dispatchのarm 1本)が要り、それ自体が配備を伴う。壊れているのは調査の質であって本番サービスではない
 - **旧 `semaphore.db` ACL は3識別子とも撤去済み**(`/var/lib/semaphore` に named-user エントリなし)
 - **`acl-status semaphore-db` は恒久的に `Permission denied` になった。** `dev-investigate` が traverse を失ったためで異常ではないが、**「ACLが付け直されていないか」を開発側から観測する手段は失われた**
 - **残存リスク**: タスク一覧が将来ページングされたとき、`task-time` は非ゼロで騒ぐが **`recent-failed` は静かに古い分を落とす**。現在757件で頭打ちは観測されていない

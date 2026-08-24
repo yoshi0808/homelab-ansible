@@ -1,5 +1,9 @@
 # 無人 claude -p の読み書きを封じ込める条件
 
+> **前提が変わっている(2026-08-03)。** 月次Knowledge振り返りの無人実行は廃止され、**この環境に無人の Claude Code セッションは1つも残っていない。** 実装だった `roles/knowledge_review/templates/job-settings.json.j2` も同日に削除された(commit `6a592a9`)。
+>
+> **それでもこのLessonを残すのは、下の実測が「無人実行」ではなく Claude Code の権限モデルそのものの性質だからである。** `Read` と `Edit` で既定挙動が違うこと、`Write()` が no-op であること、`acceptEdits` が path 指定を無効化すること — いずれも `.claude/settings.json` を触るときに今も効く。**無人実行を再開する話ではない。**
+
 ## 教訓
 
 `claude -p`を無人で走らせるとき、**読み書きの範囲を限定するには次の3条件が同時に必要**である。1つでも欠けると封じ込めは成立しない。
@@ -53,6 +57,6 @@ Writeのpath制限はBash経由で迂回できる。無人実行では`Bash`を�
 
 decoy環境で4構成を実測して上表を得た。3条件のうち`acceptEdits`が最も見落としやすい(「編集を自動承認する」だけの設定に見えて、実際にはpath指定を無効化する)。
 
-実装は`roles/knowledge_review/templates/job-settings.json.j2`、Role観点の要約は`docs/ai/role-routing-index.md`「無人実行されるCoordinator」節。**このLessonが3条件の正本**であり、両者はここを参照する。
+**当時の実装(`roles/knowledge_review/templates/job-settings.json.j2`)と、Role観点の要約を置いていた `docs/ai/role-routing-index.md` は、どちらも既に存在しない**(前者は2026-08-03の無人実行廃止で、後者は2026-08-04の解体で削除)。**上の3条件と実測表の正本は本ファイルである。**
 
 関連: [[verify-the-outside-of-a-claimed-boundary]]、[[destructive-operation-classification-criteria]]

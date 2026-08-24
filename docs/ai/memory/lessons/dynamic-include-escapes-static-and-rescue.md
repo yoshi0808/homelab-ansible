@@ -2,6 +2,8 @@
 
 ## 教訓
 
+**規範としての正本は `skills/ansible-implementation-style/SKILL.md`**(「`include_tasks` / `block` に付けられない属性」節と「check_mode の実装上の落とし穴」節)。本ファイルは事例(根拠)側として残す — 3層に分けた判断と、runtimeでの事前パース検証を採らなかった理由は、Skillには書かない。
+
 `ansible.builtin.include_tasks` で読み込むタスクファイルは、**実行時に初めて解決される**。ここから、実測で確認した3つの制約が出る(Ansible core 2.20.1、2026-07-27)。
 
 **1. `--syntax-check` は中身を検証しない。** include先のYAMLが壊れていても静的検査は通る。`ansible-lint` も `load-failure` を出すだけで内容を追わない。**静的検査を通ったことは、include先が健全であることを意味しない。**

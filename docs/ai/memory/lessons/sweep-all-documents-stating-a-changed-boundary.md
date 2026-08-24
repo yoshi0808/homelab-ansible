@@ -25,7 +25,7 @@ grep -rn "<変更した境界のキーワード>" docs/ai/ CLAUDE.md AGENTS.md s
 対象の典型は次の4層。上位ほど見落とすと影響が広い。
 
 1. `docs/ai/core.md`(全Roleが最初に読む共通原則) — **最も見落としやすく、最も影響が大きい**
-2. `docs/ai/role-routing-index.md`、`docs/ai/roles/*.md`
+2. `docs/ai/roles/*.md`
 3. `docs/ai/policies/*_policy.md`、`docs/ai/context/`
 4. `skills/*/SKILL.md`、`CLAUDE.md`
 
