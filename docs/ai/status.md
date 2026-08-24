@@ -19,6 +19,8 @@
 
 **未確認: unpoller の Prometheus scrape cache** — 4.0.0 の起動ログに `Prometheus scrape cache enabled, refresh interval: 1m0s` が出る。3.3.4 から在ったのか 4.0.0 で入ったのかを測っていない。4.0.0 で入ったのなら、scrape 間隔15秒に対して値の更新が60秒になり**メトリクスの時間分解能が落ちる**(counter の総量は保たれるため alert rule 4本の発火条件は成立したまま)。確認は monnie の journal に残っている 2026-08-07 03:30 前後の起動ログ
 
+**観測待ち: Semaphore の新版検知が初めて発火すること(2026-08-25 実装)** — `SAFE: Semaphore update check monthly`、**毎月10日 20:00**。**初回は 2026-09-10。** ansy / quory とも現在 2.19.8 で `releases/latest` と一致しているため、**鳴らずに静かに終わるのが正常**(「動いていない」と疑わないこと)。apt リポジトリが無く GitHub Releases からしか取れないため、この経路が唯一の検知手段である。**適用は手動**で、手順は `docs/ai/reviews/semaphore_upgrade/2026-08-18_002_manual_procedure.md`。**本番で1回手動実行して `up_to_date` を確認済み**(ジョブ #827)。案件記録は `docs/ai/reviews/semaphore_update_check/`。**同日、schedule の有効化ゲートを撤去した**(`docs/ai/reviews/semaphore_activation_gate_removal/`) — カタログが `active: true` と書けば1回の適用で有効になる
+
 **観測待ち: 誤りの再発を機械が刻む仕組み(2026-08-18 実装)** — **規範に書いても守れない誤りがあり、それを自己申告でしか検出できていない**という問題への手探り。**2回目の発火で過検出が確定し、2026-08-19に門を2段階で差し替えた。過検出は大きく下がったが、残っており、合否を判定する手段がまだ無い。**
 
 - **形式は `docs/ai/memory/lessons/` の「再発記録」節**。契約は「**別体**がセッション終了時に transcript を読み、**規範に反した事実があったときだけ**1行足す。無ければ何もしない」。**門は①Policy違反 ②harnessの安全機構に止められた ③規範文書または依頼文に書いてあることをしなかった、の3つだけ**で、**反した規範の所在を書けない項目は落とす**(`norm` が空なら機械が捨てる)。定型文の正本は `scripts/session-recurrence-record.py` の `RECURRENCE_SECTION`
