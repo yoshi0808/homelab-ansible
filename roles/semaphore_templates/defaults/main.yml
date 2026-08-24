@@ -944,7 +944,10 @@ semaphore_schedules_closed_world: true
 # 選べない。**立てる前に必ず`--check`で`pending_activation`を読み、そこに
 # 並ぶものを全部有効化してよいか確かめること。**
 #
-semaphore_schedules_allow_activation: false
+# **2026-08-24、`SAFE: Semaphore update check monthly` の有効化のために一時的に立てている。**
+# 押した後に false へ戻す commit で畳む。**保留中の遷移はこの1件だけであることを、
+# ジョブ #826 のレポート(`pending_activation`)で確認済み。**
+semaphore_schedules_allow_activation: true
 
 # --- R15: allowlist型のcanonical本番URL ---------------------------------------
 # 有効化を許可してよい接続先の判定に使う。**他の変数(semaphore_target等)
