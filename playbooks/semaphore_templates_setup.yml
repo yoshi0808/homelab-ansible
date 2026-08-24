@@ -83,10 +83,25 @@
 #
 # schedule側(2026-08-09追補): template適用が完了した後に、
 # roles/semaphore_templates/defaults/main.yml の
-# semaphore_schedules_catalog をreconcileする(R10)。有効化
-# (false→true)はclosed-worldフラグ・明示許可・接続先allowlistの3条件が
-# 揃わない限り行われない(R12/R15、既定はすべて不許可・移行期間側)。
-# 詳細は docs/ai/reviews/semaphore_schedules_as_code/。
+# semaphore_schedules_catalog をreconcileする(R10)。
+#
+# **2026-08-24追補(semaphore_activation_gate_removal案件): 有効化
+# (false→true)を別段階へ遅らせて実行ごとの明示的な許可を要求していた
+# 旧gate(closed-worldフラグ・明示許可・接続先allowlist・schedule集合の
+# 非変化の4条件)は撤去した。** カタログの`active`は、既存・新規を
+# 問わず単一のapplyでそのまま反映される(押下1回・commit1回で有効に
+# なる)。**ただし接続先の検査(旧allowlistの一部)だけは独立した目的を
+# 持つとして復元した(R2)** — 書き込みに使うAPI base URLが、カタログに
+# 定めたcanonicalな本番URLと一致しないとき、**各schedule書き込みの直前に
+# 取得したfresh値**を使って「このwriteは本当にfalse→trueを行うか」を
+# 個別に判定し、該当すればそのwriteとそれ以降のPOST/PUTをすべて中止する
+# (`roles/semaphore_templates/tasks/schedules_apply_item.yml` /
+# `schedules_apply_new_item.yml`。2026-08-24再追補: diff時点の
+# スナップショットで判定すると、diffと実際の書き込みの間の競合を見逃す
+# ことが独立レビューで判明したため、write直前の値で判定する設計に
+# 改めた)。
+# 詳細は docs/ai/reviews/semaphore_schedules_as_code/ と
+# docs/ai/reviews/semaphore_activation_gate_removal/。
 
 - name: Fail closed if semaphore_target is not a known Semaphore-server inventory host
   hosts: localhost

@@ -8,7 +8,7 @@
 # High #3)への対応。** このfileは`tasks/main.yml`のnested block/rescue/
 # alwaysの`always:`から(さらにその内側の独自block/rescueに包まれて)呼ば
 # れ、**成功経路・`--check`・schedule blockが失敗した経路のすべてで実行
-# される。** 失敗経路では、preflight/diff/stage1/stage2のどの時点で
+# される。** 失敗経路では、preflight/diff/applyのどの時点で
 # 止まったかにより、これ以降で参照する事実の一部がまだ`set_fact`されて
 # いないことがある(例: `schedules_preflight.yml`自体が失敗すれば
 # `semaphore_schedules_diff_result`は存在しない)。**このfileが自分自身
@@ -30,12 +30,10 @@
 # `default(...)`で読むだけであり、生の`ansible_failed_result`には一切
 # 触れない。
 #
-# Runs after every other schedules task (including schedules_apply_
-# stage1.yml / schedules_apply_stage2.yml) so it can show the actual
-# outcome, not just the pre-apply diff. Under --check the outcome lists
-# are simply empty (schedules_diff.yml initialized them; the two apply
-# files never ran) and semaphore_schedules_stage2_gate_result is
-# schedules_diff.yml's preview.
+# Runs after every other schedules task (including schedules_apply.yml)
+# so it can show the actual outcome, not just the pre-apply diff. Under
+# --check the outcome lists are simply empty (schedules_diff.yml
+# initialized them; schedules_apply.yml never ran).
 #
 # copy/file support check_mode simulation (skill "check_modeの実装上の
 # 落とし穴" 1) so both need an explicit check_mode: false to actually save
@@ -46,26 +44,10 @@
     semaphore_schedules_ts_iso: "{{ lookup('pipe', \"TZ='Asia/Tokyo' date '+%Y-%m-%dT%H:%M:%S+09:00'\") }}"
     semaphore_schedules_ts: "{{ lookup('pipe', \"TZ='Asia/Tokyo' date '+%Y%m%d_%H%M%S+0900'\") }}"
 
-# For each newly-created schedule (this run), note whether the catalog
-# wants it active — the diff filter never puts a brand-new schedule into
-# `pending_activation` in the same run that creates it (R13's docstring:
-# activation happens in a *later* apply), so this is computed here purely
-# for report readability, from data already on hand (no new filter call).
-- name: Build a "created, activation pending a future apply" note list (R13/AC3)
-  ansible.builtin.set_fact:
-    semaphore_schedules_created_pending_activation: >-
-      {%- set catalog_by_name = {} -%}
-      {%- for e in semaphore_schedules_catalog -%}
-        {%- set _ = catalog_by_name.update({e.name: e}) -%}
-      {%- endfor -%}
-      {%- set out = [] -%}
-      {%- for c in (semaphore_schedules_created | default([])) -%}
-        {%- if catalog_by_name.get(c.name, {}).get('active') is true -%}
-          {%- set _ = out.append(c.name) -%}
-        {%- endif -%}
-      {%- endfor -%}
-      {{ out }}
-
+# 2026-08-24(semaphore_activation_gate_removal案件 R1): 有効化ゲート撤去に
+# 伴い、「作成したが有効化は別段階待ち」という状態が無くなったため、その
+# 注記リストを計算する task を削除した。作成された schedule は、カタログの
+# active が true ならその時点で既に active=true として作成されている。
 - name: Show the schedules diff/outcome summary
   ansible.builtin.debug:
     msg:
@@ -83,20 +65,22 @@
           / {{ semaphore_schedules_observed_api_version | default('(未取得)') }}
       - >-
           新規作成 : {{ (semaphore_schedules_diff_result | default({})).new | default([]) | length }} 件
-          (作成={{ semaphore_schedules_created | default([]) | length }} 件、
-          うち有効化待ち={{ semaphore_schedules_created_pending_activation | default([]) | length }} 件)
+          (作成={{ semaphore_schedules_created | default([]) | length }} 件)
       - >-
-          第1段階 更新 : {{ (semaphore_schedules_diff_result | default({})).stage1 | default([]) | length }} 件
-          (書込={{ semaphore_schedules_stage1_written | default([]) | length }} 件、
-          見送り={{ semaphore_schedules_stage1_skipped | default([]) | length }} 件)
+          更新 : {{ (semaphore_schedules_diff_result | default({})).changed | default([]) | length }} 件
+          (書込={{ semaphore_schedules_updated | default([]) | length }} 件、
+          見送り={{ semaphore_schedules_update_skipped | default([]) | length }} 件)
       - "無変更               : {{ (semaphore_schedules_diff_result | default({})).unchanged | default([]) | length }} 件"
       - "管理外(削除しない)   : {{ (semaphore_schedules_preflight_result | default({})).unmanaged | default([]) | length }} 件"
       - >-
-          有効化待ち : {{ (semaphore_schedules_diff_result | default({})).pending_activation | default([]) | length }} 件
-          (有効化済み={{ semaphore_schedules_stage2_activated | default([]) | length }} 件)
-      - >-
-          有効化許可 : {{ (semaphore_schedules_stage2_gate_result | default({})).allowed | default(false) }}
-          ({{ (semaphore_schedules_stage2_gate_result | default({})).reasons | default(['未評価']) | join(' / ') }})
+          canonical接続先一致(R2) : {{ semaphore_schedules_canonical_url_ok | default('(未評価)') }}
+          (canonical={{ semaphore_schedules_canonical_api_base_url | default('(未設定)') }}、
+          api_base_url={{ semaphore_templates_api_base_url }})
+          -- 有効化を伴う書き込みが実際に非canonical接続先へブロック
+          された場合は、上のfailed/failed_msgに個別のschedule名で出る
+          (2026-08-24再追補: 判定はwrite直前のfresh値で行うため、diff
+          時点の静的な「有効化対象」一覧はもう保持しない。独立レビュー
+          `2026-08-24_004_review.md` High 1参照)
 
 - name: Show unmanaged schedules (defined nowhere in the catalog — R18, report only)
   ansible.builtin.debug:
@@ -105,10 +89,10 @@
   loop_control:
     label: "{{ item.name }}"
 
-- name: Show stage-1 skipped writes (identity changed since preflight — migration only, R8)
+- name: Show skipped writes (identity changed since preflight — migration only, R8)
   ansible.builtin.debug:
     msg: "! {{ item.name }}(id={{ item.id }}): {{ item.reason }}"
-  loop: "{{ semaphore_schedules_stage1_skipped | default([]) }}"
+  loop: "{{ semaphore_schedules_update_skipped | default([]) }}"
   loop_control:
     label: "{{ item.name }}"
 
@@ -163,17 +147,29 @@
         api_version: "{{ semaphore_schedules_observed_api_version | default('(未取得)') }}"
       diff:
         new: "{{ (semaphore_schedules_diff_result | default({})).new | default([]) }}"
-        stage1: "{{ (semaphore_schedules_diff_result | default({})).stage1 | default([]) }}"
+        changed: "{{ (semaphore_schedules_diff_result | default({})).changed | default([]) }}"
         unchanged_count: "{{ (semaphore_schedules_diff_result | default({})).unchanged | default([]) | length }}"
-        pending_activation: "{{ (semaphore_schedules_diff_result | default({})).pending_activation | default([]) }}"
       unmanaged: "{{ (semaphore_schedules_preflight_result | default({})).unmanaged | default([]) }}"
       outcome:
         created: "{{ semaphore_schedules_created | default([]) }}"
-        created_pending_activation: "{{ semaphore_schedules_created_pending_activation | default([]) }}"
-        stage1_written: "{{ semaphore_schedules_stage1_written | default([]) }}"
-        stage1_skipped: "{{ semaphore_schedules_stage1_skipped | default([]) }}"
-        stage2_activated: "{{ semaphore_schedules_stage2_activated | default([]) }}"
-      activation_gate: "{{ semaphore_schedules_stage2_gate_result | default({'allowed': false, 'reasons': ['未評価'], 'url_used': ''}) }}"
+        updated: "{{ semaphore_schedules_updated | default([]) }}"
+        update_skipped: "{{ semaphore_schedules_update_skipped | default([]) }}"
+      # R2(2026-08-24追補、独立レビュー Finding 1で復元): 判定に使った
+      # 接続先とcanonical URLの一致結果を必ず記録する(旧R15と同じ要求)。
+      # `url_matches`が`null`のまま保存されるのは、schedule処理そのものが
+      # canonical_check.ymlへ到達する前に失敗した場合のみ(default(none))。
+      #
+      # **2026-08-24再追補(独立レビュー`2026-08-24_004_review.md` High
+      # 1): `activation_targets`キーは削除した。** diff時点のスナップ
+      # ショットから静的に列挙する設計だったが、diffと実際の書き込みの
+      # 間の競合を見逃す(このファイルのヘッダコメント参照)。有効化判定は
+      # 今はwrite直前のfresh値で個別に行われ(`schedules_apply_item.yml`
+      # / `schedules_apply_new_item.yml`)、ブロックされた場合は下の
+      # `failed`/`failed_msg`(このJSONの上部)に対象のschedule名入りで
+      # 記録される -- 別の場所へ二重に持たない。
+      canonical_check:
+        canonical_url: "{{ semaphore_schedules_canonical_api_base_url | default('') }}"
+        url_matches: "{{ semaphore_schedules_canonical_url_ok | default(none) }}"
   become: false
   check_mode: false
   ignore_unreachable: true

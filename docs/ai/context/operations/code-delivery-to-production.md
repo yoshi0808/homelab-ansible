@@ -223,21 +223,19 @@ ssh quory-investigate "semaphore-query running 20"   # 見送りが続く理由�
 ### schedule を触るときの規則
 
 - **UI で一時的に変えてよい。** 禁じる仕組みではなく、**一時的な変更が恒久化しない**ことを保証するのが目的である(Yoshinobu、2026-08-10)。次の適用でカタログの値へ戻る
-- **戻る対象は cron・対象 template・`task_params`・無効化の4つ。** `false → true`(有効化)だけは別扱いで、下記の4条件が揃わない限り発行されない
+- **戻る対象は cron・対象 template・`task_params`・有効/無効の4つ。** カタログが宣言した値へ戻る。**2026-08-24 に有効化ゲートを撤去したため、`false → true` の別扱いは無くなった**(`docs/ai/reviews/semaphore_activation_gate_removal/`)。
 - **削除は行わない。** カタログに無い schedule に DELETE を出す経路が存在しない
 - **closed-world フェーズに入っている**(2026-08-10)。カタログに無い schedule を検出したら、**preflight で書き込みを1件も出さずに停止する**。消さずに知らせる形である
 - **新しい playbook を足すときは、template と schedule を同じ変更で決め、既存の実行時刻と競合しない cron を選ぶ。** schedule を先に作ってはならない — schedule が指す template は適用時点で実在している必要があり、同一変更で両方を足す場合は **template を先に適用する2段階**になる
 
-有効化の4条件: closed-world フェーズであること / 管理外が0件であること / **実行ごとの明示的な許可**(`-e semaphore_schedules_allow_activation=true`、既定は不許可)/ 書き込み先の API URL がカタログの canonical な本番 URL と完全一致すること。
-
 ### Git から復元できる範囲
 
-**「定義」は戻せるが、「動いている状態」までは戻らない。**
+**カタログが管理する5項目は戻る。それ以外の実行時の状態は戻らない。**
 
-- 新規作成は**常に無効**で行われる。復元後に定期実行を再開させるには、上記4条件を満たす別の実行が要る
+戻るのは `name` / 対象 template / `cron_format` / `task_params` / `active` の5つで、**`active: true` も1回の適用で戻る**(2026-08-24 に有効化ゲートを撤去した)。**戻らないのは、過去の実行履歴と、カタログが管理していない `run_at` / `type` / `delete_after_run` である**(下記)。
+
+- **新規作成もカタログの宣言どおりに行われる。** `active: true` と書いた schedule は、1回の適用で有効になる
 - **template を先に戻す必要がある**(schedule の解決先が実在しないと停止する)
 - **`run_at` / `type` / `delete_after_run` は管理していない。** cron スケジュールでは使われておらず(実測で全件 NULL / 空)、失われる値が無いためである
 - **復元そのものは ansy で実証済み**(2026-08-10)。カタログにある schedule を消してから流すと、`name` / 対象 template / cron / `task_params` がカタログ値と一致する形で作られ、`active` は `false` になる。一次記録は `docs/ai/reviews/semaphore_schedules_as_code/2026-08-10_028_test_result_write_paths.md`
-- **quory 本番でも書き込みの経路を通した**(2026-08-18、`semaphore_db_backup`)。カタログに追加した template と schedule が新規作成され、続く実行で有効化された。**新規作成が常に無効で行われることと、有効化に別の実行が要ることは、本番でそのとおりに起きた**
-
-**有効化の旗は schedule を選べない。** `-e semaphore_schedules_allow_activation=true` は、そのとき無効になっている**管理下の schedule すべて**に効く。**`--check` の差分に `pending_activation` が複数並んだら、並んでいる全部を有効化してよいか先に確かめる**(2026-08-18、意図していない `UN-SAFE:Proxmox Weekly Full Patch` が同時に並んだ)。
+- **quory 本番でも書き込みの経路を通した**(2026-08-18、`semaphore_db_backup`)。カタログに追加した template と schedule が新規作成され、続く実行で有効化された。**当時は新規作成が常に無効で行われ、有効化に別の実行を要した**(2026-08-24 に撤去した有効化ゲートの挙動)。**いまは1回の適用で有効になる**

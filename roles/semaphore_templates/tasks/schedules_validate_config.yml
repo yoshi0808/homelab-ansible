@@ -3,17 +3,13 @@
 # 2026-08-09_017_review_implementation.md` Critical #2)への対応。
 #
 # `ansible-playbook -e key=value` の値は常に**文字列**として渡る。
-# `semaphore_schedules_activation_gate`(filter_plugins/semaphore_schedules.
-# py)は `if not allow_flag:` のように受け取った値をそのままPython真偽値
-# 評価するため、非空文字列 `"false"` は(内容に関わらず)Pythonの
-# truthy判定を通ってしまい、`-e semaphore_schedules_allow_activation=false`
-# が実質的に「許可」として扱われることをCoordinatorが再現した。
-# `semaphore_schedules_closed_world` も同じ構造の危険を持つ(移行期間の
-# つもりで `-e semaphore_schedules_closed_world=false` と書いても、文字列
-# である限りfilter側の素朴な真偽判定は通過しうる)。
+# `semaphore_schedules_closed_world` はfilter側で素朴に真偽値評価される
+# 可能性がある値であり、移行期間のつもりで `-e
+# semaphore_schedules_closed_world=false` と書いても、文字列である限り
+# 素朴な真偽判定は通過しうる。
 #
 # **対策はtask層とfilter層の両方に入れる(Coordinator指示: 片方に寄せ
-# ない)。** ここではtask層の入口で、この2フラグが「曖昧さの無い真偽値
+# ない)。** ここではtask層の入口で、このフラグが「曖昧さの無い真偽値
 # 表現」であることをAnsibleへ渡す前に確認し、そうでなければ推測せず停止
 # する。Ansible標準の`| bool`フィルタは非対応の文字列を(2026-08-09時点、
 # ansible-core 2.20.1で)警告付きで`False`へ暗黙変換するだけで拒否しない
@@ -21,22 +17,17 @@
 # 所属を先に検査する。
 #
 # **正規化した値は、元の変数名へ書き戻さず、別名
-# (`semaphore_schedules_closed_world_bool` /
-# `semaphore_schedules_allow_activation_bool`)へ出す。** 元の変数名へ
+# (`semaphore_schedules_closed_world_bool`)へ出す。** 元の変数名へ
 # `set_fact`で書き戻す実装を最初に試したが、**`-e`(extra-vars)は
 # Ansibleの変数優先順位で最上位であり、同名への`set_fact`はextra-vars
 # 経由で設定された値を上書きできない**ことをローカルdecoy
 # (`/tmp`限定、実ホスト・実IPには到達しない)で実測した — 具体的には
 # `-e myflag=false`のあとに`set_fact: myflag: "{{ myflag | bool }}"`を
 # 行っても、以後`myflag`を読むと文字列`"false"`のまま(`type_debug`で
-# `str`)であることを確認した。これは「文字列`"false"`が有効化許可として
-# 扱われる」という元のCritical #2の欠陥を、正規化のつもりの実装がそのまま
-# 再現してしまう(気付きにくい)落とし穴であり、モックAPIを使った統合実行
-# で発見した。**以降、schedule系のすべてのtask・filter呼び出しは
-# `semaphore_schedules_closed_world_bool` /
-# `semaphore_schedules_allow_activation_bool` を参照すること** — 元の
-# `semaphore_schedules_closed_world` / `semaphore_schedules_allow_
-# activation`(カタログ以外の文脈でこの2つの生の値をそのまま使わない)。
+# `str`)であることを確認した。**以降、schedule系のすべてのtask・filter
+# 呼び出しは`semaphore_schedules_closed_world_bool`を参照すること** —
+# 元の`semaphore_schedules_closed_world`(カタログ以外の文脈でこの生の値を
+# そのまま使わない)。
 #
 # 検証順序: このfileはschedule系の最初のtaskとして走る(main.yml)。API
 # 到達より前に、入力そのものの妥当性を確定させる。
@@ -46,15 +37,14 @@
 # Critical #1)への対応。** `main.yml`の最終再送出は
 # `semaphore_schedules_run_failed` / `semaphore_schedules_report_save_
 # failed`という2つのfactの真偽値と、`ansible_failed_result is defined`
-# のORで判定するようにした(3回目査読への対応)。しかし
-# **「schedule処理自体は成功し、レポート保存だけがUNREACHABLEになった」
-# 場合、`rescue`は発火しないため`ansible_failed_result`は未定義のまま
-# であり、`-e '{"semaphore_schedules_report_save_failed": false}'`が
-# `set_fact`を上書きすると、3条件すべてがfalseになり、レポートが保存
-# できていないのにplayが成功で終わる。** `register`した結果へ判定を
-# 差し替えても同じ穴が空く — registerされた変数もただの名前であり、
-# extra-varsは`register`より優先されるため、同じ手口で上書きできる
-# (Reviewer指摘のとおり)。
+# のORで判定する。しかし**「schedule処理自体は成功し、レポート保存だけが
+# UNREACHABLEになった」場合、`rescue`は発火しないため`ansible_failed_
+# result`は未定義のままであり、`-e '{"semaphore_schedules_report_save_
+# failed": false}'`が`set_fact`を上書きすると、3条件すべてがfalseになり、
+# レポートが保存できていないのにplayが成功で終わる。** `register`した
+# 結果へ判定を差し替えても同じ穴が空く — registerされた変数もただの名前
+# であり、extra-varsは`register`より優先されるため、同じ手口で上書き
+# できる(Reviewer指摘のとおり)。
 #
 # **したがって、値ではなく「その名前が外部(-e等)から事前定義されている
 # こと自体」を、schedule処理のtaskが1つも走る前に拒否する。** extra-vars
@@ -62,16 +52,15 @@
 # 偽装する経路が無いことは3回目差し戻しで実測済み)。この向きの検査なら
 # 上書きできない。
 #
-# **対象は今回指摘された2変数だけに絞らず、この role がschedule処理の
-# 内部状態として`set_fact`/`register`する名前(`semaphore_schedules_`
-# または内部専用の`_semaphore_schedules_`prefixを持つ名前)全体とする**
-# (Coordinator指示: 「将来同じ穴が空かないように」)。個々の名前を
-# 手で列挙して追随し続けるのは漏れの元になるため、代わりに
-# **「カタログ・6つの設定変数(role defaultsが正当に持つ、ユーザーが
-# `-e`で上書きしてよい値)以外の`(_)?semaphore_schedules_*`という名前は、
-# この時点で1つも定義されていてはならない」というallowlist補集合の
-# 形で検査する** — 新しい内部変数をこの先追加しても、allowlistに載せない
-# 限り自動的に保護される。
+# **対象はこの role がschedule処理の内部状態として`set_fact`/`register`
+# する名前(`semaphore_schedules_`または内部専用の`_semaphore_schedules_`
+# prefixを持つ名前)全体とする**(Coordinator指示: 「将来同じ穴が空かない
+# ように」)。個々の名前を手で列挙して追随し続けるのは漏れの元になるため、
+# 代わりに**「カタログ・role defaultsが正当に持つ、ユーザーが`-e`で
+# 上書きしてよい値以外の`(_)?semaphore_schedules_*`という名前は、この
+# 時点で1つも定義されていてはならない」というallowlist補集合の形で検査
+# する** — 新しい内部変数をこの先追加しても、allowlistに載せない限り
+# 自動的に保護される。
 #
 # `lookup('varnames', ...)`(`vars`辞書直接参照はansible-core 2.20.1で
 # 非推奨警告が出るため、推奨されるlookup pluginを使う)で、現在定義済みの
@@ -80,27 +69,29 @@
 #
 # **2026-08-10、5回目の査読差し戻し(`docs/ai/reviews/
 # semaphore_schedules_as_code/2026-08-10_026_review_implementation_r5.md`
-# Critical #1)への対応。** 初版は上記の判定(allowlist・観測結果・
-# 不一致リスト)をtask-level `vars:`(`_reserved_name_guard_*`)へ一度
-# 保存してから`when:`/`msg:`で参照していたが、**task-level `vars:`も
-# extra-varsより優先順位が低い**ため、`-e '{"semaphore_schedules_report_
-# save_failed": false, "_reserved_name_guard_unexpected": []}'`のように
-# 保護対象のfactと「判定結果を空にするfact」を同時に渡すと、`vars:`側の
-# 計算結果ごと外部の値で上書きされ、guard自体がskipされることをReviewer
-# が実測した。**同じ欠陥クラス(値の上書きでなく、判定を保持する場所その
-# ものが外部から名前で書き換え可能)が、この案件でこれで3回目
-# (`allow_activation`の文字列、内部failure fact、そしてguard自身)。**
-#
-# **修正: 判定の中間結果を一切、名前付き変数(`vars:`/`set_fact`/
-# `register`のいずれも)へ保存しない。** `lookup(...)`とallowlistの
-# literal listを`when:`と`msg:`それぞれの中で**独立に、その場で**評価
+# Critical #1)への対応。** 判定の中間結果を一切、名前付き変数(`vars:`/
+# `set_fact`/`register`のいずれも)へ保存しない。`lookup(...)`とallowlist
+# のliteral listを`when:`と`msg:`それぞれの中で**独立に、その場で**評価
 # する — 参照できる名前が存在しない値は、extra-varsを含むいかなる名前
-# ベースの上書きでも書き換えられない。allowlistの6項目は`when:`/`msg:`の
-# 両方に同じ内容で重複させてある(YAMLアンカー等でこの重複を消す手段は
-# 無かった — `vars:`を経由しない限りAnsible側から参照可能な名前を作れず、
-# 文字列展開の外でYAMLアンカーを使うにはtask構造そのものに新しいキーが
-# 要るが、Ansibleがtaskの未知keyを許さないため断念した)。**allowlistを
-# 変更するときは両方を同時に直すこと。**
+# ベースの上書きでも書き換えられない。allowlistは`when:`/`msg:`の両方に
+# 同じ内容で重複させてある(YAMLアンカー等でこの重複を消す手段は無かった
+# — `vars:`を経由しない限りAnsible側から参照可能な名前を作れず、文字列
+# 展開の外でYAMLアンカーを使うにはtask構造そのものに新しいキーが要るが、
+# Ansibleがtaskの未知keyを許さないため断念した)。**allowlistを変更する
+# ときは両方を同時に直すこと。**
+#
+# **2026-08-24(semaphore_activation_gate_removal案件 R1): `semaphore_
+# schedules_allow_activation`は role defaults から撤去された。** allowlist
+# から該当1エントリを落とし、対応する「曖昧さの無い真偽値か」チェック
+# (旧`allow_activation`用)も削除した。`closed_world`側の同型チェックは
+# 引き続き必要であり(R17は撤去対象ではない)、そのまま残す。
+#
+# **同日、独立レビュー(`2026-08-24_003_review.md` Finding 1)を受けて
+# requirementをR2として改訂し、`semaphore_schedules_canonical_api_base_
+# url`は role defaults へ復元した。** allowlistへ戻す ―― この変数は
+# ユーザーが`-e`で正当に上書きしてよい設定値であり(ansy検証時など、
+# `schedules_canonical_check.yml`参照)、内部状態ではないため
+# reject対象に含めない。
 - name: "Fail closed if any (_)semaphore_schedules_* internal-state name is already defined before this role's own tasks set it"
   ansible.builtin.fail:
     msg: >-
@@ -111,7 +102,6 @@
            | reject('in', [
                'semaphore_schedules_catalog',
                'semaphore_schedules_closed_world',
-               'semaphore_schedules_allow_activation',
                'semaphore_schedules_canonical_api_base_url',
                'semaphore_schedules_expected_timezone',
                'semaphore_schedules_report_dir',
@@ -123,17 +113,15 @@
       許可しません(査読r5 Critical #1 — 判定の中間結果を名前付き変数へ
       一切保存しないため、この判定式自体を外部から上書きする経路が無い)。
       許可される外部設定は semaphore_schedules_catalog /
-      semaphore_schedules_closed_world / semaphore_schedules_allow_activation /
-      semaphore_schedules_canonical_api_base_url /
+      semaphore_schedules_closed_world / semaphore_schedules_canonical_api_base_url /
       semaphore_schedules_expected_timezone / semaphore_schedules_report_dir
-      の6つだけです。名前を変えて再実行してください。
+      の5つだけです。名前を変えて再実行してください。
   when: >-
     (
       lookup('varnames', '^_?semaphore_schedules_.*', wantlist=True)
       | reject('in', [
           'semaphore_schedules_catalog',
           'semaphore_schedules_closed_world',
-          'semaphore_schedules_allow_activation',
           'semaphore_schedules_canonical_api_base_url',
           'semaphore_schedules_expected_timezone',
           'semaphore_schedules_report_dir',
@@ -159,31 +147,11 @@
       )
     )
 
-- name: "Fail closed if semaphore_schedules_allow_activation is not an unambiguous boolean"
-  ansible.builtin.fail:
-    msg: >-
-      semaphore_schedules_allow_activation の値
-      {{ semaphore_schedules_allow_activation | to_json }}
-      (型: {{ semaphore_schedules_allow_activation | type_debug }})が、
-      曖昧さの無い真偽値として認識できません。ネイティブなtrue/falseか、
-      文字列 true/false/yes/no/on/off/1/0 のいずれかで指定してください。
-      判定できない値では推測せず停止します(R15、査読Critical #2)。
-  when: >-
-    not (
-      semaphore_schedules_allow_activation is boolean
-      or (
-        semaphore_schedules_allow_activation is string
-        and (semaphore_schedules_allow_activation | lower) in
-            ['true', 'false', 'yes', 'no', 'on', 'off', '1', '0']
-      )
-    )
-
-# Normalize to real Python bool *under new variable names* (see header
+# Normalize to a real Python bool *under a new variable name* (see header
 # comment: overwriting the same name is silently ineffective when the
 # original was set via `-e`, because extra-vars precedence beats
-# `set_fact`). `| bool` is safe here precisely because the strict checks
-# above have already rejected anything not in the recognized token set.
-- name: Normalize both flags to native booleans, under new names, for every downstream use
+# `set_fact`). `| bool` is safe here precisely because the strict check
+# above has already rejected anything not in the recognized token set.
+- name: Normalize closed_world to a native boolean, under a new name, for every downstream use
   ansible.builtin.set_fact:
     semaphore_schedules_closed_world_bool: "{{ semaphore_schedules_closed_world | bool }}"
-    semaphore_schedules_allow_activation_bool: "{{ semaphore_schedules_allow_activation | bool }}"

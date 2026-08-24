@@ -1,0 +1,175 @@
+---
+# Included with `loop: semaphore_schedules_diff_result.changed` from
+# schedules_apply.yml. `item` is {name, id, before, after, fields} from
+# the diff filter -- `item.after` is the full desired state for all 5
+# managed fields, including `active` (reflecting the catalog directly,
+# 2026-08-24 semaphore_activation_gate_removal案件 R1).
+#
+# 撤去前との違い: `desired`はもう観測値に依存しない(純粋にカタログの
+# entryとresolved template_idだけから決まる)ため、この直前fresh GETの
+# 後で desired を再計算する必要が無くなった。`item.after`(schedules_diff.
+# ymlで一度だけ計算済み)をそのままPUTのpayloadと直後検証の両方に使う。
+#
+# ただしこの直前fresh GET自体は撤去していない — 有効化ゲートとは無関係の
+# 3つの理由でいまも必要: (1) get-then-merge-then-sendのmerge元として、
+# 現在の生オブジェクトが要る(R8)。(2) preflight時点からidentityが変化
+# していないかを確認する必要がある。(3) **R2(2026-08-24再追補、独立
+# レビュー`2026-08-24_004_review.md` High 1)** — この直前fresh GETの
+# `active`こそが「このwriteが本当にfalse→trueを行うのか」の唯一正しい
+# 判定材料である。diff計算時点の`item.fields`/`item.after.active`だけを
+# 見て「有効化対象かどうか」を決めると、diffとこのfresh GETの間にUIで
+# activeが変えられた場合に検出できない(独立レビューが実Ansibleで
+# 再現: カタログ`active:true`・diff時GET`active:true`・cronだけ差分
+# なら`fields=['cron_format']`で有効化対象外と誤判定され、非canonical
+# 接続先でもPUTが素通りし、fresh objectへ`item.after.active:true`を
+# 上書きして再有効化してしまう)。**したがって有効化判定は、diffの
+# `fields`/`after`ではなく、必ずこの直前fresh GETの値を使う。**
+#
+# **この修正が閉じるのは「diff計算からこのfresh GETまでの間」の競合窓
+# だけである(`2026-08-24_005_review.md` Suggestion 2)。** 「fresh GET
+# からこの直後のPUTそのものまで」のごく短い間にもう一度activeが変えら
+# れる残余の競合窓は閉じない ―― SemaphoreのAPIはETagもトランザクション
+# も持たないため、この最後の窓自体を無くすことはできない。これはR8が
+# 元から明示・受容している範囲であり、今回の修正が新たに生んだ穴では
+# ない。
+#
+# R8のフェーズ依存の反応(不変、有効化ゲートとは独立):
+#   - 移行期間: この1件だけ見送り、残りは続行する(rcは0のまま)
+#   - closed-world: 残りのPOST/PUTをすべて中止する(rc非ゼロ) —
+#     `loop:`駆動の`include_tasks`内で失敗したtaskがループとplay全体を
+#     止めることをローカルdecoyで実測済み(2026-08-09実装記録参照)
+#
+# status_codeに404を含めるのは、preflightとこの直前取得の間に削除された
+# scheduleを「identityが変化した」として扱うため(migrationはこれでも
+# 継続できる必要がある)。
+#
+# Task names below are deliberately static (ansible-lint name[template]:
+# Jinja belongs only at the very end of a name) -- the calling loop's
+# `loop_control: label: "{{ item.name }}"` (schedules_apply.yml) already
+# shows which schedule each console line belongs to; `item.name` still
+# appears in fail messages where it matters for diagnosis.
+
+- name: Fetch fresh detail immediately before the PUT (R8 freshness)
+  ansible.builtin.uri:
+    url: "{{ semaphore_templates_api_base_url }}/project/{{ semaphore_templates_project_id }}/schedules/{{ item.id }}"
+    method: GET
+    headers:
+      Authorization: "Bearer {{ semaphore_templates_token }}"
+    status_code: [200, 404]
+    validate_certs: "{{ semaphore_templates_api_validate_certs }}"
+  register: _semaphore_schedules_apply_fresh
+  no_log: true
+
+- name: Determine whether identity still matches preflight time (R8)
+  ansible.builtin.set_fact:
+    _semaphore_schedules_apply_identity_ok: >-
+      {{ (_semaphore_schedules_apply_fresh.status == 200)
+         and ((_semaphore_schedules_apply_fresh.json.id | default(None)) == item.id)
+         and ((_semaphore_schedules_apply_fresh.json.name | default(None)) == item.name) }}
+
+- name: Abort all remaining writes if identity changed since preflight (closed-world, R8/AC22)
+  ansible.builtin.fail:
+    msg: >-
+      closed-world: schedule {{ item.name }}(id={{ item.id }})の直前取得が
+      preflight時点のidentityと一致しません(HTTP {{ _semaphore_schedules_apply_fresh.status }}、
+      現在name={{ _semaphore_schedules_apply_fresh.json.name | default('(取得不可)') }})。
+      R8/R18に従い残りのPOST/PUTをすべて中止し、再preflightを促します。
+      既に適用済みの書き込みは取り消しません(semaphore_schedules_updated参照)。
+  when: (not _semaphore_schedules_apply_identity_ok) and semaphore_schedules_closed_world_bool
+
+- name: Skip this write and continue if identity changed since preflight (migration, R8)
+  ansible.builtin.set_fact:
+    semaphore_schedules_update_skipped: >-
+      {{ semaphore_schedules_update_skipped + [{'name': item.name, 'id': item.id,
+         'reason': 'preflight時点からidentityが変化したため見送り(R8)'}] }}
+  when: (not _semaphore_schedules_apply_identity_ok) and (not semaphore_schedules_closed_world_bool)
+
+- name: Determine whether this write would newly activate the schedule, using the value just fetched (R2 -- not diff-time data)
+  ansible.builtin.set_fact:
+    _semaphore_schedules_apply_would_activate: >-
+      {{ (_semaphore_schedules_apply_fresh.json.active | default(false))
+         | semaphore_schedules_would_newly_activate(item.after.active) }}
+  when: _semaphore_schedules_apply_identity_ok
+
+- name: Abort all remaining writes if this write would newly activate against a non-canonical connection (R2)
+  ansible.builtin.fail:
+    msg: >-
+      schedule {{ item.name }}(id={{ item.id }})への書き込みは、直前の
+      fresh GETで観測したactive
+      ({{ _semaphore_schedules_apply_fresh.json.active | default(false) }})を
+      falseからtrueへ動かします。接続先 {{ semaphore_templates_api_base_url }}
+      は、カタログのcanonicalな本番URL
+      {{ semaphore_schedules_canonical_api_base_url }} と一致しません。
+      canonicalでない接続先での有効化は行わず、書き込みを1件も追加で
+      発行せず、残りのPOST/PUTもすべて中止します(R2)。既に適用済みの
+      書き込みは取り消しません(semaphore_schedules_updated参照)。
+      このURLが実際にcanonicalな本番であるなら(例: quoryを別名で恒久的に
+      再建した場合)、defaults/main.ymlの
+      semaphore_schedules_canonical_api_base_url をcommitで更新してください
+      -- `-e`でその場だけ通さないこと
+      (docs/ai/context/operations/semaphore-db-restore.md「復元後に
+      確かめること」)。検証目的で一時的にこの接続先をcanonical扱い
+      したいだけなら(ansyでのfixture検証など)、その回だけ
+      `-e semaphore_schedules_canonical_api_base_url=<この接続先のURL>`
+      で上書きしてください。
+  when: >-
+    _semaphore_schedules_apply_identity_ok
+    and _semaphore_schedules_apply_would_activate
+    and not semaphore_schedules_canonical_url_ok
+
+- name: PUT the managed fields, including active (R8 get-then-merge-then-send)
+  ansible.builtin.uri:
+    url: "{{ semaphore_templates_api_base_url }}/project/{{ semaphore_templates_project_id }}/schedules/{{ item.id }}"
+    method: PUT
+    headers:
+      Authorization: "Bearer {{ semaphore_templates_token }}"
+    body_format: json
+    body: "{{ _semaphore_schedules_apply_fresh.json | semaphore_schedules_payload(item.after) }}"
+    status_code: [200, 201, 204]
+    validate_certs: "{{ semaphore_templates_api_validate_certs }}"
+  register: _semaphore_schedules_apply_put
+  no_log: true
+  when: _semaphore_schedules_apply_identity_ok
+
+- name: Verify the write (R16-2)
+  ansible.builtin.uri:
+    url: "{{ semaphore_templates_api_base_url }}/project/{{ semaphore_templates_project_id }}/schedules/{{ item.id }}"
+    method: GET
+    headers:
+      Authorization: "Bearer {{ semaphore_templates_token }}"
+    status_code: [200]
+    validate_certs: "{{ semaphore_templates_api_validate_certs }}"
+  register: _semaphore_schedules_apply_verify
+  no_log: true
+  when: _semaphore_schedules_apply_identity_ok
+
+- name: Fail closed if the write did not verify (R16-2)
+  ansible.builtin.fail:
+    msg: >-
+      schedule {{ item.name }}(id={{ item.id }})のPUT直後GETが期待値と
+      一致しません: {{ (_semaphore_schedules_apply_verify.json
+      | semaphore_schedules_verify(item.after)) | join(', ') }}。
+      APIが未知のキーを黙って捨てた可能性があります(6.5節)。ここで
+      停止します(R16-2)。
+  when: >-
+    _semaphore_schedules_apply_identity_ok
+    and ((_semaphore_schedules_apply_verify.json
+          | semaphore_schedules_verify(item.after)) | length) > 0
+
+- name: Fail closed if non-managed fields changed during the write (AC4/AC17)
+  ansible.builtin.fail:
+    msg: >-
+      schedule {{ item.name }}(id={{ item.id }})のPUTで、管理5項目以外の
+      フィールドが変化しました: {{ (_semaphore_schedules_apply_fresh.json
+      | semaphore_schedules_nonmanaged_diff(_semaphore_schedules_apply_verify.json)) | join(', ') }}。
+      非管理フィールドの保持が確認できません。ここで停止します(AC4/AC17)。
+  when: >-
+    _semaphore_schedules_apply_identity_ok
+    and ((_semaphore_schedules_apply_fresh.json
+          | semaphore_schedules_nonmanaged_diff(_semaphore_schedules_apply_verify.json)) | length) > 0
+
+- name: Record the successful write
+  ansible.builtin.set_fact:
+    semaphore_schedules_updated: >-
+      {{ semaphore_schedules_updated + [{'name': item.name, 'id': item.id, 'fields': item.fields}] }}
+  when: _semaphore_schedules_apply_identity_ok

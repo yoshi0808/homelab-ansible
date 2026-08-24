@@ -1,0 +1,23 @@
+---
+# 2026-08-24(semaphore_activation_gate_removal案件 R1): 有効化ゲート撤去後
+# の単一段apply。カタログの`active`を含む5管理フィールドを、既存か新規かを
+# 問わずそのまま反映する — 「押下1回・commit1回でscheduleが登録され、有効に
+# なる」(requirement §4ゴール)。呼び出し元(tasks/main.yml)が`when: not
+# ansible_check_mode`でこのファイル全体をゲートしているため、--checkでは
+# ここに到達しない(AC1/AC2)。
+#
+# 順序(new→changed)は慣例であり依存関係は無い。各ループは`include_tasks`を
+# 使うため、per-itemの`ansible.builtin.fail`(closed-worldでのidentity drift
+# 中断、またはverify不一致)がそのループと以降のすべてのtaskを止める。
+
+- name: Create schedules that do not exist yet (active reflects the catalog directly)
+  ansible.builtin.include_tasks: schedules_apply_new_item.yml
+  loop: "{{ semaphore_schedules_diff_result.new }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Update schedules whose managed fields differ (R8-2)
+  ansible.builtin.include_tasks: schedules_apply_item.yml
+  loop: "{{ semaphore_schedules_diff_result.changed }}"
+  loop_control:
+    label: "{{ item.name }}"

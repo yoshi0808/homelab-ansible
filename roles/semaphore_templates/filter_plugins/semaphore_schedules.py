@@ -13,7 +13,7 @@ reviews/semaphore_schedules_as_code/2026-08-09_001_requirement.md.
 Implement record for this pass: docs/ai/reviews/semaphore_schedules_as_
 code/2026-08-09_015_implement_filters.md.
 
-Scope boundary: this module owns the 8 functions in the requirement's
+Scope boundary: this module owns the functions in the requirement's
 "確定済みインターフェース契約" table, plus `semaphore_schedules_
 nonmanaged_diff` (added 2026-08-09 per independent review High #2 --
 `verify` alone never checked non-managed fields, see that function's
@@ -27,6 +27,38 @@ response (task_params content this module does not recognize as safe is
 reported as a *finding*, not an exception -- see
 `_task_params_public_problems`, an allowlist, not a denylist -- rewritten
 2026-08-09 per independent review High #3).
+
+2026-08-24 (semaphore_activation_gate_removal案件、requirement docs/ai/
+reviews/semaphore_activation_gate_removal/2026-08-24_001_requirement.md):
+R1 により、有効化ゲート(2段階apply / `pending_activation` /
+`semaphore_schedules_activation_gate` / `semaphore_schedules_
+stage2_precheck`)をこのモジュールから撤去した。`semaphore_schedules_
+desired` はもう `observed_detail` と `stage` を受け取らず、`entry['active']`
+をそのまま返す -- カタログの `active` は、既存かどうかを問わず単一の
+PUT/POSTでそのまま反映される。`semaphore_schedules_diff` の戻り値も
+`stage1`/`pending_activation` の代わりに単一の `changed` を持つ。
+
+2026-08-24追補(独立レビュー `2026-08-24_003_review.md` Finding 1、
+requirement R2 改訂): 撤去したのは「実行ごとの明示的な許可」であって、
+「接続先の検査」ではなかった -- 唯一の呼び出し元が有効化ゲートだった
+ことは、接続先を検査する目的そのものが無くなった証明にはならない、と
+指摘された。`semaphore_schedules_url_matches_canonical` を、ゲート構造
+(実行ごとの許可・closed-world・管理外件数・schedule集合の非変化と束ねた
+5条件)とは独立させて追加した -- 判定するのは「接続先がカタログの
+canonical な本番URLと一致するか」の1点のみ。
+
+2026-08-24再追補(独立レビュー `2026-08-24_004_review.md` High 1):
+最初に追加した `semaphore_schedules_activation_targets(diff_result)` は
+diff時点のスナップショットから「有効化対象」を静的に列挙する設計だった
+が、これは不健全だった -- diff時点で `active` が既に一致(true)して
+いて `cron_format` だけが差分のentryは、diffと実際の書き込みの間にUIで
+`active: false` にされても対象として検出されない。書き込み自体は常に
+カタログの `active` を送るため、この場合は非canonical接続先への
+再有効化を許してしまう(独立レビューが実Ansibleで再現)。**同日中に
+`semaphore_schedules_would_newly_activate(before_active, desired_active)`
+へ置き換えた** -- 呼び出し側(task)に「PUT/POST直前に取得した値」を
+渡すことを強制する、より狭いシグネチャにすることで、diff時点データの
+混入を構造的に防ぐ。
 """
 from __future__ import annotations
 
@@ -43,11 +75,6 @@ from urllib.parse import urlsplit, urlunsplit
 # R1's `cron` becomes `cron_format` (the API's own field name).
 # ---------------------------------------------------------------------------
 _MANAGED_FIELD_ORDER = ('name', 'cron_format', 'template_id', 'task_params', 'active')
-
-# R8-3's first stage writes these 4 unconditionally, plus a stage-specific
-# `active` (see semaphore_schedules_desired). The stage-2 precheck (R8-3)
-# re-checks exactly these 4 plus an explicit `active is False` check.
-_STAGE1_FIELD_ORDER = ('name', 'cron_format', 'template_id', 'task_params')
 
 _REQUIRED_CATALOG_FIELDS = ('name', 'template', 'cron', 'active', 'task_params')
 
@@ -498,73 +525,51 @@ def semaphore_schedules_preflight(catalog, observed_schedules, observed_template
     }
 
 
-def semaphore_schedules_desired(entry, observed_detail, template_id, stage):
-    """R8-2: the effective desired state for the 5 managed fields, for one
-    reconcile stage.
+def semaphore_schedules_desired(entry, template_id):
+    """R8-2: the effective desired state for the 5 managed fields.
 
-    `entry` is a catalog row (R1's 5 logical fields). `observed_detail` is
-    the single-GET raw object (R8) for the existing schedule, or None when
-    this entry has no existing schedule yet. `template_id` is the id
-    already resolved by semaphore_schedules_preflight (R3: never taken
+    `entry` is a catalog row (R1's 5 logical fields). `template_id` is the
+    id already resolved by semaphore_schedules_preflight (R3: never taken
     from the catalog).
 
-    Stage 1 never activates (R8-3): a brand-new schedule is always
-    created with active=False (R13); an existing schedule keeps its
-    *observed* active value unless the catalog says False, in which case
-    it is deactivated immediately (R8-2's "即時無効化"). Stage 2 is only
-    ever invoked by a caller that has already re-confirmed every R12
-    condition via semaphore_schedules_activation_gate -- this function has
-    no way to check R12 itself -- so its desired active is unconditionally
-    True.
+    2026-08-24 (semaphore_activation_gate_removal案件 R1): `desired['active']`
+    is the catalog's own `active` value, unconditionally -- reflected
+    directly whether the schedule is brand-new or already exists. Before
+    this removal, a stage argument and an `observed_detail` argument
+    together decided a *different* active value than the catalog's own
+    (a new schedule was always forced to False; an existing one only ever
+    moved true->false immediately, never false->true, without a separate,
+    explicitly-gated second write). That indirection existed only to serve
+    the activation gate this function no longer needs to cooperate with --
+    removing the gate removes the reason for the indirection, not just the
+    gate's own check.
     """
-    if stage not in (1, 2):
-        raise ValueError("stage must be 1 or 2, got {!r}".format(stage))
-
-    desired = {
+    return {
         'name': entry['name'],
         'cron_format': entry['cron'],
         'template_id': template_id,
         'task_params': entry['task_params'],
+        'active': bool(entry['active']),
     }
-
-    if stage == 2:
-        desired['active'] = True
-        return desired
-
-    if observed_detail is None:
-        desired['active'] = False  # R13
-    elif entry.get('active') is False:
-        desired['active'] = False  # R8-2: immediate true -> false
-    else:
-        desired['active'] = bool(observed_detail.get('active'))  # stage 1: never activates
-
-    return desired
 
 
 def semaphore_schedules_diff(catalog, observed_by_name, detail_by_id, template_ids):
-    """Stage-1 diff (R8-3) plus the pending-activation report (R8-2).
+    """R8-2: the reconcile diff. `observed_by_name` and `template_ids` are
+    the same-named outputs of semaphore_schedules_preflight. `detail_by_id`
+    maps a schedule id to its single-GET raw object (R8: the *only*
+    legitimate merge source for a write; this function only reads it for
+    comparison, it does not write).
 
-    `observed_by_name` and `template_ids` are the same-named outputs of
-    semaphore_schedules_preflight. `detail_by_id` maps a schedule id to its
-    single-GET raw object (R8: the *only* legitimate merge source for a
-    write; this function only reads it for comparison, it does not write).
-
-    `stage1`'s membership (R8-2) is exactly "management-4-fields differ,
-    or an immediate deactivation is needed" -- both fall out naturally
-    from comparing `before` (the raw object's current 5 fields) against
-    `desired` (stage-1's effective desired state, which itself never
-    introduces true->false->true activation), so no separate branch is
-    needed to keep activation out of `stage1`.
-
-    `pending_activation` is independent of `stage1`/`unchanged` membership
-    -- a schedule can be unchanged for stage 1 and still be pending
-    activation (R8-3's step 2 case), or need a stage-1 write and also be
-    pending activation.
+    2026-08-24 (semaphore_activation_gate_removal案件 R1): there is no
+    longer a separate activation step or a `pending_activation` report --
+    `changed` membership is exactly "any of the 5 managed fields (`active`
+    included) differs from the catalog's desired state", computed in one
+    pass. A catalog entry whose `active` alone differs from the observed
+    schedule lands in `changed` the same way a cron-only change would.
     """
     new_items = []
-    stage1_items = []
+    changed_items = []
     unchanged_items = []
-    pending_activation = []
 
     for entry in catalog:
         name = entry['name']
@@ -572,13 +577,13 @@ def semaphore_schedules_diff(catalog, observed_by_name, detail_by_id, template_i
         observed_row = observed_by_name.get(name)
 
         if observed_row is None:
-            desired = semaphore_schedules_desired(entry, None, template_id, 1)
+            desired = semaphore_schedules_desired(entry, template_id)
             new_items.append({'name': name, 'desired': desired})
             continue
 
         sched_id = observed_row.get('id')
         detail = detail_by_id.get(sched_id) or {}
-        desired = semaphore_schedules_desired(entry, detail, template_id, 1)
+        desired = semaphore_schedules_desired(entry, template_id)
         before = _management_fields_from_raw(detail)
         changed_fields = [
             field for field in _MANAGED_FIELD_ORDER
@@ -586,7 +591,7 @@ def semaphore_schedules_diff(catalog, observed_by_name, detail_by_id, template_i
         ]
 
         if changed_fields:
-            stage1_items.append({
+            changed_items.append({
                 'name': name,
                 'id': sched_id,
                 'before': before,
@@ -596,14 +601,10 @@ def semaphore_schedules_diff(catalog, observed_by_name, detail_by_id, template_i
         else:
             unchanged_items.append(name)
 
-        if entry.get('active') is True and detail.get('active') is not True:
-            pending_activation.append({'name': name, 'id': sched_id})
-
     return {
         'new': new_items,
-        'stage1': stage1_items,
+        'changed': changed_items,
         'unchanged': unchanged_items,
-        'pending_activation': pending_activation,
     }
 
 
@@ -623,12 +624,14 @@ def semaphore_schedules_payload(raw_detail, desired):
 
 
 def semaphore_schedules_create_payload(desired, project_id):
-    """POST payload for a brand-new schedule (R13: `desired['active']` is
-    always False here in practice, because callers only ever build
-    `desired` for a new entry via stage 1). No get-then-merge applies --
-    there is nothing to merge with yet -- so this is just the 5 managed
-    fields (R8-2 renamed: `cron`/`template` -> `cron_format`/`template_id`)
-    plus the `project_id` the catalog itself never carries (R4).
+    """POST payload for a brand-new schedule. `desired['active']` is the
+    catalog's own `active` value (semaphore_activation_gate_removal案件
+    R1 -- a new schedule is created active immediately when the catalog
+    says so, not forced inactive pending a later, separately-gated write).
+    No get-then-merge applies -- there is nothing to merge with yet -- so
+    this is just the 5 managed fields (R8-2 renamed: `cron`/`template` ->
+    `cron_format`/`template_id`) plus the `project_id` the catalog itself
+    never carries (R4).
     """
     return {
         'name': desired['name'],
@@ -687,28 +690,71 @@ def semaphore_schedules_nonmanaged_diff(before_raw, after_raw):
     return changed
 
 
-def semaphore_schedules_stage2_precheck(raw_detail, stage1_verified_desired):
-    """R8-3: the check made immediately before issuing the stage-2
-    (activation-only) PUT. Re-checks the 4 non-active managed fields
-    against the value stage 1 already verified, and separately requires
-    `active` to still be exactly False (R8-3: "第2段階の直前の単一 GET
-    で...active が false であることを確認する") -- `active` is reported
-    by name in the mismatch list precisely when it is not, so a caller
-    that finds it non-empty knows both *that* something changed and,
-    from the field names, roughly *what*.
+def semaphore_schedules_would_newly_activate(before_active, desired_active):
+    """R2 (2026-08-24追補、独立レビュー `2026-08-24_004_review.md` High 1
+    への対応): whether writing `desired_active` would newly turn a
+    schedule on, given the value observed *immediately before this
+    specific write*.
+
+    **This function replaces `semaphore_schedules_activation_targets`
+    (2026-08-24, removed the same day it was added).** That earlier
+    version computed the "would activate" list once, from the
+    `semaphore_schedules_diff()` result taken at diff time -- a snapshot
+    that can go stale before the actual PUT: independent review
+    reproduced, against real ansible-core, a schedule that was
+    `active: true` in both the catalog and the diff-time GET (so only
+    `cron_format` showed up as a changed field, `active` did not, and the
+    diff-time snapshot never flagged it as an activation target) get
+    turned `active: false` via the UI *between* the diff and the write,
+    and then reactivated by the write itself -- because the write always
+    sends the catalog's `active` value (R1's whole point), and the
+    per-item fresh GET taken just before the PUT only checks identity
+    (id/name), never `active`. A non-canonical connection sailed straight
+    through the diff-time-only check and reactivated the schedule anyway.
+
+    The fix is call-site discipline, not a smarter diff: **never decide
+    "would this activate" from anything but the value fetched immediately
+    before the write it gates.** This function's current (and only) call
+    sites pass the value from a fresh GET taken immediately before the
+    write, or a literal for a not-yet-existing schedule -- but the
+    signature itself does not *enforce* that (2026-08-24再々追補、独立
+    レビュー`2026-08-24_005_review.md` Suggestion 1: 「構造的に混入できな
+    い」という以前の説明は不正確だった。call siteの規約でしかない).
+
+    2026-08-24再々追補(独立レビュー`2026-08-24_005_review.md` High 1へ
+    の対応): **both arguments must be unambiguous native `bool` values
+    (`True`/`False`), or -- `before_active` only -- `None` (a
+    not-yet-existing schedule, R2's own convention). Anything else is
+    never coerced through Python's bare truthiness.** The previous
+    version returned `bool(desired_active) and not bool(before_active)`
+    -- and Python's `bool("false")` is `True` (any non-empty string is
+    truthy), so a fresh-GET `active` value that came back as the string
+    `"false"` (a real, observed API-shape risk in this same module's
+    task_params handling, per `_ENVIRONMENT_BOOL_STRINGS`) made `not
+    bool("false")` evaluate to `False` -- silently reporting "not newly
+    activating" for a write that, in fact, would flip a non-canonical
+    connection's schedule to active. Independent review reproduced this
+    against the real task expression. **A value this function cannot
+    positively classify as a real bool is treated as "cannot prove this
+    write does not activate"** -- the same fail-closed direction as
+    every other ambiguous-input case in this module (R9's "判定できない
+    ものは error 側へ倒す") -- so this function returns `True` (treat as
+    an activating write, subject to the canonical URL check) rather than
+    silently passing an untyped value through comparison or truthiness.
     """
-    current = _management_fields_from_raw(raw_detail)
-    mismatched = [
-        field for field in _STAGE1_FIELD_ORDER
-        if not _strict_equal(current.get(field), stage1_verified_desired.get(field))
-    ]
-    if current.get('active') is not False:
-        mismatched.append('active')
-    return mismatched
+    if not isinstance(desired_active, bool):
+        return True  # cannot positively classify -- do not assume "not activating"
+    if desired_active is False:
+        return False  # unambiguously not activating, regardless of before_active
+    if before_active is None:
+        before_active = False  # R2: a not-yet-existing schedule is not-active
+    if not isinstance(before_active, bool):
+        return True  # cannot positively classify -- do not assume "already active"
+    return not before_active
 
 
 def _normalize_api_base_url(url):
-    """R15: absorb only notational differences (trailing slash, scheme/host
+    """R2: absorb only notational differences (trailing slash, scheme/host
     case) -- never resolve or equate a different hostname. Query strings
     and fragments have no legitimate place in an API base URL in this
     repo's usage, so dropping them is not "equating an alias", it is
@@ -723,72 +769,23 @@ def _normalize_api_base_url(url):
     return urlunsplit((scheme, netloc, path, '', ''))
 
 
-def semaphore_schedules_activation_gate(
-    api_base_url, canonical_url, allow_flag, closed_world,
-    unmanaged_count, preflight_ids, current_ids,
-):
-    """R12 + R15 + R16: whether `false -> true` activation may proceed at
-    all, independent of any single schedule. All 5 conditions are checked
-    unconditionally and independently (never short-circuited), so
-    `reasons` always lists every condition that is currently unmet -- this
-    is deliberately an allowlist (R15: "「ansy でなければ許可」という
-    否定判定にしない"), so a canonical-URL mismatch is itself a reason,
-    never the default-permit path.
+def semaphore_schedules_url_matches_canonical(api_base_url, canonical_url):
+    """R2 (2026-08-24追補、独立レビュー Finding 1で復元): whether the
+    connection this run actually writes through normalizes to the same
+    value as the catalog's canonical production URL
+    (`semaphore_schedules_canonical_api_base_url`).
 
-    `allow_flag` and `closed_world` must be actual `bool` values, not
-    merely truthy/falsy. `ansible-playbook -e key=value` values are
-    strings -- `-e semaphore_schedules_allow_activation=false` arrives
-    here as the non-empty string `"false"`, which bare `if not
-    allow_flag:` would treat as *true* (2026-08-09 review Critical #1,
-    reproduced: `allow_flag="false" closed_world="true"` -> `allowed:
-    True`). A non-bool is therefore treated as its own, distinct failure
-    -- fail-closed, not "coerce and hope" -- so a caller can tell a type
-    mistake apart from a legitimate "not yet closed-world" / "not
-    explicitly allowed" outcome. Task-side callers are expected to also
-    validate these at the entry point (`| bool` with strict typing, or
-    equivalent) -- this function's own check is the last line of defense,
-    not a substitute for that.
+    Deliberately an allowlist, not a denylist (旧R15と同じ判断、独立
+    レビューが指摘したとおり判断そのものは今回も有効): a mismatch is the
+    failure condition, never the default-permit path, so an alias or
+    different-notation DNS name that happens to reach the same real
+    server is *not* silently treated as a match -- only normalization
+    noise (trailing slash, scheme/host case) is absorbed, never hostname
+    resolution.
     """
-    reasons = []
-
-    if not isinstance(closed_world, bool):
-        reasons.append(
-            "closed_world が真偽値でない(型: {}) -- 設定ミスとして有効化を許可しない"
-            "(R12条件1)".format(type(closed_world).__name__)
-        )
-    elif not closed_world:
-        reasons.append("移行期間のため有効化しない(R12条件1: closed-worldのみ)")
-
-    if unmanaged_count:
-        reasons.append(
-            "管理外 schedule が {} 件あるため有効化しない(R12条件2)".format(unmanaged_count)
-        )
-
-    if not isinstance(allow_flag, bool):
-        reasons.append(
-            "allow_flag が真偽値でない(型: {}) -- 設定ミスとして有効化を許可しない"
-            "(R12条件3)".format(type(allow_flag).__name__)
-        )
-    elif not allow_flag:
-        reasons.append("有効化が実行ごとに明示許可されていない(R12条件3)")
-
     normalized_used = _normalize_api_base_url(api_base_url)
     normalized_canonical = _normalize_api_base_url(canonical_url)
-    url_matches = bool(normalized_canonical) and normalized_used == normalized_canonical
-    if not url_matches:
-        reasons.append(
-            "接続先 URL {!r} が canonical な本番 URL {!r} と一致しない"
-            "(R15 allowlist: 一致するときだけ許可)".format(api_base_url, canonical_url)
-        )
-
-    if set(preflight_ids) != set(current_ids):
-        reasons.append("preflight 時点から schedule 集合が変化しているため有効化しない(R16)")
-
-    return {
-        'allowed': not reasons,
-        'reasons': reasons,
-        'url_used': normalized_used,
-    }
+    return bool(normalized_canonical) and normalized_used == normalized_canonical
 
 
 class FilterModule(object):
@@ -801,6 +798,6 @@ class FilterModule(object):
             'semaphore_schedules_create_payload': semaphore_schedules_create_payload,
             'semaphore_schedules_verify': semaphore_schedules_verify,
             'semaphore_schedules_nonmanaged_diff': semaphore_schedules_nonmanaged_diff,
-            'semaphore_schedules_stage2_precheck': semaphore_schedules_stage2_precheck,
-            'semaphore_schedules_activation_gate': semaphore_schedules_activation_gate,
+            'semaphore_schedules_would_newly_activate': semaphore_schedules_would_newly_activate,
+            'semaphore_schedules_url_matches_canonical': semaphore_schedules_url_matches_canonical,
         }

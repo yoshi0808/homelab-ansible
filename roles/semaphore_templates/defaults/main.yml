@@ -671,11 +671,12 @@ semaphore_templates_report_dir: >-
 # 実例であり、「同定はnameで行う」ことの根拠そのものである(手で命名された
 # scheduleの名前と、role側が機械生成するtemplate名は独立している)。
 #
-# **activeは3件ともquoryの実状(19件全てtrue)に合わせてtrue。** ただし
-# 移行期間(semaphore_schedules_closed_worldが未設定)は管理外scheduleが
-# 常に存在するため、R14によりfalse→trueの発行そのものが起こらない
-# (カタログのactive:trueは「有効化待ち」としてレポートに出るだけで、
-# 実際にPUTされるのはclosed-world後の別のapply、R13/R8-3)。
+# **activeは3件ともquoryの実状(19件全てtrue)に合わせてtrue。**
+# (2026-08-24追補、semaphore_activation_gate_removal案件 R1: かつては
+# 移行期間中は管理外scheduleが常に存在するため、false→trueの発行が有効化
+# ゲートにより見送られる旨をここに書いていたが、そのゲート自体を撤去した。
+# いまはこのカタログのactiveが、既存・新規を問わずそのまま単一のapplyで
+# 反映される。)
 #
 # **task_params.environmentはJSON文字列("{}")であり、dictではない**
 # (6.5節の実測どおり)。YAML側でも文字列のまま(クォート必須)で持つ —
@@ -849,9 +850,10 @@ semaphore_schedules_catalog:
   # 持たないが、**「毎週土曜6時に走る」という事実がGitに載ることがこのバッチの
   # 意味**であり、そのため単独のバッチにしてある。
   #
-  # 載ることで、cron・対象template・task_params・無効化の4つはUIで変えても次の
-  # 適用でカタログの値へ戻る。有効化(false→true)だけは別扱いで、R12の4条件が
-  # 揃わない限り発行されない。
+  # 載ることで、cron・対象template・task_params・activeの4つはUIで変えても
+  # 次の適用でカタログの値へ戻る(2026-08-24追補、semaphore_activation_
+  # gate_removal案件 R1: 有効化<false→true>だけを別扱いにするゲートは
+  # 撤去済み)。
   - name: "UN-SAFE:Proxmox Weekly Full Patch"
     template: "UN-SAFE: Proxmox patch weekly full"
     cron: "00 06 * * 6"
@@ -931,26 +933,38 @@ semaphore_schedules_catalog:
 # 検査が解除されてしまうため、R17本文)。既定false(移行期間)。
 semaphore_schedules_closed_world: true
 
-# --- R15: 有効化(false→true)の実行ごとの明示許可 ------------------------------
-# 既定は不許可(R12条件③)。**渡し方は2つあり、どちらでも同じ変数である。**
-# CLIから流すなら `-e semaphore_schedules_allow_activation=true`。**Semaphoreの
-# ボタンから流すときは`-e`を渡す口が無いため、この既定値をtrueにするcommitを
-# 立て、押した後にfalseへ戻すcommitで畳む**(2026-08-18)。ボタン側にsurvey変数を
-# 手で足す形は採らない — 手で登録するとドリフトするというのがこのカタログの
-# 出発点であり、そこだけ例外にすると前提が崩れる。commitなら差分がレビューされ
-# git logに残るので、フォームへ打つより追跡できる。
+# --- R2: allowlist型のcanonical本番URL(2026-08-24、独立レビュー Finding 1
+# を受けてrequirement改訂・復元) -----------------------------------------------
+# **2026-08-24、有効化ゲート撤去の一次実装でこの変数ごと撤去したが、独立
+# レビューが差し戻した。** 実装者は「唯一の消費箇所がゲートだった」ことを
+# 根拠に「目的も消えた」としたが、それは誤り ―― 消費箇所の有無と、守って
+# いる境界の有無は別の話である。旧R15の目的は「API base URLを`-e`で
+# 切り替えられる設計の下で、Restore複製のansyのようなcanonicalでない接続先
+# へ`active: true`を書かないこと」であり、**ゲート(実行ごとの明示的な許可)
+# を撤去してカタログのactiveを直接反映するようになった分、誤ったインスタンス
+# へ書き込む危険はむしろ増えている。**
 #
-# **立てている間は、そのとき保留中の遷移がすべて通る。** 個別のscheduleは
-# 選べない。**立てる前に必ず`--check`で`pending_activation`を読み、そこに
-# 並ぶものを全部有効化してよいか確かめること。**
+# **したがって、この変数と、それを使う接続先検査は残す。** ただし旧設計の
+# 「実行ごとの明示的な許可・closed-world・管理外0件・schedule集合の非変化」
+# という他の4条件とは束ねない ―― それらはR1で撤去されたままである
+# (Yoshinobu承認済み、2026-08-24)。ここで検査するのは接続先の一致だけ
+# (`semaphore_schedules_url_matches_canonical`、filter_plugins/
+# semaphore_schedules.py)。
 #
-semaphore_schedules_allow_activation: false
-
-# --- R15: allowlist型のcanonical本番URL ---------------------------------------
-# 有効化を許可してよい接続先の判定に使う。**他の変数(semaphore_target等)
-# からは導出しない** — 導出すると「ansyでなければ許可」という否定判定
-# (denylist型)に近づき、別名・別表記のDNS名で同じサーバへ到達したとき
-# fail-openする(R15本文)。値はquoryの現在のcanonical URLへのリテラル。
+# **判定は各schedule書き込みの直前に取得したfresh値で行う。**
+# `schedules_canonical_check.yml`はこの変数と接続先URLの一致(静的な文字
+# 列比較)だけを一度計算し、実際に「このwriteは有効化か」の判定は
+# `semaphore_schedules_would_newly_activate` を使って
+# `schedules_apply_item.yml` / `schedules_apply_new_item.yml` が個別に
+# 行う(2026-08-24再追補、独立レビュー`2026-08-24_004_review.md` High 1
+# — diff時点のスナップショットで判定すると、diffと実際の書き込みの間に
+# UIでactiveが変えられた場合に見逃す競合が実測された)。
+#
+# **他の変数(semaphore_target等)からは導出しない** ―― 導出すると
+# 「ansyでなければ許可」という否定判定(denylist型)に近づき、別名・
+# 別表記のDNS名で同じサーバへ到達したときfail-openする(旧R15本文、
+# 独立レビューが今回も支持した判断)。値はquoryの現在のcanonical URLへの
+# リテラル。
 semaphore_schedules_canonical_api_base_url: "https://quory.internal:3000/api"
 
 # --- R11: cronを解釈するtimezoneの前提値 --------------------------------------

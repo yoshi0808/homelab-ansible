@@ -57,10 +57,35 @@
     # apply/--checkが確定した後に走らせる。requirement
     # docs/ai/reviews/semaphore_schedules_as_code/2026-08-09_001_requirement.md) --
     #
+    # **2026-08-24(semaphore_activation_gate_removal案件、requirement
+    # docs/ai/reviews/semaphore_activation_gate_removal/
+    # 2026-08-24_001_requirement.md): R1により有効化ゲート(2段適用
+    # stage1/stage2、pending_activation、activation_gate)を撤去した。**
+    # `schedules_apply_stage1.yml`/`schedules_apply_stage2.yml`の2importは
+    # 単一の`schedules_apply.yml`import(下記)へ置き換わった。以下の
+    # 過去の査読差し戻しの記述はブロック/レスキュー構造自体(有効化ゲートと
+    # は独立した、失敗捕捉とレポート保存の頑健性)の経緯であり、そのまま残す。
+    #
+    # **同日、独立レビュー(`2026-08-24_003_review.md` Finding 1)が
+    # 一次実装のR2判断(canonical URL変数も一緒に撤去してよい)を差し戻した
+    # ため、requirementを改訂しR2として復元した。** 撤去した「実行ごとの
+    # 明示的な許可」と、独立して残す「接続先の検査」は別物である
+    # -- `schedules_canonical_check.yml`(下記、diffの直後・applyの直前。
+    # 接続先URLがcanonicalかの静的な事実だけを計算する)を参照。
+    #
+    # **さらに同日、再レビュー(`2026-08-24_004_review.md` High 1)が
+    # この接続先検査の初版にあった競合を実Ansibleで再現した。** diff時点
+    # のスナップショットから「有効化対象」を静的に列挙する設計だったため、
+    # diffと実際の書き込みの間にUIでactiveを変えられると見逃せた。**修正は
+    # write-time側(`schedules_apply_item.yml` / `schedules_apply_new_
+    # item.yml`)へ移し、各書き込みの直前に取得したfresh値で個別に判定する
+    # ように改めた** -- `schedules_canonical_check.yml`自体はもう有効化
+    # 対象を列挙せず、`fail`もしない。
+    #
     # **2026-08-09、査読差し戻し(`2026-08-09_017_review_implementation.md`
     # High #3)を受けてnested block/rescue/alwaysへ変更した。** 以前は
     # schedules_report.ymlをこのtaskリストの末尾に置いていたため、
-    # preflight/stage1/stage2のいずれかがfailすると、周囲のblockの残りが
+    # preflight/diff/applyのいずれかがfailすると、周囲のblockの残りが
     # skipされ外側のrescueへ移り、レポートが一切保存されなかった
     # (R8の「既に発行済みの書き込みをレポートへ明記する」、R18の管理外
     # レポート、AC22の「適用済みの1件目が具体的に記録される」を満たせない)。
@@ -95,7 +120,7 @@
     # `fail`する — 元の失敗が後発の失敗に上書きされない。
     - name: Read, preflight, diff, and (optionally) apply schedules — capture (not swallow) any failure
       block:
-        - name: Validate semaphore_schedules_closed_world / semaphore_schedules_allow_activation are unambiguous booleans (R15/R17)
+        - name: Validate semaphore_schedules_closed_world is an unambiguous boolean (R17)
           ansible.builtin.import_tasks: schedules_validate_config.yml
 
         - name: Read the current Semaphore schedules and a fresh template list (R10, read-only)
@@ -107,15 +132,14 @@
         - name: Preflight the schedules catalog; stop before any write on error (R9)
           ansible.builtin.import_tasks: schedules_preflight.yml
 
-        - name: Compute the schedules diff (R8/R8-2/R8-3) and the activation-eligibility preview
+        - name: Compute the schedules diff (R8/R8-2)
           ansible.builtin.import_tasks: schedules_diff.yml
 
-        - name: Apply schedule stage 1 (create/update, skipped under --check — R7)
-          ansible.builtin.import_tasks: schedules_apply_stage1.yml
-          when: not ansible_check_mode
+        - name: Determine whether the connection matches the catalog's canonical production URL (R2 -- consumed at write time)
+          ansible.builtin.import_tasks: schedules_canonical_check.yml
 
-        - name: Apply schedule stage 2 (activation only, skipped under --check — R7/R8-3)
-          ansible.builtin.import_tasks: schedules_apply_stage2.yml
+        - name: Apply schedules (create/update, skipped under --check — R7)
+          ansible.builtin.import_tasks: schedules_apply.yml
           when: not ansible_check_mode
       rescue:
         - name: "Build a token-scrubbed copy of the original schedule failure (does not re-raise here — always: must still run)"

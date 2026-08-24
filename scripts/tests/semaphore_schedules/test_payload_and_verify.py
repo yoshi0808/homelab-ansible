@@ -5,7 +5,6 @@ import _path_setup  # noqa: F401
 from semaphore_schedules import (
     semaphore_schedules_create_payload,
     semaphore_schedules_payload,
-    semaphore_schedules_stage2_precheck,
     semaphore_schedules_verify,
 )
 
@@ -134,43 +133,6 @@ class VerifyTests(unittest.TestCase):
         self.assertEqual(
             sorted(semaphore_schedules_verify(raw_after, desired)),
             sorted(['cron_format', 'active']),
-        )
-
-
-class Stage2PrecheckTests(unittest.TestCase):
-    def test_no_mismatch_when_management_fields_match_and_still_inactive(self):
-        stage1_desired = {
-            'name': 'SAFE: X', 'cron_format': '30 6 * * *', 'template_id': 10,
-            'task_params': {'environment': '{}'},
-        }
-        raw_detail = dict(stage1_desired)
-        raw_detail['active'] = False
-        self.assertEqual(semaphore_schedules_stage2_precheck(raw_detail, stage1_desired), [])
-
-    def test_management_field_changed_since_stage1_is_reported(self):
-        stage1_desired = {
-            'name': 'SAFE: X', 'cron_format': '30 6 * * *', 'template_id': 10,
-            'task_params': {'environment': '{}'},
-        }
-        raw_detail = dict(stage1_desired)
-        raw_detail['cron_format'] = '0 0 * * *'  # changed by UI after stage 1
-        raw_detail['active'] = False
-        self.assertEqual(
-            semaphore_schedules_stage2_precheck(raw_detail, stage1_desired), ['cron_format'],
-        )
-
-    def test_active_already_true_is_reported_even_if_other_fields_match(self):
-        """R8-3: 第2段階の直前確認は active が false のままであることも
-        確かめる。すでに true(例えば UI で先に有効化された)なら不一致。
-        """
-        stage1_desired = {
-            'name': 'SAFE: X', 'cron_format': '30 6 * * *', 'template_id': 10,
-            'task_params': {'environment': '{}'},
-        }
-        raw_detail = dict(stage1_desired)
-        raw_detail['active'] = True
-        self.assertEqual(
-            semaphore_schedules_stage2_precheck(raw_detail, stage1_desired), ['active'],
         )
 
 

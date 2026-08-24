@@ -1,0 +1,51 @@
+---
+# R2(2026-08-24追補、独立レビュー `2026-08-24_003_review.md` Finding 1 /
+# requirement改訂への対応): 有効化ゲート(実行ごとの明示的な許可・
+# closed-world・管理外0件・schedule集合の非変化の4条件、R1で撤去)とは
+# **独立して**、接続先の検査だけを復元する。
+#
+# 旧R15の目的は「API base URLを`-e`で切り替えられる設計の下で、Restore
+# 複製のansyのようなcanonicalでない接続先へ`active: true`を書かない
+# こと」だった。ゲートを撤去してカタログの`active`を直接反映するように
+# なった分、この境界が無いと誤ったインスタンスへ書き込む危険はむしろ
+# 増える(独立レビュー指摘、Yoshinobu承認済み)。
+#
+# **2026-08-24再追補(独立レビュー `2026-08-24_004_review.md` High 1へ
+# の対応): このfileはもう「有効化対象の判定」も「fail」も行わない。**
+# 最初のバージョンはdiff計算直後に一度だけ、diff時点のスナップショット
+# (`semaphore_schedules_diff_result`)から「今回新たにactiveにする
+# schedule」を静的に列挙し、それが空でなければ非canonical接続先を
+# 拒否していた。**これは競合に弱い設計だった** -- diff時点で
+# `active`が既に観測値と一致(true)していて`cron_format`だけが差分の
+# entryは、diffの直後・実際のPUTの直前にUIで`active: false`へ変えられ
+# ても、diff時点のスナップショット上は「有効化対象ではない」ままになる。
+# 一方、実際のPUT(schedules_apply_item.yml)は常にカタログの`active`
+# (=true)を送るため、書き込みそのものは再有効化になる。独立レビューが
+# 実Ansibleでこの経路を再現した(targets=[]、fields=['cron_format']、
+# fresh GET active=false、生成されたPUT bodyのactive=trueが同時に成立)。
+#
+# **修正の要点は「実際に書く値で判断する」こと** -- diffの静的スナップ
+# ショットではなく、各write の直前に取得した fresh な値を使って、その
+# writeがこの瞬間に本当にfalse→trueを行うのかをwrite-time側
+# (`schedules_apply_new_item.yml` / `schedules_apply_item.yml`)で個別に
+# 判定するよう設計を変えた(`semaphore_schedules_would_newly_activate`、
+# filter_plugins/semaphore_schedules.py)。**このfileが担当するのは
+# 「接続先がcanonicalかどうか」という、書き込みのタイミングに関わらず
+# 一定の値(2つの静的な設定文字列の比較でしかない)だけであり、write-time
+# 側の各判定がこの結果を再利用する。**
+#
+# read-only: --checkの有無にかかわらず常に実行する(他のprecondition
+# checkと同じ規約)。
+#
+# **内部状態(`semaphore_schedules_canonical_url_ok`)は、
+# schedules_validate_config.ymlの reserved-name guard が既に保護する**
+# -- `semaphore_schedules_canonical_api_base_url`(role defaultsの
+# 外部設定allowlist5項目の1つ、2026-08-24に再追加)には含まれない内部
+# 専用の名前であり、`-e`での事前定義はこのファイルへ到達する前に拒否
+# される。ここで改めて`-e`上書き対策を書く必要は無い。
+
+- name: Determine whether the connection URL used matches the catalog's canonical production URL (R2)
+  ansible.builtin.set_fact:
+    semaphore_schedules_canonical_url_ok: >-
+      {{ semaphore_templates_api_base_url
+         | semaphore_schedules_url_matches_canonical(semaphore_schedules_canonical_api_base_url) }}

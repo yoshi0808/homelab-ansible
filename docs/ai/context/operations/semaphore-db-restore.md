@@ -63,6 +63,7 @@
 ## 6. 復元後に確かめること
 
 - Semaphore の UI または API で、template 一覧・schedule 一覧が復元前の内容と一致すること(AC7)。
-- （実際の災害復旧の場合のみ）既存の schedule が退避時点の `active` 状態のまま動いているか確認する — カタログの reconcile を流すと、`active` の値は §7(`docs/ai/context/operations/code-delivery-to-production.md`)の4条件が揃わない限り `false → true` へは書き換わらない点に注意する。
+- （実際の災害復旧の場合のみ）既存の schedule が退避時点の `active` 状態のまま動いているか確認する — **カタログの reconcile を流すと、`active` はカタログが宣言した値へそのまま揃う。** **2026-08-24 に有効化ゲートを撤去したため、以前あった「4条件が揃わない限り `false → true` にならない」という抑制は無い**(`docs/ai/reviews/semaphore_activation_gate_removal/`)。**復元直後に reconcile を流すと、カタログが `active: true` としている schedule はその時点から動き出す。** 止めたまま確認したい段階があるなら、reconcile を流す前に行うこと。
+  - **ただしこれは、復元先が canonical な API base URL のときに限る。** 別名で建て直した quory や ansy の複製へ向けて流すと、**有効化を伴う適用は接続先の検査で止まる**(`semaphore_schedules_canonical_api_base_url`)。**災害復旧で quory を別のホスト名で再建したときは、この検査が先に当たる** — 止まるのは正しい動作であり、**canonical URL の値をカタログ側で更新するのが筋**である。`-e` でその場だけ変えて通さない。
 
 想定読者Role: Coordinator = 復元判断時に全文確認、Tester = AC7検証時に手順を参照、その他 = 概要のみ。

@@ -1,10 +1,16 @@
 ---
 # R8: get-then-merge-then-send の「取得」を、比較のためにここで一度行う。
-# **これは各PUTの直前に取り直す取得(R8本文、schedules_apply_stage1_item.yml)
+# **これは各PUTの直前に取り直す取得(R8本文、schedules_apply_item.yml)
 # とは別物** — ここでの取得は差分の計算とレポートのためのものであり、実際の
 # 書き込みの直前にはさらに一度、個別に取り直す(鮮度の要求はR8/R16参照)。
 #
 # read-only: --checkの有無にかかわらず常に実行する(R7)。
+#
+# 2026-08-24(semaphore_activation_gate_removal案件 R1): 有効化ゲート撤去に
+# 伴い、このfileが持っていた「stage-2 precheckが参照するstage-1desired」
+# と「activation-eligibilityのpreview」の2つの計算を削除した。撤去後は
+# `semaphore_schedules_diff`が返す`changed`の`after`がそのまま最終的な
+# 書き込み対象であり、別段階のためにここで先取りして保持しておく値は無い。
 
 - name: Build the list of existing schedules matched to the catalog (for per-schedule detail fetch, R8)
   ansible.builtin.set_fact:
@@ -42,7 +48,7 @@
       {%- endfor -%}
       {{ m }}
 
-- name: Compute the schedules diff (R8-2/R8-3 — new / stage1 / unchanged / pending_activation)
+- name: Compute the schedules diff (R8-2 — new / changed / unchanged)
   ansible.builtin.set_fact:
     semaphore_schedules_diff_result: >-
       {{ semaphore_schedules_catalog | semaphore_schedules_diff(
@@ -50,58 +56,13 @@
            semaphore_schedules_detail_by_id,
            semaphore_schedules_preflight_result.template_ids) }}
 
-# Stage-2 (schedules_apply_stage2_item.yml) re-checks a schedule's stage-1
-# fields immediately before activating it (R8-3's stage2_precheck). It needs
-# the stage-1 desired state for *every* matched existing schedule, not only
-# the ones that needed a stage-1 write (diff().stage1 only carries `after`
-# for entries whose before != desired — an already-matching "unchanged"
-# entry has no `after` recorded there). Recomputing it here from the same
-# entry/detail/template_id used above covers both cases uniformly: for a
-# stage1 entry this value is identical to that item's `after`; for an
-# unchanged entry it's simply the (already-matching) current desired state.
-- name: Compute stage-1 desired state for every matched existing schedule (used by stage-2 precheck, R8-3)
-  ansible.builtin.set_fact:
-    semaphore_schedules_stage1_desired_by_id: >-
-      {%- set m = {} -%}
-      {%- for entry in semaphore_schedules_catalog -%}
-        {%- if entry.name in semaphore_schedules_preflight_result.observed_by_name -%}
-          {%- set sid = semaphore_schedules_preflight_result.observed_by_name[entry.name].id -%}
-          {%- set detail = semaphore_schedules_detail_by_id.get(sid, {}) -%}
-          {%- set tid = semaphore_schedules_preflight_result.template_ids.get(entry.name) -%}
-          {%- set _ = m.update({sid: (entry | semaphore_schedules_desired(detail, tid, 1))}) -%}
-        {%- endif -%}
-      {%- endfor -%}
-      {{ m }}
-
-# Apply-outcome accumulators: stay empty under --check (schedules_apply_
-# stage1.yml / schedules_apply_stage2.yml are both `when: not
-# ansible_check_mode` and never run), populated under a real apply. Set
-# here (unconditionally) so schedules_report.yml can always reference them
-# without an "undefined variable" error regardless of check mode.
+# Apply-outcome accumulators: stay empty under --check (schedules_apply.yml
+# is `when: not ansible_check_mode` and never runs), populated under a
+# real apply. Set here (unconditionally) so schedules_report.yml can
+# always reference them without an "undefined variable" error regardless
+# of check mode.
 - name: Initialize apply-outcome accumulators
   ansible.builtin.set_fact:
     semaphore_schedules_created: []
-    semaphore_schedules_stage1_written: []
-    semaphore_schedules_stage1_skipped: []
-    semaphore_schedules_stage2_activated: []
-
-# A cheap, always-computed *preview* of stage-2 eligibility (R12/R15 static
-# conditions only). It reuses semaphore_schedules_preflight_ids for both the
-# "preflight" and "current" arguments, so R16's collision check trivially
-# passes here by construction (nothing has happened between the two reads
-# of the same value) -- it is not a substitute for the real check.
-# schedules_apply_stage2.yml overwrites this same fact with the
-# authoritative, freshly-fetched evaluation immediately before any
-# activation PUT is attempted (R16: "有効化を発行する直前に...再取得").
-# Under --check that overwrite never happens, so this preview is what the
-# report shows.
-- name: Compute an activation-eligibility preview (R12/R15; R16 freshness is authoritative only at apply time)
-  ansible.builtin.set_fact:
-    semaphore_schedules_stage2_gate_result: >-
-      {{ semaphore_templates_api_base_url | semaphore_schedules_activation_gate(
-           semaphore_schedules_canonical_api_base_url,
-           semaphore_schedules_allow_activation_bool,
-           semaphore_schedules_closed_world_bool,
-           semaphore_schedules_preflight_result.unmanaged | length,
-           semaphore_schedules_preflight_ids,
-           semaphore_schedules_preflight_ids) }}
+    semaphore_schedules_updated: []
+    semaphore_schedules_update_skipped: []

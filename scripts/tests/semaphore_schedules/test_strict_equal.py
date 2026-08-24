@@ -8,8 +8,8 @@ real ansible-core (2.20.1), Coordinator measured that a catalog value
 classes: `_AnsibleTaggedStr` vs plain `str`, `_AnsibleLazyTemplateDict` vs
 plain `dict`. Content and meaning were identical (`a == b` was already
 `True`); only the wrapper class differed. The old `type(a) is type(b)`
-check rejected every one of those pairs, so `diff`'s stage1 classification,
-`verify`, and `stage2_precheck` would all report a change/mismatch that
+check rejected every one of those pairs, so `diff`'s `changed`
+classification and `verify` would both report a change/mismatch that
 was never real.
 
 This module reproduces that shape *without importing ansible* -- plain
@@ -32,7 +32,6 @@ import _path_setup  # noqa: F401
 from semaphore_schedules import (
     _strict_equal,
     semaphore_schedules_diff,
-    semaphore_schedules_stage2_precheck,
     semaphore_schedules_verify,
 )
 
@@ -133,24 +132,8 @@ class VerifyAcceptsEquivalentWrapperTypesTests(unittest.TestCase):
         self.assertEqual(mismatched, ['cron_format'])
 
 
-class Stage2PrecheckAcceptsEquivalentWrapperTypesTests(unittest.TestCase):
-    def test_stage2_precheck_reports_no_mismatch_for_value_equal_wrapped_vs_plain(self):
-        stage1_desired = _wrapped_desired()
-        del stage1_desired['active']  # stage1_verified_desired carries the 4 non-active fields
-        raw_detail = _plain_raw(active=False)
-        self.assertEqual(semaphore_schedules_stage2_precheck(raw_detail, stage1_desired), [])
-
-    def test_stage2_precheck_still_reports_a_real_content_mismatch(self):
-        stage1_desired = _wrapped_desired()
-        del stage1_desired['active']
-        raw_detail = _plain_raw(active=False, template_id=99)
-        self.assertEqual(
-            semaphore_schedules_stage2_precheck(raw_detail, stage1_desired), ['template_id'],
-        )
-
-
-class DiffStage1AcceptsEquivalentWrapperTypesTests(unittest.TestCase):
-    def test_value_equal_wrapped_catalog_vs_plain_api_detail_is_unchanged_not_stage1(self):
+class DiffChangedAcceptsEquivalentWrapperTypesTests(unittest.TestCase):
+    def test_value_equal_wrapped_catalog_vs_plain_api_detail_is_unchanged_not_changed(self):
         catalog = [{
             'name': _StrSubclass('SAFE: Time sync check'),
             'template': _StrSubclass('SAFE: Time sync check'),
@@ -168,10 +151,10 @@ class DiffStage1AcceptsEquivalentWrapperTypesTests(unittest.TestCase):
 
         result = semaphore_schedules_diff(catalog, observed_by_name, detail_by_id, template_ids)
 
-        self.assertEqual(result['stage1'], [])
+        self.assertEqual(result['changed'], [])
         self.assertEqual(result['unchanged'], ['SAFE: Time sync check'])
 
-    def test_a_real_content_difference_still_lands_in_stage1(self):
+    def test_a_real_content_difference_still_lands_in_changed(self):
         catalog = [{
             'name': _StrSubclass('SAFE: Time sync check'),
             'template': _StrSubclass('SAFE: Time sync check'),
@@ -189,8 +172,8 @@ class DiffStage1AcceptsEquivalentWrapperTypesTests(unittest.TestCase):
 
         result = semaphore_schedules_diff(catalog, observed_by_name, detail_by_id, template_ids)
 
-        self.assertEqual(len(result['stage1']), 1)
-        self.assertEqual(result['stage1'][0]['fields'], ['cron_format'])
+        self.assertEqual(len(result['changed']), 1)
+        self.assertEqual(result['changed'][0]['fields'], ['cron_format'])
         self.assertEqual(result['unchanged'], [])
 
 

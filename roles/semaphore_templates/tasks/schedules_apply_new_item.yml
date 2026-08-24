@@ -1,20 +1,55 @@
 ---
 # Included with `loop: semaphore_schedules_diff_result.new` from
-# schedules_apply_stage1.yml. `item` here is one entry of that list:
-# {name, desired} where `desired` was already computed by the diff filter
-# via semaphore_schedules_desired(entry, None, template_id, 1) -- R13:
-# `desired.active` is always False for a brand-new schedule.
+# schedules_apply.yml. `item` here is one entry of that list: {name,
+# desired} where `desired` was already computed by the diff filter via
+# semaphore_schedules_desired(entry, template_id). `desired['active']` is
+# the catalog's own `active` value (2026-08-24 semaphore_activation_gate_
+# removal案件 R1) -- a brand-new schedule is created active immediately
+# when the catalog says so, not forced inactive pending a later,
+# separately-gated write.
 #
 # R6 guarantees `new` is only ever non-empty in closed-world (migration
 # preflight fails closed on any catalog name absent from the API), so no
-# phase branch is needed here -- unlike schedules_apply_stage1_item.yml,
-# there is no pre-existing identity to have drifted from.
+# phase branch is needed here -- unlike schedules_apply_item.yml, there is
+# no pre-existing identity to have drifted from.
 #
 # Task names below are deliberately static (ansible-lint name[template]:
 # Jinja belongs only at the very end of a name) -- the calling loop's
-# `loop_control: label: "{{ item.name }}"` (schedules_apply_stage1.yml)
-# already shows which schedule each console line belongs to; `item.name`
-# still appears in fail/assert messages where it matters for diagnosis.
+# `loop_control: label: "{{ item.name }}"` (schedules_apply.yml) already
+# shows which schedule each console line belongs to; `item.name` still
+# appears in fail/assert messages where it matters for diagnosis.
+#
+# R2(2026-08-24追補、独立レビュー Finding 1/High 1): a brand-new schedule
+# has no pre-existing object, so "before" is unambiguously not-active --
+# no fresh GET is needed to establish that (unlike schedules_apply_item.
+# yml, there is nothing that could have drifted). If the catalog wants it
+# active and the connection isn't canonical, refuse the POST before it is
+# ever sent.
+
+- name: Determine whether creating this schedule would newly activate it (R2 -- a new schedule has no prior state to drift)
+  ansible.builtin.set_fact:
+    _semaphore_schedules_create_would_activate: >-
+      {{ false | semaphore_schedules_would_newly_activate(item.desired.active) }}
+
+- name: Refuse to create this schedule active against a non-canonical connection (R2)
+  ansible.builtin.fail:
+    msg: >-
+      schedule {{ item.name }} をcatalogの指示どおり active: true で
+      新規作成しようとしています。接続先 {{ semaphore_templates_api_base_url }}
+      は、カタログのcanonicalな本番URL
+      {{ semaphore_schedules_canonical_api_base_url }} と一致しません。
+      canonicalでない接続先でのactive:trueな新規作成は行わず、書き込みを
+      1件も追加で発行せず、残りのPOST/PUTもすべて中止します(R2)。
+      このURLが実際にcanonicalな本番であるなら(例: quoryを別名で恒久的に
+      再建した場合)、defaults/main.ymlの
+      semaphore_schedules_canonical_api_base_url をcommitで更新してください
+      -- `-e`でその場だけ通さないこと
+      (docs/ai/context/operations/semaphore-db-restore.md「復元後に
+      確かめること」)。検証目的で一時的にこの接続先をcanonical扱い
+      したいだけなら(ansyでのfixture検証など)、その回だけ
+      `-e semaphore_schedules_canonical_api_base_url=<この接続先のURL>`
+      で上書きしてください。
+  when: _semaphore_schedules_create_would_activate and not semaphore_schedules_canonical_url_ok
 
 - name: Create the schedule
   ansible.builtin.uri:
