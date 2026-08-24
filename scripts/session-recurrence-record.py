@@ -265,6 +265,7 @@ def main():
 
     reason = payload.get("reason", "")
     if reason in SKIP_REASONS:
+        log("対象外: reason=%s" % reason)
         return
 
     transcript_path = payload.get("transcript_path")
@@ -274,6 +275,7 @@ def main():
 
     reduced = reduce_transcript(transcript_path)
     if not reduced.strip():
+        log("本文が空: reason=%s" % reason)
         return
 
     dry_run = os.environ.get("SESSION_RECURRENCE_DRY_RUN") == "1"
@@ -291,6 +293,8 @@ def main():
 
     matches = run_codex(prompt)
     if not matches:
+        log("該当なし: reason=%s reduced=%dB lessons=%d"
+            % (reason, len(reduced.encode()), len(catalog)))
         return
 
     date = datetime.now(JST).strftime("%Y-%m-%d")

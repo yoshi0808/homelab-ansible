@@ -24,6 +24,7 @@
 - **形式は `docs/ai/memory/lessons/` の「再発記録」節**。**契約の正本は `docs/ai/memory-classification.md`「`lessons/`の「再発記録」節」**(2026-08-25に移設 — それまで各lessonへ12行の定型文を複製しており、8本で96行の二重化になっていた)。節が持つのは見出し・正本へのポインタ1行・表だけである。書き込む実装は `scripts/session-recurrence-record.py`
 - **機構は `SessionEnd` hook と `scripts/session-recurrence-record.py`**(`.claude/settings.json` に登録)。決めた3点は①hookは `SessionEnd`、`reason` が `resume` のときだけ対象外とし **`clear` は含める**(この環境では境界の大半が `/clear` のため)②別体は**役を着せない `codex exec` を1回**(Reviewer役は着せない — 「findingsを重大度別に返せ」が過検出へ引くため)③渡すのは user/assistant の本文と `tool_use` の入力のみで **`tool_result` は捨てる**。transcript のパスは codex へ渡さず stdin で流す(境界を依頼文でなく入力経路に置く)
 - **異常終了では発火しない。** OOM・SIGKILL・電源断は `shutdown()` を通らず hook が起動しないため、**取りこぼしは沈黙として現れる。対象外とすることをYoshinobuが決めた**(2026-08-18)
+- **hook自身が起動したのに黙って終わる経路は、2026-08-25に塞いだ。** それまで「該当なし」「対象外」「本文が空」は無言で `return` しており、**ログに行が無い状態が「該当なし」「途中で落ちた」「起動しなかった」の3つと同じ見た目になっていた**。実際 2026-08-19 に `TimeoutExpired` で1回取りこぼしている(ログには残っていたが誰も読んでいなかった)。全経路で1行残すようにし、**ログを月次の測定対象へ入れた**(`docs/ai/memory/knowledge-review-log.md`)。ログはrepo外(`~/.claude/`)にあり、gitに入らない
 - **`/clear` のたびに codex が1回走り、最大120秒待つ。** 待ち時間の上限は `.claude/settings.json` の `CLAUDE_CODE_SESSIONEND_HOOKS_TIMEOUT_MS`
 - **同じ日に、現在地の渡り方も直した** — SessionStartで渡る本ファイルが **hookの10,000文字制限で切れていた**(出力16,821文字に対し先頭2,000文字しか届かず、Next表の2行目で切断)。`scripts/session-context.py` で節境界に分割し4エントリ登録した(commit `036649d`)。**分割は成立している** — 2026-08-18のセッション開始で全節が届いた。
 - **初回発火を確認した**(2026-08-18、commit `dcb7375`)。lesson 4本へ追記され、**再発記録節が無い lesson への新設経路も通った**
