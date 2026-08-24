@@ -1,0 +1,45 @@
+---
+- name: Send Semaphore update-check notification through common Slack
+  ansible.builtin.include_tasks: "{{ playbook_dir }}/../roles/common_slack/tasks/notify.yml"
+  vars:
+    slack_channel: >-
+      {{ 'alerts' if semaphore_update_check_status in
+         ['current_unreadable', 'collection_failed', 'latest_older_than_current'] else 'patches' }}
+    slack_status: >-
+      {{ 'error' if semaphore_update_check_status in
+         ['current_unreadable', 'collection_failed', 'latest_older_than_current'] else 'info' }}
+    slack_title: "[semaphore_update_check] {{ semaphore_update_check_status }}"
+    semaphore_update_check_binary_diagnostic: >-
+      {{ (semaphore_update_check_current_raw.stderr | default('', true))
+         or (semaphore_update_check_current_raw.msg | default('', true))
+         or '(no module message)' }}
+    semaphore_update_check_api_diagnostic: >-
+      {{ (semaphore_update_check_latest_raw.msg | default('', true))
+         or '(no module message)' }}
+    slack_message: |
+      Semaphore update check
+      - host: {{ inventory_hostname }}
+      - status: {{ semaphore_update_check_status }}
+      {% if semaphore_update_check_status == 'update_available' %}
+      - update available: {{ semaphore_update_check_current_version }} → {{ semaphore_update_check_latest_version }}
+      - release: {{ semaphore_update_check_latest_url }}
+      - 検知のみです。適用は人が既存の手順で行います
+        (docs/ai/reviews/semaphore_upgrade/2026-08-18_002_manual_procedure.md)。
+      {% elif semaphore_update_check_status == 'current_unreadable' %}
+      - installed version: {{ semaphore_update_check_current_version | default('?', true) }}
+      - `semaphore version` collection: {{ 'FAILED (rc=' ~ (semaphore_update_check_current_raw.rc | default('unknown') | string) ~ ')' if (semaphore_update_check_current_raw.rc | default(1) | int) != 0 else 'FAILED (version parse)' }}
+      - diagnostic: {{ (semaphore_update_check_binary_diagnostic | trim)[:200] }}
+      {% elif semaphore_update_check_status == 'collection_failed' %}
+      - installed version: {{ semaphore_update_check_current_version | default('?', true) }}
+      - GitHub latest release collection: {{ 'FAILED (HTTP status=' ~ (semaphore_update_check_latest_raw.status | default('unknown') | string) ~ ')' if (semaphore_update_check_latest_raw.status | default(-1) | int) != 200 else 'FAILED (tag_name parse)' if not (semaphore_update_check_latest_version is match('^[0-9]+[.][0-9]+[.][0-9]+$')) else 'FAILED (html_url missing or invalid)' if not (semaphore_update_check_latest_url_valid | bool) else 'OK' }}
+      - GitHub API diagnostic: {{ (semaphore_update_check_api_diagnostic | trim)[:200] }}
+      {% elif semaphore_update_check_status == 'latest_older_than_current' %}
+      - installed version: {{ semaphore_update_check_current_version }}
+      - releases/latest version: {{ semaphore_update_check_latest_version }}
+      - GitHubの"Latest"が、ここにインストール済みの版より古いバージョンを
+        指しています。リポジトリ側でLatestを手動で古い版へ固定した場合に
+        起こりえます(requirement §6)。「更新なし」ではありません — 何が
+        起きているか {{ semaphore_update_check_latest_url }} で確認してください。
+      {% endif %}
+
+      検知のみです。ダウンロード・適用・サービス操作は行っていません。

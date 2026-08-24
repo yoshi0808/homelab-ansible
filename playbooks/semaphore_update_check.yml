@@ -1,0 +1,41 @@
+# semaphore_update_check.yml - Semaphore(ansy/quory)自身の新版検知。
+#
+# `apt`リポジトリを持たず`.deb`はGitHub Releasesからしか取れないため、新版が
+# 出ても誰も気づかない(docs/ai/reviews/semaphore_update_check/
+# 2026-08-24_001_requirement.md「問題定義」)。本playbookは検知だけを行う —
+# 適用・ダウンロード・サービス操作は一切含まない(R5、§3非ゴール)。適用は
+# 既存の手順書に従い人が行う
+# (docs/ai/reviews/semaphore_upgrade/2026-08-18_002_manual_procedure.md)。
+#
+# 対象: semaphore_servers グループ(ansy / quory の2台、R3)。
+# 上流: GitHub Releases の releases/latest(R2)。prereleaseを追わない —
+#   このエンドポイントが構造的にprereleaseを除外するため、tag一覧を引いて
+#   自前で選別するロジックは持たない(§6実測)。
+# 系統(track): 固定しない(§3非ゴール)。Semaphoreの版にLTS区分は無く、
+#   releases/latestを引けば「Latest」1本で足りる。
+#   roles/prometheus_update_checkのtrackの仕組みはこのplaybookへ持ち込んで
+#   いない。
+# 版の読み取り: `semaphore version`出力の先頭X.Y.Z(コミット・ビルド番号を
+#   落とす、R1。実測: 2.19.8-3449a04-1786894505)。
+#
+# 使用方法:
+#   ansible-playbook playbooks/semaphore_update_check.yml
+#   対象を絞る: ansible-playbook playbooks/semaphore_update_check.yml -l quory
+#
+# tester-gate: role-guarded — 副作用はSlack通知のみで、common_slack
+#   notify.ymlのskip_notifications/ansible_check_mode/AIエージェントセッション
+#   検出(3条件)ガードで抑止される(TS-005)。`semaphore version`のローカル
+#   実行とGitHub Releases APIへのread-only GETは対象システムの状態を変えない
+#   (AC5: 適用・ダウンロード・サービス操作のtaskは1つも無い)が、唯一の外部
+#   状態変更であるSlack通知がこの分類を決める。
+#
+# 設計: docs/ai/reviews/semaphore_update_check/2026-08-24_002_implement.md
+
+- name: Check for a new Semaphore release on ansy/quory
+  hosts: semaphore_servers
+  gather_facts: false
+  become: false
+  tasks:
+    - name: Run semaphore_update_check role
+      ansible.builtin.import_role:
+        name: semaphore_update_check

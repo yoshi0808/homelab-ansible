@@ -291,6 +291,19 @@ semaphore_templates_catalog:
     class: SAFE
     legacy_name: "SAFE:Recovery monitoring check"
 
+  # semaphore_update_check案件(2026-08-24)。ansy/quoryのSemaphore自身の
+  # 新版検知。`semaphore version`のローカル実行とGitHub releases/latestへの
+  # read-only GETのみで、適用・ダウンロード・サービス操作を一切持たない。
+  # 唯一の副作用はSlack通知であり、common_slackの抑止guardで止まる
+  # (tester-gate: role-guarded、TS-005。ここでのclass: SAFEはSemaphore
+  # template UI上の分類でtester-gateとは別軸、一致検査はしない)。
+  # dry_runのような実行パラメータを持たないため引数・survey_varsとも無し
+  # (roles/prometheus_update_checkのapply/check/rollbackの3template構成
+  # とは異なり、このplaybookはtemplateも
+  # scheduleも1本で足りる)。
+  - playbook: playbooks/semaphore_update_check.yml
+    class: SAFE
+
   # --- sandbox版(recovery_*系のapplyと同じplaybookを共有) -------------------
   - playbook: playbooks/recovery_vm_reboot.yml
     class: SANDBOX
@@ -868,6 +881,46 @@ semaphore_schedules_catalog:
   - name: "SEMI-SAFE: Semaphore db backup daily"
     template: "SEMI-SAFE: Semaphore db backup"
     cron: "0 12 * * *"
+    active: true
+    task_params:
+      environment: "{}"
+
+  # --- semaphore_update_check案件(2026-08-24追加) ----------------------------
+  #
+  # 正本: docs/ai/reviews/semaphore_update_check/2026-08-24_001_requirement.md
+  # §7「月次を採る」(UV-085: バージョンを跨ぐ変化はアップグレード側=月次)。
+  # template・scheduleを同じ変更で登録する(R10、上のsemaphore_templates_
+  # catalog参照)。task_paramsを持たない — 実行パラメータそのものが無い
+  # (roles/semaphore_update_check/defaults/main.ymlのヘッダ参照)。
+  #
+  # **選定: 毎月10日 20:00 JST。この行自身が毎月10日20:00の枠を使う。**
+  # カタログ内では、この時刻は(本エントリを除いて)載る20件のいずれの実行
+  # 時刻とも重ならない(00:10=1日Cloudkey、00:40=毎日drift check、
+  # 03:30=毎日nightly、05:30-05:50=毎日healthcheck群、06:00=土曜Weekly Full
+  # Patch/日曜Cert renew、06:30=毎日recovery monitoring check、12:00=毎日db
+  # backup、17:00-18:30=金曜週次群、18:00=木曜Proxmox snapshot check、
+  # 18:15=2日Ubuntu vm full upgrade dry-run、18:30=28日Proxmox backup restore
+  # verify。木曜18:00のProxmox snapshot checkは当初この列挙から抜けており、
+  # レビュー2026-08-24_003指摘で補った。比較対象は本エントリ追加前の20件)。
+  #
+  # **ただしカタログだけでは全体の衝突を判定できない。** 横断する窓の一覧は
+  # Semaphoreの外(UniFi・Proxmox・systemd timer・unattended-upgrades等)にも
+  # 広がっており、横断して持つ正本はYoshinobuが別途管理するNotionの
+  # 「バッチ処理工程管理表」(このリポジトリの外)だけである
+  # (docs/ai/context/system/semaphore.md「cronを決めるとき、このカタログ
+  # だけで衝突を判定しない」)。
+  #
+  # **2026-08-24、Yoshinobuがこの表を実際に確認し、20時台にこの表側の予定が
+  # 無いことを確かめた上でこの時刻を選んだ。** これは選定時点で確認した事実
+  # であり、「20時台は空いている」という恒久の性質として書いているのではない
+  # — **この行自身が毎月10日20:00の枠を占有する**ため、次に別の用途で
+  # この枠(またはその前後)を検討する者は、この行がいる前提で、改めて同じ
+  # 表を確認すること。カタログのコメントを更新した変更自身が、その回のコメント
+  # が指す枠を埋めていないかを毎回確かめる(2026-08-23、commit `7676c78`で
+  # 直した「コメントを書いた変更自身がその枠を埋めていた」誤りを再現しない)。
+  - name: "SAFE: Semaphore update check monthly"
+    template: "SAFE: Semaphore update check"
+    cron: "0 20 10 * *"
     active: true
     task_params:
       environment: "{}"

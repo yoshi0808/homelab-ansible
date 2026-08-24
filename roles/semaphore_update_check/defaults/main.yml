@@ -1,0 +1,20 @@
+---
+# semaphore_update_check role defaults.
+#
+# 正本: docs/ai/reviews/semaphore_update_check/2026-08-24_001_requirement.md
+#
+# このroleは検知だけを行う(§3非ゴール、R5)。roles/prometheus_update_check
+# のtrackの仕組みはこのroleへ持ち込まない(§3「系統を固定しない」、§8)—
+# Semaphoreの版にはLTS区分が無く、releases/latestを引けばprereleaseを
+# 除外したメインストリーム1本が得られる(§6実測)ため、trackで絞り込む
+# 対象そのものが存在しない。
+#
+# 適用・ダウンロード・rollbackのtaskを一切持たないため、dry_runゲートも
+# 持たない — prometheus_update_checkのdry_runは「検知はいつでも実行し、
+# 適用だけをdry_run=falseで明示的に許可する」ためのゲートだが、このroleは
+# 適用という分岐そのものを持たないため、ゲートする対象が無い(R5)。
+
+semaphore_update_check_binary: /usr/bin/semaphore
+semaphore_update_check_repo: semaphoreui/semaphore
+semaphore_update_check_api_url: "https://api.github.com/repos/{{ semaphore_update_check_repo }}/releases/latest"
+semaphore_update_check_api_timeout: 15

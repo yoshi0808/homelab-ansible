@@ -1,0 +1,205 @@
+---
+# semaphore_update_check: Semaphore自身(ansy/quory)の新版検知。
+#
+# 正本: docs/ai/reviews/semaphore_update_check/2026-08-24_001_requirement.md
+#
+# 非ゴール(§3): 適用しない、trackを固定しない、community版切替を扱わない、
+# .debを取得しない。このroleにはdry_runゲートが無い — 破壊的な分岐そのもの
+# を持たないため、ゲートする対象が無い(defaults/main.ymlのヘッダ参照)。
+#
+# バイナリpath・repo名・API URLの相互一貫性は検査しない
+# (prometheus_update_checkのバリデーションと違う点)。あちらの一貫性検査は
+# backup/restoreのpath構築が壊れることを防ぐためのものだが、このroleは
+# 読み取りと通知しか行わず、値が食い違っても行き着く先は既存のfail-closed
+# 分類(current_unreadable / collection_failed)であって危険な操作では
+# ない。加えて、Tester(fixture)がAC2〜AC4を検証するには
+# semaphore_update_check_binary / semaphore_update_check_api_url を
+# 個別に上書きできる必要があり(実GitHubを呼びつつ、ローカル側だけを
+# 差し替えて update_available / latest_older_than_current /
+# current_unreadable を再現する)、一貫性検査はその再現を妨げる。
+- name: Validate Semaphore update-check configuration
+  ansible.builtin.assert:
+    that:
+      - semaphore_update_check_api_timeout | int > 0
+    fail_msg: >-
+      Invalid semaphore_update_check_api_timeout configuration
+      ({{ semaphore_update_check_api_timeout }}).
+    quiet: true
+
+# 判定不能を正常扱いにしないための既定値(docs/ai/core.md「作るものが
+# 満たすこと」)。以降のtaskはすべて無条件(when無し)なので、この初期値が
+# 生き残って観測されることは通常無いはずだが、fail-closedの既定として
+# 'collection_failed'(更新なしと区別される側)に倒しておく。
+- name: Initialize Semaphore update-check facts
+  ansible.builtin.set_fact:
+    semaphore_update_check_status: collection_failed
+    semaphore_update_check_current_version: ""
+    semaphore_update_check_latest_version: ""
+    semaphore_update_check_latest_url: ""
+
+# ---------------------------------------------------------------------------
+# Phase 1: インストール済みバージョンを読む。
+# `command`はcheck_modeを持たず--check下ではauto-skipする
+# (skills/ansible-implementation-style/SKILL.md「check_modeの実装上の
+# 落とし穴」#1)。このroleに破壊的な分岐は無いため、check_mode: falseは
+# 安全性の例外ではなく、「--check付きでも付けなくても同じstatusを報告する」
+# ことのための指定である。
+# ---------------------------------------------------------------------------
+- name: Collect installed Semaphore version
+  ansible.builtin.command:
+    argv:
+      - "{{ semaphore_update_check_binary }}"
+      - version
+  register: semaphore_update_check_current_raw
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+# R1: `semaphore version`は「X.Y.Z-<commit>-<build>」を1行で返す
+# (実測 2026-08-24: 2.19.8-3449a04-1786894505)。コミットハッシュと
+# ビルド番号は比較に使わない。
+#
+# regex_findall(regex_replaceではない)でキャプチャグループだけを取り出す
+# ため、置換文字列の後方参照そのものが存在しない。prometheus_update_check
+# で2026-08-23に出た `\1` 対 `\g<1>` のエスケープ不整合(YAMLの引用符と
+# `{{ }}`/裸の条件式の組み合わせで必要なバックスラッシュ数が変わる欠陥)は、
+# 後方参照を含む置換文字列があって初めて起こりうる。regex_findallには
+# 置換文字列という概念自体が無いため、このroleにはその欠陥が刺さる面が無い
+# — defaults/main.ymlにprometheus_update_check_major_minor_pattern相当の
+# 共有変数を置かなかったのは、この理由による(定義箇所が1つも無いのではなく、
+# 定義すべき対象自体が無い)。
+- name: Parse installed Semaphore version
+  ansible.builtin.set_fact:
+    semaphore_update_check_current_version: >-
+      {{ (semaphore_update_check_current_raw.stdout | default('')
+          | regex_findall('^([0-9]+[.][0-9]+[.][0-9]+)')
+          | first | default('')) }}
+
+- name: Judge whether the installed Semaphore version was read successfully
+  ansible.builtin.set_fact:
+    semaphore_update_check_current_readable: >-
+      {{ (semaphore_update_check_current_raw.rc | default(1) | int) == 0
+         and (semaphore_update_check_current_version is match('^[0-9]+[.][0-9]+[.][0-9]+$')) }}
+
+# ---------------------------------------------------------------------------
+# Phase 2: GitHub releases/latest を読む。
+#
+# R2: このエンドポイントはprereleaseを構造的に除外する(2026-08-24実測、
+# requirement §6 — alpha/beta/rcはすべてprerelease=trueで運用されており、
+# releases/latestは常に最新の非prerelease版を返す)。tag一覧を取得して
+# 自前で選別するロジックはここに無い — 存在しないことが§6の要求を満たす
+# 実装そのものである。
+#
+# `uri`も--check下でauto-skipするため、Phase 1と同じ理由でcheck_mode: false
+# を明示する。
+# ---------------------------------------------------------------------------
+- name: Collect latest Semaphore release
+  ansible.builtin.uri:
+    url: "{{ semaphore_update_check_api_url }}"
+    method: GET
+    return_content: true
+    timeout: "{{ semaphore_update_check_api_timeout }}"
+  register: semaphore_update_check_latest_raw
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+# release ページのURLはAPI応答のhtml_urlをそのまま使う(自前でtag名から
+# 組み立てない)。組み立て用のURLテンプレート変数を持たないぶん、二重に
+# 持つ値そのものが無い(docs/ai/core.md「値を二重に持たない」)。
+#
+# `default('', true)` の第2引数(boolean=True)はUndefinedだけでなく、
+# JSONの`null`・`0`・空配列・空辞書などJinjaがfalsyと見なす値も`''`へ倒す。
+# 非空のlist/dict・数値のようなtruthyな非文字列値はそのまま素通りする —
+# 「文字列でない」ことを次のtask(Judge whether ...)の型検査で判定するため、
+# ここでは型を決め打ちしない。
+- name: Parse latest Semaphore release
+  ansible.builtin.set_fact:
+    semaphore_update_check_latest_version: >-
+      {{ ((semaphore_update_check_latest_raw.json | default({})).tag_name | default('') | string)
+         | regex_replace('^v', '') }}
+    semaphore_update_check_latest_url: >-
+      {{ (semaphore_update_check_latest_raw.json | default({})).html_url | default('', true) }}
+
+# レビュー指摘(2026-08-24、Finding 2、2周目): 最初の修正は`html_url | length
+# > 0`だけだった。これは3通りの取りこぼしを残していた——非空のobject/list
+# はlengthが真になり「URLとして成功」扱いになる、空白だけの文字列も同様、
+# `null`や数値は`length`の評価自体が失敗しうる(通知の前でtask failureに
+# なり、R6が要求する`#alerts`通知を経ないままplaybookが落ちる)。
+#
+# `type_debug`で文字列であることを先に確定し、`and`の短絡評価により文字列
+# でなければ後続の`trim`を評価しない(非文字列に`trim`を通しても例外には
+# ならないが、意味の無い変換を避ける)。文字列だと確定してから`trim`後の
+# 非空を見ることで、空白だけの値も弾く。R4/R6が要求するのは「文字列で、
+# 中身がある」ことであり、URLの形式(スキーム・ホスト名)までは検査しない
+# — GitHubが返す`html_url`を狭い正規表現で弾くと、上流の形が変わったとき
+# 正常系まで止まる(Coordinator指示)。
+- name: Judge whether the latest Semaphore release's URL is a non-empty string
+  ansible.builtin.set_fact:
+    semaphore_update_check_latest_url_valid: >-
+      {{ (semaphore_update_check_latest_url | type_debug == 'str')
+         and (semaphore_update_check_latest_url | trim | length > 0) }}
+
+- name: Judge whether the latest Semaphore release was collected successfully
+  ansible.builtin.set_fact:
+    semaphore_update_check_latest_collected: >-
+      {{ (semaphore_update_check_latest_raw.status | default(-1) | int) == 200
+         and (semaphore_update_check_latest_version is match('^[0-9]+[.][0-9]+[.][0-9]+$'))
+         and (semaphore_update_check_latest_url_valid | bool) }}
+
+# ---------------------------------------------------------------------------
+# Phase 3: 判定する。
+#
+# R6の3つの異常はそれぞれ独立したstatusとして、比較を試みる前に判定する。
+# したがって下の`is version(...)`は、両辺がsemver形式であると確認済みの
+# ときにしか評価されない — 「比較そのものが失敗する」余地を残さない。
+#
+#   ③ 現在版が読めない       -> current_unreadable
+#   ① 取得・parse・比較の失敗 -> collection_failed
+#   ② latestが現在版より古い  -> latest_older_than_current
+#      (GitHub側でLatestを手動で古い版へ固定した場合に起こりうる。R6/§6)
+# ---------------------------------------------------------------------------
+- name: Judge Semaphore update-check status
+  ansible.builtin.set_fact:
+    semaphore_update_check_status: >-
+      {{ 'current_unreadable' if not (semaphore_update_check_current_readable | bool)
+         else 'collection_failed' if not (semaphore_update_check_latest_collected | bool)
+         else 'latest_older_than_current' if (semaphore_update_check_latest_version is version(semaphore_update_check_current_version, '<'))
+         else 'update_available' if (semaphore_update_check_latest_version is version(semaphore_update_check_current_version, '>'))
+         else 'up_to_date' }}
+
+- name: Print Semaphore update-check summary
+  ansible.builtin.debug:
+    msg:
+      host: "{{ inventory_hostname }}"
+      status: "{{ semaphore_update_check_status }}"
+      current: "{{ semaphore_update_check_current_version | default('') }}"
+      latest: "{{ semaphore_update_check_latest_version | default('') }}"
+      release_url: "{{ semaphore_update_check_latest_url | default('') }}"
+
+# ---------------------------------------------------------------------------
+# Phase 4: 通知。
+#
+# AC1: up_to_dateは沈黙する(通知を送らない)。
+# update_available: 検知の成功であり異常ではない(UV-087「上げるべき」
+# というStatusを機械は持たない) — #patches/infoへ、現在版→新版と
+# release URLを載せて通知する(R4)。
+# R6の3異常: #alerts/errorへ通知する。
+# ---------------------------------------------------------------------------
+- name: Send Semaphore update-check notification
+  when: semaphore_update_check_status != 'up_to_date'
+  block:
+    - name: Build and send Semaphore Slack notification
+      ansible.builtin.include_tasks: notify.yml
+
+# AC4: R6の3異常は、通知とジョブの終了コードの両方で「更新なし」と
+# 区別できなければならない。update_availableは検知が成功した結果であり
+# (up_to_dateと同様に)正常終了(rc 0)とする — 失敗させるのは検知そのものが
+# 信用できない・異常な状態のときだけ。
+- name: Fail the play after notifying about a Semaphore anomaly
+  ansible.builtin.fail:
+    msg: >-
+      semaphore_update_check {{ semaphore_update_check_status }} on
+      {{ inventory_hostname }}: current={{ semaphore_update_check_current_version | default('', true) }}
+      latest={{ semaphore_update_check_latest_version | default('', true) }}
+  when: semaphore_update_check_status in ['current_unreadable', 'collection_failed', 'latest_older_than_current']
