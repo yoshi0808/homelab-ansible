@@ -40,6 +40,8 @@ Claude Memoryの`user`/`feedback`/`project`/`reference`とは別の分類体系�
 | `decisions/` | 承認済み設計判断 | 恒久。前提が変わったら見直す(3節) | Shellは収集、判定はAnsible側 |
 | `temporary/` | 作業中だけ必要な情報 | 案件クローズ時に削除 | request-42のテストが未完了 |
 
+`docs/ai/memory/knowledge-review-log.md`は上の4分類に属さない。月次振り返りの**測定値だけ**を月ごとに積む(3節「月次振り返りの対象と手順」)。
+
 `incidents/`のファイル形式(ファイル名規則・記載項目・原因分類タグ・`状態`)は`skills/incident-recording/SKILL.md`が正本。**記録は気づいた時点で開始し、原因判明後に同じファイルを完成させる2段階。**
 
 ### `lessons/`の「再発記録」節
@@ -115,6 +117,8 @@ Policy または Skill (該当業務のPolicyファイル新設・改訂、ま�
 **期日の正本はCoordinatorのMEMORY.md先頭の1行**であり続ける。timerは起動機構、MEMORY.mdは実施記録という分担で、振り返り自身が最後にこの行を更新する。二重管理を避けるため、期日を他所へ書かない。
 
 **書き出し先**: `docs/ai/memory/`・`docs/ai/context/`・`skills/`・`docs/ai/status.md`。`docs/ai/policies/`本文の改訂はYoshinobuの領域であり、必要なら提案として起こす。**状態の突合で見つかった差分は、その場で`docs/ai/status.md`へ反映する。**
+
+**測定値は`docs/ai/memory/knowledge-review-log.md`へ1節足す。** 後から計算し直せないため、この系列でしか対応の有効性を判定できない。**まず前回の節の「次月に見るもの」を開いて突き合わせるところから始め**、最後に今回の節を書く。値は着手時に測る(振り返り自身が動かす前の状態が系列になる)。**判断はそこへ書かず、行き先を指す** — やることは`docs/ai/status.md`、やらないことは`docs/ai/memory/decisions/rejected-proposals.md`、原因の断定は`docs/ai/memory/decisions/`の個別ファイル。
 
 **Context陳腐化チェックも行う。** 上記3系統(Incident/auto-memory/工程往復案件)とは別軸で、`docs/ai/context/system/`・`docs/ai/context/operations/`・`docs/ai/context/ansible/repository-overview.md`が`roles/`・`playbooks/`・`inventories/homelab/`の現物と整合しているかを検査する。手順は次の4つ。
 
