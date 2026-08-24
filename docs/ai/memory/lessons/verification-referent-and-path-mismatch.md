@@ -38,3 +38,4 @@
 |---|---|---|---|
 | 2026-08-18 | `group_vars/sophos.yml` の `ansible_ssh_private_key_file` を**Ansibleの接続設定と読み**、playbook本体を開かずに「必ず失敗する」と断定した。実体は `expect` へ渡す `ssh -i` の引数だった | `docs/ai/roles/coordinator.md`「確認していないものは未確認と明示する。確認手段があるなら先に確認する」 | Yoshinobu |
 | 2026-08-22 | Codexペインの古いWebSocketエラーを現在状態として読み、TUIが落ちたと断定したが、実際は承認待ちだった。 | docs/ai/roles/coordinator.md — 確認していないものは「未確認」と明示し、確認手段があるなら先に確認する | Yoshinobu |
+| 2026-08-25 | 過去の選定根拠コメントを現在値として読み、12時ジョブがあるのに「06:30〜17:00は空」と断定した。 | docs/ai/roles/coordinator.md「確認していないものは未確認と明示し、確認手段があるなら先に確認する」「仮説で行動しない」 | Yoshinobu |

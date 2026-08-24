@@ -46,3 +46,15 @@ Coordinator は撤去の requirement に「**代わりに置くもの — 実装
 一次記録: `docs/ai/reviews/semaphore_activation_gate_removal/2026-08-24_001_requirement.md`
 
 関連: [[permission-boundaries-must-be-designed-not-prompted]]、[[acceptance-criteria-need-observable-success]]
+
+## 再発記録
+
+**この節は機械が追記する。** セッション終了時、**別体**が transcript を読み、**次のいずれかが実際に起きたときだけ**1行足す — ①Policyに反した ②harnessの安全機構に止められた ③規範文書または依頼文に書いてあることをしなかった。**それ以外は何も足さない。**
+
+**話題が本 lesson に似ていることは記録の理由にならない。** 調べた・検証した・見つけた、は記録しない。lesson を正しく適用できているものも記録しない。**反した規範の所在を書けない項目は記録しない。**
+
+**回数は推定であって測定ではない。** 分類器はLLMであり、見落とせば沈黙し、過検出すれば水増しする。**回数だけを昇格の根拠にしない** — 3回を超えたら Skill 化の候補として人へ出す、までが機械の役目である。
+
+| 日付 | 何に対して踏んだか | 反した規範 | 気づかせたもの |
+|---|---|---|---|
+| 2026-08-25 | 登録直後のschedule発火が実際に起きたか測らず、有効化ゲートと二重の押下・commit手順を維持した。 | docs/ai/roles/coordinator.md「仮説で行動しない。仮説から懸念を広げない」 | Yoshinobu |

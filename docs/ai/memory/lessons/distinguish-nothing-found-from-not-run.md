@@ -53,3 +53,4 @@
 
 | 日付 | 何に対して踏んだか | 反した規範 | 気づかせたもの |
 |---|---|---|---|
+| 2026-08-25 | Reviewerにrejected-proposals.mdの確認を依頼したが、Reviewerはmemory配下を読めず、検証不能な対象を確認済み扱いしかけた。 | docs/ai/core.md:86「Reviewerはdocs/ai/memory/を読まない」 | Reviewer |
