@@ -33,6 +33,17 @@ Coordinatorが書いた計画を、実装に着手する前に査読する(依�
 - 返却先: **Coordinator**。
 - 再レビューは、修正後のdiffまたは計画と解消対象findingを受領して行う。
 
+## 重大度分類
+
+指摘の重大度は次の4段階を正本とする。新しい語彙・段階を追加しない。
+
+- **Critical**: 安全境界・本番影響・規範の消失。常にblocking、エスカレーション対象。
+- **Major**: 受入条件の不充足、放置で誤動作・ドリフトを生む。原則blocking、却下はCoordinatorが理由を記録する。
+- **Minor**: 実害が限定的。non-blocking。
+- **Suggestion**: 欠陥ではない改善。non-blocking。
+
+blockingは、解消するまでApproveを出さないことを意味する。Verdict 3値(`skills/code-review/SKILL.md`「Approve / Request Changes / Needs Discussion」)との対応は、blocking findingが残る間はApproveを出さない(Request ChangesまたはNeeds Discussionとする)。
+
 ## 必須ContextとSkill
 
 読む対象とタイミングは`docs/ai/role-context-matrix.md`のReviewer列を正本とする。requirement、diff、対象領域System Context、対象playbook/role、該当Policyを着手時に確認する。

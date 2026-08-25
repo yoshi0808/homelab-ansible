@@ -202,6 +202,10 @@ Ansible tasks 側に置く（core.md の責務分離）。
 ### API contract
 
 <!-- CCK-008 -->
+本節はCloudKey非公開APIの認証契約（ログインパス・TOKEN cookie・Origin・ホスト名接続・
+`validate_certs: false`）の正本である。`unifi_backup_fetch_policy.md`（UNIFI-007）は
+これらをここへ委譲し、自分の差分（CSRF導出）と固有の補足だけを持つ。
+
 | 操作 | メソッド + パス | ボディ |
 |---|---|---|
 | ログイン | POST /api/auth/login | {username, password} |
@@ -213,7 +217,9 @@ Ansible tasks 側に置く（core.md の責務分離）。
 認証:
 
 - ログイン応答の `Set-Cookie` の `TOKEN`(JWT、有効2時間) を使う
-- CSRFトークンは JWTペイロードの `csrfToken` クレームから抽出する
+- CSRFトークンは JWTペイロードの `csrfToken` クレームから抽出する。**CSRF導出は
+  実装ごとに異なる** — `unifi_backup_fetch`はレスポンスヘッダーを優先しJWTはfallback
+  として使う。差分の正本は`unifi_backup_fetch_policy.md`（UNIFI-007）。
 - 状態変更系（POST/PUT/DELETE）には以下を必ず付与する:
   - `Cookie: TOKEN=<JWT>`
   - `X-CSRF-Token: <csrfToken>`
@@ -282,3 +288,4 @@ account名、credential保管path、Vault password fileの実値はPolicyへ記�
 | v1.1 | 2026-07-25 | 標準8見出しへ再編し、規範の意味を変えず認証実値を正本参照へ置換 |
 | v1.2 | 2026-07-26 | 実行ホストを特定名へ限定する記述を削除(実行権限の実体はSSH鍵`ann`保有者であり、Policyの対象外)。CCK-005を「CloudKeyへアップロードする鎖の形式」に限定し、トラストストアとの別レイヤー性をCCK-021として明示。§4.1の秘密鍵の主語を中間CAへ限定しCCK-022でルートCA秘密鍵のオフライン保管をCERT-006へ相互参照。無条件force運用の更新トリガをCCK-023として明文化。 |
 | v1.3 | 2026-08-25 | CCK-003の「実行元(開発)=ansy」「実行権限の実体はSSH鍵`ann`」を現状へ改めた。`id_ann`は2026-08-19にansyから削除済みで(`docs/ai/policies/execution_boundary_policy.md` EXEC-005)、開発側からの実行経路は無く、実行はquoryのSemaphore Task Templateのみである。§1比較表の同項目と§5の自動実行例に残っていた同じ食い違いも合わせて改めた。 |
+| v1.4 | 2026-08-25 | CCK-008「API contract」を、`unifi_backup_fetch_policy.md`（UNIFI-007）と共有する認証契約の正本と明示した。CSRF導出は実装ごとに異なることと、unifi_backup_fetch側の差分（ヘッダー優先+JWT fallback）への相互参照を1行追記した。規定文の意味は変えていない。 |

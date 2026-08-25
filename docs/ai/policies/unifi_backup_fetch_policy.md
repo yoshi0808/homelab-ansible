@@ -9,9 +9,10 @@
 ### 1. 位置づけ（cert_renew_cloudkey_policy.md との関係）
 
 本ポリシーは CloudKey へ「書き込む」cert デプロイとは独立した「取得」系である。
-認証方式（UniFi OS 非公開 API ログイン）は cloudkey_cert_deploy と共有するが、
-実行ホスト・目的・保存先が異なる。両者は障害を分離しており、片方が壊れても
-もう片方には影響しない。
+認証方式（UniFi OS 非公開 API ログイン）は cloudkey_cert_deploy と共有する
+（共有範囲・正本は`cert_renew_cloudkey_policy.md` CCK-008。CSRF導出のみ本ポリシー
+独自の差分を持つ）。実行ホスト・目的・保存先が異なる。両者は障害を分離しており、
+片方が壊れてももう片方には影響しない。
 
 | 項目 | cloudkey_cert_deploy | unifi_backup_fetch（本ポリシー） |
 |---|---|---|
@@ -161,22 +162,23 @@ always   一時ファイル掃除 → サマリ生成 → Slack 通知 → 失�
 
 <!-- UNIFI-007 -->
 <!-- UNIFI-021 -->
-### 5. 認証方式（cloudkey_cert_deploy と共有）
+### 5. 認証方式（cloudkey_cert_deploy と共有。共有範囲はCCK-008を参照）
 
-- ログイン: `POST https://cloudkey.internal/api/auth/login`
-  - ボディ: `{"username": "{{ cloudkey_api_user }}", "password": "{{ cloudkey_api_password }}"}`
-  - 認証情報は `inventories/vars/cloudkey.yml`（Ansible Vault 暗号化済み）から取得する。
+ログインパス・ボディ形状・TOKEN cookie・状態変更系に付与する認証ヘッダー（Cookie /
+X-CSRF-Token / Origin）・`validate_certs: false`は、`cert_renew_cloudkey_policy.md`
+（CCK-008「API contract」）を正本とする。以下は本ポリシー固有の補足と、CSRF導出の差分。
+
+- バックアップ生成を伴う `GET /api/backup/download`（UNIFI-002）にも、状態変更系と
+  同じ認証ヘッダー一式（CCK-008）を付与する。メソッドがGETであることを理由に省略しない。
+
+- 認証情報は `inventories/vars/cloudkey.yml`（Ansible Vault 暗号化済み）から取得する。
   - アカウントは UniFi OS の**ローカルアカウント**（2FA 無効・API 利用可）。
     クラウド SSO / 2FA 有効アカウントは `/api/auth/login` で弾かれる。
-- TOKEN: レスポンスの `Set-Cookie` の `TOKEN`（JWT）を Cookie として保持する。
-- CSRF（優先順位）: レスポンスヘッダー **`X-CSRF-Token` を最優先**、無ければ
-  `X-Updated-CSRF-Token`。**両ヘッダーとも空のときに限り**、JWT ペイロードの
+- CSRF（優先順位。CCK-008との差分）: レスポンスヘッダー **`X-CSRF-Token` を最優先**、
+  無ければ `X-Updated-CSRF-Token`。**両ヘッダーとも空のときに限り**、JWT ペイロードの
   `csrfToken` をデコードして fallback とする（ヘッダーが有効なら JWT は一切触らない）。
   - 実機（CloudKey Gen2 Plus）ではログイン応答に両ヘッダーが返り、
     供給源は `X-CSRF-Token` になる。JWT fallback は CloudKey 側仕様変更時の保険。
-- 認証ヘッダー: 状態に関わる要求には `Cookie: TOKEN=<JWT>` / `X-CSRF-Token: <csrf>` /
-  `Origin: https://cloudkey.internal` を付与する。
-- `validate_certs: false`（私設 CA のため）。
 - 秘密情報（認証情報・TOKEN・CSRF・認証ヘッダー）を扱うタスクには `no_log: true` を付ける。
 
 
@@ -241,6 +243,7 @@ always   一時ファイル掃除 → サマリ生成 → Slack 通知 → 失�
 | v1.2 | 2026-07-25 | pve1夏季平日シャットダウン運用対応(ADR-001)。実行ホストをpve1固定からpve1優先・pve2フェイルオーバーへ変更したことを反映。 |
 | v1.3 | 2026-08-02 | 本文に埋め込まれていた実測日付を除去し、規則本文とUNIFI番号だけを残す整理を行った(`docs/ai/reviews/norm_docs_rationale_removal_round3/`)。CSRFヘッダー優先順位の実機確認事実(実測日を除いても事実自体は不変)から日付だけを除去した。許可・禁止・停止条件、UNIFI番号はいずれも変更していない。UNIFI番号の新設・退番はない |
 | v1.4 | 2026-08-25 | UNIFI-019の`--check`意味論をTS-030後の停止assert方式へ改めた(旧文はTS-030導入前のまま残っていた)。UNIFI-014から`ubuntu_vm_patch_policy.md`「深夜リブートスケジュール」への参照(参照先はOperations Contextへ委譲済みで実体を持たない)と、実行時刻・曜日の実値を落とし、`roles/systemd_timers/defaults/main.yml`・`semaphore_schedules_catalog`へのポインタへ改めた。UNIFI-010の世代数実値(8)、UNIFI-012の鮮度ガード実値(60秒・pve2側500ms)、既定パラメータ表(§11)の既定値列を落とし、`roles/unifi_backup_fetch/defaults/main.yml`（pve2側は`docs/ai/policies/time_sync_check_policy.md` TIME-005）へのポインタへ改めた。 |
+| v1.5 | 2026-08-25 | UNIFI-001とUNIFI-007の「cloudkey_cert_deployと共有」という文言を、共有範囲・正本が`cert_renew_cloudkey_policy.md`（CCK-008）であることを明示する形へ改めた。UNIFI-007のログインパス・TOKEN cookie・認証ヘッダー・`validate_certs: false`の重複規定文をCCK-008へのポインタへ置換し、CSRF導出（ヘッダー優先+JWT fallback）を自分の差分として明示した。規定文の意味は変えていない。 |
 
 
 <!-- UNIFI-017 -->
