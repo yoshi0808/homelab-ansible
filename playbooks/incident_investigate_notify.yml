@@ -8,15 +8,15 @@
 # 「副作用がSlack通知のみで、roles/common_slack/tasks/notify.ymlの抑止guard
 # (skip_notifications/ansible_check_mode/AIエージェントセッション検出の3条件)で止まる」ことを要件に
 # するが、本playbookはそのnotify.ymlを一切includeしていない(N2充足のため
-# `community.general.slack`を直接呼ぶ、§3.1参照)。`role-guarded`は
+# 送信を直接呼ぶ、§3.1参照)。`role-guarded`は
 # TS-022により`--check`なしの通常実行が許される分類のため、抑止guardが
 # 存在しないまま`role-guarded`を名乗ると、Testerが検証のため実行するたびに
 # 無条件で実送信される — TS-026が警告する「marker drift」そのものだった。
 # `check-mode-native`へ再分類し、下の送信taskへ`when: not ansible_check_mode`
-# + `tags: [destructive]`を明示した(`community.general.slack`は
-# `check_mode: support full`でモジュール自身も`--check`下で実送信しない実装
-# だが、この明示ゲートにより将来モジュールの実装が変わってもこのリポジトリの
-# 慣行どおり安全側で止まる — TS-014と同じ形)。
+# + `tags: [destructive]`を明示した(2026-08-25、送信モジュールを
+# `ansible.builtin.uri`へ移行 — このモジュールは`check_mode: support: none`
+# であり`--check`下では自動skipされるが、それに依存せずこの明示ゲートで
+# 安全側に止める — TS-014と同じ形)。
 #
 # incident-investigate.py(quory、roles/incident_investigate/files/
 # incident-investigate.py の send_investigation_notification())が、一次調査
@@ -27,10 +27,9 @@
 # 持たない。roles/common_slack/tasks/notify.yml は常にcolor/iconを付ける
 # ため意図的に再利用しない(このplaybookはroles/common_slackを変更しない
 # scope — N2を満たすには送信そのものを別経路にする必要があった)。
-# community.general.slack を `msg:` のみ・`color:` 省略(既定 'normal') で
-# 直接呼ぶと、attachmentsではなくプレーンな `text` ペイロードになる
-# (community.general.slackモジュール実装: color=='normal'かつtext!=Noneの
-# 分岐)。
+# 送信taskはSlack incoming webhookへ `{"text": "..."}` のみを送る
+# (`attachments` キーを含めない) — Slack側はattachmentsが無ければ
+# プレーンテキストとして表示する。
 #
 # N7: 呼び出し元(incident-investigate.py)がsync起動→この通知、の順で
 # 呼ぶ。ここではその順序を検査しない(呼び出し元の責務)。
@@ -84,11 +83,6 @@
         file: "{{ inventory_dir }}/../vars/slack.yml"
       no_log: true
 
-    - name: "Extract token from #alerts webhook URL"
-      ansible.builtin.set_fact:
-        _iv_slack_token: "{{ slack_webhook_alerts | replace('https://hooks.slack.com/services/', '') }}"
-      no_log: true
-
     - name: "Build notification body (N1 fields: job number, template, playbook, verdict, confidence, known_condition, report path)"
       ansible.builtin.set_fact:
         _iv_body: |-
@@ -127,10 +121,19 @@
     - name: "Send the notification, surfacing any failure with the webhook URL redacted"
       block:
         # 唯一の破壊的task(TS-014と同じ形でゲート — 上のヘッダコメント参照)。
+        # ansible.builtin.uriは宛先を`url:`の値そのままへ送る
+        # (community.general.slackと違いドメインをモジュール内で決め打ちしない
+        # — 2026-08-25、docs/ai/reviews/slack_notify_uri_migration/
+        # 2026-08-25_001_requirement.md §1)。`slack_webhook_alerts`は
+        # トークン抽出をせずフルURLのまま渡す。
         - name: "Send plain-text Slack notification to #alerts (N2 — no status/severity/color)"
-          community.general.slack:
-            token: "{{ _iv_slack_token }}"
-            msg: "{{ _iv_body }}"
+          ansible.builtin.uri:
+            url: "{{ slack_webhook_alerts }}"
+            method: POST
+            body_format: json
+            body:
+              text: "{{ _iv_body }}"
+            status_code: 200
           no_log: true
           when: not ansible_check_mode
           tags: [destructive]
@@ -138,15 +141,20 @@
 
       rescue:
         # register した結果の中身は no_log でも失われない(no_log が抑えるのは
-        # 表示だけ)。**この task には no_log を付けない** — 付けたら元の木阿弥。
+        # 表示だけ、実測で確認済み — ansible/plugins/strategy/__init__.py の
+        # register処理は censor_result を経由しない task_result._return_data を
+        # 直接使う)。**この task には no_log を付けない** — 付けたら元の木阿弥。
         #
-        # `regex_replace` は多層防御である。webhook形式トークンを使う本playbookの
-        # 経路では、モジュール自身が失敗msg内のURLを `[obscured]` へ伏せてから
-        # `fail_json` する(community.general 12.1.0 の slack.py:449-452。伏せない
-        # のは `use_webapi` が真、つまり xoxb 形式トークンを使う場合だけで、ここは
-        # 該当しない)。それでも落とすのは、①この伏字化がモジュールの版に依存する
-        # ②quory 側の collection の版を確認していない ③`info['msg']` は素通しの
-        # テキストであり中身を我々が決めていない、の3点による。
+        # `regex_replace` は多層防御である。ansible.builtin.uri は
+        # community.general.slack と違い失敗msg内のURLを自ら伏せない
+        # (P0-4)。それでも通常の接続失敗パス(urllib.error.URLError /
+        # OSError)ではmoduleのmsgフィールド自体にURL全体は現れない
+        # (module_utils/urls.pyのmsg組み立てを実装時に確認済み)。ただし
+        # `info['url']`フィールド(uresp['url']として登録変数へ残る)には
+        # 常にフルURLが入る — **このtaskがそれを参照しない**ことで漏らさない
+        # 設計にしている。regex_replaceは、①別の失敗経路でmsgへURLが混入する
+        # 実装変更が将来入る可能性 ②quory側のansible-core版を確認していない
+        # の2点に備える層であり、`_iv_send.msg`にしか掛からない。
         - name: "Re-raise the send failure with the webhook URL redacted"
           ansible.builtin.fail:
             msg: >-

@@ -109,22 +109,27 @@
       become: false
       no_log: true
 
-    - name: Extract token from webhook URL
-      ansible.builtin.set_fact:
-        _slack_token: "{{ _slack_webhook | replace('https://hooks.slack.com/services/', '') }}"
-      delegate_to: localhost
-      become: false
-      no_log: true
-
     - name: Send Slack notification
-      community.general.slack:
-        token: "{{ _slack_token }}"
-        attachments:
-          - title: "{{ _slack_icon }} {{ slack_title }}"
-            text: "{{ slack_message }}"
-            color: "{{ _slack_color }}"
-            fallback: "{{ slack_title }}"
-            footer: "{{ 'capture: ' ~ _capture_written_id if _capture_written_id is defined else '' }}"
+      # community.general.slack hardcodes the destination to slack.com /
+      # slack-gov.com regardless of the token/domain given to it, so a decoy
+      # webhook URL never actually redirects the send (4 Incidents,
+      # docs/ai/reviews/slack_notify_uri_migration/2026-08-25_001_requirement.md
+      # §1). ansible.builtin.uri sends to exactly the URL given in `url:`,
+      # so pointing _slack_webhook at a closed loopback port keeps the send
+      # local. `_slack_webhook` carries the full URL including the secret
+      # token — do not split it into token/domain again.
+      ansible.builtin.uri:
+        url: "{{ _slack_webhook }}"
+        method: POST
+        body_format: json
+        body:
+          attachments:
+            - title: "{{ _slack_icon }} {{ slack_title }}"
+              text: "{{ slack_message }}"
+              color: "{{ _slack_color }}"
+              fallback: "{{ slack_title }}"
+              footer: "{{ 'capture: ' ~ _capture_written_id if _capture_written_id is defined else '' }}"
+        status_code: 200
       delegate_to: localhost
       become: false
       no_log: true

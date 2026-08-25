@@ -142,13 +142,16 @@ NOTIFY_OUTPUT_CAPTURE_CHARS = 2000
 # stdout へ出す(censored になるのは `fatal:` の構造化出力だけ)。捕捉した出力は
 # ジャーナルにも成果物にも入るため、素通しにはしない。
 #
-# **現状この経路から実URLが出ることは確認できていない** — webhook形式トークンを
-# 使う本playbookの経路では、community.general.slack 自身が失敗msg内のURLを
-# `[obscured]` へ伏せてから `fail_json` する(12.1.0 の slack.py:449-452)。
-# それでもここで落とすのは多層防御であり、①その伏字化がモジュールの版に依存する
-# ②quory側の collection の版を確認していない ③`info['msg']` は素通しのテキストで
-# 中身を我々が決めていない、の3点による(2026-08-07 独立レビュー S5 で当初の
-# 「モジュールがURLを含むメッセージを出す」という記述を訂正した)。
+# **現状この経路から実URLが出ることは確認できていない** — 2026-08-25に
+# 送信を`community.general.slack`から`ansible.builtin.uri`へ移行してからは、
+# 接続失敗(URLError/OSError)や非200応答の通常の失敗msgにURL全体が
+# 含まれないことをmodule_utils/urls.pyの実装読解で確認済み、かつ
+# playbooks/incident_investigate_notify.ymlのrescueもURLを保持する
+# `_iv_send.url`フィールドを参照しない設計にしている。それでもここで
+# 落とすのは多層防御であり、①uriモジュールの一部の失敗経路
+# (`http.client.HTTPException`)はmsgへURLを含む実装になっている
+# ②quory側のansible-core版を確認していない ③`info['msg']`は素通しの
+# テキストで中身を我々が決めていない、の3点による。
 # 切り詰めより先に適用すること — 後に適用すると URL の断片が末尾に残りうる。
 WEBHOOK_URL_RE = re.compile(r"https://hooks\.slack\.com/services/\S+")
 WEBHOOK_URL_PLACEHOLDER = "<redacted-webhook-url>"
@@ -958,9 +961,9 @@ def build_notify_payload(cfg, task_id, artifact, codex_error, wait_error):
 
 def send_investigation_notification(cfg, task_id, artifact, codex_error, wait_error):
     """N1〜N3・N7・N11: 一次調査1件の完了をSlack `#alerts` へプレーンテキストで
-    通知する(playbooks/incident_investigate_notify.yml、community.general.slack
-    を`msg:`のみ・color省略で直接呼ぶ — N2「ステータス・重要度・色分けを
-    持たない」)。recovery-probe.pyのrun_playbook/queue_notifyと同じ
+    通知する(playbooks/incident_investigate_notify.yml、`ansible.builtin.uri`で
+    `{"text": ...}` のみを送る — `attachments` を含めずN2「ステータス・重要度・
+    色分けを持たない」を満たす)。recovery-probe.pyのrun_playbook/queue_notifyと同じ
     「payloadを一時ファイルへ書き、`-e @<file>`でansible-playbookを起動する」
     流儀(空白を含む日本語文字列を `-e key=value` の連結で渡さない —
     skills/ansible-implementation-style/SKILL.md)。
@@ -987,11 +990,14 @@ def send_investigation_notification(cfg, task_id, artifact, codex_error, wait_er
             # 何が落ちたのか分からなかった。
             #
             # stdout を載せてよいことは実測で確かめてある: 通知playbookの送信task
-            # は `no_log: true` で、かつ `community.general.slack` の argspec 自身が
-            # `token` を no_log にしているため、失敗時の stdout に webhook URL も
-            # トークンも現れない(2026-08-07 の独立レビューが本番playbookを無変更で
-            # decoy実行して確認)。**この前提は notify.yml 側の no_log に依存する** —
-            # あちらから no_log を外すなら、ここも同時に見直すこと。
+            # は `no_log: true` であり、失敗時に外へ再送出する
+            # `ansible.builtin.fail` の msg も webhook URL を含む
+            # フィールド(`_iv_send.url`)を参照しない設計にしているため、
+            # 失敗時の stdout に webhook URL は現れない(2026-08-25、
+            # `community.general.slack` から `ansible.builtin.uri` への移行時に
+            # 確認)。**この前提は notify.yml 側の no_log と、rescueがURLを
+            # 参照しない設計に依存する** — あちらを変えるなら、ここも同時に
+            # 見直すこと。
             # redact してから切り詰める(順序が逆だと URL の断片が残りうる)。
             tail = redact_webhook_urls(result.stdout).strip()[-NOTIFY_OUTPUT_CAPTURE_CHARS:]
             err = redact_webhook_urls(result.stderr).strip()
@@ -1025,12 +1031,14 @@ def record_notification_result(cfg, task_id, artifact, sent, error):
     R4: `error` は `send_investigation_notification()` が投げた例外の
     `str()` であり、outbound(ansible-playbook)のstderrやPython例外の
     メッセージに由来する。実測(本requirement着手時の decoy 検証、
-    実装記録に記録)では、community.general.slack の `token` は
-    モジュール引数仕様自体が `no_log=True` を持ち、かつ本playbookの送信task
-    自身も `no_log: true` であるため、失敗時のAnsible出力(stdout)は
-    "the output has been hidden..." に完全に censored される。ansible-
-    playbookプロセスのOS stderrは通常のtask失敗では空になる(fatal表示は
-    stdoutの callback 経由のため)。それでもこの文字列に内部IPアドレスの
+    実装記録に記録)では、送信task自身が `no_log: true` であるため
+    そのtaskの失敗はAnsible出力(stdout)上で "the output has been
+    hidden..." に censored される。送信taskの失敗はrescueが捕捉して
+    再送出するが、再送出する `ansible.builtin.fail` の msg は
+    webhook URLを保持するフィールドを参照しないため、そこにも
+    URLは現れない(2026-08-25、`ansible.builtin.uri` への移行時に
+    確認)。ansible-playbookプロセスのOS stderrは通常のtask失敗では
+    空になる(fatal表示はstdoutの callback 経由のため)。それでもこの文字列に内部IPアドレスの
     実値が紛れ得る経路(接続エラーメッセージ等)を完全には否定できないため、
     LLM由来テキストと同じ IPv4 除去(redact_ipv4、IC-040)をここにも適用する
     — 二次防御であり、この関数自体が新たに秘密情報の経路を作らないことの
