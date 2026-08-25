@@ -42,7 +42,7 @@
 - **AC1 / AC4 / AC5 / AC7 と `link_names` の構造は Tester が独立に実測して PASS。** AC7(無応答endpointでも `rescue` が親timeoutより前に完走する)は両経路とも約11秒で、親の30秒に達しない
 - **AC2 は本番の定期通知で PASS した**(2026-08-25、`#info` の `worktree_sync` 通知4本)。左端のカラーバーが出ていることが `attachments` の `color` が効いている証拠である
 - **残るのは AC3 だけ** — `incident_investigate_notify.yml` が `#alerts` へ**attachmentsでないプレーンテキスト**で届くこと。**意図的に起こせない** — Semaphoreジョブが失敗して一次調査が完了したときにしか動かない。次にそれが起きたときが唯一の確認機会である
-- **AC6(配備)が要る** — `incident-investigate.py` を変更したため `playbooks/incident_investigate_setup.yml`(quory)の実行が必要。**配備前は日次のドリフト検査が鳴る**
+- **AC6(配備)は完了した**(2026-08-25、ジョブ #838)。`deployed-hash incident-investigate` が repo と一致することを確認済み
 - **回帰テストは置いていない。** 独立レビューが「4回再発した安全境界の修正が一回限りのscratchpad検証にしか残っていない」として `scripts/tests/` への新設を提案したが、Coordinatorが保留した。**`community.general.slack` へ戻す差分や `link_names` / `timeout` の脱落を機械的に止める仕組みは無い**
 
 **壊れている: 一次調査の先読みファイルが書けていない(AC10は不合格、2026-08-25判明)** — `homelab-semaphore-query` のAPI移行は**quoryへ配備完了**(commit `0196087`、Semaphoreジョブ #758〜#762)だが、**同じ配備が入れた先読み機構は導入以来1度も動いていない。**
