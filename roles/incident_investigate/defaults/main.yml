@@ -36,6 +36,17 @@ incident_investigate_inspect_user: incident-inspect
 incident_investigate_inspect_wrapper: /usr/local/bin/codex-investigate-wrapper
 incident_investigate_inspect_workspace: /var/lib/incident-inspect/workspace
 
+# 上記 incident_inspect_workspace と、下の incident_investigate_semaphore_context_dir
+# の共通の親。incident-inspect所有・0750で作られる(このroleでもU1でもmode:を
+# 明示していない——incident_inspect roleがworkspaceを作った際の再帰的な
+# ディレクトリ作成の副作用としてこの所有者/modeになる。2026-08-25実機観測:
+# docs/ai/reviews/investigate_acl_observation/2026-08-25_004_test_result.md AC1)。
+# yoshi(incident_investigate_run_user)は owner でも group でもないため、ACLが
+# 無いとここを通れない——実際 2026-08-19 の導入以来、先読み書き込みが
+# `[Errno 13] Permission denied` で失敗し続けていた(原因の確定:
+# docs/ai/reviews/incident_prefetch_traverse/2026-08-25_001_requirement.md)。
+incident_investigate_inspect_root: /var/lib/incident-inspect
+
 # Semaphore先読み専用のcontext directory(R14。requirement:
 # docs/ai/reviews/semaphore_query_api/2026-08-19_001_requirement.md)。
 # **incident-inspectのworkspaceとは意図的に別のdirectoryである**

@@ -136,6 +136,32 @@
   tags: [destructive]
 
 # ---------------------------------------------------------------------------
+# 先読み書き込みが2026-08-19の導入以来失敗し続けていた原因への対処
+# (docs/ai/reviews/incident_prefetch_traverse/2026-08-25_001_requirement.md
+# P0-1)。incident_investigate_inspect_root (/var/lib/incident-inspect) は
+# incident-inspect所有・0750であり、yoshi(incident_investigate_run_user)は
+# owner でも group でもなく other に落ちる。葉の semaphore-context 自体は
+# yoshi 所有・0750で正しく作られていても、親を通れなければ辿り着けない。
+#
+# 上の「incident-inspect が葉を通る」grant の鏡像 — 書き手(yoshi)が親を
+# 通るための経路。**x のみ、r は与えない**: yoshi は渡された正確なパスへ
+# 書くだけで、親ディレクトリの列挙(ls相当)は必要としない。r を足すと
+# workspace を含む親の中身が見えるようになり、least privilegeを外れる
+# (このrole/roles/incident_inspectのどちらもこのgrantでworkspace自体の
+# mode/ACLには触れない — workspaceが閉じたままかはincident_inspect側の
+# 0750定義がそのまま効く)。
+- name: Grant yoshi ACL traverse on the incident-inspect root directory (mirrors the grant above; x only, no r — least privilege)
+  ansible.posix.acl:
+    path: "{{ incident_investigate_inspect_root }}"
+    entity: "{{ incident_investigate_run_user }}"
+    etype: user
+    permissions: x
+    state: present
+  become: true
+  when: not ansible_check_mode
+  tags: [destructive]
+
+# ---------------------------------------------------------------------------
 # スクリプト・設定・systemd unit
 # ---------------------------------------------------------------------------
 - name: Deploy incident-investigate.py
