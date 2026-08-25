@@ -37,6 +37,14 @@
 - **良くなる確証は双方とも持っていない**(Yoshinobu、2026-08-18)。やってみる価値はあるという判断で始めた
 - **やめる条件は現段階では定めない**(Yoshinobu、2026-08-18)。Coordinatorが「効かなかったことを観測可能にするため先に決めるべき」と進言し、**現段階では不要と判断された**。再提案しない
 
+**観測待ち: Slack送信のuri移行が、一次調査の通知経路でも成立すること(AC3、2026-08-25 実装)** — `community.general.slack` は宛先を `slack.com` にハードコードし `domain` 引数も無視するため、**URLを差し替えるdecoyが原理的に成立しなかった**(この類のIncidentが5件)。送信2箇所を `ansible.builtin.uri` へ移し、宛先の決定をURLの側へ戻した。案件記録は `docs/ai/reviews/slack_notify_uri_migration/`
+
+- **AC1 / AC4 / AC5 / AC7 と `link_names` の構造は Tester が独立に実測して PASS。** AC7(無応答endpointでも `rescue` が親timeoutより前に完走する)は両経路とも約11秒で、親の30秒に達しない
+- **AC2 は本番の定期通知で PASS した**(2026-08-25、`#info` の `worktree_sync` 通知4本)。左端のカラーバーが出ていることが `attachments` の `color` が効いている証拠である
+- **残るのは AC3 だけ** — `incident_investigate_notify.yml` が `#alerts` へ**attachmentsでないプレーンテキスト**で届くこと。**意図的に起こせない** — Semaphoreジョブが失敗して一次調査が完了したときにしか動かない。次にそれが起きたときが唯一の確認機会である
+- **AC6(配備)が要る** — `incident-investigate.py` を変更したため `playbooks/incident_investigate_setup.yml`(quory)の実行が必要。**配備前は日次のドリフト検査が鳴る**
+- **回帰テストは置いていない。** 独立レビューが「4回再発した安全境界の修正が一回限りのscratchpad検証にしか残っていない」として `scripts/tests/` への新設を提案したが、Coordinatorが保留した。**`community.general.slack` へ戻す差分や `link_names` / `timeout` の脱落を機械的に止める仕組みは無い**
+
 **壊れている: 一次調査の先読みファイルが書けていない(AC10は不合格、2026-08-25判明)** — `homelab-semaphore-query` のAPI移行は**quoryへ配備完了**(commit `0196087`、Semaphoreジョブ #758〜#762)だが、**同じ配備が入れた先読み機構は導入以来1度も動いていない。**
 
 - **壊れていたことと直ったことの両方が実測で残っている** — `homelab-incident-capture.service` が5分ごとに `status=2` で失敗し続け、配備を境に緑になった。版上げ(8/18 20:29)から約14時間、本番の証拠収集が動いていなかった
