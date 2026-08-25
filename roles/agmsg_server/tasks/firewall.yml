@@ -5,7 +5,7 @@
 # 直接公開しない(loopbackのみ)」+「nginxが公開する側のポートだけをufwで
 # 絞る」の二層で行う。
 #
-# quoryのアドレスをrepoへ literal で書かない(docs/ai/core.md「内部IPアドレス
+# quoryのアドレスをrepoへ literal で書かない(docs/ai/core.md「IPアドレス
 # を...記載しない」)。inventoryのDNS名(quory.internal)を実行時に解決させる。
 #
 # **ufw自身はホスト名を解決しない**(2026-08-16実測、ansy:

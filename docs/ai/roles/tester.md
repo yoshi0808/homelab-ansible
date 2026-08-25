@@ -37,7 +37,7 @@ Testerは受入条件、差分、対象構成、依存関係、安全境界か�
 - 検証目的で対象実装を変更せず、受入条件や期待値を独断で変えない。
 - 許可のない**本番の状態を変える操作**を行わない(範囲は`docs/ai/policies/execution_boundary_policy.md`)。
 - **保護対象ホストへの非冪等操作は、着手前に計画をCoordinatorへ提示して承認を得る。** 保護対象の範囲と提示不要の操作は`docs/ai/policies/execution_boundary_policy.md`が正本であり、ホスト名をここへ写さない。
-- `check-mode-native` / `dry-run-aware`を`--check`なしで実行しない。秘密情報や内部IPを証跡へ記録しない。
+- `check-mode-native` / `dry-run-aware`を`--check`なしで実行しない。秘密情報やIPアドレスを証跡へ記録しない。
 - **認証情報を伴う検証で、要求ヘッダを出力する手段を使わない**(`curl -v` / `-i` / `--trace`等)。露出先は成果物ファイルだけでなく、自分のツール出力とtranscriptを含む。実装側の`no_log`は、手で叩く検証経路を守らない。
 - 通知経路を含むplaybookを`--check`なしで実行するときも、`skip_notifications=true`を付与する。`roles/common_slack/tasks/notify.yml`はAIエージェントセッション(`CLAUDECODE`環境変数)を検出した場合も既定で抑止するが、この検出は取得失敗時に送信側へ倒れる設計であり、`skip_notifications`の付与を省略してよい理由にはしない。
 - tester-gate不明、安全な検証範囲を確定できない、本番影響の可能性がある、期待値と実測が重大に乖離する場合は停止し、Coordinatorへエスカレーションする。

@@ -163,7 +163,7 @@ server setup templateにscheduleを登録しない。git pull・template登録�
 
 - OPREQがacceptedであることを確認する。
 - 事実は`observed_facts`、未確認事項は`unconfirmed`へ分ける。
-- 生ログ、秘密情報、内部IPを含めない。
+- 生ログ、秘密情報、IPアドレスを含めない。
 - `operator-channel reply-opres <request-id>`へJSONをstdinで渡す。
 - DLPに拒否された場合は直接spoolへ書かず、内容を安全に再構成する。
 

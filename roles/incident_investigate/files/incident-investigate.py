@@ -652,7 +652,7 @@ Slack経由のCodexが到達しうるidentityであり、人のレビューを�
 - 生ログの内容を出力へ転記しないこと。引用は最小限にとどめる。
 - 修正差分やリポジトリ内の被疑パスの特定は書かないこと。それは開発側の
   仕事であり、この出力は一次情報であって原因の確定ではない。
-- 内部IPアドレス・認証情報の実値は書かないこと。
+- IPアドレス・認証情報の実値は書かないこと。
 
 ## 調査対象
 Semaphoreジョブ番号: {task_id}
@@ -1038,7 +1038,7 @@ def record_notification_result(cfg, task_id, artifact, sent, error):
     webhook URLを保持するフィールドを参照しないため、そこにも
     URLは現れない(2026-08-25、`ansible.builtin.uri` への移行時に
     確認)。ansible-playbookプロセスのOS stderrは通常のtask失敗では
-    空になる(fatal表示はstdoutの callback 経由のため)。それでもこの文字列に内部IPアドレスの
+    空になる(fatal表示はstdoutの callback 経由のため)。それでもこの文字列にIPアドレスの
     実値が紛れ得る経路(接続エラーメッセージ等)を完全には否定できないため、
     LLM由来テキストと同じ IPv4 除去(redact_ipv4、IC-040)をここにも適用する
     — 二次防御であり、この関数自体が新たに秘密情報の経路を作らないことの
