@@ -15,7 +15,7 @@ RICE / MoSCoW / ICE のいずれかを案件の性質に応じて使う。
 
 ## Now / Next / Later
 
-3分類で構想中の作業を整理する。core.mdの「on the horizon」的な位置づけと相性が良い。
+3分類で構想中の作業を整理する。
 
 ## Decision Memo(意思決定記録)
 

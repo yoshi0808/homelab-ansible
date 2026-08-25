@@ -26,7 +26,7 @@ SemaphoreはAnsible playbookをGUIから手動またはschedule実行し、job�
 
 ## ansy の Semaphore(検証用インスタンス、2026-08-04)
 
-**ansy にも Semaphore が動いており、quory とは別インスタンスである。** 素性は**quory のバックアップからの復元**で、quory が VM でないため Semaphore のバックアップが必要になり、その復元手順を ansy で検証した経緯による(Yoshinobu 談、2026-08-04)。そのため project 名・inventory 名・repository 名は quory と同じだが、**id は異なる**(2026-08-18時点で ansy=3 / quory=1。ansy は 2026-08-04 の実測では 2 で、**その後変わっている**)。**id を固定値として扱わない。この行の値も、読んだ時点で古い可能性がある。**
+**ansy にも Semaphore が動いており、quory とは別インスタンスである。** 素性は**quory のバックアップからの復元**で、quory が VM でないため Semaphore のバックアップが必要になり、その復元手順を ansy で検証した経緯による(Yoshinobu 談、2026-08-04)。そのため project 名・inventory 名・repository 名は quory と同じだが、**id は両インスタンスで異なり、変わったことがある**。**id を固定値として扱わず、都度実測する**(`semaphore-query template-list` 等)。過去の実測値をこの行へ書き足さない。
 
 - 接続は `https://ansy.internal:3000`。**HTTPS である**(httpで叩くと400が返る)。証明書は `homelab_cert_renew` が配っている。
 - **2026-08-04 に SSH 鍵を2本(サーバ群向け / github)削除した。** 残るのは `type=none` の1本のみで、inventory と repository はそれを指す。**したがってこのインスタンスは、どのホストへも到達できず、リポジトリを clone することもできない。**
@@ -46,7 +46,7 @@ SemaphoreはAnsible playbookをGUIから手動またはschedule実行し、job�
 - **`task-hosts` / `task-errors` はAPIに構造化エンドポイントが無い**(`GET /project/{id}/tasks/{task_id}/hosts` と `.../errors` はいずれも404、2.19で追加された `/stages` もstage単位でホスト内訳を持たない)。ジョブ出力テキスト(`task-output` と同じ取得元)からの導出になっている — `task-hosts` は `PLAY RECAP` 行以降、`task-errors` は `fatal:` で始まる行。出力にはANSI SGRエスケープが埋め込まれるため、導出前に除去する。`PLAY RECAP` が見つからない場合は0件の正常終了ではなく非ゼロ終了とする(完了したjobの出力には必ずPLAY RECAPがあるはずなので、無い場合は取得・整形側の異常とみなす)。
 - **`template-list <n>`は、テンプレート1件ごとに自己記述的なJSON1行を返す**(2026-08-19、旧: `project__template` の CREATE TABLE文+行dumpの2文形式から変更。APIの応答が既にフィールド名付きJSONであるため、列名を推測しない目的はより直接に満たせる)。
 - **2.19.8 で `semaphore.db` の直読みが壊れたことが、この移行の理由である**(2026-08-19、quory / ansy とも実測)。2.19.8 は SQLite を **WAL モード**で開き(上げる前は `journal_mode=delete`)、`semaphore.db-shm` / `semaphore.db-wal` が現れる。**この2ファイルに ACL は付かず、WAL では読み手も `-shm` を読み書きできる必要がある**ため、`semaphore.db` に `r--` を持つだけの `recovery-exec` / `incident-inspect` / `dev-investigate` は `unable to open database file (14)` になっていた。**ファイル個別に ACL を足しても直らない** — 停止中に `journal_mode=delete` へ戻しても、起動時に必ず WAL へ戻され `-shm` / `-wal` が ACL なしで作り直される。**そもそも SQLite の直読みは Semaphore がサポートする接し方ではない**(公開された口は API であり、ストレージの内部形式は上流が自由に変えてよい)。当時の実測は `docs/ai/reviews/semaphore_upgrade/2026-08-18_003_result.md`。
-- ansy / quory ともSemaphoreのバージョンとサービス実行ユーザーは一致している(**2026-08-18に両方を 2.19.8 へ上げた**。案件: `docs/ai/reviews/semaphore_upgrade/`)。スキーマ調査は開発側(ansy)で先に行い、本番の読み取りを最小化する。**両者の版が揃っていることがこの前提を支えているので、片方だけ上げた状態を作ったら、その間は ansy のスキーマを quory のものとして読まない。**
+- ansy / quory ともSemaphoreのバージョンとサービス実行ユーザーは一致させる(現在値は`semaphore version`で都度確認する。版を揃えた案件の記録: `docs/ai/reviews/semaphore_upgrade/`)。スキーマ調査は開発側(ansy)で先に行い、本番の読み取りを最小化する。**両者の版が揃っていることがこの前提を支えているので、片方だけ上げた状態を作ったら、その間は ansy のスキーマを quory のものとして読まない。**
 
 ## UIは新しいテンプレートを即座に表示しない(2026-08-05 Yoshinobu実測)
 

@@ -37,7 +37,7 @@ Molecule採用可否、Codex/Claude Code固定化の判断など、技術選択�
 
 ## 適用先
 
-新設予定の`docs/ai/adr/`。
+`docs/ai/adr/`。
 
 **`skills/goal-tracking/SKILL.md`(Decision Memo)とは統合しない**: ADRはスコープ確定後の実装方式選択(How)を扱う。優先順位づけ(What/When)はCoordinatorのDecision Memoが扱う。
 

@@ -56,14 +56,13 @@ CloudKey へは必ずホスト名で接続する（私設 CA + `Origin` ヘッ�
 <!-- UNIFI-014 -->
 ### 9. 自動実行
 
-`ubuntu_vm_patch_policy.md` の深夜リブートスケジュールと衝突しない時間帯に、quory の
-systemd timer で**週次**実行する（Semaphore UI 導入後は Schedule へ移行）。
+他の定常jobと衝突しない時間帯に、quory の
+systemd timer で**週次**実行する（Semaphore UI 導入後は Schedule へ移行）。実行時刻・曜日の
+実値は `roles/systemd_timers/defaults/main.yml`、または Semaphore Schedule設定
+（`roles/semaphore_templates/defaults/main.yml` の `semaphore_schedules_catalog`）を正本とする。
 
 - Ansible playbook 内で git pull はしない（core.md）。
 - 未確認コードを timer で自動実行しない（`docs/ai/core.md`「開発と本番の境界」）。確定済みコードのみ。
-
-参考: 深夜帯は 01:00 UniFi Console / 02:00 UniFi Device / 03:00 quory / 03:30 authy・monnie が
-稼働するため、本取得はそれらと重ならない週次枠に置く。
 
 ## 3. 対応するPlaybook
 
@@ -78,7 +77,7 @@ systemd timer で**週次**実行する（Semaphore UI 導入後は Schedule へ
 実装ファイルの詳細（role / defaults / Vault変数）は §11「構成ファイル」を参照。
 
 <!-- UNIFI-019 -->
-tester gateはrisk-acceptedであり、check有無にかかわらず変更を生じ得る。本表は実行許可を追加しない。
+tester gateはrisk-acceptedであり、`--check`は停止assertにより変更を一切行わず停止する（`docs/ai/policies/ansible_test_safety_policy.md` TS-030）。本表は実行許可を追加しない。
 
 <!-- UNIFI-020 -->
 入口1本、unifi_backup_fetch role 1本、共通Slack通知の対応を維持する。
@@ -104,7 +103,7 @@ tester gateはrisk-acceptedであり、check有無にかかわらず変更を生
   同名が既にあっても**毎回上書き**する（取得済みを捨てて成功扱いにしない）。
 
 <!-- UNIFI-010 -->
-- 世代数: 既定 **8 世代**。ファイル名のタイムスタンプ昇順（= 文字列昇順、ms は固定桁）で
+- 世代数: `unifi_backup_keep_generations`（既定値は `roles/unifi_backup_fetch/defaults/main.yml` が正本）。ファイル名のタイムスタンプ昇順（= 文字列昇順、ms は固定桁）で
   ソートし、超過分を古い順に削除する。
 - 保存パーミッション: `0640` / root。
 
@@ -115,10 +114,10 @@ tester gateはrisk-acceptedであり、check有無にかかわらず変更を生
 <!-- UNIFI-012 -->
 
 ファイル名に埋め込まれたタイムスタンプ（エポックミリ秒）と**選定された実行ホスト（pve1 または pve2）の現在時刻**
-（`date +%s%3N`）を比較し、差の絶対値が **既定 60 秒**を超える場合は fail する。
+（`date +%s%3N`）を比較し、差の絶対値が `unifi_backup_freshness_max_seconds`（既定値は `roles/unifi_backup_fetch/defaults/main.yml` が正本）を超える場合は fail する。
 
 - 目的: 古いキャッシュや意図しないファイルを「最新」と誤認して保存しないため。
-- 前提: 実行ホスト（pve1 / pve2 いずれも）と CloudKey の時刻が NTP 同期していること。大きくずれると Phase 3 で fail する。pve2側の同期状態は`playbooks/time_sync_check.yml`が500msの厳しい閾値で独立監視している。
+- 前提: 実行ホスト（pve1 / pve2 いずれも）と CloudKey の時刻が NTP 同期していること。大きくずれると Phase 3 で fail する。pve2側の同期状態は`playbooks/time_sync_check.yml`が独立監視しており、そちらの閾値は`docs/ai/policies/time_sync_check_policy.md` TIME-005を正本とする。
 - 一時的に緩める場合は extra-vars: `-e unifi_backup_freshness_max_seconds=120`。
 
 ## 5. ライフサイクル・処理フロー
@@ -207,16 +206,18 @@ always   一時ファイル掃除 → サマリ生成 → Slack 通知 → 失�
 
 ### 既定パラメータ（defaults/main.yml）
 
-| 変数 | 既定値 | 意味 |
-|---|---|---|
-| `cloudkey_host` | `cloudkey.internal` | 接続先（ホスト名必須） |
-| `unifi_backup_login_path` | `/api/auth/login` | ログイン API |
-| `unifi_backup_download_path` | `/api/backup/download` | 生成 + DL API |
-| `unifi_backup_dest_dir` | `<backup destination>` | 保存先（末尾スラッシュなし） |
-| `unifi_backup_tmp_path` | `<dest_dir>/.unifi_backup_fetch.download.tmp` | 同一 FS の一時ファイル |
-| `unifi_backup_keep_generations` | `8` | 残す世代数 |
-| `unifi_backup_freshness_max_seconds` | `60` | 鮮度ガードの許容秒 |
-| `unifi_backup_download_timeout` | `120` | DL タイムアウト秒 |
+既定値の正本は `roles/unifi_backup_fetch/defaults/main.yml` である。本表は変数の存在と意味だけを示す。
+
+| 変数 | 意味 |
+|---|---|
+| `cloudkey_host` | 接続先（ホスト名必須） |
+| `unifi_backup_login_path` | ログイン API |
+| `unifi_backup_download_path` | 生成 + DL API |
+| `unifi_backup_dest_dir` | 保存先（末尾スラッシュなし） |
+| `unifi_backup_tmp_path` | 同一 FS の一時ファイル |
+| `unifi_backup_keep_generations` | 残す世代数 |
+| `unifi_backup_freshness_max_seconds` | 鮮度ガードの許容秒 |
+| `unifi_backup_download_timeout` | DL タイムアウト秒 |
 
 ## 8. 変更履歴
 
@@ -239,6 +240,7 @@ always   一時ファイル掃除 → サマリ生成 → Slack 通知 → 失�
 | v1.1 | 2026-07-25 | 標準8見出しへ再編し、孤立code fenceを修正。 |
 | v1.2 | 2026-07-25 | pve1夏季平日シャットダウン運用対応(ADR-001)。実行ホストをpve1固定からpve1優先・pve2フェイルオーバーへ変更したことを反映。 |
 | v1.3 | 2026-08-02 | 本文に埋め込まれていた実測日付を除去し、規則本文とUNIFI番号だけを残す整理を行った(`docs/ai/reviews/norm_docs_rationale_removal_round3/`)。CSRFヘッダー優先順位の実機確認事実(実測日を除いても事実自体は不変)から日付だけを除去した。許可・禁止・停止条件、UNIFI番号はいずれも変更していない。UNIFI番号の新設・退番はない |
+| v1.4 | 2026-08-25 | UNIFI-019の`--check`意味論をTS-030後の停止assert方式へ改めた(旧文はTS-030導入前のまま残っていた)。UNIFI-014から`ubuntu_vm_patch_policy.md`「深夜リブートスケジュール」への参照(参照先はOperations Contextへ委譲済みで実体を持たない)と、実行時刻・曜日の実値を落とし、`roles/systemd_timers/defaults/main.yml`・`semaphore_schedules_catalog`へのポインタへ改めた。UNIFI-010の世代数実値(8)、UNIFI-012の鮮度ガード実値(60秒・pve2側500ms)、既定パラメータ表(§11)の既定値列を落とし、`roles/unifi_backup_fetch/defaults/main.yml`（pve2側は`docs/ai/policies/time_sync_check_policy.md` TIME-005）へのポインタへ改めた。 |
 
 
 <!-- UNIFI-017 -->

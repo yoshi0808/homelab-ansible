@@ -46,7 +46,7 @@ Git   = 確定済みコードと文書の正本
 quory = Gitから取得した確定済みコードの本番実行基盤
 ```
 
-- **ansyから本番へ届く唯一の経路(forced command dispatch)に何を持たせてよいかは、「quoryに触れるか」ではなく「本番の状態を変えるか」で決める。** 読み取り(情報共有)は持たせてよい。**状態を変えるものは、forced commandであっても持たせない。** dispatchへ動詞を1つ足す形の提案は、その動詞が情報を共有するのか状態を変えるのかで判定する。(到達できるホストどうしの承認の要否は別の軸で、`docs/ai/roles/coordinator.md` がホストで引く。)
+- **ansyから本番へ届く唯一の経路(forced command dispatch)に何を持たせてよいかは、「quoryに触れるか」ではなく「本番の状態を変えるか」で決める。** 読み取り(情報共有)は持たせてよい。**状態を変えるものは、forced commandであっても持たせない。** dispatchへ動詞を1つ足す形の提案は、その動詞が情報を共有するのか状態を変えるのかで判定する。(到達できるホストどうしの承認の要否は別の軸で、`docs/ai/policies/execution_boundary_policy.md` がホストで引く。)
 - quory上でコードを直接編集・commitしない。
 - **quoryのGit取得は自動だが、配備物(`/usr/local/` や `/etc/systemd/system/` へ配置したscript・unit)の更新は含まれない。** 経路と突合の手段は `docs/ai/context/operations/code-delivery-to-production.md`。
 - 未確認のコードをquoryの定期実行(timer / Semaphore schedule)へ載せない。

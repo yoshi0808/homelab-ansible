@@ -12,4 +12,4 @@ effort: high
 
 実装スタイルは`skills/ansible-implementation-style/SKILL.md`を参照する。
 
-あなたはCoordinatorが起動したsubagentである。会話の過程は永続しないので、**変更内容・判断根拠・未検証事項・残存リスクは案件のimplement記録ファイルへ書き切る**。
+変更内容・判断根拠・未検証事項・残存リスクは案件のimplement記録ファイルへ書き切る(`docs/ai/core.md`「subagentが共通して守ること」)。

@@ -17,7 +17,7 @@ CloudKey は cert_renew とは認証・配送・鍵方式が根本的に異な�
 | 鍵アルゴリズム | EC secp384r1 | RSA 2048 / PKCS#1 |
 | 配送 | ファイル配置 + サービス再起動（SSH/become） | UniFi OS 非公開 HTTP API |
 | 認証 | SSH（ann鍵 + become） | API ログイン（Vault管理local account） |
-| 実行元 | quory のみ | quory（本番）/ ansy（開発） |
+| 実行元 | quory のみ | quory（Semaphore Task Template）のみ |
 | 配布チェーン | リーフ + 中間CA | リーフ + 中間CA + ルートCA（フルチェーン） |
 
 ### 目的
@@ -42,14 +42,13 @@ Home-TLS-CA（中間CA）署名の短命証明書（45日）で自動更新す�
 | Playbook | `playbooks/cloudkey_cert_deploy.yml`（変更系） |
 | role | `roles/cloudkey_cert_deploy/` |
 | 実行元（本番） | quory（Semaphore Task Template、月次） |
-| 実行元（開発） | ansy（CLI 実行を許可） |
 
 通信先はAnsible管理対象ホスト（ann + SSH）ではなく**外部のCloudKey API**である。
 証明書の署名は実行controller localで行い、CloudKeyへはAPI経由でアップロードする。
 `localhost`（connection: local）で実行する。
 
-実行ホストを特定名へ限定する規範は本Policyに置かない。実行権限の実体はSSH鍵`ann`の
-保有者であり、実行元の列挙は上表のとおり現状の運用形態を示すに留める。
+開発側（ansy）からの実行経路は無い。実行はquoryのSemaphore Task Templateのみである。
+実行境界の正本は`docs/ai/policies/execution_boundary_policy.md`（EXEC-005）である。
 
 ### CA構成
 
@@ -229,7 +228,6 @@ Ansible tasks 側に置く（core.md の責務分離）。
 ### 自動実行
 
 ```sh
-# 開発（ansy）/ 本番（quory）共通
 ansible-playbook -i inventories/homelab/hosts.yml playbooks/cloudkey_cert_deploy.yml
 ```
 
@@ -283,3 +281,4 @@ account名、credential保管path、Vault password fileの実値はPolicyへ記�
 | v1.0 | 2026-06-13 | 初版。CloudKeyを内蔵Let's Encrypt運用からHome-TLS-CA配下へ移行。UniFi OS 非公開API経由の証明書デプロイ方式を定義。 |
 | v1.1 | 2026-07-25 | 標準8見出しへ再編し、規範の意味を変えず認証実値を正本参照へ置換 |
 | v1.2 | 2026-07-26 | 実行ホストを特定名へ限定する記述を削除(実行権限の実体はSSH鍵`ann`保有者であり、Policyの対象外)。CCK-005を「CloudKeyへアップロードする鎖の形式」に限定し、トラストストアとの別レイヤー性をCCK-021として明示。§4.1の秘密鍵の主語を中間CAへ限定しCCK-022でルートCA秘密鍵のオフライン保管をCERT-006へ相互参照。無条件force運用の更新トリガをCCK-023として明文化。 |
+| v1.3 | 2026-08-25 | CCK-003の「実行元(開発)=ansy」「実行権限の実体はSSH鍵`ann`」を現状へ改めた。`id_ann`は2026-08-19にansyから削除済みで(`docs/ai/policies/execution_boundary_policy.md` EXEC-005)、開発側からの実行経路は無く、実行はquoryのSemaphore Task Templateのみである。§1比較表の同項目と§5の自動実行例に残っていた同じ食い違いも合わせて改めた。 |

@@ -46,7 +46,7 @@ Ansible: 配置、実行、JSON読込、期待値比較、warning/critical分類
 
 ## 3. tester-gateマーカーと実guardの整合
 
-`playbooks/*.yml`冒頭の`# tester-gate: safe-readonly`コメントは、Slack通知抑止の実際のguard(`roles/common_slack/tasks/notify.yml`の`skip_notifications | default(false) | bool or ansible_check_mode | bool or (AIエージェントセッション検出 and not slack_force_send)`、3条件のいずれか)と一致している必要がある。TODO 7-2(pilot1)・pilot2で、コメントの理由文と実guardが乖離する“marker drift”が実際に見つかった。reviewerは変更対象playbookのマーカー文言と`common_slack/notify.yml`の条件式を必ず突き合わせる。
+`playbooks/*.yml`冒頭の`# tester-gate: safe-readonly`コメントは、Slack通知抑止の実際のguard(`roles/common_slack/tasks/notify.yml`の`skip_notifications | default(false) | bool or ansible_check_mode | bool or (AIエージェントセッション検出 and not slack_force_send)`、3条件のいずれか)と一致している必要がある。TODO 7-2(`docs/ai/reviews/agent_skills_reorganization_todo7-2_result.md`、pilot1)・pilot2(`docs/ai/reviews/agent_skills_reorganization_phase7_pilot2_setup.md`)で、コメントの理由文と実guardが乖離する“marker drift”が実際に見つかった。reviewerは変更対象playbookのマーカー文言と`common_slack/notify.yml`の条件式を必ず突き合わせる。
 
 ## 4. reportの保存パターン
 
@@ -54,7 +54,7 @@ Ansible: 配置、実行、JSON読込、期待値比較、warning/critical分類
 
 ## 5. 既知の落とし穴: 意味論の自前計算
 
-`used_percent`のような値は、`df`等が返すUse%列をそのまま採用し、`used/total`から自前計算しない(丸め・予約領域の扱いが異なるため)。TODO 7-2で見つかり、pilot2(`monitoring_healthcheck`)でも再発しないか確認済み。新しい閾値・指標を追加する際は、参照実装(同系statのある既存role)を実装前に読む。
+`used_percent`のような値は、`df`等が返すUse%列をそのまま採用し、`used/total`から自前計算しない(丸め・予約領域の扱いが異なるため)。TODO 7-2(`docs/ai/reviews/agent_skills_reorganization_todo7-2_result.md`)で見つかり、pilot2(`monitoring_healthcheck`、`docs/ai/reviews/agent_skills_reorganization_phase7_pilot2_setup.md`)でも再発しないか確認済み。新しい閾値・指標を追加する際は、参照実装(同系statのある既存role)を実装前に読む。
 
 ## この文書の使い方
 

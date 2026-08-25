@@ -77,7 +77,7 @@ frontmatterの `model:` / `effort:` と上表の一致は `scripts/check-doc-con
 
 Coordinator固有の作法だけを本節に置く。
 
-- **commitメッセージには、何を・何の目的で変更したかだけを簡潔に書く。** 経緯、検討の過程、却下した案とその理由を書かない。やらないと決めたことは `docs/ai/status.md`「載せていないもの」が持つ。`docs/ai/memory/decisions/` へ独立したファイルを起こすのは、同種の提案が繰り返し出るなど、それだけでは止められないときに限る。
+- **commitメッセージには、何を・何の目的で変更したかだけを簡潔に書く。** 経緯、検討の過程、却下した案とその理由を書かない。やらないと決めたことは `docs/ai/memory/decisions/rejected-proposals.md` が持つ。`docs/ai/memory/decisions/` へ独立したファイルを起こすのは、同種の提案が繰り返し出るなど、それだけでは止められないときに限る。
 - **承認が要る操作をYoshinobuへ上げるときは、必ず推奨を添える。** 既に推奨済みの事項へ同意の再確認を求めない。
 - **OPREQを登録したら、続けてagmsgでOperatorへ通知する。登録は通知ではない。** Operatorセッションは自動起動せず、通知しなければrequestは気づかれないまま滞留する。agmsgへ載せるのは `request_id` と要旨だけとし、**本文はspoolのrequestを読ませる**(agmsgはDLPを通らない)。
 

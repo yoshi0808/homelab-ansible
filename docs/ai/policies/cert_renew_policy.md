@@ -181,7 +181,7 @@ pve1 / pve2 を例外とする理由は、夏季にpve1を平日シャットダ�
 | 入口 | 頻度 | 強制再発行 | 機会を外したときの回復 |
 |---|---|---|---|
 | `cert_renew.yml` | 週次。**週末に実行する** | しない（残り15日を切ったときだけ更新する） | 翌週の実行が拾う |
-| `cert_renew_quory.yml` | 月次（毎月1日 00:35） | する（`force_renew: true`） | timerの `Persistent=true` が、発火時刻に停止していた分をquory起動時に実行する |
+| `cert_renew_quory.yml` | 月次（実行時刻は `roles/systemd_timers/defaults/main.yml` の `cert-renew-quory` エントリが正本） | する（`force_renew: true`） | timerの `Persistent=true` が、発火時刻に停止していた分をquory起動時に実行する |
 
 `cert_renew.yml` を**週末に実行する**理由は、pve1が夏季に平日シャットダウンされること（CERT-023）にある。平日に実行すると、週次にしてもpve1だけは毎回スキップされ、頻度を上げた効果がそのnodeに出ない。
 
@@ -271,7 +271,7 @@ Semaphore から実行する場合は Task Template の Extra Variables に `for
 
 `cert_renew_quory.yml` は playbook 内の vars で `force_renew: true` を固定している。
 
-運用は両経路とも force_renew=true の月次強制再発行とする。閾値条件(残15日以下)は、月次実行間隔に対して安全マージンが不足するため運用上は使用しない(forceなし手動実行時のフォールバックとして残置)。
+定常運用での起動頻度・強制再発行の要否はCERT-024を正本とする。
 
 
 ### 中間CA秘密鍵の再配置（quory OS再インストール時など）
@@ -348,3 +348,4 @@ CA資材の配置、mode、offline root、runtime staging、owner非固定の制
 | v2.3 | 2026-07-26 | CERT-022の実測要件を6/6エンドポイントで充足したうえで、`deploy_ca_trust.yml`からの中間CA配布を廃止しルートCA単独配布へ移行。配布済み`home-tls-ca.crt`は`state: absent`で回収する。実測記録は`docs/ai/reviews/cert_renew/2026-07-25_006_test_result.md`。 |
 | v2.4 | 2026-08-01 | CERT-023を新設。夏季のpve1平日シャットダウン運用を受け、`cert_renew.yml`でpve1 / pve2が到達不能な場合は当該nodeをスキップしWARNING通知のうえ正常終了する（`ansy` / `monnie`は従来どおり失敗）。§6の通知チャンネル選択に、`alerts`通知と終了コードが独立である旨を追記。実装と検証は`docs/ai/reviews/cert_renew_unreachable_node/`。 |
 | v2.5 | 2026-08-06 | CERT-024を新設し、更新の起動頻度を「更新猶予の窓に機会が2回以上入るか」で決める規範にした。`cert_renew.yml`は月次強制から**週次・期限駆動・週末実行**へ移行し、カタログの`force_renew`既定値を`false`へ変更（surveyは残し、強制が要る場面では打てる）。`cert_renew_quory.yml`は月次強制のまま、timerを`Persistent=true`へ変更して実行主体停止時の取りこぼしを埋める。**2つの入口は脆さの種類が違うため同じ対処を適用しない**ことを明記。あわせてCERT-023の「復帰後の追いかけ更新は自動化していない」という記述を、週次実行が拾う現状へ改めた。 |
+| v2.6 | 2026-08-25 | CERT-013末尾の「両経路とも月次強制」という旧文（v2.5で移行済みのはずが改訂漏れしていた）を削除し、定常運用の起動頻度・強制要否はCERT-024を正本とする形へ改めた。CERT-024表の`cert_renew_quory.yml`実行時刻の実値（毎月1日 00:35）を落とし、`roles/systemd_timers/defaults/main.yml`の`cert-renew-quory`エントリへのポインタへ置換。 |

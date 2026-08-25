@@ -49,7 +49,7 @@ Yoshinobu表明(2026-07-30):
 
 この根拠が移行前はどこにも存在しなかった。**ここがAIの担当分である** — データから機械的に出せる部分であり、人間の記憶に頼る必要がない。
 
-対象ホストは `monnie`(Prometheus)。**read-onlyの参照であり、Yoshinobuの確認を要さない**(2026-07-30、`monnie`は非冪等操作でも確認不要と決定済み。`docs/ai/roles/coordinator.md`)。
+対象ホストは `monnie`(Prometheus)。**read-onlyの参照であり、Yoshinobuの確認を要さない**(`monnie`は保護対象ではなく、状態を変えない確認はどのホストへも承認不要。区分の正本は`docs/ai/policies/execution_boundary_policy.md` EXEC-010 / EXEC-040)。
 
 ### 2. Yoshinobuが意味を決める
 

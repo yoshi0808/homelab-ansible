@@ -47,10 +47,10 @@ Semaphore schedule / systemd timer が実行
 | 1 | ansyで修正してstage | AI |
 | 2 | **pre-commitが「配備が要る: `playbooks/X_setup.yml`」と予告する**(カタログに載る`copy`配備物を触った場合。§2) | 自動 |
 | 3 | `git commit` / `git push` | **人が承認**(AIが実行) |
-| 4 | quoryが作業ツリーをpull(1分間隔)。Semaphoreはジョブ実行時に`/opt`へ自分でcloneする(§3) | 自動 |
+| 4 | quoryが作業ツリーをpull(間隔は`roles/worktree_sync/defaults/main.yml`を正本とする)。Semaphoreはジョブ実行時に`/opt`へ自分でcloneする(§3) | 自動 |
 | 5 | **配備物はまだ古い** | — |
 | 6 | Semaphoreで該当templateを押す。**テンプレートから新規に起動する**(過去のタスクの再実行では古いcommitが走る。§3.1) | **人** |
-| 7 | 押し忘れた場合、翌00:40の日次ドリフト検査がSlackへ「食い違い + 直し方」を出す(§2) | 自動 |
+| 7 | 押し忘れた場合、翌日の日次ドリフト検査がSlackへ「食い違い + 直し方」を出す(§2) | 自動 |
 | 8 | 直すまで毎朝再通知される(エッジ抑止が無い) | 自動 |
 
 **打鍵が要るのは3と6だけで、どちらも「判断」である。** コマンドを組み立てる作業は残っていない — 状態を変えない確認はAIがdispatch経由で行い、本番への適用はSemaphoreのボタンが担う。
@@ -116,7 +116,7 @@ ssh quory-investigate "deployed-hash <name>"       # quory側
 
 ### 日次のドリフト検査が拾う範囲
 
-`playbooks/deployment_drift_check.yml`(`safe-readonly`、日次 00:40)が**自動で突合する**。対象カタログは `roles/deployment_drift_check/defaults/main.yml` が正本。
+`playbooks/deployment_drift_check.yml`(`safe-readonly`。cadenceは`roles/semaphore_templates/defaults/main.yml`の`semaphore_schedules_catalog`を正本とする)が**自動で突合する**。対象カタログは `roles/deployment_drift_check/defaults/main.yml` が正本。
 
 **`copy` 配備物は内容まで見るが、`template` 配備物は見ない。** 期待値を得るのに描画が要るためで、dispatch script・sudoers・unit本体・`worktree-sync.sh` などが該当する(Tier 2、未着手)。**この穴は特定のroleの問題ではなく、配備方式で決まる。** `template` で配備したものは、日次検査に守られていないと考えること。
 
@@ -138,7 +138,7 @@ unit の `enabled` / `active` は別軸で見ており、**timerが止められ�
 
 `worktree_sync` が実行中タスクを見て同期を見送る仕組みは現に動いているが、**それが守っている相手はSemaphoreではない**。Semaphoreは自分でcloneするため作業ツリーを共有していない。**共有している実行主体は `ansible-cert-renew-quory.service` である**(2026-08-05 の決定時にYoshinobuが示した事実。このunitはrepo管理外で、ansy側からは確かめられない)。
 
-**この排他を外さないことは2026-08-05に決定済みである**(現状維持。`docs/ai/status.md`「載せていないもの」)。外すなら守る相手を付け替える形が正しく、単に消すのではない。
+**この排他を外さないことは2026-08-05に決定済みである**(現状維持。`docs/ai/memory/decisions/rejected-proposals.md`)。外すなら守る相手を付け替える形が正しく、単に消すのではない。
 
 同期は `semaphore.db` を直接読み、実行中のタスクがあれば**見送る**(待たない・殺さない・強行しない)。判定は終端status語彙(`success` / `error` / `stopped`)の**否定**で書いてあり、未知の値が現れても安全側へ倒れる。**確認とpullのあいだにジョブが始まる競合は消せない** — Semaphoreは我々の管理下になく、lockを尊重させられない。受容した残存リスクである。
 
@@ -176,7 +176,7 @@ ssh quory-investigate "journal-unit worktree-sync.service 24h"
 ssh quory-investigate "semaphore-query running 20"   # 見送りが続く理由の調査
 ```
 
-**この抑止は1分間隔のtimerに対する設計である。** 人が直すまで続く状態(汚れた作業ツリー等)を毎周期通知すると、1時間に60通になる。初回と、別の異常へ変わったときは即通知されるので気づきは遅れない。
+**この抑止は`worktree_sync`のtimer間隔(正本は`roles/worktree_sync/defaults/main.yml`)に対する設計である。** 人が直すまで続く状態(汚れた作業ツリー等)を毎周期通知すると通知が積み上がる。初回と、別の異常へ変わったときは即通知されるので気づきは遅れない。
 
 ### 閾値を回数で持たない
 

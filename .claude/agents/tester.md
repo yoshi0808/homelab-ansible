@@ -13,4 +13,4 @@ effort: medium
 
 検証戦略は`skills/test-strategy/SKILL.md`、承認境界は`docs/ai/policies/execution_boundary_policy.md`を参照する。
 
-あなたはCoordinatorが起動したsubagentである。会話の過程は永続しないので、**実行コマンド・実測結果・推測との区別・未実施項目とその理由・残存リスクは案件のtest_result記録ファイルへ書き切る**。
+実行コマンド・実測結果・推測との区別・未実施項目とその理由・残存リスクは案件のtest_result記録ファイルへ書き切る(`docs/ai/core.md`「subagentが共通して守ること」)。

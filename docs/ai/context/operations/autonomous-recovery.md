@@ -25,18 +25,7 @@ target別muteは`homelab-mute set/status/clear`で操作する。global pauseは
 
 **解除忘れは日次確認が拾う。** `playbooks/recovery_monitoring_check.yml`がglobal pauseの継続と`recovery-probe`の停止を毎朝確認し、いずれかに該当するときだけ`alerts`へ経過時間つきで通知する(Policy AR-103)。正常時は無通知であり、**通知が来ないことを「確認された」の意味に読まない** — 日次実行そのものが行われたかはSemaphoreのジョブ履歴で見る。target別muteは自動失効するため対象外である。
 
-自動mute対象とTTLの具体値は各呼出playbook / role varsを正本とする。
-
-現行の横断契約は次のとおりである。
-
-| Playbook | 対象 | TTL |
-|---|---|---:|
-| `proxmox_evacuate_node.yml` | `authy` / `monnie` / `sophos-fw` | 120分 |
-| `proxmox_patch_apply_node.yml` | `authy` / `monnie` / `sophos-fw` | 60分 |
-| `proxmox_restore_vm_placement.yml` | `authy` / `monnie` / `sophos-fw` | 90分 |
-| `ubuntu_nightly.yml` | reboot対象の`authy` / `monnie` | 30分 |
-| `proxmox_patch_weekly_full.yml` | `authy` / `monnie` / `sophos-fw` | 360分 |
-| `ubuntu_vm_full_upgrade.yml` | apply対象の`authy` / `monnie` | 45分 |
+自動mute対象とTTLの具体値は各呼出playbook / role varsを正本とする。段階単位のplaybookの横断契約(一律TTLとその例外)は[`autonomous_recovery_policy.md`](../../policies/autonomous_recovery_policy.md)AR-077を正本とする。
 
 ## Manual layer
 
@@ -76,4 +65,4 @@ probeが正常でもmanual layerを選べるが、その発火判断は人間が
 
 - Proxmox nodeへ到達できない、VMがnot-found、allowlist外入力、forced-command拒否の場合は変更操作へ進まず記録・通知する。
 - Slack通知失敗は復旧処理の結果と分離し、reportまたはnotification queueから後で確認する。
-- 実装・導入の時点履歴と2026-07-05のtester教訓は009 investigationを参照する。
+- 実装・導入の時点履歴と2026-07-05のtester教訓は[`2026-07-24_009_investigation_autonomous_recovery_policy_rewrite.md`](../../reviews/policy_standardization/2026-07-24_009_investigation_autonomous_recovery_policy_rewrite.md)を参照する。

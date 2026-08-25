@@ -73,7 +73,7 @@ chronyホストへのquory参照追加準備playbook。
 - NTP設定そのものの自動補正（異常検知のみ、修正はしない）。
 - 時刻ズレの履歴管理・トレンド分析。
 - Sophosのserial0コンソール経由での確認（別件）。
-- cloudkeyへのquory参照追加（GUI管理のため対象外。§3参照）。
+- cloudkeyへのquory参照追加（GUI管理のため対象外。TIME-007参照）。
 
 ## 3. 対応するPlaybook
 
@@ -84,10 +84,10 @@ chronyホストへのquory参照追加準備playbook。
 | Playbook | 役割 |
 |---|---|
 | `time_sync_check.yml` | quoryを基準にhomelab主要ホストのNTP同期状態を確認し、閾値超過・収集失敗をSlack通知する（read-only）。 |
-| `time_sync_ntp_reference.yml` | pve1/pve2/ansy/monnie/authyのNTPクライアント設定にquoryを参照先として追加する準備作業（変更系）。cloudkey・sophos-fwは対象外（§3参照）。 |
+| `time_sync_ntp_reference.yml` | pve1/pve2/ansy/monnie/authyのNTPクライアント設定にquoryを参照先として追加する準備作業（変更系）。cloudkey・sophos-fwは対象外（TIME-007参照）。 |
 
 <!-- TIME-017 -->
-time_sync_check.ymlのtester gateはsafe-readonly、time_sync_ntp_reference.ymlはrisk-acceptedであり、列挙は実行許可を追加しない。
+各playbookのtester gate分類は各ファイル先頭のマーカーを正本とする（`docs/ai/policies/ansible_test_safety_policy.md` TS-007）。本表への列挙は実行許可を追加しない。
 
 <!-- TIME-018 -->
 上記2 Playbookはそれぞれtime_sync_check、time_sync_ntp_reference roleに対応し、確認と変更を混同しない。
@@ -114,9 +114,9 @@ time_sync_check.ymlのtester gateはsafe-readonly、time_sync_ntp_reference.yml�
 - sophos-fwの直接比較は、Advanced Shellのメニュー遷移全体（SSH接続〜メニュー
   操作〜date取得〜exit）をコントローラー側でbefore/afterブラケットして誤差を
   記録する。単純な1コマンドの往復より大きい誤差（実機計測で約1秒規模）が
-  混入するため、他ホストより大きい専用閾値
-  （`time_sync_check_sophos_threshold_ms`、既定5000ms）を用いる。
-  `time_sync_check_threshold_ms`（既定500ms）はchrony/cloudkey共通。
+  混入するため、他ホストより大きい専用閾値（`time_sync_check_sophos_threshold_ms`）
+  を用いる。`time_sync_check_threshold_ms`はchrony/cloudkey共通。既定値は
+  `roles/time_sync_check/defaults/main.yml`が正本。
 
 ## 5. ライフサイクル・処理フロー
 
@@ -236,3 +236,4 @@ role / playbook）
 | v1.1 | 2026-07-25 | 標準8見出しへ再編し、安全境界の意味を維持。 |
 | v1.2 | 2026-07-26 | Yoshinobuの再点検を反映。CloudKeyのquory参照はhostnameでなくIP登録済みである事実(2026-07-16のAP busybox resolver問題)にTIME-007を訂正。個別ホスト接続失敗とquoryの実際の同期異常の重大度を入れ替え(接続失敗→warning、閾値超過→error)、個別ホスト失敗だけではジョブを非ゼロ終了させず他ホストの検証を継続する方針をTIME-019/021/022として明記。 |
 | v1.3 | 2026-08-02 | 本文に埋め込まれていた改訂経緯・実施日付を除去し、規則本文とTIME番号だけを残す整理を行った(`docs/ai/reviews/norm_docs_rationale_removal_round3/`)。TIME-001からSSH方式検討の経緯段落(受け皿は`docs/ai/reviews/time_sync_check/2026-06-23_006_implement.md`)、TIME-007から2026-06-25実施時の登録値スナップショット(その後quory.internal→IP変更で陳腐化済み)を除去し、busybox ntpdのNXDOMAIN失敗とIP登録という現在も有効な事実・規則は日付なしで残した。許可・禁止・停止条件、TIME番号はいずれも変更していない。TIME番号の新設・退番はない |
+| v1.4 | 2026-08-25 | TIME-017の分類実値複製をやめ、各playbookヘッダのマーカー(TS-007)を正本とする形へ改めた。「§3参照」×2をTIME-007への直接参照に直し(節番号の体系がずれ、旧「§3」が解決しない状態だった)。TIME-005の閾値実値(500ms/5000ms)を落とし、既定値は`roles/time_sync_check/defaults/main.yml`を正本とする形へ改めた。意味論(sophos-fwは他ホストより大きい専用閾値を使う)は維持。 |

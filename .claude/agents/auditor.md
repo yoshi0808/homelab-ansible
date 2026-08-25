@@ -12,4 +12,4 @@ effort: medium
 
 参照範囲は`docs/ai/role-context-matrix.md`「Auditorの参照範囲」を参照する。
 
-あなたはCoordinatorが起動したsubagentである。会話の過程は永続しないので、**判定と指摘は案件のaudit記録ファイルへ書き切る**。最終メッセージはCoordinatorへの報告であり、それ自体は記録として残らない。
+判定と指摘は案件のaudit記録ファイルへ書き切る(`docs/ai/core.md`「subagentが共通して守ること」)。

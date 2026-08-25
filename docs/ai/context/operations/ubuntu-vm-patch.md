@@ -75,7 +75,7 @@ healthcheckはmanual standaloneでも使える。異常時はreportと通知を�
 | `radius_healthcheck.yml`(`authy`のhealthcheck) | Semaphore UI schedule。旧`ansible-authy-healthcheck.timer`(`quory`上のsystemd timer、毎日05:30)から移行済み |
 | `monitoring_healthcheck.yml`(monitoring healthcheck) | Semaphore UI schedule。旧`ansible-monitoring-healthcheck.timer`(`quory`上のsystemd timer、毎日05:35)から移行済み |
 
-移行済みの根拠は`roles/systemd_timers/defaults/main.yml`のコメント化されたentry(「以下のエントリはSemaphore UIスケジュールに移行済み」)。現在唯一有効なsystemd timerは`cert-renew-quory`(`quory`上、`cert_renew_quory.yml`、月初00:35)である。正確な時刻とschedule有効性はSemaphore UIを正本とし、UI設定はリポジトリ外で変化し得るため本書は複製・保証しない。
+移行済みの根拠は`roles/systemd_timers/defaults/main.yml`のコメント化されたentry(「以下のエントリはSemaphore UIスケジュールに移行済み」)。`roles/systemd_timers`カタログ上、現在有効なentryは`cert-renew-quory`(`quory`上、`cert_renew_quory.yml`)のみである。schedule(時刻・有効性)の正本は`roles/semaphore_templates/defaults/main.yml`のカタログであり、本書は複製・保証しない。
 
 ## 障害時の確認
 

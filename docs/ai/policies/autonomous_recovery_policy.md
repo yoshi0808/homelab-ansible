@@ -149,7 +149,7 @@ pull probeは全対象を60秒間隔で継続監視する。
 
 ### Pull ladder
 
-pullはlock、flapping、`pvesh`の4分岐を順に評価し、P4の条件を満たす段だけを実行する。
+pullはlock、flapping、`pvesh`の各分岐を順に評価し、条件を満たす段だけを実行する。
 
 <!-- AR-032 -->
 service restartを行う場合はrestart前にreset-failedを行い、start-limit raceを回避する。
@@ -382,3 +382,4 @@ Codex wrapperはsudo、setuid、file capabilityによる権限昇格を前提に
 | 2026-08-01 | global pauseの解除忘れとprobe停止を日次で検知する規定としてAR-103を新設。TTLによる自動resumeは採らず、通知で人間の判断を挟む形とした(Yoshinobu選択)。根拠: `docs/ai/memory/incidents/2026-07-29_global-monitoring-pause-left-on-8-days.md`、案件記録: `docs/ai/reviews/recovery_pause_daily_check/` |
 | 2026-08-02 | AR-103本文にあった根拠引用(`docs/ai/memory/incidents/2026-07-29_global-monitoring-pause-left-on-8-days.md`。上記2026-08-01行に同一引用が既存)を除去し、実装・案件記録のポインタだけを残した(`docs/ai/reviews/norm_docs_rationale_removal_round3/`)。許可・禁止・停止条件、AR番号はいずれも変更していない。AR番号の新設・退番はない |
 | 2026-08-25 | Codex向けAGENTS.mdが2つあり能力が異なることを規定としてAR-104を新設。同一化・統合を禁じ、一次調査のLLMのAGENTS.mdへdispatchのcommandを書かないことを明記した。既存AR番号の改訂・退番はない |
+| 2026-08-25 | Pull ladderの説明文にあった未定義識別子「P4」(本文書のどこにも定義が無い)と、列挙と一致しない数の宣言「4分岐」を削除した。許可・禁止・停止条件は変更していない。 |

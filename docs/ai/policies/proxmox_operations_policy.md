@@ -37,6 +37,8 @@ removeを伴う更新、major upgrade疑いは自動適用しない。`MAINTENAN
 ### 2.2 node順序とguest
 
 <!-- SB-011 -->
+以下は両nodeが利用可能なときの順序制約である。pve2が到達不能または不健全でpve1だけが利用可能な場合は、pve2の先行検証・適用実績がないままpve1へ適用する(SB-028、SB-032)。
+
 - pve2を先に処理する。
 - pve1が正常な場合のみpve2を更新する。
 - pve2が壊れた場合はpve1を守り、pve1が生きている間にpve2を再インストールする。
@@ -200,7 +202,7 @@ local user必須、特定機能有効時だけ、DoSだけ、XSSだけ、物理a
 `NO_UPDATES`は通知とreport保存だけを行い、applyしない。
 
 <!-- SB-038 -->
-`PATCH_READY`にはhealthcheck OK、`apt-get check`成功、simulation成功、removeなし、major疑いなし、重要更新なしのすべてが必要である。pve2へ先行適用し、post-healthcheck OKの場合だけpve1へ進む。NGならpve1へ進まず停止・通知する。
+`PATCH_READY`にはhealthcheck OK、`apt-get check`成功、simulation成功、removeなし、major疑いなし、重要更新なしのすべてが必要である。両nodeが利用可能な場合はpve2へ先行適用し、post-healthcheck OKの場合だけpve1へ進む。NGならpve1へ進まず停止・通知する。pve2が到達不能または不健全でpve1だけが利用可能な場合は、pve2の先行検証・適用実績がないままpve1へ適用する(SB-028、SB-032、§2.2)。
 
 <!-- SB-039 -->
 `MAINTENANCE_REQUIRED`のうちremoveを伴わないものは自動適用する(SB-003/SB-027)。removeを伴う`MAINTENANCE_REQUIRED`は引き続き自動適用も部分適用もせず、毎週dry-runで再評価し、保留期間に固定上限を設けない。人間がmaintenance枠を確保してpve2から手動実施するか判断する。
@@ -407,6 +409,7 @@ Sophos Firewall VMのHA relocateはstop → migrate → startであり、VM再�
 
 | 日付 | 変更 |
 |---|---|
+| 2026-08-25 | SB-011・SB-038が条件句を持たない無条件規定のまま残り、§1・SB-028・SB-032が定める単一node適用(pve2利用不能時)と矛盾していた(2026-08-01の追随改訂で挙がった条項に含まれず改訂漏れ)。両者へ「両nodeが利用可能なときの順序制約である」旨の条件句を追加した。文言は§1・2026-08-01変更履歴の既存表現と揃えた。許可・禁止・停止条件の実質は変更していない |
 | 2026-08-02 | 本文に埋め込まれていた改訂注記・実測日付・撤回の経緯説明を除去し、規則本文と括弧内のPolicy ID(SB-nnn)だけを残す整理を行った(`docs/ai/reviews/norm_docs_rationale_removal_round3/`)。許可・禁止・停止条件、SB番号はいずれも変更していない。既存の退番記録(SB-023、SB-049 / SB-083 / SB-084 / SB-086)は本表のとおりで変更なし。SB番号の新設・退番はない |
 | 2026-08-01 | Semaphoreジョブ#507(weekly full patchがpve1到達不能で`exit 4`)を受け、自動適用範囲を拡大し単一node適用を許可した(`docs/ai/reviews/proxmox_auto_apply_widening/2026-08-01_001_requirement.md`)。「重要コンポーネント更新を自動適用しない」という必須目的を撤回し、`MAINTENANCE_REQUIRED`のうちremoveを伴わないものを自動適用する(SB-001、SB-003、SB-004、SB-027、SB-039)。removeを伴う`MAINTENANCE_REQUIRED`と`MAJOR_UPGRADE_DETECTED`は引き続き自動適用しないが、`MAJOR_UPGRADE_DETECTED`は手動apply mode+一致する確認文字列での適用を新たに許可した(SB-027、SB-031、SB-041、SB-059)。apply側の「利用する反対nodeのhealthcheck」要求と、weekly full側の「両nodeのhealthcheck OK」「fixed pair dry-run」要求を撤回し、到達可能かつ健全なnodeが1つ以上あればそのnodeに適用する(SB-028、SB-032、SB-094、SB-095)。pve2を先行検証nodeとする順序(SB-001)は両node利用可能時の制約として維持し、pve2が利用不能な場合はpve2の先行実績なしにpve1へ適用する。`BLOCKED`と到達可能node 0件は引き続き非0終了とし、緑にしない。付随して、SB-007の表・SB-035・SB-046・SB-058・§5.1標準flowの記述を同じ区分(remove_countの有無)に合わせて更新した(直接の改訂対象11件には含まれないが、放置すると本書内で矛盾する記述になるため)。**同日の追補として**、(1)control node分離preflightの問い合わせ先をpve1固定から到達可能な任意nodeへ変更(`roles/proxmox_exec_node`を再利用。実装のみでPolicy本文に固定nodeの記載はなかったため本Policyの改訂は不要)、(2)単一node適用は反対nodeという退避先が無いため、対象nodeにrunning guestが残っている場合は退避を試みず適用を見送る(緑終了+通知)というB案をSB-012・SB-088へ明記した(Yoshinobu判断 — guestを無人で停止して適用を強行する案は不採用)。SB番号の新設・退番はない |
 | 2026-08-01 | `proxmox_patch_policy.md`を`proxmox_operations_policy.md`へ、Operations Contextの`proxmox-patch.md`を`proxmox-operations.md`へ改名。文書名がpatchに限定されていた一方、本Policyは既にhealthcheck、退避・復帰、read-only点検を規定しており、SB-020の安全度表もそれらを含む前提で作られていたため、名前を実態に合わせた。タイトル・冒頭リード・SB-001の冒頭節をpatchのみの記述から現行SB-020対応のplaybook群(healthcheck、VM/CT退避・復帰、read-only点検を含む)へ拡張。SB-020の安全度表に、既存のSB-095が既にread-only点検として名指ししていた`proxmox_hw_check.yml`(safe)と、2026-07-30時点で「patch domain外」と位置づけていた`proxmox_snapshot_check.yml`(safe)を追加。`proxmox_backup_restore_verify.yml`(controlled apply)もSB-020の索引へ追加したが、同playbookは`proxmox_backup_restore_verify_policy.md`が既に許可・禁止・停止条件の正本として存在するため、本書はSB-020の自動実行tier索引としてのみ扱い、詳細規範の正本を二重化しない(冒頭リード・SB-020該当行に明記)。既存の許可・禁止・停止条件そのものの内容、SB番号は変更していない |

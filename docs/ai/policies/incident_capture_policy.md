@@ -1,6 +1,6 @@
 # Incident Capture Policy
 
-状態: **正本**(**Yoshinobu承認済み**。以後の改訂もYoshinobuの領域である — `docs/ai/roles/coordinator.md`)
+状態: **正本**(**Yoshinobu承認済み**。以後の改訂もYoshinobuの領域である — `docs/ai/policies/execution_boundary_policy.md` EXEC-030)
 
 本書は**障害の証拠の捕捉・一次調査・見直し**における許可、禁止、停止条件の正本である。環境事実と実装詳細は対応するADR・Contextを参照し、競合時は本Policyを優先する。個別の設計判断の根拠は複製せず参照する。
 
@@ -166,3 +166,4 @@
 | 2026-07-28 | **IC-033を追加**(Yoshinobu依頼)。IC-025で中止した月次評価を**誰が再実行するか**が、repoのどこにも規範として無かった(通知本文に手順があるだけだった)。あわせて、この運用が成立する前提条件(ミラーを削除しない・評価がcatch-up型である)を明示し、崩す変更を禁じた |
 | 2026-08-03 | **転送段を退役させ、パイプラインを4段から3段へ**(Yoshinobu承認)。`incident_sync` の廃止と、月次評価の `claude -p` 2本の廃止に伴う。IC-002 / IC-003 / IC-005 / IC-006 / IC-007 / IC-017 / IC-019 / IC-023 / IC-030 / IC-032 を改訂、**IC-043 / IC-044 を新設**、IC-012 / IC-014 / IC-015 / IC-025 / IC-031 / IC-033 を削除(退番。再利用しない)。IC-013 は文言を変えず §4 から §2 へ、IC-030 は §4 から §3 へ移した。§4「転送の規律」は節ごと消滅。§8 から転送・ansy側置き場所・評価の頻度・保持期間の実値の4項目を除去した(いずれも決着したため)。保持期間は30日から90日へ延長した(`roles/incident_capture/defaults/main.yml`)。**IC-018 は変更していない** — 無人セッションの封じ込めという規律自体は一次調査(Codex)に対して生きている。起草と経緯は `docs/ai/reviews/dev_prod_boundary/2026-08-03_019_policy_revision_proposal.md` |
 | 2026-08-02 | 本文に埋め込まれていた作成日・改訂注記・判断の引用を除去し、規則本文とIC番号だけを残す整理を行った(`docs/ai/reviews/norm_docs_rationale_removal_round3/`)。冒頭「状態:」行から作成日、IC-004からD4への根拠引用(`## 9. 参照`に同一ファイルが残る)、IC-007・IC-033から改訂日時と決定主体の注記を除去。許可・禁止・停止条件、IC番号はいずれも変更していない。IC番号の新設・退番はない |
+| 2026-08-25 | 冒頭「状態:」行のPolicy改訂権限の参照先を`docs/ai/roles/coordinator.md`(該当規定なし)から`docs/ai/policies/execution_boundary_policy.md`(EXEC-030)へ改めた。 |

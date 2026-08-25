@@ -24,7 +24,7 @@ unit / integration / e2e の3層でtest planを構成する。
 ## 実行コマンドの組み立て
 
 Testerが自分のsandboxからplaybookを実行する際は、temp pathを実行ユーザーごとに分離する。
-固定パスにすると別ユーザー(`ann` / `yoshi`)の残骸と衝突してUNREACHABLEになる。
+固定パスにすると別ユーザーの残骸と衝突してUNREACHABLEになる。
 
 ```
 ANSIBLE_LOCAL_TEMP=/tmp/ansible-local \
@@ -32,8 +32,11 @@ ANSIBLE_REMOTE_TEMP='/tmp/ansible-remote-$USER' ansible-playbook ...
 ```
 
 `ANSIBLE_REMOTE_TEMP`は**シングルクォート必須**である。ダブルクォートにすると`$USER`が
-実行元で先に展開され、リモート側で意図しないパスになりUNREACHABLEになる。2026-07-26の
-`ca_trust_deploy`適用時に実際にこの誤りでansyが初回UNREACHABLEとなり、再実行で解消した。
+実行元で先に展開され、リモート側で意図しないパスになりUNREACHABLEになる。
+
+### ホームラボ固有の補足
+
+上記の教訓はこのリポジトリのTester sandbox構成に基づく(`docs/ai/context-classification.md` §4の例外条件を適用)。実行ユーザーは`ann` / `yoshi`の2つがあり、固定パスはこの2ユーザーの残骸と衝突する。2026-07-26の`ca_trust_deploy`適用時に実際にこの誤りでansyが初回UNREACHABLEとなり、再実行で解消した。
 
 ## 適用先
 

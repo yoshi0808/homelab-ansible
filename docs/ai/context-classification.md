@@ -61,7 +61,7 @@ Context内で対象を指す必要がある場合は、inventory group名・変�
 
 | 値の種類 | 正本 |
 |---|---|
-| 実行schedule、時刻、曜日、cadence | scheduler設定(systemd timer定義またはSemaphore UI)。UI設定はリポジトリ外で変化するため、リポジトリ内の記述は現在値を保証しない |
+| 実行schedule、時刻、曜日、cadence | scheduler設定(`roles/systemd_timers`のtimer定義、または`roles/semaphore_templates/defaults/main.yml`のカタログ)。リポジトリ内の記述(本文の説明文)は現在値を保証しない |
 | ソフトウェアのバージョン、リリース番号 | 対象host上の実測値、またはrole defaults / vars |
 | 件数、閾値、世代数、保持期間 | role defaults / vars |
 | systemd unit名、timer名の一覧 | 該当roleのvars / templates |
