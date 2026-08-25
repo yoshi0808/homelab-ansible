@@ -149,4 +149,30 @@ if ! printf '%s\n' "$staged_files" | python3 "$(dirname "${BASH_SOURCE[0]}")/che
   exit 1
 fi
 
+# community.general.slack を実行コードへ戻さない。
+#
+# 同モジュールは宛先を slack.com / slack-gov.com にハードコードし `domain`
+# 引数も無視するため、**webhook URL を差し替える形の decoy が原理的に成立
+# しない**。この性質により decoy の通知が実 Slack へ到達する事故が5件起きた
+# (docs/ai/memory/incidents/2026-08-25_decoy-slack-reached-real-endpoint-
+# during-its-own-fix.md に一覧)。2026-08-25 に送信2箇所とも
+# ansible.builtin.uri へ移し、宛先の決定を URL の側へ戻している。
+#
+# **拾うのは task key としての呼び出し形だけである。** 素の文字列を検索すると
+# 上記の経緯を説明したコメント(現に roles/ と playbooks/ に9箇所ある)へ
+# 当たり、検査が偽陽性しか出さなくなる。
+#
+# **この検査が保証しないもの**: 別モジュール・別の書き方(自作 shell での
+# curl 等)で同じ宛先へ送ることは止められない。止めているのは「このモジュール
+# を再導入すること」だけである。
+if git -c core.quotepath=false grep --cached -nE \
+     '^[[:space:]]*community\.general\.slack[[:space:]]*:|(action|module)[[:space:]]*:[[:space:]]*community\.general\.slack' \
+     -- roles playbooks; then
+  echo "ERROR: community.general.slack is invoked in executable code."
+  echo "       It cannot be redirected (destination is hardcoded), so decoy"
+  echo "       verification does not hold. Use ansible.builtin.uri with the"
+  echo "       full webhook URL. See roles/common_slack/tasks/notify.yml."
+  exit 1
+fi
+
 echo "[pre-commit] OK"
