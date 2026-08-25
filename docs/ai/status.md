@@ -45,15 +45,17 @@
 - **AC6(配備)は完了した**(2026-08-25、ジョブ #838)。`deployed-hash incident-investigate` が repo と一致することを確認済み
 - **回帰テストは置いていない。** 独立レビューが「4回再発した安全境界の修正が一回限りのscratchpad検証にしか残っていない」として `scripts/tests/` への新設を提案したが、Coordinatorが保留した。**`community.general.slack` へ戻す差分や `link_names` / `timeout` の脱落を機械的に止める仕組みは無い**
 
-**壊れている: 一次調査の先読みファイルが書けていない(AC10は不合格、2026-08-25判明)** — `homelab-semaphore-query` のAPI移行は**quoryへ配備完了**(commit `0196087`、Semaphoreジョブ #758〜#762)だが、**同じ配備が入れた先読み機構は導入以来1度も動いていない。**
+**壊れている: 一次調査の先読みファイルが書けていない — 原因確定、修正待ち(2026-08-25)** — `homelab-semaphore-query` のAPI移行は**quoryへ配備完了**(commit `0196087`、Semaphoreジョブ #758〜#762)だが、**同じ配備が入れた先読み機構は導入以来1度も動いていない。**
 
 - **壊れていたことと直ったことの両方が実測で残っている** — `homelab-incident-capture.service` が5分ごとに `status=2` で失敗し続け、配備を境に緑になった。版上げ(8/18 20:29)から約14時間、本番の証拠収集が動いていなかった
 - **8/19以降の初発火(ジョブ #802、8/22)で失敗した。** 成果物の `notes` に `failed to write pre-fetched Semaphore context file for the LLM: [Errno 13] Permission denied: '/var/lib/incident-inspect/semaphore-context/semaphore-context-802.txt'`。LLMはSemaphoreのジョブ出力・ホスト結果・エラー本文を一切読めず、所見は「失敗タスクや直接エラーは特定不能」で終わった。`known_condition.suspected` も先読み欠落を理由に `false` へ落ちている
 - **回帰ではない。** `semaphore_context_dir` とディレクトリ作成タスクは `0196087`(8/19)が初出で、それ以前の #631(8/8)・#675(8/11)は旧経路で正常に所見を出していた。**配備した機能が最初から動いていない。**
 - **AC10が問おうとしていた層には到達していない。** 失敗は「sandbox内のLLMが外のファイルを読めるか」ではなく、その1段手前の**sandboxの外でyoshiがファイルを書く**ところである。unitは `User=yoshi`、roleはこのディレクトリを `owner: yoshi` / `mode: 0750` で作る建付け(`roles/incident_investigate/tasks/main.yml`)なので、**repo側の意図と本番の現物が食い違っている**
 - **配備物は最新である** — `deployed-hash incident-investigate` は repo と一致(`3a22c979…`)。差分ではなくディレクトリ側の問題
-- **開発側から現物を観測する手段が無い。** `acl-status` の対象は `yoshi-home` / `semaphore-dir` / `semaphore-db` / `reports-root` の固定4件で、`/var/lib/incident-inspect/` 配下の arm が無い。**下の `acl-status semaphore-db` と同じクラスの穴が、もう1件効いている**
-- **着手は別案件。** 原因の切り分けに観測手段の追加(dispatchのarm 1本)が要り、それ自体が配備を伴う。壊れているのは調査の質であって本番サービスではない
+- **観測手段を足して原因が確定した**(2026-08-25、`docs/ai/reviews/investigate_acl_observation/`)。`/var/lib/incident-inspect` は `incident-inspect` 所有・`0750`・**ACLエントリなし**で、`yoshi` は owner でも group でもなく「other」に落ちる。**`---` で traverse が無いため、そもそも親へ入れない。** 葉が `yoshi` 所有で正しく作られていても辿り着けない
+- **配備が `ok` を返していた理由もこれで説明が付く** — role は `become: true` で走り、**root は権限ビットを無視する**。root から見て正しいことと `yoshi` が使えることは別だった
+- **設計の穴は traverse が片方向しか無いこと。** `incident-inspect` → 葉の `x` は与えているが、**`yoshi` → 親の経路が無い**。読み手のための経路だけが設計されている
+- **修正は未実施。** 既にある付与の鏡像(親へ `yoshi` の `x`)になる。**採る前に、親へ `x` を与えたとき同じ親の下の `workspace` へ辿り着けるようにならないかを確かめる**
 - **旧 `semaphore.db` ACL は3識別子とも撤去済み**(`/var/lib/semaphore` に named-user エントリなし)
 - **`acl-status semaphore-db` は恒久的に `Permission denied` になった。** `dev-investigate` が traverse を失ったためで異常ではないが、**「ACLが付け直されていないか」を開発側から観測する手段は失われた**
 - **残存リスク**: タスク一覧が将来ページングされたとき、`task-time` は非ゼロで騒ぐが **`recent-failed` は静かに古い分を落とす**。現在757件で頭打ちは観測されていない
