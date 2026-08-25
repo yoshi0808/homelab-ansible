@@ -28,6 +28,13 @@
 # original 25 arms, their arity checks, or their denial text changed by one
 # character to make room for these.
 #
+# 2026-08-25 (docs/ai/reviews/investigate_acl_observation/
+# 2026-08-25_001_requirement.md): acl-status's fixed name->path table grew
+# from 4 entries to 6 (incident-inspect-root / incident-inspect-context
+# added). This is a new item in an existing arm's enum, not a new arm — the
+# total check count above (29) is unchanged, and none of the other 28 arms'
+# arity checks or denial text changed by one character to make room for it.
+#
 # All checks are read-only (I-1): no pvesh create/set/delete, no systemctl
 # start/stop/restart/enable, no qm start/stop, no redirection, no tee/rm/mv/cp.
 # SSH_ORIGINAL_COMMAND is never eval'd or otherwise shell-reinterpreted (I-2,
@@ -360,6 +367,26 @@ case "$check" in
       semaphore-dir) target_path=/var/lib/semaphore ;;
       semaphore-db) target_path=/var/lib/semaphore/semaphore.db ;;
       reports-root) target_path=/home/yoshi/homelab-ansible/reports ;;
+      # Added 2026-08-25 (docs/ai/reviews/investigate_acl_observation/
+      # 2026-08-25_001_requirement.md) to observe the directory the
+      # pre-fetch writer (homelab-incident-investigate.service, User=yoshi)
+      # failed to write into (job #802, EACCES) even though the role that
+      # creates it (incident_investigate) runs become:true and reported `ok`
+      # rather than `changed` on redeploy (job #838) — i.e. the owner/mode
+      # were already as intended from root's view, but that view does not
+      # tell us what `yoshi` can do.
+      # incident-inspect-root is decisive either way: getfacl only needs
+      # traverse on /var/lib, which is open to everyone, so this entry
+      # always reads. Its owner/mode is what determines whether `yoshi` can
+      # get past it.
+      incident-inspect-root) target_path=/var/lib/incident-inspect ;;
+      # incident-inspect-context additionally needs traverse on the
+      # directory above. If that traverse is denied to this identity
+      # (dev-investigate), getfacl fails with Permission denied instead of
+      # returning ACL text — and that failure is itself the observation,
+      # not an error to work around (requirement AC2: either outcome
+      # satisfies the check).
+      incident-inspect-context) target_path=/var/lib/incident-inspect/semaphore-context ;;
       *) deny_invalid path ;;
     esac
     getfacl -p -- "$target_path"
