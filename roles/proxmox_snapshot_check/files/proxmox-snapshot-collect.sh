@@ -2,7 +2,7 @@
 # proxmox-snapshot-collect.sh
 # Collects the snapshot inventory for guests hosted on THIS node and outputs JSON.
 #
-# Shell responsibility (docs/ai/context/operations/healthcheck.md): collection and JSON formatting only.
+# Shell responsibility (skills/ansible-implementation-style/SKILL.md): collection and JSON formatting only.
 # No staleness judgment here. The 7-day threshold is evaluated in Ansible tasks.
 #
 # Collection failures are reported as observed data (collection_ok / errors), not

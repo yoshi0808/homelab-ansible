@@ -4,7 +4,7 @@
 
 ## 位置づけ
 
-本書は、Coordinator(Claude Code)を起点とする agmsg の連絡経路を扱う**非規範runbook**である。扱うのは2つ — **codex 側 Reviewer への依頼**(team `homelab`、local-only、§1〜§6)と、**quory 側 Operator とのすり合わせ**(team `homelab-ops`、remote、§7〜§9)。各Roleの責務・権限・成果物は `docs/ai/roles/<role>.md` が、承認境界は [`docs/ai/policies/execution_boundary_policy.md`](../../policies/execution_boundary_policy.md) が正本であり、競合時はそちらを優先する。IP、認証情報、秘密情報の実値は記載しない。
+本書は、Coordinator(Claude Code)を起点とする agmsg の連絡経路を扱う runbook である。禁止・義務はこの経路の手順に閉じる(`docs/ai/context-classification.md`「Operations Context」「Policyとの境界」)。扱うのは2つ — **codex 側 Reviewer への依頼**(team `homelab`、local-only、§1〜§6)と、**quory 側 Operator とのすり合わせ**(team `homelab-ops`、remote、§7〜§9)。各Roleの責務・権限・成果物は `docs/ai/roles/<role>.md` が、承認境界は [`docs/ai/policies/execution_boundary_policy.md`](../../policies/execution_boundary_policy.md) が正本であり、競合時はそちらを優先する。IP、認証情報、秘密情報の実値は記載しない。
 
 ## 1. 構成
 

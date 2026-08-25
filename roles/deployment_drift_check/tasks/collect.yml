@@ -1,7 +1,7 @@
 ---
 # 各対象ホストで実際の状態を採取する。**判定はしない** — 収集のみ。
 # 判定・分類・通知は compare.yml(controller側)が行う
-# (docs/ai/context/operations/healthcheck.md)。
+# (skills/ansible-implementation-style/SKILL.md)。
 
 # pve_unreachable_handling (2026-08-16, R4/R5): 呼び出し元play
 # (playbooks/deployment_drift_check.yml)の `ignore_unreachable: true` は、

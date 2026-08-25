@@ -144,7 +144,7 @@ Phase 2〜4は対象ホストごとに独立して収集・判定する。1ホ�
 <!-- TIME-010 -->
 shell / Ansible の責務分離: 各ホストでの時刻・offset情報の取得は
 command/expectで行い、差分計算・閾値判定・fail制御はAnsible tasks側に置く
-（docs/ai/context/operations/healthcheck.md）。
+（`skills/ansible-implementation-style/SKILL.md`「check系shellの責務分離」）。
 
 ## 6. 通知方針
 
@@ -237,3 +237,4 @@ role / playbook）
 | v1.2 | 2026-07-26 | Yoshinobuの再点検を反映。CloudKeyのquory参照はhostnameでなくIP登録済みである事実(2026-07-16のAP busybox resolver問題)にTIME-007を訂正。個別ホスト接続失敗とquoryの実際の同期異常の重大度を入れ替え(接続失敗→warning、閾値超過→error)、個別ホスト失敗だけではジョブを非ゼロ終了させず他ホストの検証を継続する方針をTIME-019/021/022として明記。 |
 | v1.3 | 2026-08-02 | 本文に埋め込まれていた改訂経緯・実施日付を除去し、規則本文とTIME番号だけを残す整理を行った(`docs/ai/reviews/norm_docs_rationale_removal_round3/`)。TIME-001からSSH方式検討の経緯段落(受け皿は`docs/ai/reviews/time_sync_check/2026-06-23_006_implement.md`)、TIME-007から2026-06-25実施時の登録値スナップショット(その後quory.internal→IP変更で陳腐化済み)を除去し、busybox ntpdのNXDOMAIN失敗とIP登録という現在も有効な事実・規則は日付なしで残した。許可・禁止・停止条件、TIME番号はいずれも変更していない。TIME番号の新設・退番はない |
 | v1.4 | 2026-08-25 | TIME-017の分類実値複製をやめ、各playbookヘッダのマーカー(TS-007)を正本とする形へ改めた。「§3参照」×2をTIME-007への直接参照に直し(節番号の体系がずれ、旧「§3」が解決しない状態だった)。TIME-005の閾値実値(500ms/5000ms)を落とし、既定値は`roles/time_sync_check/defaults/main.yml`を正本とする形へ改めた。意味論(sophos-fwは他ホストより大きい専用閾値を使う)は維持。 |
+| v1.5 | 2026-08-25 | TIME-010の責務分離規範の参照先を、移設に追随して`docs/ai/context/operations/healthcheck.md`から`skills/ansible-implementation-style/SKILL.md`「check系shellの責務分離」へ付け替えた。規則本文・TIME番号は変更していない。 |

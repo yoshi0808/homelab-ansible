@@ -1,6 +1,6 @@
 ---
 name: ansible-implementation-style
-description: homelab-ansibleのImplementerがshell/Python/Jinja2を含むAnsible実装を書くときのスタイル基準。「実装する」「shellスクリプトを書く」「Jinja2テンプレートを書く」場面で使う。
+description: homelab-ansibleのImplementerがshell/Python/Jinja2を含むAnsible実装を書くときのスタイル基準。「実装する」「shellスクリプトを書く」「Jinja2テンプレートを書く」場面で使う。shellを使う全roleに適用される「check系shellの責務分離」の正本を含む。
 ---
 
 # Ansible Implementation Style
@@ -15,7 +15,37 @@ Ansible専用の公式Skillは存在しないため、内部で使う個別言�
 
 - shellは小規模ユーティリティ・単純なラッパースクリプトに限定して使う。
 - 100行を超える、または制御フローが複雑になった場合は構造化言語(Python)へ書き直す。
-- `docs/ai/core.md`「Ansible変更の共通ゲート」の「check系shellは観測に留め、判定・分類・通知・保存をshellへ持たせない」を補強する根拠として使う(正本は`docs/ai/context/operations/healthcheck.md`)。
+
+### check系shellの責務分離
+
+healthcheck系に限らず、shellを使う全roleに適用される。`docs/ai/core.md`「Ansible変更の共通ゲート」の「check系shellは観測に留め、判定・分類・通知・保存をshellへ持たせない」の正本はここである。
+
+shellスクリプト(`files/*.sh`)は収集とJSON整形のみを行い、warning/critical等の判定をしない。判定・分類・reportは常にAnsible側(`tasks/*.yml`)が行う。
+
+check系shellは対象ホスト上でコマンドを実行し、結果をJSONに整形して標準出力へ返す。**収集とJSON整形のみ**を行い、次を行わない。
+
+- **変更操作**(check系shellへ変更を伴う操作を一切入れない)
+- 正常 / 異常の判定
+- warning / criticalの分類
+- host_varsとの期待値比較
+- 実行継続 / 中止の判断
+- 通知
+- レポート保存
+
+責務分離は次のとおり。
+
+```text
+Shell:   収集とJSON整形のみ
+Ansible: 配置、実行、JSON読込、期待値比較、warning/critical分類、保存、fail制御
+```
+
+補足:
+
+- shellが`port_1812_listen: true/false`のような観測値を返すことは許容する。
+- shellが`status: critical`や`warnings: [...]`を生成することは許容しない。
+- shellはhealth判定の主体ではなく、対象ホスト上の情報収集センサーとして扱う。
+
+`proxmox_snapshot_check`の収集script(`proxmox-snapshot-collect.sh`)はこの分離を明示コメントで守っている好例(「7日の閾値はAnsible tasks側で評価する」と明記)。新規判定を追加する際もshell側を変更する必要はなく、`tasks/main.yml`側だけで完結させられる。healthcheck系role共通のパターン(warning/critical二段階閾値、tester-gateマーカーと実guardの整合、reportの保存パターン等)は`docs/ai/context/operations/healthcheck.md`を参照する。
 
 ## Python
 

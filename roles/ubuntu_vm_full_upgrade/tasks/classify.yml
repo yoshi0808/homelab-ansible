@@ -2,7 +2,7 @@
 # Phase 5-7: important-component judgement, remove judgement, Status
 # determination. All judgement happens here in Ansible tasks — the shell
 # script (ubuntu-full-upgrade-simulate.sh) only extracted raw Inst/Remv
-# package names (requirement §11 / docs/ai/context/operations/healthcheck.md).
+# package names (requirement §11 / skills/ansible-implementation-style/SKILL.md).
 #
 # simulation.phased_detail (upgrades deferred by Ubuntu phased updates) is
 # deliberately NOT an input to any judgement in this file: apt-get

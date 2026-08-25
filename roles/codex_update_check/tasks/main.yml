@@ -1,7 +1,7 @@
 ---
 # codex_update_check: Codex CLI(npm globalパッケージ)のバージョン確認・
 # 差分があれば更新する。バージョン取得はcommandモジュールで収集のみ行い、
-# 判定(比較・changed/failed)はAnsible側(本ファイル)で行う(docs/ai/context/operations/healthcheck.md)。
+# 判定(比較・changed/failed)はAnsible側(本ファイル)で行う(skills/ansible-implementation-style/SKILL.md)。
 # npm本体についても同様にバージョンを確認し、メジャーバージョンが上がって
 # いる場合のみ更新する(マイナー/パッチ差分は静かにスキップ)。
 # 参照:

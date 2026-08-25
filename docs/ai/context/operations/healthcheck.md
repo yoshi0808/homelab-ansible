@@ -1,40 +1,15 @@
 # Operations Context: healthcheck系roleの共通パターン
 
 作成日: 2026-07-22(初版はPhase 7 pilot3向けの最小サブセット)
-更新: 2026-07-26。旧`docs/ai/prompts/core.md` §7・§17のshell責務規範を移設し、**§1はリポジトリ全体に適用される正本**となった。
+更新: 2026-07-26に旧`docs/ai/prompts/core.md` §7・§17のshell責務規範を§1へ移設した。2026-08-25に同規範を`skills/ansible-implementation-style/SKILL.md`「check系shellの責務分離」へ再移設し、本書は正本ではなくなった(分類の越境是正、`docs/ai/context-classification.md`「Policyとの境界」)。
 
-**位置づけ**: §1「shell / Ansible責務分離」は、healthcheck系に限らず**shellを使う全roleに適用される規範**である(移設元の旧core §7が全体規範だったため)。§2以降はhealthcheck系roleの共通パターンをまとめたContextであり、網羅的ではない。他のhealthcheck roleを読んで拡充・再構成することを前提とする。
+**位置づけ**: 本書はhealthcheck系roleの共通パターンをまとめたOperations Contextであり、事実の記録である。§2以降は網羅的ではなく、他のhealthcheck roleを読んで拡充・再構成することを前提とする。
 
-§2以降が主に対象とするrole(read-only診断・`safe-readonly` tester-gate系): `monitoring_healthcheck`、`radius_healthcheck`、`proxmox_healthcheck`、`proxmox_hw_check`、`proxmox_snapshot_check`、`time_sync_check`。なお§1を根拠にしているshellはこれ以外にも存在する(`codex_update_check`、`ubuntu_vm_full_upgrade`等)。
+§2以降が主に対象とするrole(read-only診断・`safe-readonly` tester-gate系): `monitoring_healthcheck`、`radius_healthcheck`、`proxmox_healthcheck`、`proxmox_hw_check`、`proxmox_snapshot_check`、`time_sync_check`。なお§1が指す規範を根拠にしているshellはこれ以外にも存在する(`codex_update_check`、`ubuntu_vm_full_upgrade`等)。
 
 ## 1. shell / Ansible責務分離
 
-shellスクリプト(`files/*.sh`)は収集とJSON整形のみを行い、warning/critical等の判定をしない。判定・分類・reportは常にAnsible側(`tasks/*.yml`)が行う。共通原則の宣言は`docs/ai/core.md`にあり、以下は旧`docs/ai/prompts/core.md` §7・§17から移設した詳細である(2026-07-26、移行表C07-01/C07-02)。
-
-check系shellは対象ホスト上でコマンドを実行し、結果をJSONに整形して標準出力へ返す。**収集とJSON整形のみ**を行い、次を行わない。
-
-- **変更操作**(check系shellへ変更を伴う操作を一切入れない)
-- 正常 / 異常の判定
-- warning / criticalの分類
-- host_varsとの期待値比較
-- 実行継続 / 中止の判断
-- 通知
-- レポート保存
-
-責務分離は次のとおり。
-
-```text
-Shell:   収集とJSON整形のみ
-Ansible: 配置、実行、JSON読込、期待値比較、warning/critical分類、保存、fail制御
-```
-
-補足:
-
-- shellが`port_1812_listen: true/false`のような観測値を返すことは許容する。
-- shellが`status: critical`や`warnings: [...]`を生成することは許容しない。
-- shellはhealth判定の主体ではなく、対象ホスト上の情報収集センサーとして扱う。
-
-`proxmox_snapshot_check`の収集script(`proxmox-snapshot-collect.sh`)はこの分離を明示コメントで守っている好例(「7日の閾値はAnsible tasks側で評価する」と明記)。新規判定を追加する際もshell側を変更する必要はなく、`tasks/main.yml`側だけで完結させられる。
+規範の正本は`skills/ansible-implementation-style/SKILL.md`「check系shellの責務分離」である(healthcheck系に限らずshellを使う全roleに適用される)。healthcheck系roleはこの規範の適用対象の1つである。
 
 ## 2. warning/critical 二段階閾値の慣習
 

@@ -12,7 +12,7 @@ AI作業は`docs/ai/roles/`に従い、Coordinator、Implementer、Reviewer、Te
 |---|---|---|
 | `dev_nodes` | `ansy` (`ansy.internal`) | Ansibleの開発・レビュー・検証環境 |
 | `control_nodes` | `quory` (`quory.internal`) | Gitから取得した確定済みコードの本番Ansible実行基盤。SemaphoreとProxmoxクラスタ外の制御点 |
-| `semaphore_servers` | `ansy`, `quory` | 開発側・本番側のSemaphore実行環境 |
+| `semaphore_servers` | `ansy`, `quory` | `quory`は本番実行基盤。`ansy`は鍵を持たずどのホストへも到達できない検証用インスタンス。詳細は`docs/ai/context/system/semaphore.md` |
 | `proxmox` | `pve1`, `pve2` (各`.internal`) | Proxmox VEクラスタ。ゲストの稼働、レプリケーション、段階的な保守を担う |
 | `radius_servers` | `authy` (`authy.internal`) | FreeRADIUSによるネットワーク認証基盤 |
 | `monitoring_servers` | `monnie` (`monnie.internal`) | Prometheus、Grafana、Loki、unpollerによる収集・可視化・ログ基盤 |

@@ -17,8 +17,7 @@ SemaphoreはAnsible playbookをGUIから手動またはschedule実行し、job�
 - Semaphore jobは、Gitから取得したplaybook、inventory、role、実行環境の名前解決、必要なsecret、対象ホストへの到達性に依存する。**UI上の inventory / repository / environment オブジェクトと、登録済みの key・user の現在状態はGitだけでは完結しない。**
 - **template と schedule の正本は `roles/semaphore_templates/defaults/main.yml` のカタログにある**(template=2026-08-04、schedule=2026-08-10 の `semaphore_schedules_as_code` 案件)。templateの同定は各templateの `description` に書いたマーカー、scheduleの同定は schedule 自身の name で行う。実物の一覧は `semaphore-query template-list` で読める(下記)。**「いつ押されるか」は `semaphore_schedules_catalog` が持ち、実行パラメータ(`task_params`)も同じエントリが持つ。**
 - **カタログが管理しないもの** — inventory / repository / environment のオブジェクト定義そのもの(カタログはこれらを名前で参照するだけ)、users、access key の実体、task の実行履歴。**これらは `semaphore.db` の中にしか無い。**
-- **`cron` を決めるとき、このカタログだけで衝突を判定しない。** 定期実行の窓はSemaphoreの外にも広がっている — UniFi(Console / Device / Protect の自動update)、Proxmox(ローカル/NASバックアップ、ZFS TRIM・scrub)、systemd timer、Ubuntuのunattended-upgradesとfstrim。**管理元が別々で、横断して見えるのはYoshinobuが維持する「バッチ処理工程管理表」だけである**(このリポジトリの外にある)。**時刻を提案・変更するときは、その表に照らしてもらうこと。** 照らさずに「カタログ上は空いている」を根拠にしない — 2026-08-18、02時台をUniFiのAP・スイッチ自動update(ネットワークが揺れうる)と重ねかけた。
-- **scheduleを追加・変更したら、同じ表へも反映する。** カタログだけを更新すると、**次に窓を選ぶ者がその枠を空いていると読む。** **この反映はリポジトリの外で行われるため、gitの履歴からは追えない** — だからここに書いてある。表の所在はCoordinatorが持ち、リポジトリへは書かない(公開されるため)。**2026-08-24、Yoshinobuの決定でCoordinatorが都度確認なく反映する。**
+- 定期実行の窓はSemaphoreの外にも広がっており、管理元が別々で、横断して見えるのはYoshinobuが維持する「バッチ処理工程管理表」だけである(このリポジトリの外にあり、所在はCoordinatorが持つ。公開リポジトリのためここへは書かない)。**時刻・scheduleを決める・変えるときの義務は `roles/semaphore_templates/defaults/main.yml` の `semaphore_schedules_catalog` ヘッダコメントが正本である。**
 - `roles/systemd_timers/defaults/main.yml`では、RADIUS・Proxmox・monitoringのhealthcheck、Proxmox patch dry-run等がSemaphore UI scheduleへ移行済みとしてコメント化されている。ただし、UI上で現在有効かどうかと正確な時刻はSemaphore UIで確認する。
 - `proxmox_healthcheck`と`proxmox_hw_check`は、複数ホストの結果、次の対応、warnings/criticals、確認項目を1行のSemaphore summaryとして標準出力へ出す。job表示は概要、実行コントローラ上のJSON reportは詳細として使い分ける。
 - `cert_renew.yml`は`quory`から実行するSemaphore向けの変更系playbookで、`ansy`のSemaphore、Proxmox UI、`monnie`のGrafanaへ証明書を配布し、必要なserviceをrestartする。CAの秘密情報は一時領域にだけ展開し、cleanupを行う設計である。
@@ -31,9 +30,9 @@ SemaphoreはAnsible playbookをGUIから手動またはschedule実行し、job�
 - 接続は `https://ansy.internal:3000`。**HTTPS である**(httpで叩くと400が返る)。証明書は `homelab_cert_renew` が配っている。
 - **2026-08-04 に SSH 鍵を2本(サーバ群向け / github)削除した。** 残るのは `type=none` の1本のみで、inventory と repository はそれを指す。**したがってこのインスタンスは、どのホストへも到達できず、リポジトリを clone することもできない。**
 - この「鍵が無いことによる無害さ」は、**API の実挙動を本番へ触れずに確かめられる**という価値を持つ。実際、2026-08-04 に id の固定値・`arguments` の型・API と DB スキーマの差という3つの誤った前提が、本番へ入る前にここで判明した。
-- **鍵を再登録しない。** 登録した瞬間にこの性質は失われる。
+- 鍵を再登録しない義務の正本は `docs/ai/policies/execution_boundary_policy.md`(EXEC-052)。
 
-**quory 側の鍵を、ansy と同じ判断で消してはならない。** Semaphore は inventory の `ssh_key_id` を通じて ansible へSSH鍵を渡すため、quory 側の鍵は本番の認証経路そのものでありうる。ansy で消して無害だったのは、ansy が本番ジョブを走らせないからにすぎない。
+quory 側の鍵を、ansy と同じ判断で消してはならない義務の正本は `docs/ai/policies/execution_boundary_policy.md`(EXEC-005)。Semaphore は inventory の `ssh_key_id` を通じて ansible へSSH鍵を渡すため、quory 側の鍵は本番の認証経路そのものでありうる。ansy で消して無害だったのは、ansy が本番ジョブを走らせないからにすぎない。
 
 ## ジョブ結果の読み取り(2026-08-19、SQLite直読みからAPI経由へ移行)
 

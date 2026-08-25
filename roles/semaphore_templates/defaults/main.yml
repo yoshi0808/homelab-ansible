@@ -681,6 +681,23 @@ semaphore_templates_report_dir: >-
 # **task_params.environmentはJSON文字列("{}")であり、dictではない**
 # (6.5節の実測どおり)。YAML側でも文字列のまま(クォート必須)で持つ —
 # dictに変えるとAPIの実データ形状と一致しなくなる。
+#
+# --- cronを決める・変えるときの義務(2026-08-25、docs/ai/context/system/semaphore.md
+# から移設) -------------------------------------------------------------------
+# **`cron`を決めるとき、このカタログだけで衝突を判定しない。** 定期実行の窓は
+# Semaphoreの外にも広がっている — UniFi(Console / Device / Protectの自動update)、
+# Proxmox(ローカル/NASバックアップ、ZFS TRIM・scrub)、systemd timer、Ubuntuの
+# unattended-upgradesとfstrim。横断して見えるのはYoshinobuが維持する「バッチ処理
+# 工程管理表」だけである(このリポジトリの外にあり、所在はCoordinatorが持つ。
+# 公開リポジトリのためここへは書かない)。**時刻を提案・変更するときは、その表に
+# 照らしてもらうこと。** 照らさずに「カタログ上は空いている」を根拠にしない —
+# 2026-08-18、02時台をUniFiのAP・スイッチ自動update(ネットワークが揺れうる)と
+# 重ねかけた。
+#
+# **scheduleを追加・変更したら、同じ表へも反映する。** カタログだけを更新すると、
+# **次に窓を選ぶ者がその枠を空いていると読む。** この反映はリポジトリの外で行われる
+# ため、gitの履歴からは追えない。**2026-08-24、Yoshinobuの決定でCoordinatorが都度
+# 確認なく反映する。**
 semaphore_schedules_catalog:
   - name: "SAFE: Time sync check"
     template: "SAFE: Time sync check"
@@ -909,8 +926,7 @@ semaphore_schedules_catalog:
   # Semaphoreの外(UniFi・Proxmox・systemd timer・unattended-upgrades等)にも
   # 広がっており、横断して持つ正本はYoshinobuが別途管理するNotionの
   # 「バッチ処理工程管理表」(このリポジトリの外)だけである
-  # (docs/ai/context/system/semaphore.md「cronを決めるとき、このカタログ
-  # だけで衝突を判定しない」)。
+  # (本ファイル冒頭の「cronを決める・変えるときの義務」ヘッダコメント参照)。
   #
   # **2026-08-24、Yoshinobuがこの表を実際に確認し、20時台にこの表側の予定が
   # 無いことを確かめた上でこの時刻を選んだ。** これは選定時点で確認した事実

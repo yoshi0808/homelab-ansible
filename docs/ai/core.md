@@ -106,7 +106,7 @@ Roleの実現方式(誰がどのモデルで、どう起動されるか)は `doc
 
 - 対象playbookの `# tester-gate:` マーカーを確認する。分類(`safe-readonly` / `role-guarded` / `risk-accepted` / `check-mode-native` / `dry-run-aware`)の意味、実行方法、Roleごとの実行義務は `docs/ai/policies/ansible_test_safety_policy.md` を正本とする。
 - `check-mode-native` / `dry-run-aware` を `--check` なしで実行することは本番適用であり、Tester役は行わない。
-- check系shellは観測に留め、判定・分類・通知・保存をshellへ持たせない(`docs/ai/context/operations/healthcheck.md`)。
+- check系shellは観測に留め、判定・分類・通知・保存をshellへ持たせない(`skills/ansible-implementation-style/SKILL.md`「check系shellの責務分離」)。
 
 **decoy inventory** は、実ホストへ触れずに実行経路を通すための検証手段である。次の3条件を満たすものを指し、**全Roleで承認不要**とする(都度の提示も要らない)。
 

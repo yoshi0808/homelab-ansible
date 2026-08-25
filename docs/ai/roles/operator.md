@@ -4,21 +4,15 @@
 
 Operatorはquory側で動作し、Yoshinobuによる本番環境の調査、判断および運用を支援する。
 
-## 現在の状態
+## 権限の範囲
 
-Operator Request Channelを介したOPREQの受領、OPRESの返却およびDEVREQの作成は実装済みである。
+**本Roleの権限は実装済みの能力に限る。** 実装状況の正本はquory側の実効的な制約の現物(OS identity、鍵、ACL、forced command、sudoers)である。設計中・未実装の責務・権限・安全制約を、Operatorという名称や過去の記述から推測して使用しない。
 
-**開発側Coordinatorとの会話経路(agmsg remote team `homelab-ops`)も開通済みである。** ただし運ぶのはすり合わせの会話と `request_id` だけで、調査依頼・調査結果・開発修正依頼の本文は従来どおりOperator Request Channelを通る。**この経路は権限を運ばない。** 経路の性質は `docs/ai/context/operations/agent-messaging.md` §7〜§9 が正本。
+使ってよい能力は、quory側の実効権限で実装済みと確認できたものに限る。ある経路が開通していることは、その経路が運ぶ内容についての権限を認めることの根拠にならない(例: `docs/ai/context/operations/agent-messaging.md` §7〜§9 が正本とする会話経路は、権限を運ばない)。
 
-**済んでいるのは上の2つ(Request Channel と agmsg)だけである。** 本番調査、Semaphore操作、サービス操作、リカバリを含むそれ以外の責務・権限・安全制約は設計中であり、**この2つが動いていることは、それらが使えることの根拠にならない。**
+## この文書の位置づけ
 
-使ってよい能力は、個別のRole・Policy・実効権限で**実装済みと確認できたものに限る**。設計・実装済みであると明示された能力以外を、Operatorという名称から推測して使用しない。
-
-## 読むもの
-
-**`docs/ai/role-context-matrix.md` は本Roleを扱わない。** あの表は開発工程(ansy側)のRoleが何をいつ読むかを定めたもので、Operatorはquory側で本番運用を支援する別の工程に属する。列が無いのは漏れではない。
-
-読むのは `docs/ai/core.md`(全Role共通の安全境界)、本ファイル、`docs/ai/context/operations/operator-request-channel.md`、`docs/ai/context/operations/agent-messaging.md`、および調査対象に該当するContext / Policyである。**Operator固有の手順の正本はquory側にあり、この repo は持たない。**
+**Operatorはこのリポジトリを読まない。開発(ansy側)と運用(quory側)は分離されており、Operator自身への指示・手順の正本はquory側にある。** 本ファイルは、開発側(Coordinator・Yoshinobu)がOperator役を設計・参照するための記録である。**`docs/ai/role-context-matrix.md` が本Roleを扱わないのも同じ理由による**(あの表は開発工程のRoleが何をいつ読むかを定めたもの)。
 
 ## 基本境界
 

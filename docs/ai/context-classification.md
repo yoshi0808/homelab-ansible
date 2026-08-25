@@ -24,9 +24,11 @@
 
 **対象**: 「複数のroleにまたがる、運用上の共通パターン・慣習」— System/Repository Contextのどちらにも収まらない、横断的な知識。
 
-**例**: `healthcheck.md`(healthcheck系role共通のshell/Ansible責務分離、warning/critical二段階閾値の慣習、tester-gateマーカーと実guardの整合、reportの保存パターン、既知の落とし穴)。
+**例**: `healthcheck.md`(healthcheck系role共通のwarning/critical二段階閾値の慣習、tester-gateマーカーと実guardの整合、reportの保存パターン、既知の落とし穴)。
 
 **作成条件**: 単一role/単一領域に閉じない、繰り返し現れるパターンが見つかった時に作る。1回しか使わない知見はContextでなくレビュー記録(`docs/ai/reviews/`)やKnowledge(`docs/ai/memory/`)に留める。
+
+**Policyとの境界**: Operations Contextのrunbookは、その手順に閉じた禁止・義務を持ってよい(例: 特定の経路・スクリプトを扱う手順上の注意)。経路・手順の利用そのものに課す確認手続きも、手順に閉じた義務としてここに含まれる。ただし安全境界、実ホスト・本番の状態を変える操作の承認、ホスト区分に触れる規範は、対象がOperations Contextであっても正本にせず、Policyへ置く。
 
 ### Policy(`docs/ai/policies/`)
 
