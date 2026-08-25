@@ -1,6 +1,6 @@
 # Execution Boundary Policy
 
-本書は、**AIが実ホストへ何をしてよいか、誰の承認が要るか**の正本である。対象業務ではなく実行主体の側で引く境界を扱うため、**全Roleが起動時に読む**(`docs/ai/role-context-matrix.md`)。他のPolicyのように該当分野のときだけ読むものではない。
+本書は、**AIが実ホストへ何をしてよいか、誰の承認が要るか**の正本である。対象業務ではなく実行主体の側で引く境界を扱うため、**開発工程のRole(Auditorを除く)が起動時に読む**。絞り込みの根拠は`docs/ai/role-context-matrix.md`と`docs/ai/roles/operator.md`「この文書の位置づけ」である。他のPolicyのように該当分野のときだけ読むものではない。
 
 環境事実と実装詳細は対応Contextを参照し、競合時は本Policyを優先する。**実際に強制している機構は `.claude/settings.json` が正本であり、値を本書へ写さない。**
 
@@ -73,7 +73,7 @@
 
 | 区分 | 扱い |
 |---|---|
-| `git commit` / `git push` | **Yoshinobuの都度承認を得てCoordinatorが実行する。** 承認プロンプトを出す前に、stageした内容の分類とcommitメッセージ案を提示する — プロンプト自体にはdiffが載らないため、提示が無ければ承認は形式になる |
+| `git commit` / `git push` | **Yoshinobuの都度承認を得てCoordinatorが実行する。** 承認プロンプトを出す前に、stageした内容の分類とcommitメッセージ案を提示する — プロンプト自体にはdiffが載らないため、提示が無ければ承認は形式になる。**subagentは承認の有無にかかわらず行わない。** |
 | Policy本文の改訂、要件段階で未許可の破壊的操作、復旧不能なデータ削除、安全境界そのものの変更 | 常にYoshinobuへ上げる |
 | **保護対象ホスト**への非冪等操作でYoshinobu承認済みscope内のもの | Coordinatorが着手前に計画を確認し承認。scope外/不明なら停止してYoshinobuへ。**このうち `pve1` / `pve2` / `authy` / `sophos-fw` へは到達手段が無く、次行が優先する** — 届かない要求に発火しても無害であり、認証情報が復活したとき意図が生き残るため、行そのものは残す |
 | **到達手段が無いホスト** | **承認の対象ではない。届かない。** 配備・適用が要るときはquoryのSemaphore(Yoshinobu起動)へ回す |
@@ -135,21 +135,20 @@
 ## 7. 制約・禁止事項
 
 <!-- EXEC-080 -->
-**安全機構(permission classifier、`permissions.deny`、`autoMode`)がブロックしたら、別の形で同じ結果へ到達しない。** 止めて、ブロックされた事実をCoordinatorへ報告する。**ブロックが妥当かどうかを判定しない** — 被ブロック側もCoordinatorも解除できない。
-
 <!-- EXEC-081 -->
-**ただし、その操作が目的に本当に必要かは問い直してよい。** 必要でなければ、迂回でも停止でもなく、**その結果を必要としない形へ検証設計を組み替える**のが正解になる。**この場合は必ず報告する** — 報告が無ければ迂回と区別が付かない。
+**安全機構(permission classifier、`permissions.deny`、`autoMode`)がブロックしたときの扱いは `docs/ai/core.md`「安全機構がブロックしたとき」を正本とする。**
 
 <!-- EXEC-082 -->
 **実行identityを昇格しない。** `sudo --become-user` 等で別のidentityを引き受けない。到達できないと分かったら、権限の足りる経路を探さず止めてCoordinatorへ返す。「正しいidentityを使っただけで迂回ではない」という整理でこれを越えない。
 
 <!-- EXEC-083 -->
-**この機構を変更したときは、症状ではなく設定そのものを確認する。** `.claude/settings.json` の `permissions.defaultMode` と `autoMode` は両方が揃って初めて機能し、片方が欠けたときの症状は「確認プロンプトが増える」という安全側の壊れ方であるため、壊れていても異常に見えない。
+**この機構(`.claude/settings.json` の `permissions.defaultMode` と `autoMode`)を変更したときの確認手順も `docs/ai/core.md`「安全機構がブロックしたとき」を正本とする。**
 
 ## 8. 変更履歴
 
 | 版 | 日付 | 内容 |
 |---|---|---|
+| v1.4 | 2026-08-25 | 冒頭の読み手を「全Roleが起動時に読む」から「開発工程のRole(Auditorを除く)が起動時に読む」へ改め、絞り込みの根拠として`docs/ai/role-context-matrix.md`と`docs/ai/roles/operator.md`「この文書の位置づけ」を指した(Auditorは技術Contextを読まない設計、Operatorは本リポジトリを読まない設計であり、両者を含めた「全Role」は成立していなかった)。EXEC-030の`git commit`/`git push`行へ「subagentは承認の有無にかかわらず行わない」を追加した(従来この禁止はcore.md「Gitの扱い」節だけが持っており、core.md側は本行への1行ポインタへ統合した)。EXEC-080/081の本文をcore.md「安全機構がブロックしたとき」への1行ポインタへ、EXEC-083の本文を同節への1行ポインタへ改めた(いずれもcore.mdの言い直しで領域適用を加えていなかった)。EXEC-082は領域固有のため本文のまま残した。EXEC番号の新設・退番はない。 |
 | v1.3 | 2026-08-25 | EXEC-005へ「quory側に登録された鍵をansyと同じ判断で消してはならない」を追加した。従来この禁止は`docs/ai/context/system/semaphore.md`だけが持っており、安全境界に触れる規範はContextを正本にせずPolicyへ置く整理に合わせて正本を本書へ移した。EXEC番号の新設・退番はない。 |
 | v1.2 | 2026-08-25 | EXEC-010の「それ以外」行から`monnie`を除去した（v1.1で「到達手段が無い」行へ`monnie`を加えた際の除去漏れ。同一ホストが両区分に同時に載り承認要否が一意に決まらない状態だった）。 |
 | v1.1 | 2026-08-19 | **`id_ann` を ansy から削除**し、`sandbox` 専用の `id_sandbox` へ分けた。EXEC-003 に `monnie` の行を足し、**「相手側で1行足せば復活する」経路が消えた**ことを書いた。EXEC-005 を過渡期の記述から実施済みの内容へ差し替え、EXEC-010 の「到達手段が無い」へ `monnie` を加えた |

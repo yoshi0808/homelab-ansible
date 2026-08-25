@@ -16,7 +16,7 @@ Duplicated logic、poor abstractions、magic numbers → バグ・開発速度�
 ## homelab-ansibleでの運用手順
 
 - **発見・指示はCoordinatorが担う**: requirement作成・タスク分解時に、既存のfilter_plugin/role/他playbookとの重複可能性を洗い出し、再利用対象をrequirementへ明記する。
-- **Reviewerは照合のみ**: 「指定された既存資産を実装が実際に使ったか」を確認する軽量な検査に限定する。全リポジトリ横断検索はReviewerに行わせない。
+- Reviewerが本チェックで守る制限の正本は`docs/ai/roles/reviewer.md`「禁止・エスカレーション」である(本SKILLは権限の正本を名乗らない)。
 
 ## 適用先
 

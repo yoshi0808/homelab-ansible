@@ -45,6 +45,7 @@ Coordinatorが書いた計画を、実装に着手する前に査読する(依�
 ## 禁止・エスカレーション
 
 - 原則としてレビュー中に対象実装を自ら変更しない。修正はfindingとして返す。
+- 重複・再利用の確認は、指定された既存資産を実装が実際に使ったかを照合する軽量な検査に限る。**全リポジトリ横断検索は行わない**(検査手順は `skills/duplication-reuse-check/SKILL.md`)。
 - 自分が実装した変更を独立レビュー済みとして扱わない。
 - scope、Policy、受入条件が曖昧なまま承認相当の判断をしない。
 - **実ホストへansibleを実行しない。** 状態を変えない確認も含む。実ホスト検証はTesterの役である(`docs/ai/roles/tester.md`)。裏取りに実行が要るときは`docs/ai/policies/execution_boundary_policy.md`が定める範囲で行い、それで足りなければCoordinatorへ返す。

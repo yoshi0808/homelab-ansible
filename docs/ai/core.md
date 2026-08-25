@@ -62,7 +62,7 @@ quory = Gitから取得した確定済みコードの本番実行基盤
 - 差分に含めてよいのは、着手前の `git status` / diff で今回の依頼のscopeに含まれると確認できた変更だけである。他者の変更を上書き・破棄・整形の対象にしない。
 - **自分が作った変更以外を元に戻さない**(`git checkout` / `git restore` / `git stash` を含む)。
 - `git add` を行うのはCoordinatorだけである。
-- `git commit` / `git push` は、Yoshinobuの都度承認を得た対話セッションだけが行う。**subagentは承認の有無にかかわらず行わない。**
+- `git commit` / `git push` の承認区分・実行主体はEXEC-030(`docs/ai/policies/execution_boundary_policy.md`)を正本とする。
 - playbook自身にGit更新を行わせない。
 
 ## 公開情報と秘密情報
@@ -79,7 +79,7 @@ quory = Gitから取得した確定済みコードの本番実行基盤
 情報は必要な範囲だけを、次の順序で選ぶ。
 
 1. 本ファイルで共通原則を確認する。
-2. **`docs/ai/policies/execution_boundary_policy.md` と、自分のRole文書 `docs/ai/roles/<role>.md` を読む。** 実行境界のPolicyは、対象業務に関わらず全Roleが起動時に読む(4項の「対象業務のPolicyだけ」の例外はこれ1本である)。 対話セッションのCoordinatorは `docs/ai/roles/coordinator.md` が該当し、あわせて `docs/ai/status.md` で現在地を確認する(SessionStart hookが自動で載せる。載っていなければ読む)。
+2. **`docs/ai/policies/execution_boundary_policy.md` と、自分のRole文書 `docs/ai/roles/<role>.md` を読む。** 実行境界のPolicyは、対象業務に関わらず開発工程のRole(Auditorを除く)が起動時に読む(4項の「対象業務のPolicyだけ」の例外はこれ1本である。絞り込みの根拠は`docs/ai/role-context-matrix.md`と`docs/ai/roles/operator.md`「この文書の位置づけ」)。 対話セッションのCoordinatorは `docs/ai/roles/coordinator.md` が該当し、あわせて `docs/ai/status.md` で現在地を確認する(SessionStart hookが自動で載せる。載っていなければ読む)。
 3. requirement、review、test_planなど、依頼で指定された案件記録を読む。
 4. 対象領域のSystem / Repository / Operations Contextと、対象業務のPolicyだけを辿る(分類の定義は `docs/ai/context-classification.md`、誰がいつ読むかは `docs/ai/role-context-matrix.md`)。
 5. 作業内容に一致するSkillを使う。

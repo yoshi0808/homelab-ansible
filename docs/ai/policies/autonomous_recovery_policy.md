@@ -370,7 +370,7 @@ Codex wrapperはsudo、setuid、file capabilityによる権限昇格を前提に
 <!-- AR-093 -->
 - `recovery-exec`に`ann`のkeyまたはSlack tokenを持たせてはならない。
 <!-- AR-102 -->
-- Codexの設定ファイルに書くコマンド制限(execpolicy等)を安全境界として設計してはならない。境界は能力の不在 — 鍵・wrapper・到達先が存在しないこと — で作る。
+- Codexの設定ファイルに書くコマンド制限(execpolicy等)を安全境界として設計してはならない。境界の作り方は`docs/ai/core.md`「安全機構がブロックしたとき」を正本とする。
 
 ## 8. 変更履歴
 
@@ -383,3 +383,4 @@ Codex wrapperはsudo、setuid、file capabilityによる権限昇格を前提に
 | 2026-08-02 | AR-103本文にあった根拠引用(`docs/ai/memory/incidents/2026-07-29_global-monitoring-pause-left-on-8-days.md`。上記2026-08-01行に同一引用が既存)を除去し、実装・案件記録のポインタだけを残した(`docs/ai/reviews/norm_docs_rationale_removal_round3/`)。許可・禁止・停止条件、AR番号はいずれも変更していない。AR番号の新設・退番はない |
 | 2026-08-25 | Codex向けAGENTS.mdが2つあり能力が異なることを規定としてAR-104を新設。同一化・統合を禁じ、一次調査のLLMのAGENTS.mdへdispatchのcommandを書かないことを明記した。既存AR番号の改訂・退番はない |
 | 2026-08-25 | Pull ladderの説明文にあった未定義識別子「P4」(本文書のどこにも定義が無い)と、列挙と一致しない数の宣言「4分岐」を削除した。許可・禁止・停止条件は変更していない。 |
+| 2026-08-25 | AR-102後段(「境界は能力の不在で作る」)を`docs/ai/core.md`「安全機構がブロックしたとき」への1行ポインタへ改めた(core.mdの原則文の言い直しで領域適用を加えていなかった)。前段(execpolicy禁止)は領域適用のため本文のまま残した。AR番号の新設・退番はない。 |
