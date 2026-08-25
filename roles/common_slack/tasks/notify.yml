@@ -118,11 +118,26 @@
       # so pointing _slack_webhook at a closed loopback port keeps the send
       # local. `_slack_webhook` carries the full URL including the secret
       # token — do not split it into token/domain again.
+      # timeout: community.general.slack never passed a timeout to
+      # fetch_url(), so it ran at ansible-core's fetch_url() default of 10s
+      # (module_utils/urls.py). uri's own default is 30s. 10s here preserves
+      # the old effective value (P0-5) and stays well under the 30s parent
+      # subprocess timeout that incident-investigate.py uses for the sibling
+      # path (roles/incident_investigate/defaults/main.yml,
+      # incident_investigate_notify_timeout_s) — this path has no such
+      # parent, but the same explicit value keeps both notify paths
+      # consistent and avoids the 3x latency regression a bare default
+      # would introduce.
       ansible.builtin.uri:
         url: "{{ _slack_webhook }}"
         method: POST
         body_format: json
         body:
+          # link_names: community.general.slack always sent this (default 1,
+          # slack.py:472) so @here / channel / user-group references kept
+          # resolving. Omitting it here would silently change the rendered
+          # notification (§3 "見た目を変えない").
+          link_names: 1
           attachments:
             - title: "{{ _slack_icon }} {{ slack_title }}"
               text: "{{ slack_message }}"
@@ -130,6 +145,7 @@
               fallback: "{{ slack_title }}"
               footer: "{{ 'capture: ' ~ _capture_written_id if _capture_written_id is defined else '' }}"
         status_code: 200
+        timeout: 10
       delegate_to: localhost
       become: false
       no_log: true

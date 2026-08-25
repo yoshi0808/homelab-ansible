@@ -126,6 +126,18 @@
         # — 2026-08-25、docs/ai/reviews/slack_notify_uri_migration/
         # 2026-08-25_001_requirement.md §1)。`slack_webhook_alerts`は
         # トークン抽出をせずフルURLのまま渡す。
+        # timeout: community.general.slack never passed a timeout to
+        # fetch_url(), so it ran at ansible-core's fetch_url() default of
+        # 10s (module_utils/urls.py). uri's own default (30s) collides with
+        # the 30s parent subprocess timeout
+        # (incident_investigate_notify_timeout_s,
+        # roles/incident_investigate/defaults/main.yml:178) that
+        # incident-investigate.py uses to run this playbook — against an
+        # endpoint that accepts the connection but never responds, the
+        # parent would kill ansible-playbook before uri gives up, so
+        # `rescue` never runs and the 2026-08-07 fix (surface the failure
+        # reason instead of losing it) is bypassed. 10s preserves the old
+        # effective value and leaves a 3x margin under the 30s parent.
         - name: "Send plain-text Slack notification to #alerts (N2 — no status/severity/color)"
           ansible.builtin.uri:
             url: "{{ slack_webhook_alerts }}"
@@ -133,7 +145,12 @@
             body_format: json
             body:
               text: "{{ _iv_body }}"
+              # link_names: community.general.slack always sent this
+              # (default 1, slack.py:472). Omitting it would silently
+              # change how @here / channel references render (§3).
+              link_names: 1
             status_code: 200
+            timeout: 10
           no_log: true
           when: not ansible_check_mode
           tags: [destructive]
