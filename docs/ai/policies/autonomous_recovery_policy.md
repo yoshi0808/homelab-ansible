@@ -241,6 +241,9 @@ extra調査は固定name / commandとして追加し、sudoが必要なら対応
 <!-- AR-028 -->
 調査追加時はCodexがそのcheckを認識できる説明も同期する。
 
+<!-- AR-104 -->
+Codex向けAGENTS.mdは2つある。`recovery_exec`が配るもの(自律復旧のCodex)と、`incident_inspect`が配るもの(一次調査のLLM)で、能力が異なるため同一にしない。統合もしない。一次調査のLLMはSSH鍵を持たずdispatchへ到達できないため、そのAGENTS.mdへdispatchのcommandを書かない。
+
 <!-- AR-030 -->
 common check categoryを追加する場合だけ両templateへ直接追加し、両側の検証を同期する。
 
@@ -378,3 +381,4 @@ Codex wrapperはsudo、setuid、file capabilityによる権限昇格を前提に
 | 2026-07-31 | execpolicyが安全境界として成立しないことが実測で確定したため、AR-069 / AR-071 / AR-073を実態(能力の不在で境界を作る)へ改訂し、AR-102を新設。§7の節名も`Execpolicy、wrapper、file権限`から改めた。根拠: `docs/ai/memory/incidents/2026-07-31_codex-execpolicy-allowlist-not-enforcing.md` |
 | 2026-08-01 | global pauseの解除忘れとprobe停止を日次で検知する規定としてAR-103を新設。TTLによる自動resumeは採らず、通知で人間の判断を挟む形とした(Yoshinobu選択)。根拠: `docs/ai/memory/incidents/2026-07-29_global-monitoring-pause-left-on-8-days.md`、案件記録: `docs/ai/reviews/recovery_pause_daily_check/` |
 | 2026-08-02 | AR-103本文にあった根拠引用(`docs/ai/memory/incidents/2026-07-29_global-monitoring-pause-left-on-8-days.md`。上記2026-08-01行に同一引用が既存)を除去し、実装・案件記録のポインタだけを残した(`docs/ai/reviews/norm_docs_rationale_removal_round3/`)。許可・禁止・停止条件、AR番号はいずれも変更していない。AR番号の新設・退番はない |
+| 2026-08-25 | Codex向けAGENTS.mdが2つあり能力が異なることを規定としてAR-104を新設。同一化・統合を禁じ、一次調査のLLMのAGENTS.mdへdispatchのcommandを書かないことを明記した。既存AR番号の改訂・退番はない |
