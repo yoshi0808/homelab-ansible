@@ -17,6 +17,16 @@ Policy: docs/ai/policies/autonomous_recovery_policy.md AR-095〜AR-101)。
 
   recovery-loki-helper count  <since> <window>
   recovery-loki-helper window <job> <since> <window> <level>
+  recovery-loki-helper errors <since> <window>
+
+`errors` は全job横断で `level="error"` の行を返す(2026-09-01追加、requirement:
+docs/ai/reviews/loki_investigate_vocabulary/2026-09-01_001_requirement.md)。
+level が付かなかった行はselectorの時点で除外されるため `errors` では取得
+できず、その旨を結果自身が明示する(AC4)。level無しの行そのものは
+`count`(集計。`(no level label)` と表示)と `window ... any`(levelで絞
+らないため level無しの行も返す、下記R3)で読める — 到達経路は残っている
+(2026-09-01レビューB3/B4で明確化。level が付くかどうかは job や host で
+はなく行ごとに決まる)。
 
 `<since>` は "YYYY-MM-DDTHH:MM"(分精度)で、常にJSTとして解釈する
 (実行hostのTZ設定に依存させない — AR-100)。
@@ -46,15 +56,22 @@ LOKI_BASE = "http://localhost:3100"
 JST = timezone(timedelta(hours=9))
 
 # --- R4/AR-098: fixed output-volume limits (initial values, 2026-07-29 実測) ---
-QUERY_LIMIT = 300  # loki-window: query_range `limit` param (返すlog行数の上限)
-MAX_LINES = 300  # loki-window: stdout行数の上限(切り詰め通知に1行分を予約する)
-MAX_LINE_LENGTH = 300  # loki-window: 1行あたりの文字数上限
+# loki-window / loki-errors で共有(2026-09-01追加のloki-errorsのために値は
+# 増やしていない — requirement AC2)。
+QUERY_LIMIT = 300  # query_range `limit` param (返すlog行数の上限)
+# stdout行数の上限。loki-windowは切り詰め通知に1行を予約する。loki-errors
+# はAC4のnote行(常時出力)にも1行を予約するため、切り詰め時は
+# note(1) + entries(MAX_LINES-2) + 切り詰め通知(1) = MAX_LINES を超えない
+# よう entries 側の予算をさらに1行減らす(2026-09-01レビューB1で修正)。
+MAX_LINES = 300
+MAX_LINE_LENGTH = 300  # 1行あたりの文字数上限
 
 # --- R9(P2)/将来のjob・host増加への保険。実測は11系列。 ---
 MAX_SERIES = 500
 
 ALLOWED_COUNT_WINDOWS = {"5m", "10m", "15m", "30m", "1h", "3h", "6h", "12h", "24h"}
 ALLOWED_WINDOW_WINDOWS = {"5m", "10m", "15m", "30m", "1h"}
+ALLOWED_ERRORS_WINDOWS = {"1h", "6h", "12h", "24h"}
 ALLOWED_JOBS = {"unifi", "network-devices", "pve-nodes", "sophos-fw", "ubuntu-nodes"}
 ALLOWED_LEVELS = {"any", "error", "warning", "info"}
 
@@ -150,6 +167,27 @@ def cmd_count(argv):
     print(f"\ntotal series: {len(rows)}" + (" (truncated)" if truncated_series else ""))
 
 
+def _truncation_notice(start, end, last_shown_ts_ns, entries_shown, threshold):
+    # Shared by cmd_window and cmd_errors (AC3: 新語彙もloki-windowと同じ
+    # 形式で「要求した窓のうちどこまで実際に読めたか」を出す)。
+    # entries_shown/threshold は呼び出し側が渡す実測値であり、この関数自体
+    # はMAX_LINESを直接参照しない — cmd_errorsはAC4のnote行の分だけ表示
+    # できる件数がcmd_windowより1件少ないため(B1修正、2026-09-01レビュー)。
+    # cmd_window向けの呼び出しは entries_shown=MAX_LINES-1, threshold=
+    # MAX_LINES を渡し、旧版(このrefactor前)と同一の文言・数値になる。
+    covered_end = datetime.fromtimestamp(
+        last_shown_ts_ns / 1e9, tz=timezone.utc
+    ).astimezone(JST)
+    fmt = "%m-%d %H:%M:%S"
+    return (
+        f"[TRUNCATED — read {start.strftime(fmt)}..{covered_end.strftime(fmt)} "
+        f"of requested {start.strftime(fmt)}..{end.strftime(fmt)} JST; "
+        f"earliest {entries_shown} of >{threshold} lines. The rest of the "
+        "window was NOT read — narrow the window or job and re-query before "
+        "concluding.]"
+    )
+
+
 def cmd_window(argv):
     if len(argv) != 4:
         deny("invalid parameter count for 'window'")
@@ -216,16 +254,95 @@ def cmd_window(argv):
         # 目的の事象があった)。direction=forwardのため落ちるのは常に末尾側で、
         # 「どこまで読めたか」が分からないことが欠陥の本体である。
         # entriesはtruncated成立時に必ずMAX_LINES-1件あるので空にならない。
-        covered_end = datetime.fromtimestamp(
-            entries[-1][0] / 1e9, tz=timezone.utc
-        ).astimezone(JST)
-        fmt = "%m-%d %H:%M:%S"
+        print(_truncation_notice(start, end, entries[-1][0], len(entries), MAX_LINES))
+
+
+def cmd_errors(argv):
+    if len(argv) != 2:
+        deny("invalid parameter count for 'errors'")
+    since, window = argv
+    if window not in ALLOWED_ERRORS_WINDOWS:
+        deny(f"invalid window '{window}' for 'errors'")
+    start = parse_since_jst(since)
+    end = start + timedelta(seconds=WINDOW_SECONDS[window])
+
+    # requirement §3: 全job横断で level="error" のみ。level="error" を
+    # selectorへ含めるため、level が付かなかった行はLoki側で最初から除外
+    # される(level が付くかどうかは job や host ではなく行ごとに決まる —
+    # 2026-09-01レビューB4)。cmd_windowのR3コメントと同じ理由の裏側で、
+    # ここでは除外そのものが目的である(AR-099は「level絞り込みを既定に
+    # しない」であって、この語彙自体がlevel絞り込み専用であることを禁じ
+    # ない)。level無しの行へ到達する経路はcmd_count(集計)とcmd_window
+    # の`any`(levelで絞らない)に残っている — B3, catalog §9。
+    selector = '{job=~".+", level="error"}'
+
+    params = {
+        "query": selector,
+        "start": rfc3339_utc(start),
+        "end": rfc3339_utc(end),
+        # loki-window と同じ考え方(AC2: 定数そのものは緩めない)。
+        "limit": str(QUERY_LIMIT + 1),
+        "direction": "forward",
+    }
+    data = loki_get("/loki/api/v1/query_range", params)
+    result = data.get("data", {}).get("result", [])
+
+    entries = []
+    for stream in result:
+        labels = stream.get("stream", {})
+        job = labels.get("job", "")
+        host = labels.get("host") or labels.get("unit") or job
+        for ts_ns, line in stream.get("values", []):
+            entries.append((int(ts_ns), job, host, line))
+    entries.sort(key=lambda e: e[0])
+
+    # B1(2026-09-01レビュー): AC4のnote行はMAX_LINESの外ではない — 総
+    # stdout行数がMAX_LINESを超えてはならない(AC2/AR-098)。note用に1行
+    # を先に予約し、切り詰めが要るときはさらに通知用の1行を予約してから
+    # entriesの表示件数を決める。
+    #   非切り詰め時: note(1) + entries(<=MAX_LINES-1) <= MAX_LINES
+    #   切り詰め時  : note(1) + entries(MAX_LINES-2) + 通知(1) = MAX_LINES
+    NOTE_LINES = 1
+    entry_budget = MAX_LINES - NOTE_LINES
+    truncated = len(entries) > entry_budget
+    if truncated:
+        entries = entries[: entry_budget - 1]
+
+    # AC4: level が付かなかった行はこの語彙で取得できないことを、結果が
+    # 空であっても常に出力自身が明示する(「errorがN件だった」を環境全体
+    # の結論として読めてしまう経路を塞ぐ)。特定のjobを名指しして「常に
+    # 見えない」と書かない — level が付くかどうかは行ごとに決まり、同じ
+    # jobの中でも付く行と付かない行が混在しうる(B4)。
+    print(
+        "note: loki-errors only sees lines that had a level label attached "
+        "during collection (this varies line by line, not by job); lines "
+        "without one are invisible here and are NOT counted as error-free "
+        "by this result."
+    )
+
+    # C1(2026-09-01再レビュー): entriesの件数だけでMAX_LINES予算を組んで
+    # も、1 entryの本文に埋め込みCR/LFが含まれると物理stdout行が複数に
+    # 展開され、MAX_LINESを実質的に回避できてしまう(Codexが `a\nb` を
+    # 本文とする299 entriesで599物理行を再現)。`str.splitlines()` は
+    # CR/LF/CRLFに加え他の物理改行相当の文字も含めて分割するため、本文
+    # を1論理行へ正規化してから長さ制限・出力する — この時点で
+    # entries内の件数と、以降で実際に出力される物理行数が一致すること
+    # が保証される(既存cmd_window/cmd_countは対象外。この語彙自身が
+    # AC2/AR-098を満たすための修正であり、既存2語の出力処理は変更しな
+    # い)。
+    for ts_ns, job, host, line in entries:
+        ts = datetime.fromtimestamp(ts_ns / 1e9, tz=timezone.utc).astimezone(JST)
+        normalized_line = " ".join(line.splitlines()) if line else line
+        formatted = f"{ts.strftime('%Y-%m-%dT%H:%M:%S+09:00')} [{job}/{host}] {normalized_line}"
+        if len(formatted) > MAX_LINE_LENGTH:
+            formatted = formatted[: MAX_LINE_LENGTH - 3] + "..."
+        print(formatted)
+
+    if truncated:
         print(
-            f"[TRUNCATED — read {start.strftime(fmt)}..{covered_end.strftime(fmt)} "
-            f"of requested {start.strftime(fmt)}..{end.strftime(fmt)} JST; "
-            f"earliest {MAX_LINES - 1} of >{MAX_LINES} lines. The rest of the "
-            "window was NOT read — narrow the window or job and re-query before "
-            "concluding.]"
+            _truncation_notice(
+                start, end, entries[-1][0], len(entries), entry_budget
+            )
         )
 
 
@@ -238,6 +355,8 @@ def main():
         cmd_count(rest)
     elif sub == "window":
         cmd_window(rest)
+    elif sub == "errors":
+        cmd_errors(rest)
     else:
         deny(f"unknown subcommand '{sub}'")
 

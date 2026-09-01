@@ -3,6 +3,7 @@
 # Called by Codex: homelab-investigate-{{ target.name }} <check>
 {% if 'loki' in target.investigate_services %}#              or: homelab-investigate-{{ target.name }} loki-count <since> <window>
 #              or: homelab-investigate-{{ target.name }} loki-window <job> <since> <window> <level>
+#              or: homelab-investigate-{{ target.name }} loki-errors <since> <window>
 {% endif %}# Hostname is hardcoded (§4.3: connection target fixed in script, not from args).
 # -F /dev/null: skip system ssh_config (bwrap UID mapping breaks ownership checks).
 #
@@ -91,6 +92,15 @@ case "$check" in
       *) deny_invalid level ;;
     esac
     run_remote "$check $p1 $p2 $p3 $p4"
+    ;;
+  loki-errors)
+    (( argc == 3 )) || deny_count
+    valid_since "$p1" || deny_invalid since
+    case "$p2" in
+      1h|6h|12h|24h) ;;
+      *) deny_invalid window ;;
+    esac
+    run_remote "$check $p1 $p2"
     ;;
 {% endif %}
   # journal-ssh (catalog §7, D7, 2026-08-03). Takes only a window — the unit

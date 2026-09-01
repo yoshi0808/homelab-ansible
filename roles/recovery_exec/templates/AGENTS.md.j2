@@ -85,6 +85,7 @@ Node-specific checks:
 homelab-investigate-monnie <check>
 homelab-investigate-monnie loki-count <since> <window>
 homelab-investigate-monnie loki-window <job> <since> <window> <level>
+homelab-investigate-monnie loki-errors <since> <window>
 ```
 Connects to monnie via SSH and reports status.
 Allowed values for `<check>`:
@@ -148,33 +149,51 @@ Node-specific checks:
 - `loki-health` — Loki metrics endpoint
 - `unpoller-config` — unpoller ExecStart + port binding
 
-**Loki横断ログ調査(`loki-count` / `loki-window`)**: monnie上のLokiに問い合わせるが、
-**返る内容はmonnie自身の状態ではなくhomelab全体で収集済みの集約ログ**である
-(job/hostはmonnieに限らない — quory、pve-nodes、UniFi機器等も含む)。まず
-`loki-count`で該当時間帯にどのjob/host/levelにログがあるか当たりをつけ、次に
-`loki-window`で該当jobの本文を取得する2段構えで使う。
+**Loki横断ログ調査(`loki-count` / `loki-window` / `loki-errors`)**: monnie上のLokiに
+問い合わせるが、**返る内容はmonnie自身の状態ではなくhomelab全体で収集済みの集約ログ**
+である(job/hostはmonnieに限らない — quory、pve-nodes、UniFi機器等も含む)。使い分け:
 
-**切り詰めが出たら、結論を出す前に必ず引き直す**: `loki-window` は上限に当たると
-末尾へ `[TRUNCATED — read <実際に読めた範囲> of requested <要求した範囲> ...]` を
-出力する。落ちるのは**常に窓の後ろ側**なので、読めていない範囲に目的の事象がある
-可能性が高い。この行が出たら、**窓を狭めるか job を絞って引き直し、要求した範囲を
-読み切ってから結論する**。読めた範囲だけを見て「異常なし」と報告してはならない。
+- `loki-count` — 該当時間帯にどのjob/host/levelにログがあるか当たりをつける(集計の
+  み、本文は返らない)。
+- `loki-window` — 特定の1jobについて本文を取得する(最大窓1h、`any`/`error`/
+  `warning`/`info`のいずれのlevelでも使える)。
+- `loki-errors` — **全job横断で`level=error`の行だけ**を、最大24hの窓で1回で取得
+  する。複数jobにまたがるerrorを`loki-window`で追うとjob数×窓数の呼び出しが要る
+  ところを1回で済ませる。**error専用**(`any`/`warning`/`info`は不可)なので、
+  `loki-count`で当たりをつけて`loki-window`で本文を読む2段構えを置き換えるもので
+  はなく、「まずerrorだけ横断で拾う」用途に限る。
+
+**切り詰めが出たら、結論を出す前に必ず引き直す**: `loki-window` / `loki-errors` は
+上限に当たると末尾へ `[TRUNCATED — read <実際に読めた範囲> of requested <要求した
+範囲> ...]` を出力する。落ちるのは**常に窓の後ろ側**なので、読めていない範囲に目的
+の事象がある可能性が高い。この行が出たら、**窓を狭めるか job を絞って引き直し、要
+求した範囲を読み切ってから結論する**。読めた範囲だけを見て「異常なし」と報告して
+はならない。`loki-errors`にはjob operandが無いため、窓を狭めるか、対象jobの見当が
+付くなら`loki-window`(最大1h)へ切り替える。
 
 - `<since>` — `YYYY-MM-DDTHH:MM`(分精度)。**常にJSTとして解釈される**(monnieの
   TZ設定に依存しない)。
 - `loki-count`の`<window>`: `5m` / `10m` / `15m` / `30m` / `1h` / `3h` / `6h` /
   `12h` / `24h`。
 - `loki-window`の`<window>`: `5m` / `10m` / `15m` / `30m` / `1h`。
+- `loki-errors`の`<window>`: `1h` / `6h` / `12h` / `24h`。
 - `<job>`: `unifi` / `network-devices` / `pve-nodes` / `sophos-fw` / `ubuntu-nodes`。
-- `<level>`: `any` / `error` / `warning` / `info`。**`any`は省略不可の必須指定**で、
-  「levelで絞らない」という意味である。levelラベルが付いていない行(実運用で
-  `network-devices`に多い)も`any`なら含まれるが、`info`等levelを指定すると
-  ラベルが無い行は結果から除外される。
+  `loki-errors`にはjob operandが無く、常に全job横断。
+- `<level>`: `any` / `error` / `warning` / `info`(`loki-window`のみ)。**`any`は省略
+  不可の必須指定**で、「levelで絞らない」という意味である。levelラベルが付いてい
+  ない行(levelが付くかどうかはjobやhostではなく行ごとに決まる)も`any`なら含まれ
+  るが、`info`等levelを指定するとラベルが無い行は結果から除外される。
 - `loki-count`はjob / host / level別の件数表を返す。levelラベルが存在しない
   系列は空文字列と区別して「ラベル無し」と表示される。
 - `loki-window`は該当窓のlog本文を時刻昇順で返す(最大300行、1行最大300文字)。
   一致件数が上限を超える場合は末尾にその旨が明記される — 明記が無ければ全件
   取得できている。
+- `loki-errors`は全job横断でerror行を`[job/host] 本文`の形で時刻昇順で返す(最大
+  300行、1行最大300文字)。**levelが付かなかった行はこの語彙では取得できない** —
+  結果の先頭に必ずその旨の`note:`行が出る(0件でも出る)。level無しの行を見たい
+  ときは`loki-count`(集計)または`loki-window <job> <since> <window> any`(level
+  で絞らないためlevel無しの行も返る)を使う — level無しの行に到達する経路はこの
+  2つに残っている。
 - 自由文字列によるlog本文grepには対応しない。job / 時刻 / levelでの絞り込みのみ。
 
 ### Proxmox read-only investigation (homelab-investigate-pve1, homelab-investigate-pve2)

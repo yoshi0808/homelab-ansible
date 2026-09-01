@@ -6,10 +6,11 @@
 #
 # Most checks below are single, literal, no-argument tokens matched against
 # the full command string (unchanged behaviour). Loki横断ログ調査
-# (loki-count / loki-window, monnie-only — see AR-095〜AR-101) is the only
-# parameterized case; it independently re-parses and re-validates its
+# (loki-count / loki-window / loki-errors, monnie-only — see AR-095〜AR-101)
+# is one of several parameterized cases (see also journal-ssh, deployed-hash,
+# unit-cat below); each independently re-parses and re-validates its
 # operands here rather than trusting the quory-side wrapper (AR-097), and
-# never eval's or otherwise shell-reinterprets SSH_ORIGINAL_COMMAND
+# none eval's or otherwise shell-reinterprets SSH_ORIGINAL_COMMAND
 # (AR-048/AR-088 discipline).
 set -euo pipefail
 
@@ -213,9 +214,10 @@ case "$cmd" in
 {% if 'loki' in target_item.investigate_services %}
 
   # --- Loki横断ログ調査 (AR-095〜AR-101, monnie-only) ---
-  # Fixed arity: loki-count takes exactly 2 operands, loki-window exactly 4.
-  # `read` captures any operand beyond the declared count into `extra`, so a
-  # 3rd/5th+ token is rejected before the helper is ever invoked.
+  # Fixed arity: loki-count takes exactly 2 operands, loki-window exactly 4,
+  # loki-errors exactly 2. `read` captures any operand beyond the declared
+  # count into `extra`, so a 3rd/5th+ token is rejected before the helper is
+  # ever invoked.
   loki-count|loki-count\ *)
     read -r _ since window extra <<<"$cmd"
     if [[ -z "$since" || -z "$window" || -n "$extra" ]]; then
@@ -267,6 +269,25 @@ case "$cmd" in
         ;;
     esac
     exec /usr/local/sbin/recovery-loki-helper window "$job" "$since" "$window" "$level"
+    ;;
+  loki-errors|loki-errors\ *)
+    read -r _ since window extra <<<"$cmd"
+    if [[ -z "$since" || -z "$window" || -n "$extra" ]]; then
+      echo "denied: invalid parameter count for 'loki-errors'" >&2
+      exit 1
+    fi
+    if [[ ! "$since" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}$ ]]; then
+      echo "denied: invalid since for loki-errors" >&2
+      exit 1
+    fi
+    case "$window" in
+      1h|6h|12h|24h) ;;
+      *)
+        echo "denied: invalid window for loki-errors" >&2
+        exit 1
+        ;;
+    esac
+    exec /usr/local/sbin/recovery-loki-helper errors "$since" "$window"
     ;;
 {% endif %}
 

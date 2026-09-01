@@ -56,7 +56,7 @@ recovery_exec_group_members: []
 # investigate_services: services for which check/journal-<svc>/status are allowed.
 # action_services:      services restarted by the action wrapper (all at once).
 #
-# Loki横断ログ調査(loki-count / loki-window, AR-095〜AR-101)は、固定named
+# Loki横断ログ調査(loki-count / loki-window / loki-errors, AR-095〜AR-101)は、固定named
 # checkとして dispatch/wrapper template側で直接case文に追加してあり、
 # investigate_extra の仕組み(name/cmd固定文字列)ではparameterを取れない
 # ため使っていない。有効化の条件は "investigate_services に 'loki' を含む

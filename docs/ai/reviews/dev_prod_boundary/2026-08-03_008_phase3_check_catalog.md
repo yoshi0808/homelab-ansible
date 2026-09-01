@@ -349,3 +349,27 @@ Slack 再接続バーストで `_run_codex` の raw output に届かず人へ `j
 
 - `journal-ssh` にも同じ `[lines]` operand を足すか(requirement OQ1)。承認された文言は `journal-unit` のみだったため今回は見送った
 - 行数を上げても journald 自身の保持量が上限になる(requirement OQ2)。保持設定を見る check は無く、今回も足さない
+
+---
+
+## 9. 追加 — Loki横断ログ調査の問い合わせ語彙(2026-09-01、Yoshinobu合意)
+
+requirement: `docs/ai/reviews/loki_investigate_vocabulary/2026-09-01_001_requirement.md`
+
+**§2 の `loki-helper` 行(class G の `deployed-hash` 対象、配備物のハッシュを見る先)とは別物である。** 本節が扱うのは、その配備物 `recovery-loki-helper` が実際に受け付ける**問い合わせ語彙**(Lokiへ何を尋ねられるか)。`loki-count` / `loki-window` は2026-07-29の導入時(AR-095〜AR-101)から存在したが、本カタログには一度も載っていなかった(requirement §1「欠陥1」)。本節でその欠落を埋め、新設した `loki-errors` もあわせて記す。
+
+| # | check | class | operand と検証 | 実行内容 |
+|---|---|---|---|---|
+| L1 | `loki-count <since> <window>` | G(monnie のみ) | `since`: 分精度・JST固定の正規表現。`window`: `5m`\|`10m`\|`15m`\|`30m`\|`1h`\|`3h`\|`6h`\|`12h`\|`24h` | 全job横断で `(job, host, level)` 別の件数を返す。**2026-07-29導入、本カタログへの記載は今回が初出** |
+| L2 | `loki-window <job> <since> <window> <level>` | G(monnie のみ) | `job`: `unifi`\|`network-devices`\|`pve-nodes`\|`sophos-fw`\|`ubuntu-nodes`。`since`: 同上。`window`: `5m`\|`10m`\|`15m`\|`30m`\|`1h`。`level`: `any`\|`error`\|`warning`\|`info` | 指定jobの生ログ行を時刻昇順で返す。**2026-07-29導入、本カタログへの記載は今回が初出** |
+| L3 | `loki-errors <since> <window>` | G(monnie のみ) | `since`: 同上。`window`: `1h`\|`6h`\|`12h`\|`24h` | **全job横断**で `level="error"` の行を時刻昇順で返す。**本requirementで新設** |
+
+**level が付かなかった行は、`loki-errors`(L3)では取得できない。** L3はLokiのselectorへ `level="error"` を固定で含めるため、level が付かなかった行はLoki側で最初から除外される。L3は結果に必ず「levelが付かなかった行はこの語彙で取得できない」旨の行を出力する(requirement AC4)。**level が付かなかった行へ到達する経路は、L1とL2に残っている** — L1(`loki-count`)は `metric` にキー自体が無いことで無ラベルの系列を判別し `(no level label)` と表示する(件数のみ、本文は返らない)。L2(`loki-window <job> <since> <window> any`)は `any` のときselectorへ `level` を入れない設計(helperのR3、2026-07-29導入)であり、**level無し行を生ログで読める唯一の経路が`any`である。** level が付くかどうかは job や host では決まらず行ごとに決まる — `roles/alloy/templates/config.alloy.j2` の `extract_level_best_effort` は `unifi` / `network-devices` の両jobに適用され、severityトークンが一致した行にだけ `level` を付ける(一致しない行は無ラベルのまま同じjob内に混在する)。特定のjobを「常にlevel無し」と決めつけない(2026-09-01レビューB3/B4)。
+
+出力量制限は**L2/L3が共有**する — `QUERY_LIMIT` / `MAX_LINES` / `MAX_LINE_LENGTH`(いずれも300)であり、L3のために緩めていない(requirement AC2)。**L1(`loki-count`)はこの3定数を一つも参照しない** — 返すのは集計(件数表)であり、代わりに系列数の上限を `MAX_SERIES`(500)で制限する(2026-09-01再レビューMinor#2、`ast`で関数ごとの参照定数名を照合して確認: `cmd_count`→`MAX_SERIES`のみ、`cmd_window`/`cmd_errors`→3定数)。上限で切り詰めたときの通知形式(要求した窓のうちどこまで実際に読めたか)はL2/L3で同一である(requirement AC3)。
+
+実装: `roles/recovery_exec/files/recovery-loki-helper`(正本)、`roles/recovery_exec/templates/recovery-investigate-dispatch.sh.j2`(operand検証)、`roles/recovery_exec/templates/homelab-investigate.sh.j2`(quory側wrapper、事前検証のみでLokiへは問い合わせない)。Policy: `docs/ai/policies/autonomous_recovery_policy.md` AR-095〜AR-101。
+
+### 9.1 §4/§6.3/§7.5 の総数表との関係
+
+§4/§6.3/§7.5 の class G 総数表(現行値: `+6`)は変更しない。**それらの表はD5〜D8それぞれの承認時点で閉じた記録であり、以後のカタログ改訂のたびに合計を追随させる仕組みではない**(次にD番号の付く承認が無い限り、この総数表自体を書き換える契機がない)。L1(`loki-count`)/L2(`loki-window`)は今回チェックとして新設したものではなく、既に2026-07-29に露出済みだったものの記載漏れである — 遡って合算すると、2026-07-29分を今回の追加であるかのように見せてしまう。L3(`loki-errors`)は今回新しく露出したチェック名そのものであり、上表の数え方に従うなら`+7`に相当するが、**総数表が閉じた記録である以上、本節では改めない。** 新設チェックの実在と検証条件はL1〜L3の表(本節)を正本とし、§4/§6.3/§7.5の数値はD5〜D8時点のスナップショットとして読む。L1/L2の挙動そのものは変更していない(requirement 制約)。
