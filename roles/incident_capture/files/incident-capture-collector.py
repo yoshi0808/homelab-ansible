@@ -18,6 +18,56 @@ Python の外側、systemd の ExecStart 上で `flock -n -E 75` が行う(こ�
   75 = (このスクリプトからは返らない。flock -E 75 が多重起動時に返す値。
         参考として記載するのみ。)
 
+**exit 2 の journal可読性**(2026-09-02、
+docs/ai/reviews/incident_capture_journal_legibility/2026-09-02_001_requirement.md
+AC1〜AC8、実装記録2026-09-02_002。2回の独立レビューで3件blocking差し戻し
+(B1〜B3)を受け是正済み — 以下は是正後の最終形): collection_errors を
+伴って exit 2 で終わる周期は、journalへ「何件あったか(run/bundle内訳
+込み)」と各 collection_errors の"what"の要約を書く
+(log_collection_errors_to_journal、AC1/AC2)。多数あるときは件数の上限で
+切り詰め、切り詰めた事実自体を明示する(AC3)。EXIT_OK の周期は何も
+出力しない(AC4)。既存の EXIT_INTERNAL_ERROR の1行(本ファイル末尾の
+`except Exception`節)は変更しない(AC5、severityも含め今回は一切touchしない)。
+
+出力先はstderr — unit template(incident-capture.service.j2)は
+StandardOutput/StandardError を指定しておらず、systemd既定(journal)に
+従う。この経路は EXIT_INTERNAL_ERROR が既に使っている(ただしそちらが
+実際にjournal/Lokiで観測された記録は無い — 本節の結論はunit templateに
+明示指定が無いことから独立に成立する)。**各行の先頭へ `<4>`
+(syslog priority: warning)を付ける**(_journal_write、B3是正) —
+`<4>`無しの既定severity(info)のままだと、monnie側rsyslogの振り分け
+(`$syslogseverity==4`だけが"warning"ラベルになる。
+roles/alloy/templates/observability-sources.rsyslog.j2)と、既に配備済みの
+Grafanaダッシュボード(infra-syslog-all-nodes.json)の既定`level`フィルタ
+(`["warning","error"]`)の組み合わせにより、要約はLokiへ入るのに
+`Failed with result 'exit-code'`が見えている画面には出ない、という
+この案件が防ごうとした状況そのものが再現してしまうため(Claude Reviewer
+B3)。EXIT_INTERNAL_ERROR の1行には`<4>`を付けていない(今回のscope外)。
+
+集約対象は周期全体のcollection_errors(このmain()内のローカル変数)と
+各バンドルのsummary["collection_errors"]の両方 — 2026-09-01の実
+インシデントが示した「no named investigate operations available for
+host 'quory'」は後者(バンドル単位)にしか記録されず、write_run_reportが
+書くcollection_errorsには載らない。
+
+表示するのは"what"のみで"why"は出さない(AC7)。ただし"what"自体にも
+非信頼データ(IC-016: spoolのpath/basename/play_host/play_nameを連結する
+5箇所)が混入する経路が実在した(codex Reviewer B2が現物5箇所と
+negative testで指摘、初版の「混入経路は無い」という判断は誤りだった)。
+是正後は、非信頼値を連結するf-stringを WHAT_PREFIX_* の固定プレフィックス
+から組み立て(_runs/・バンドルへ書く内容自体は従来と同一)、journal表示
+側だけが _redact_untrusted_what() でこのプレフィックスに一致した"what"を
+固定の要約文へ置き換え、連結された非信頼値そのものは出さない。それ以外の
+(非信頼な自由記述を連結しない)"what"は、改行相当文字を正規化してから
+(B1是正 — 1件の埋め込み改行がJOURNAL_SUMMARY_MAX_ITEMS/_WHAT_MAX_CHARS
+という「件数・文字数の上限」を物理journal行数の上限としては無力化していた。
+2026-09-01のloki-errors案件とcodexが指摘した欠陥クラスは同一で、是正の
+形(" ".join(value.splitlines()))も揃えた)、1件あたりの表示長も
+防御的に切り詰める。
+
+dry-run経路は無い(AC8) — このスクリプトはAnsibleではなく`--check`相当の
+概念を持たず、今回追加した出力はstderrへの書き込みのみで新たな副作用は無い。
+
 **現況スナップショット中のSSH到達不能は、それ単体では終了コードを2にしない。**
 pve1平日日中シャットダウン運用下ではSSHタイムアウトが日常的に起きうる
 (docs/ai/adr/003-incident-capture-collector-runtime.md 末尾のd-2解説を参照)。
@@ -141,6 +191,21 @@ REQUIRED_SPOOL_FIELDS = {
 # 通知経路が"問題あり"として記録した(ok/空文字以外の)ステータス集合。
 # ok/空文字は「捕捉はしたが単体では証拠バンドルの根拠にならない」通常通知。
 NON_NOTABLE_SLACK_STATUS = {"", "ok"}
+
+# collection_errors の "what" のうち、非信頼データ(IC-016: spoolのpath/
+# basename/play_host/play_name。書き手は recovery-exec とAnsible controller
+# identityのいずれも非信頼)を末尾に連結して組み立てるものの固定プレフィックス
+# (B2是正、2026-09-02 Reviewer)。journal表示側(log_collection_errors_to_journal
+# の _redact_untrusted_what)はこの定数を使ってprefixだけを残し、連結された
+# 非信頼値は出さない。生成側(reject_spool_file/consume_spool_file/
+# collect_host_snapshot/spool単独バンドル生成)もこの定数からf-stringを組み立て、
+# 文字列リテラルを二重管理しない — _runs/・バンドル本体に書く内容(prefix+値)は
+# 従来と完全に同じ文字列になる。
+WHAT_PREFIX_REJECT_MOVE_FAILED = "failed to move malformed spool record "
+WHAT_PREFIX_REJECT_MALFORMED = "malformed spool record "
+WHAT_PREFIX_CONSUME_REMOVE_FAILED = "failed to remove consumed spool record "
+WHAT_PREFIX_NO_INVESTIGATE_OPS = "no named investigate operations available for host '"
+WHAT_PREFIX_NO_CORRELATED_JOB = "no correlated Semaphore job found for spool record ("
 
 
 # ---------------------------------------------------------------------------
@@ -289,9 +354,11 @@ def reject_spool_file(spool_dir, path, reason, collection_errors):
     try:
         shutil.move(path, dest)
     except OSError as e:
-        collection_errors.append({"what": f"failed to move malformed spool record {path}", "why": str(e)})
+        collection_errors.append({"what": f"{WHAT_PREFIX_REJECT_MOVE_FAILED}{path}", "why": str(e)})
         return
-    collection_errors.append({"what": f"malformed spool record {os.path.basename(path)}", "why": reason})
+    collection_errors.append(
+        {"what": f"{WHAT_PREFIX_REJECT_MALFORMED}{os.path.basename(path)}", "why": reason}
+    )
 
 
 def consume_spool_file(path, collection_errors):
@@ -299,7 +366,7 @@ def consume_spool_file(path, collection_errors):
         os.remove(path)
     except OSError as e:
         collection_errors.append(
-            {"what": f"failed to remove consumed spool record {path}", "why": str(e)}
+            {"what": f"{WHAT_PREFIX_CONSUME_REMOVE_FAILED}{path}", "why": str(e)}
         )
 
 
@@ -370,7 +437,7 @@ def collect_host_snapshot(cfg, host):
     ops = cfg["failure_snapshot_ops"].get(host)
     if not ops:
         return None, {
-            "what": f"no named investigate operations available for host '{host}'",
+            "what": f"{WHAT_PREFIX_NO_INVESTIGATE_OPS}{host}'",
             "why": (
                 "host is not a key in incident_capture_failure_snapshot_ops "
                 "(ADR-003 constraint 4: named operations only exist for "
@@ -644,6 +711,117 @@ def spool_bundle_id(rec):
     return f"spool-{epoch}-{uuid.uuid4().hex[:8]}"
 
 
+# ---------------------------------------------------------------------------
+# journal可読性(AC1〜AC4, AC7。設計の全文はモジュールdocstring
+# 「exit 2 の journal可読性」節を参照。ここでは実装のみ)
+# ---------------------------------------------------------------------------
+JOURNAL_SUMMARY_MAX_ITEMS = 10  # AC3: 全件出さず切り詰める
+JOURNAL_SUMMARY_WHAT_MAX_CHARS = 200  # AC7: 1件あたりの表示長を防御的に制限する
+
+# B2是正: WHAT_PREFIX_* のいずれかで始まる "what" は、非信頼データ(IC-016)を
+# 末尾に連結して組み立てられている。journalへ出すのはこの固定prefix(この
+# ファイル自身が書いた文言であり非信頼値を含まない)だけとし、連結された
+# 非信頼な値そのものは出さない。表示専用の変換であり、_runs/・バンドル本体に
+# 書かれる "what"(prefix+非信頼値の元の文字列)には一切手を触れない。
+_UNTRUSTED_WHAT_REDACTIONS = (
+    (WHAT_PREFIX_REJECT_MOVE_FAILED, "failed to move a malformed spool record (filename omitted — untrusted, IC-016)"),
+    (WHAT_PREFIX_REJECT_MALFORMED, "malformed spool record (filename omitted — untrusted, IC-016)"),
+    (WHAT_PREFIX_CONSUME_REMOVE_FAILED, "failed to remove a consumed spool record (filename omitted — untrusted, IC-016)"),
+    (WHAT_PREFIX_NO_INVESTIGATE_OPS, "no named investigate operations available for a spool-correlated host (host name omitted — untrusted, IC-016)"),
+    (WHAT_PREFIX_NO_CORRELATED_JOB, "no correlated Semaphore job found for a spool record (play name omitted — untrusted, IC-016)"),
+)
+
+
+def _redact_untrusted_what(what):
+    """what が既知の非信頼値連結パターン(_UNTRUSTED_WHAT_REDACTIONS)のいずれかに
+    一致すれば、固定の要約文へ置き換える(B2是正)。一致しなければ(=このファイル
+    自身が生成した固定文言、またはSemaphore由来の数値/既知の内部語彙のみで
+    非信頼な自由記述を連結しないもの)そのまま返す。"""
+    for prefix, redacted in _UNTRUSTED_WHAT_REDACTIONS:
+        if what.startswith(prefix):
+            return redacted
+    return what
+
+
+def _truncate_for_journal(value, max_chars):
+    """journalの1エントリを1物理行に収めるため、まず改行相当文字(LF/CR/CRLF等、
+    str.splitlines()が認識するもの全て)を空白へ正規化してから文字数で切り詰める
+    (B1是正、2026-09-02)。正規化を先に行わないと JOURNAL_SUMMARY_WHAT_MAX_CHARS
+    は文字数の上限にしかならず、埋め込み改行がそのまま物理journal行数を
+    増やしてしまう(2026-09-01 loki-errors案件と同じ欠陥クラス。是正も同じ
+    " ".join(value.splitlines()) を使う)。"""
+    s = " ".join(str(value).splitlines())
+    if len(s) <= max_chars:
+        return s
+    return s[: max_chars - 1] + "…"
+
+
+def _journal_write(line):
+    """stderrへ1行書く。先頭に syslog priority prefix `<4>`(warning)を付ける
+    (B3是正、2026-09-02)。
+
+    unitは StandardOutput=/StandardError= を指定していないため既定
+    (journal、SyslogLevelPrefix=yes 既定)に従う。prefix無しの行は既定の
+    SyslogLevel(info)で journal入りし、monnie側のrsyslogルール
+    (roles/alloy/templates/observability-sources.rsyslog.j2、
+    `$syslogseverity == 4` だけが "warning" ラベルになる)を通ると
+    severity 6(info)のまま扱われる。grafana_provisioningの
+    `infra-syslog-all-nodes.json` はデフォルトで `level` 変数が
+    `["warning","error"]` のため、prefix無しの要約は既定フィルタで隠れ、
+    この案件が防ごうとした「失敗行しか見えない」状況がそのまま残ってしまう
+    (Claude Reviewer B3)。`<4>` は個々の行のpriorityを明示的に
+    warning(4)へ固定し、rsyslogの `$syslogseverity == 4` 条件と正確に一致する。
+
+    既存の EXIT_INTERNAL_ERROR の1行(`__main__` の except節)は今回
+    `<4>` を付けない —意図的にscope外とする(Coordinator指示、2026-09-02)。
+    unit全体へ `SyslogLevel=warning` を設定する案は採らなかった —
+    prefix無しの全行(EXIT_INTERNAL_ERRORを含む)の既定severityを変えてしまい、
+    今回touchしないと決めた経路の挙動まで変えるため。
+    """
+    sys.stderr.write(f"<4>{line}\n")
+
+
+def log_collection_errors_to_journal(run_level_errors, pending_bundles):
+    """collection_errors を伴って終了する周期に、journal(stderr)へ人が読める
+    要約を書く。AC1(要約を出す)/AC2(each "what" + 件数)/AC3(上限+明示切り詰め、
+    かつ物理行数ベースで上限を守る)/AC4(空なら何も書かない)/AC7("why"は出さず、
+    非信頼値を含む"what"は固定カテゴリへ置換し、残りも防御的に切り詰める)。
+
+    表示のみを行い、run_level_errors・pending_bundles の中身は変更しない
+    (_runs/ とバンドル本体への記録は現状のまま — requirement §5の制約)。
+
+    ヘッダの内訳(run N / bundles M)は、`_runs/<run_id>.json` の
+    `collection_errors` が run-levelの分(N件)しか持たないことを、
+    突合する人が誤読しないよう明示する(2026-09-02 Claude Reviewer Suggestion#6)。
+    """
+    run_items = [("run", e.get("what", "")) for e in run_level_errors]
+    bundle_items = [
+        (summary["bundle_id"], e.get("what", ""))
+        for summary, _raw_logs, _host in pending_bundles
+        for e in (summary.get("collection_errors") or [])
+    ]
+    items = run_items + bundle_items
+
+    if not items:
+        return  # AC4: has_errorsがFalseの周期はここへ来ない設計だが、念のため
+
+    _journal_write(
+        f"incident-capture-collector: exiting with {len(items)} collection_errors this cycle "
+        f"(run: {len(run_items)}, bundles: {len(bundle_items)}; "
+        f"_runs/<run_id>.json only records the 'run' ones):"
+    )
+    shown = items[:JOURNAL_SUMMARY_MAX_ITEMS]
+    for i, (source, what) in enumerate(shown, start=1):
+        safe_what = _truncate_for_journal(_redact_untrusted_what(what), JOURNAL_SUMMARY_WHAT_MAX_CHARS)
+        _journal_write(f"  [{i}] ({source}) {safe_what}")
+    omitted = len(items) - len(shown)
+    if omitted > 0:
+        _journal_write(
+            f"  ... {omitted} more collection_errors omitted "
+            "(see _runs/ or the bundle summary.json on quory for full detail)"
+        )
+
+
 def main():
     config_path = sys.argv[1] if len(sys.argv) > 1 else os.environ.get("INCIDENT_CAPTURE_CONFIG", CONFIG_PATH_DEFAULT)
     with open(config_path, "r", encoding="utf-8") as f:
@@ -767,7 +945,7 @@ def main():
             "snapshot": {"base": None, "host": None},
             "collection_errors": [
                 {
-                    "what": f"no correlated Semaphore job found for spool record ({rec.get('play_name')!r})",
+                    "what": f"{WHAT_PREFIX_NO_CORRELATED_JOB}{rec.get('play_name')!r})",
                     "why": (
                         "this spool record's slack_status is notable but no Semaphore "
                         "failed-job row correlated within the configured time tolerance "
@@ -857,6 +1035,15 @@ def main():
             "exit_code": exit_code,
         },
     )
+
+    # --- 13. journal要約(AC1〜AC4, AC7)。_runs/ と同じ has_errors 条件を使う
+    #         — 判定を二重に持たない。_runs/・バンドル本体は変更しない。
+    #         heartbeat(12)より後に置く(2026-09-02 Claude Reviewer Minor#3) —
+    #         この関数が例外を送出した場合でも heartbeat は既に書き終えている
+    #         ようにするため(先に置くと、万一の例外で `except Exception` に
+    #         捕まりheartbeatが書かれず、exit 2 が exit 3 に化けてしまう)。 ---
+    if has_errors:
+        log_collection_errors_to_journal(collection_errors, pending_bundles)
 
     return exit_code
 
