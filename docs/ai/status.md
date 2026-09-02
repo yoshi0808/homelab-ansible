@@ -65,12 +65,6 @@
 - **残存リスク**: タスク一覧が将来ページングされたとき、`task-time` は非ゼロで騒ぐが **`recent-failed` は静かに古い分を落とす**。現在757件で頭打ちは観測されていない
 - 記録は `docs/ai/reviews/semaphore_query_api/`(requirement / 実装 / レビュー3本 / 配備手順 / 配備結果)
 
-**回答待ち: flappingの発火条件の根拠(2026-09-02 OPREQ発行)** — `req-20260902T170856+0900-607a7b449ed2830b`。UniFiスイッチのポートflappingをsyslogから検知するalert ruleの設計で、**発火条件の新設には反実仮想の発火回数が要る**(`log_observability_policy.md` LOG-081)。**この集計は開発側から取れない** — `loki-window` が最長1時間・300行、`loki-count` が本文でフィルタできず、`network-devices` は310行/時で1時間窓でも上限に当たる。依頼したのは直近14日の `Link Down` / `Link Up` の host×port 別件数と、**15分窓あたりの件数が2/3/4/5以上だった窓の個数**である(後者が反実仮想そのもの)。**Operatorセッションが立つまで返らない。** 回答が来たら閾値を決め、requirementの未決を閉じて実装へ進む。案件記録は `docs/ai/reviews/unifi_port_flapping_alert/`
-
-- **`roles/grafana_provisioning` は alerting YAML を1ファイルしか配れない**(変数がスカラ)。2本目にはrole側の対応が要る
-- **完了時にPolicy改訂が要る** — §1の表の「未実装」、LOG-047、LOG-067が偽になる。**Yoshinobu必須**
-- **Loki(LogQL)でのalertはこの環境で初物である。** まずスイッチのポートlink up/downに限り、AP側の接続断は範囲外とした
-
 ## Next(着手候補) — 工程・体制
 
 | 項目 | 内容 | 根拠 |
@@ -87,7 +81,7 @@
 
 | 項目 | 内容 | 根拠 |
 |---|---|---|
-| **syslog週次ダイジェスト(requirement合意済み・未実装)** | Yoshinobu提起(2026-09-01)「warning, error を見ていないので何かあっても気づけていないかもしれない」。**閾値を決めずに「見ていない」状態を解消する**ため、週に1度Lokiの中身の要約を Slack `#info` へ出す。着手前の実測で、error は1日7件で緊急の異常は出ておらず、warning 183件は大半がノイズ(Grafanaのファイルロック、canonical-livepatch)、**最大の系統である `network-devices` 7,457行/日には level が付かない**ことが分かっている。**本案件は検知を実装しない** — flappingの検知は別案件(`unifi_port_flapping_alert`)で、そちらはダイジェストの完了を待たない | `docs/ai/reviews/syslog_weekly_digest/2026-09-01_001_requirement.md` |
+| **syslog週次ダイジェスト(requirement合意済み・未実装)** | Yoshinobu提起(2026-09-01)「warning, error を見ていないので何かあっても気づけていないかもしれない」。**閾値を決めずに「見ていない」状態を解消する**ため、週に1度Lokiの中身の要約を Slack `#info` へ出す。着手前の実測で、error は1日7件で緊急の異常は出ておらず、warning 183件は大半がノイズ(Grafanaのファイルロック、canonical-livepatch)、**最大の系統である `network-devices` 7,457行/日には level が付かない**ことが分かっている。**flappingの検知は2026-09-03に「作らない」で閉じた**(`docs/ai/reviews/unifi_port_flapping_alert/2026-09-03_002_measurement_and_decision.md`) — 36日の実測で `Link Down` 123件はすべて説明が付き(居間のPC 54件、pve1の平日停止、週次パッチ再起動)、閾値3件/15分で発火するのは1回だけ、それも居間のPCだった。**この実測がそのままダイジェストの設計入力になる** — `network-devices` は件数で出せばよく、個々を通知する必要がない | `docs/ai/reviews/syslog_weekly_digest/2026-09-01_001_requirement.md` |
 | **apt以外のアップデートを機械的に当てる** | Yoshinobu表明(2026-08-23)「update は機械的に行う(人の判断が入らない)」。**aptはそうなっている**(Ubuntu Pro / unattended-upgrades)が、**apt以外は検知までで、適用は人が `dry_run=false` を明示する**。**この原則は現時点でPolicyに書いていない** — 現在形の規範として書くと `UV-035`〜`UV-038`(定期実行を `dry_run=true` に限定)と正面から矛盾するため(2026-08-23の独立レビューが検出)。実現するなら **`UV-035`〜`UV-038` と実装を同じ案件で改訂する**。`roles/prometheus_update_check/` は無人運用向けの機構を既に持つ(チェックサム検証・トランザクションロック・リトライ付きhealthcheck・**失敗時の自動ロールバック**・バックアップ3世代)。**ただし監視の中核を無人で入れ替える変更**なので、requirementとTesterを通す。**Semaphoreは同じ扱いになるが、そもそも検知経路が無い**(本表の別行) | Yoshinobu表明(2026-08-23)。現行の境界は `docs/ai/policies/ubuntu_vm_patch_policy.md` `UV-086` |
 | **DLP entropy の既存誤検知(14件)** | 2026-08-23 の corpus scan(**5ルート・376本に絞った母集団**での手分類)で、`high-entropy-string` が **PascalCase の長い識別子と hex 文字列 14 種**を BLOCK していることが分かった。**全追跡ファイル(1,737本)まで広げると、20文字以上の BLOCK は 57 種になる**(内訳の手分類は未実施)。**同日の候補パターン変更より前から BLOCK されており、今回の変更が持ち込んだものではない**(`git show HEAD` で着手前の状態を再判定して確認)。**文字クラスの調整では衝突ゼロに到達しない**ことが4ラウンドで分かっており、直すなら指標か適用範囲の側を変える案件になる。**急がない** — 止まったときは拒否メッセージが `rule_id at pointer` で場所を示すため、書き換えて再送できる | `docs/ai/reviews/oprc_dlp_false_positive/2026-08-23_005_review.md`。判定の境界は `docs/ai/context/operations/operator-request-channel.md` |
 | **ansy が自分自身を対象にする playbook を実行できない** | `id_ann` 削除(2026-08-19)以降、`dev_nodes` の group_vars が**存在しない鍵を指す**ため、ansy から ansy 自身への SSH が成立しない。2026-08-23 に `operator_request_channel_client_setup.yml` の配備が止まった(その場は暫定で通し、下記の理由で revert 済み)。**いま困ってはいない** — client は配備済みで、次に ansy が自分へ配備するときに再発する。<br>**素の `ansible_connection: local` を `host_vars/ansy.yml` へ入れてはいけない。** host_vars は inventory のデータで、**quory の Semaphore も同じものを読む**。2026-08-24、これにより quory が `ansy` を対象にした検査で **quory 自身を見て** drift 2件を誤報した(`89e822a` → `9e9daf5` で revert)。**変更系 playbook を流していれば quory が書き換わっていた。**<br>**正しい形は `inventories/homelab/host_vars/quory.yml` に既にある** — `lookup('pipe', 'hostname -s')` でコントローラを見て条件分岐する。**同じ問題が同じ inventory の中で既に解かれていた。**<br>**入れるときの受入条件**: quory から `ansy` を対象に `--check` を流し、**quory ではなく ansy を見ている**ことを確認する。これを確かめずに入れない | `9e9daf5` の commit メッセージ。ドリフトの実測は 8/22・8/23 が 0、8/24 00:40 が 2、revert 後の 07:50 が 0 |
