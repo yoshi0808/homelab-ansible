@@ -11,11 +11,13 @@
 
 ## Now(進行中)
 
-**観測待ち: 月次 full-upgrade が conffile プロンプトで止まらないこと(2026-08-22 実装)** — 当日 monnie のジョブ #802 が `/etc/unpoller/up.conf` の conffile プロンプトで**無期限に停止した**。`DEBIAN_FRONTEND=noninteractive` が抑止するのは debconf であって dpkg の conffile プロンプトではない。**プロンプトの stdin は Ansible の SSH セッションにあり、誰も答えられない。** 入れたのは `-o Dpkg::Options::=--force-confold` と `timeout --kill-after` と `NEEDRESTART_MODE=l`。**その条件が2026-09にそろった。** 9/2 18:15 の月次 dry-run(ジョブ #929、成功・34秒)で、**monnie の更新対象に `unpoller` が入っている**(Status は quory / monnie とも `REVIEW_REQUIRED`、reboot不要・holdなし。monnie の重要は `alloy` / `loki` / `unpoller` の3件)。**8/22に止まった相手そのものであり、次にmonnieへ手動applyしたときが答え合わせになる。**<br>**見るのは3点** — ①ジョブが完走するか(8/22は停止させるまで無期限に止まった) ②所要時間(`timeout` は3600秒。短すぎると健全なaptを殺すため長い側へ倒してある) ③通知に「保持する設定で適用した」の一文が出るか。<br>**確定ではない** — 実際にプロンプトが出るかは①新版 `unpoller` がconffileを変更しているか ②`/etc/unpoller/up.conf` にローカル変更が残っているか による。**どちらも未確認**で、開発側からmonnieのファイル内容を読む手段が無い。<br>**別件で report に出ていたもの**: monnie の prometheus に非apt更新あり(`3.13.2 → 3.14.0`)。`prometheus_update_check` の経路が拾ったもので、applyとは別作業。<br>案件記録は `docs/ai/reviews/ubuntu_vm_apply_conffile_prompt/`
+**conffile の修正は成立した。ただし同じ apply が別の理由で無期限停止した(2026-09-03)** — 2026-09-02の月次dry-run(#929)で `unpoller` が更新対象に入り、9/3 08:09 に monnie へ apply した(#938)。**term.log に conffile プロンプトは1つも出ておらず、`--force-confold` は効いた。** 2026-08-22 の欠陥は塞がっている。
 
-- **timeout は 3600秒。** 短いほうが危険という非対称性で選んだ — 短すぎると健全に進んでいる apt を kill して 当日と同じ壊れた dpkg 状態を自作する。長すぎても気づくのが遅れるだけ。mute の120分に対して60分の余裕
-- **どの conffile を保持したかは出せていない。** 通知に出るのは「保持する設定で適用した」という静的な一文だけ。特定は `docs/ai/reviews/ubuntu_vm_conffile_held_report/` へ分割した(着手時期未定)。**apply 前後の状態比較では原理的に届かない**ことが3ラウンドのレビューで確定している
-- **孤児プロセスの後始末は自動化していない。** 当日、Semaphore がジョブを停止しても monnie の `apt-get` は残った
+**しかし apply は `Run apt full-upgrade` で停止し、自力では終わらない状態になった。** 原因は**その修正が入れた `timeout` 自身**である — `become: true` で Ansible が pty を割り当てる文脈で、`timeout` が新しいプロセスグループを作り、それが**背景グループとして制御端末に触って `SIGTTOU`/`SIGTTIN` で停止**した。`timeout` も同じグループで止まるため、**3600秒のアラームは発火しない**。
+
+**案件は `docs/ai/reviews/ubuntu_vm_apply_timeout_sigttou/` へ引き継いだ。** 有力な実装は `timeout --foreground` + stdin を `/dev/null` へ。Incidentは `docs/ai/memory/incidents/2026-09-03_apt-stalled-by-the-timeout-added-to-prevent-stalls.md`。**復旧(kill → `dpkg --configure -a` → 版と稼働の確認)が完了するまで monnie を再起動しない。**
+
+**あわせて判明した弱点**: Operator は apt のログを読めない(`root:adm 0640`、`ann` では拒否)。本番で apt が止まったとき、運用側から中身を確かめる手段が無い。
 
 **観測待ち: Semaphore の新版検知が初めて発火すること(2026-08-25 実装)** — `SAFE: Semaphore update check monthly`、**毎月10日 20:00**。**初回は 2026-09-10。** ansy / quory とも現在 2.19.8 で `releases/latest` と一致しているため、**鳴らずに静かに終わるのが正常**(「動いていない」と疑わないこと)。apt リポジトリが無く GitHub Releases からしか取れないため、この経路が唯一の検知手段である。**適用は手動**で、手順は `docs/ai/reviews/semaphore_upgrade/2026-08-18_002_manual_procedure.md`。**本番で1回手動実行して `up_to_date` を確認済み**(ジョブ #827)。案件記録は `docs/ai/reviews/semaphore_update_check/`。**同日、schedule の有効化ゲートを撤去した**(`docs/ai/reviews/semaphore_activation_gate_removal/`) — カタログが `active: true` と書けば1回の適用で有効になる
 
