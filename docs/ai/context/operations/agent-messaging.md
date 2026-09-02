@@ -55,6 +55,7 @@ despawn.sh <team> <from> <name> [--force]
 - **`--boot-prompt` に依頼文を載せない**(§6)。置くのは「agmsg で依頼が届くまで待て」という起動指示だけである
 - **`--fresh` を省くと、記録済みスレッドを `resume` する。** 古い transcript を再生した状態でプロンプトに止まり、新しい boot prompt は実行されない
 - codex には spawn の readiness handshake が無く、`--no-wait` が常に暗黙に効く
+- **Reviewer のペインは都度畳まない**(Yoshinobu、2026-09-02)。次の依頼はそのまま `send.sh` で送る。畳むのは作り直しが要るときだけであり、`despawn` → 再 `spawn` は配送が成立しなくなることがある(§10)
 - `--force` で畳むと transcript は残らない。**後から原因を調べる必要があるものは、畳む前に `tmux capture-pane` で控える**
 
 ## 5. 権限の層
