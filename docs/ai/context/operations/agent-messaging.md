@@ -41,13 +41,18 @@ team `homelab` に2者が登録されている。**この team は local-only �
 - `history.sh <team>` の既読マーク — `●` が未読、`○` が配送済み
 - 相手ペインの実際の反応(`tmux capture-pane -p -t <pane>`)
 
+**既読マークが付くのは、recipient側のセッションが実際に取り込んだときだけである**(`check-inbox.sh` / `inbox.sh` が recipient-scoped に記録する)。したがって local team `homelab` では、送った側からこれを見れば相手が受け取ったことが分かる。**依頼を送ったら `○` になるまでを送信とみなす。**
+
+**remote team `homelab-ops` では使えない。** 既読は recipient(quory)の store に付き、同期で戻ってこない。実測では `coordinator → operator` の全メッセージが `●` のままであり、**4分後にOPRESが返ったものも `●` である**。remote側で確かめられるのは「送ったこと」までで、そこから先はOperatorセッションの起動(Yoshinobu)に委ねられる。**確かめられないことを、送らない理由にしない。**
+
 ## 4. spawn と despawn
 
 ```bash
-spawn.sh codex <name> --team <team> --split h --fresh --boot-prompt "<依頼文>"
+spawn.sh codex <name> --team <team> --split h --fresh --boot-prompt "<起動指示>"
 despawn.sh <team> <from> <name> [--force]
 ```
 
+- **`--boot-prompt` に依頼文を載せない**(§6)。置くのは「agmsg で依頼が届くまで待て」という起動指示だけである
 - **`--fresh` を省くと、記録済みスレッドを `resume` する。** 古い transcript を再生した状態でプロンプトに止まり、新しい boot prompt は実行されない
 - codex には spawn の readiness handshake が無く、`--no-wait` が常に暗黙に効く
 - `--force` で畳むと transcript は残らない。**後から原因を調べる必要があるものは、畳む前に `tmux capture-pane` で控える**
@@ -68,6 +73,8 @@ codex 側には2つの層があり、どちらもリポジトリ外にある。*
 **`~/.codex/config.toml` は Ansible 管理外である。** repo からは配備されず、`git` にも現れない。ここを変えたことは記録に残さないと、次に読む者は現物を見るまで知りようがない。
 
 ## 6. 依頼文
+
+**依頼文は `send.sh` で送る。`--boot-prompt` へ載せない。** boot prompt は tmux ペインへ直接注入されメッセージDBを通らないため、**依頼が1通も存在しない状態になる**。存在しないものは配送も既読も確かめられず、相手が気づかないまま止まっていても分からない。boot prompt に置くのは起動指示だけとし、**送ったあとは §3 の `○` で受け取りを確かめる。**
 
 型は [`skills/subagent-briefing/SKILL.md`](../../../../skills/subagent-briefing/SKILL.md) に従い、ここへ複製しない。codex 固有として書き添えるのは次の2つである。
 

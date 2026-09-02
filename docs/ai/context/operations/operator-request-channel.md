@@ -30,6 +30,8 @@ ansy: 取り込み前DLP → Coordinator が受領
 
 **この経路は情報交換だけを行う。** request本文は本番操作の承認・実行指示・権限付与として扱わない。request登録がOperatorセッション、調査、ジョブ、本番操作を起動することはない。
 
+**Coordinatorからの提出は `scripts/oprc-submit.sh` で行う。** 登録とOperatorへのagmsg通知が1操作になっており、通知できない状態では登録しない(登録は取り消せないため、要旨の不足や通知経路の不在は登録より前に落ちる)。**登録は通知ではなく、Operatorセッションを起動するのはYoshinobuである** — 気づかせるのは送り手の責任であり、手段はagmsgしかない。通知が未送のまま終わった場合はその事実が明示されるので、手で送って成立させる。
+
 **性質の異なる第2の経路が並走している。** すり合わせの会話と `request_id` は、agmsg の remote team `homelab-ops`(ansy 上のサーバ、E2EE、`docs/ai/context/operations/agent-messaging.md` §7〜§9)を通る。**本経路の本文・DLP・spool・forced command はそれに一切関与しない** — agmsgは調査依頼・調査結果・開発修正依頼の本文を運ばず、逆にこの経路は会話を運ばない。どちらも情報交換だけを行う点は同じである。
 
 **DEVREQはOPREQへの返信に限らない。** quoryで見つけた障害を起点にOperatorが単独で発行できる。真因の確定と修正方法の設計は開発側Coordinatorが主体となる。

@@ -79,7 +79,8 @@ Coordinator固有の作法だけを本節に置く。
 
 - **commitメッセージには、何を・何の目的で変更したかだけを簡潔に書く。** 経緯、検討の過程、却下した案とその理由を書かない。やらないと決めたことは `docs/ai/memory/decisions/rejected-proposals.md` が持つ。`docs/ai/memory/decisions/` へ独立したファイルを起こすのは、同種の提案が繰り返し出るなど、それだけでは止められないときに限る。
 - **承認が要る操作をYoshinobuへ上げるときは、必ず推奨を添える。** 既に推奨済みの事項へ同意の再確認を求めない。
-- **OPREQを登録したら、続けてagmsgでOperatorへ通知する。登録は通知ではない。** Operatorセッションは自動起動せず、通知しなければrequestは気づかれないまま滞留する。agmsgへ載せるのは `request_id` と要旨だけとし、**本文はspoolのrequestを読ませる**(agmsgはDLPを通らない)。
+- **OPREQの登録とagmsg通知は1つの操作である。`scripts/oprc-submit.sh` で出す。** 別々に打つと片方だけを実行しても何も咎めず、requestは気づかれないまま滞留する。agmsgへ載せるのは `request_id` と要旨だけとし、**本文はspoolのrequestを読ませる**(agmsgはDLPを通らない)。
+- **Operatorセッションを起動するのはYoshinobuであり、気づかせるのは送り手であるCoordinatorである。手段はagmsgしかない。** セッションがまだ立っていないことを、通知しない理由にも、通知を後回しにする理由にもしない。**相手は常に居る前提で送る。**
 
 ## `docs/ai/status.md` の維持
 
