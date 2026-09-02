@@ -41,3 +41,4 @@
 | 日付 | 何に対して踏んだか | 反した規範 | 気づかせたもの |
 |---|---|---|---|
 | 2026-08-25 | host_vars/ansy.ymlのlocal接続はansyだけに効くと断定したが、quoryからも効き、drift検査が別ホストを見た。 | docs/ai/roles/coordinator.md「到達できない本番の状態を推測で埋めない」およびdocs/ai/core.md「確認できていない値を推測で固定しない」 | 自分(#824のdrift結果を確認) |
+| 2026-09-02 | MAX_LINESをentry数の境界試験だけで満たすと判断したが、本文の埋め込み改行により299件が599物理行へ展開した。 | docs/ai/reviews/loki_investigate_vocabulary/2026-09-01_001_requirement.mdは、loki-errorsの物理出力行数を上限内に制限することを要求 | Codex Reviewer |

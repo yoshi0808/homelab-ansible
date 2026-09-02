@@ -49,3 +49,11 @@ grep -rn "<変更した境界のキーワード>" docs/ai/ CLAUDE.md AGENTS.md s
 - `docs/ai/memory/lessons/verify-the-outside-of-a-claimed-boundary.md`(境界の検証そのものの落とし穴)
 - `docs/ai/memory/decisions/approval-authority-for-real-host-operations.md`(この掃引の対象となった決定)
 - `docs/ai/memory/lessons/multilayer-escaping-and-novel-stack-verification.md`(同クラス全面掃引という同じ発想を、実装の欠陥クラスに適用したもの)
+
+## 再発記録
+
+**機械が追記する節である。人は手で書かない。** 契約(何を記録し、何を記録しないか)は `docs/ai/memory-classification.md`「`lessons/`の「再発記録」節」が正本。
+
+| 日付 | 何に対して踏んだか | 反した規範 | 気づかせたもの |
+|---|---|---|---|
+| 2026-09-02 | loki-errorsのdispatch・helperを追加した一方、一次調査LLMが読むAGENTS.md.j2を2語のまま残した。 | AGENTS.md.j2は一次調査エンジンが利用可能な調査語彙を示す規範であり、追加した語彙との同期が必要 | Claude側ReviewerとCodex Reviewer |

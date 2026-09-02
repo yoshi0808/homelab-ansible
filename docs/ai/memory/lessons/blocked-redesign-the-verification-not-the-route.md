@@ -30,3 +30,11 @@ Implementer は**別の形で同じ結果へ迂回せず**、`git commit` を伴
 一次記録: `docs/ai/reviews/incident_auto_capture_step2/2026-07-28_012_u2_implement.md` §0・§5-3
 
 関連: [[permission-boundaries-must-be-designed-not-prompted]]、[[distinguish-nothing-found-from-not-run]]
+
+## 再発記録
+
+**機械が追記する節である。人は手で書かない。** 契約(何を記録し、何を記録しないか)は `docs/ai/memory-classification.md`「`lessons/`の「再発記録」節」が正本。
+
+| 日付 | 何に対して踏んだか | 反した規範 | 気づかせたもの |
+|---|---|---|---|
+| 2026-09-02 | Codex Reviewerが生成した__pycache__の削除をharnessに拒否され、別経路で削除せず停止して報告した。 | docs/ai/core.md「安全機構がブロックしたら、別の形で同じ結果へ到達せず停止して報告する」 | 自分(harness拒否の報告) |
