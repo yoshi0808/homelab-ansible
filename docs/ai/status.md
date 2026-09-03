@@ -11,13 +11,41 @@
 
 ## Now(進行中)
 
-**conffile の修正は成立した。ただし同じ apply が別の理由で無期限停止した(2026-09-03)** — 2026-09-02の月次dry-run(#929)で `unpoller` が更新対象に入り、9/3 08:09 に monnie へ apply した(#938)。**term.log に conffile プロンプトは1つも出ておらず、`--force-confold` は効いた。** 2026-08-22 の欠陥は塞がっている。
+**Operator が起動時にこの repo を読むようになった。規範側3箇所が事実と食い違っている(2026-09-03)** — Yoshinobu が quory 側で設定した。OPREQ で繰り返しトラブったことへの対応である。**これで対象の文書は設計メモではなく、本番エージェントの起動時契約になった** — push すれば `worktree_sync` の timer で quory へ入り、次の起動から効く。**編集は「文書の更新」ではなく「本番の挙動を変える変更」として扱う。**
 
-**しかし apply は `Run apt full-upgrade` で停止し、自力では終わらない状態になった。** 原因は**その修正が入れた `timeout` 自身**である — `become: true` で Ansible が pty を割り当てる文脈で、`timeout` が新しいプロセスグループを作り、それが**背景グループとして制御端末に触って `SIGTTOU`/`SIGTTIN` で停止**した。`timeout` も同じグループで止まるため、**3600秒のアラームは発火しない**。
+**実測(2026-09-03、agmsg で Operator に確認した)。** 読み込み元は `/home/yoshi/homelab-ansible` の **Git作業ツリーそのもの**で、別コピーではない。読むのは**毎セッションの作業開始時**(キャッシュで省略する仕組みは未確認)。**repo から読んでいるのは4本で、Yoshinobu の説明にあった2本より多い。**
 
-**案件は `docs/ai/reviews/ubuntu_vm_apply_timeout_sigttou/` へ引き継いだ。** 有力な実装は `timeout --foreground` + stdin を `/dev/null` へ。Incidentは `docs/ai/memory/incidents/2026-09-03_apt-stalled-by-the-timeout-added-to-prevent-stalls.md`。**復旧は2026-09-03 09時台に完了した**(`.../2026-09-03_002_recovery_result.md`)。`dpkg --configure -a` は即返で設定待ちゼロ、`loki 3.7.7` と `unpoller 5.2.2+git` を再起動、unpollerのメトリクス1815本を確認、再起動要求なし。**適用は実質的に終わっており、止まっていたのは後片付けだけだった。**<br>**ジョブ #938 は失敗のまま残す。修正が入るまで再実行しない** — apt が即座に終わる場合でも終了時の端末操作で同じ停止を踏みうる。<br>**残存リスク**: `--force-confold` は手動管理の設定をメジャー版更新でも黙って保持する(今回 unpoller は 4.x → 5.x をまたいで旧設定のまま動いたが、**観測であって保証ではない**)。また `MAJOR_UPGRADE_DETECTED` は codename drift / 合計100超 / remove 30超の3信号だけで、**個々のパッケージのメジャー版差は見ていない**(守備範囲の違いであり欠陥ではない)。
+| 読んでいるもの | 所在 |
+|---|---|
+| `docs/ai/core.md` / `docs/ai/roles/operator.md` | repo 作業ツリー |
+| `docs/ai/context/operations/operator-request-channel.md` / `docs/ai/policies/execution_boundary_policy.md` | repo 作業ツリー。**事前に把握していなかった2本** |
+| `AGENTS.md`(起動時指示) / `~/.agents/skills/agmsg/SKILL.md` / `/home/yoshi/operator-runtime/CONNECTIONS.md` | repo外 |
 
-**あわせて判明した弱点**: Operator は apt のログを読めない(`root:adm 0640`、`ann` では拒否)。本番で apt が止まったとき、運用側から中身を確かめる手段が無い。
+**Operator 自身が矛盾を検出し、妥当に整理していた** — AGENTS.md を Yoshinobu の最新明示指示として従いつつ、`core.md` の開発Role専用規則(subagent成果物、Git操作等)を**Operator権限の根拠には使わない**、としている。**問題は、この切り分けが Operator の判断の中にしか無く、文書側に書かれていないことである。**
+
+食い違っているのは次の3箇所で、いずれも「Operatorはこのリポジトリを読まない」を前提に書かれている。**引用関係があるので1案件でまとめて直す。**
+
+| 場所 | 書いてあること |
+|---|---|
+| `docs/ai/roles/operator.md`「この文書の位置づけ」 | **正本。**「Operatorはこのリポジトリを読まない」「本ファイルは開発側がOperator役を設計・参照するための記録である」。**Operator は、自分がこれを読まないと書いてある文書を読んでいる** |
+| `docs/ai/role-context-matrix.md:34` | 同じ主張。上の節を引用している |
+| `docs/ai/core.md`「開発の作業時に読む情報」項2 | 実行境界Policyを**開発工程のRoleだけ**に絞り、その根拠として上の節を引いている。**Operator は現にこのPolicyを起動時に読んでいる** |
+
+**`core.md` は冒頭で読者を Coordinator と開発工程の4 subagent に限定しており、Operator を含んでいない。** 中身も「Gitの扱い」「開発の作業時に読む情報」「Ansible変更の共通ゲート」「decoy inventory」は開発工程向けで噛み合わない(quory の作業ツリーが汚れている状態は異常だと `docs/ai/context/operations/code-delivery-to-production.md` が定義しているため、「作業開始時に `git status` で確認する」は Operator に対しては意味が反転する)。一方「人間の権限と安全境界」「開発と本番の境界」「公開情報と秘密情報」「作るものが満たすこと」はそのまま効いてほしい。**「subagentが共通して守ること」には、Operator にも効いてほしい安全則が同居している**(迂回せず止めて返す、記録どうしの不一致を勝手に統合しない)。
+
+**Coordinator の推奨は「`core.md` は触らず、`operator.md` 側に『`core.md` のうち Operator に効くのはこの節』と名指しする」。** `core.md` は5 Role が毎セッション読むファイルで、運用側の都合で構造を変える影響が大きい。値の複製ではなくポインタなので正本は1つのままである。**未決 — Yoshinobu の判断待ち。**
+
+**起動時の入口は quory 側にあり、repo直下の `AGENTS.md` は無関係だった(2026-09-03 確認済み)。** 適用されている `AGENTS.md` は `/home/yoshi/operator-runtime/AGENTS.md` で、セッションの cwd も `/home/yoshi/operator-runtime`。**repo直下の `AGENTS.md`(Codex entrypoint)は読まれておらず、起動時契約としても適用されていない** — cwd が作業ツリーなら codex が自動で読む経路を疑ったが、そうではなかった。`core.md` と `operator.md` を読む根拠は quory 側 runtime の `AGENTS.md` にある「作業開始時に読む正本」の指定である。**したがって直す対象は上の3箇所のままで、repo直下の入口は増えない。** ただし**その指定の現物は quory 側にあり、開発側からは観測も変更もできない** — 読ませる文書を増やす・減らすのは Yoshinobu 側の操作になる。
+
+**月次 apply は2026-09-03に4台とも完了した。開いているのは案件のクローズ判断だけである(2026-09-03)** — 発端は 9/3 08:09 の monnie への apply(#938)で、`Run apt full-upgrade` が無期限停止した。原因は2026-08-22 の conffile 対策が入れた `timeout` 自身である — `become: true` で Ansible が pty を割り当てる文脈で `timeout` が新しいプロセスグループを作り、それが背景グループとして制御端末に触って `SIGTTOU` で停止した(`timeout` も同じグループで止まるため、3600秒のアラームは発火しない)。**conffile 対策そのものは効いている** — 4台とも term.log に conffile プロンプトは1つも出ていない。復旧は同日 09時台に完了し(`dpkg --configure -a` は即返、`loki` / `unpoller` を再起動)、修正 `41a55ae`(`setsid -w` + 既定モードの `timeout`)で **quory #943 / authy #944 / ansy #945 の3台が完走した**。Incidentは `docs/ai/memory/incidents/2026-09-03_apt-stalled-by-the-timeout-added-to-prevent-stalls.md`。
+
+**`docs/ai/reviews/ubuntu_vm_apply_timeout_sigttou/` は requirement / recovery / implement / codexレビュー(blockingなし)の4本まで来ており、closeout と Auditor が無い。** **本番3台の完走は「修正が効いた」ことの証明ではない** — 3台の apt が端末に触ったかどうかは分からない。機構が効くことの確認は sandbox の実測(`.../2026-09-03_003_implement.md`)が担う。
+
+**残存リスクと申し送り。**
+
+- **`--force-confold` は手動管理の設定をメジャー版更新でも黙って保持する。** 今回 unpoller は 4.x → 5.x をまたいで旧設定のまま動いたが、**観測であって保証ではない**。また `MAJOR_UPGRADE_DETECTED` は codename drift / 合計100超 / remove 30超の3信号だけで、**個々のパッケージのメジャー版差は見ていない**(守備範囲の違いであり欠陥ではない)
+- **Operator は apt のログを読めない**(`root:adm 0640`、`ann` では拒否)。本番で apt が止まったとき、運用側から中身を確かめる手段が無い
+- **`NEEDRESTART_MODE=l` は再起動しないため、更新したパッケージのうち動いているプロセスが旧版のままのものがある。** authy は `libpam` 系が入ったが `freeradius` は旧ライブラリのまま動いている(再起動不要と出ており、急がない)
 
 **観測待ち: Semaphore の新版検知が初めて発火すること(2026-08-25 実装)** — `SAFE: Semaphore update check monthly`、**毎月10日 20:00**。**初回は 2026-09-10。** ansy / quory とも現在 2.19.8 で `releases/latest` と一致しているため、**鳴らずに静かに終わるのが正常**(「動いていない」と疑わないこと)。apt リポジトリが無く GitHub Releases からしか取れないため、この経路が唯一の検知手段である。**適用は手動**で、手順は `docs/ai/reviews/semaphore_upgrade/2026-08-18_002_manual_procedure.md`。**本番で1回手動実行して `up_to_date` を確認済み**(ジョブ #827)。案件記録は `docs/ai/reviews/semaphore_update_check/`。**同日、schedule の有効化ゲートを撤去した**(`docs/ai/reviews/semaphore_activation_gate_removal/`) — カタログが `active: true` と書けば1回の適用で有効になる
 
@@ -46,20 +74,7 @@
 - **`workspace` の本番現物を開発側から観測する手段が無い。** `acl-status` の表に arm が無く、repo 側の定義までしか言えない
 - **`acl-status semaphore-db` は恒久的に `Permission denied`。** `dev-investigate` が traverse を失ったためで異常ではないが、**ACLが付け直されていないかを開発側から観測する手段は失われた**
 - **先読みが空でも「調査したがわからなかった」と同じ見た目で通知が出る。** 通知が運ぶのは verdict / confidence / known_condition で `notes` は運ばない。2026-08-22 の #802 では `EACCES` が成果物の中にしか無く、Slack には「特定不能」としか出なかった
-**月次 apply: monnie / quory / authy は2026-09-03に完了。残るは ansy 1台**(2026-09-03)
 
-| ホスト | ジョブ | 結果 |
-|---|---|---|
-| monnie | #938 → 手動復旧 | `SIGTTOU` で停止。`kill` → `dpkg --configure -a` → `loki` / `unpoller` 再起動で完了 |
-| quory | #943 | **success / 1分48秒**。修正後のコード(`41a55ae`)で走り、タイムアウト分岐にも失敗分岐にも入っていない |
-| authy | #944 | **success / 1分28秒**。failed unit 0、RADIUS 1812/1813 待受中 |
-| **ansy** | **未実施** | **`reboot_expected: True`。playbookが同一セッションで再起動するため、対話セッション・tmux・codexペインが落ちる**(agmsgサーバはDockerで自動復帰) |
-
-**`timeout` の SIGTTOU 修正は本番で2回完走した**(`41a55ae`、`setsid -w` + 既定モードの `timeout`)。**ただし「修正が無ければ止まっていた」ことの証明にはならない** — quory / authy の apt が端末に触ったかどうかは分からない。機構が効くことの確認は sandbox の実測(`docs/ai/reviews/ubuntu_vm_apply_timeout_sigttou/2026-09-03_003_implement.md`)が担う。
-
-**ansy を押すときの手順**: 落ちてよい時間に押す → 再起動後 `ssh ansy` → セッションを立て直す → **SessionStart に出る agmsg の同期状態を見る**(`3aaad4d` で自動化した。`sync engine` はsystemd unitではないので再起動で必ず落ちる)。
-
-**残っている申し送り**: `NEEDRESTART_MODE=l` は再起動しないため、更新したパッケージのうち**動いているプロセスが旧版のまま**のものがある。authy は `libpam` 系が入ったが `freeradius` は旧ライブラリのまま動いている(再起動不要と出ており、急がない)。
 ## Next(着手候補) — 工程・体制
 
 | 項目 | 内容 | 根拠 |
