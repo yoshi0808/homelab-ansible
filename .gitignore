@@ -46,11 +46,13 @@ homelab_vault_pass
 #   scripts/tests/operator_request_channel/  Operator Request Channelのoffline/integration test
 #   scripts/tests/semaphore_schedules/       semaphore_schedules filter pluginの単体test
 #   scripts/tests/oprc_submit/               scripts/oprc-submit.sh の回帰test
+#   scripts/tests/apply_timeout/             apply.yml の apt wrapper の回帰test
 scripts/tests/*
 !scripts/tests/fixtures/
 !scripts/tests/operator_request_channel/
 !scripts/tests/semaphore_schedules/
 !scripts/tests/oprc_submit/
+!scripts/tests/apply_timeout/
 new-session.sh*
 kick.sh
 prep-agent.sh*

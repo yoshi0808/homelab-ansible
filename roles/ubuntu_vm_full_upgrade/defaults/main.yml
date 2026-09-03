@@ -172,6 +172,16 @@ ubuntu_vm_full_upgrade_notify_detail_max_lines: 100
 # unexpected interactive prompt or a stuck maintainer script fails loudly
 # instead of hanging forever like 2026-08-22's monnie incident (job #802).
 #
+# **この保証は `setsid -w` で端末を外していることに依存する**(tasks/apply.yml)。
+# 素の timeout は新しいプロセスグループを作り、become の pty に対して背景
+# グループになるため、端末に触った時点で SIGTTOU/SIGTTIN でグループごと停止
+# する。**timeout 自身も停止するのでアラームは発火せず、上限は効かない。**
+# 2026-09-03、ジョブ #938 が実際にそうなった。
+# **`--foreground` でも成立しない** — 停止は消えるが signal が COMMAND だけに
+# 送られ、残った子孫が pipe へ出力する限り Ansible の module が返らない
+# (実測: 3秒の上限に対し 6.07秒)。**値だけを見て「必ず終わる」と読まない。**
+# 機構と実測は docs/ai/reviews/ubuntu_vm_apply_timeout_sigttou/。
+#
 # ubuntu_vm_full_upgrade_apply_timeout_seconds (TERM sent here) — 3600s
 # (60 min, Coordinator decision 2026-08-22, raised from an initial 1800s):
 # the two failure directions this value trades off are NOT symmetric, so it

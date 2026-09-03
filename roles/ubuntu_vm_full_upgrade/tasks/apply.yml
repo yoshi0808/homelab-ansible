@@ -104,6 +104,26 @@
 - name: Run apt full-upgrade
   ansible.builtin.command:
     argv:
+      # setsid -w: 端末を外し、timeout を既定の(プロセスグループへ signal を
+      # 送る)モードのまま使うための包み。become で pty が割り当てられる本
+      # playbook では、timeout が作る新しいプロセスグループが前景ではないため、
+      # apt/dpkg が端末に触った時点で SIGTTOU/SIGTTIN により**グループごと停止**
+      # する。timeout 自身も停止するのでアラームは永久に発火せず、無期限に
+      # 止まる(2026-09-03、ジョブ #938)。
+      #
+      # **`--foreground` では解決しない。** あれは新しいプロセスグループを作ら
+      # ないので停止は消えるが、signal が COMMAND だけに送られ**子孫が残る**。
+      # Ansible の run_command() は stdout/stderr の pipe を読み続けるため、
+      # 残った dpkg が出力する限り module は返らず、上限が実効しない
+      # (実測: 3秒の上限に対し 6.07秒。setsid 版は 3.01秒)。
+      #
+      # setsid は新しいセッションを作り制御端末を持たせないため、job control
+      # signal そのものが発生しない。timeout は既定モードのままなので、上限で
+      # プロセスグループごと閉じられる。`-w` は終了を待ち同じ終了コードを返す
+      # (rc=124 / 137 の判定が下の task で成立する条件)。
+      # 機構と実測は docs/ai/reviews/ubuntu_vm_apply_timeout_sigttou/。
+      - setsid
+      - -w
       - timeout
       - "--kill-after={{ ubuntu_vm_full_upgrade_apply_kill_after_seconds }}"
       - "{{ ubuntu_vm_full_upgrade_apply_timeout_seconds }}"
