@@ -46,12 +46,20 @@
 - **`workspace` の本番現物を開発側から観測する手段が無い。** `acl-status` の表に arm が無く、repo 側の定義までしか言えない
 - **`acl-status semaphore-db` は恒久的に `Permission denied`。** `dev-investigate` が traverse を失ったためで異常ではないが、**ACLが付け直されていないかを開発側から観測する手段は失われた**
 - **先読みが空でも「調査したがわからなかった」と同じ見た目で通知が出る。** 通知が運ぶのは verdict / confidence / known_condition で `notes` は運ばない。2026-08-22 の #802 では `EACCES` が成果物の中にしか無く、Slack には「特定不能」としか出なかった
-**予定: authy / quory / ansy の月次 apply を週末にまとめて行う(2026-09-03 Yoshinobu)** — 9/2 の dry-run(#929)で3ホストとも更新対象あり(quory は38件、`REVIEW_REQUIRED`、重要は `python3-apt` / `python3-distupgrade` / `python3-pyasn1`)。**プロダクトの更新ではないのでまとめて扱う。** monnie は 2026-09-03 に適用済み。
+**月次 apply: monnie / quory / authy は2026-09-03に完了。残るは ansy 1台**(2026-09-03)
 
-**その前に `timeout` の修正(`docs/ai/reviews/ubuntu_vm_apply_timeout_sigttou/`)が要る。** 停止の機構はホストに依存しない — `become: true` で pty が割り当てられ、`timeout` が新しいプロセスグループを作り、背景グループとして端末に触った時点で `SIGTTOU` で止まる。**修正前に流すと3ホストとも同じ形で止まり、`timeout` 自身も止まるため誰も終わらせられない。**
+| ホスト | ジョブ | 結果 |
+|---|---|---|
+| monnie | #938 → 手動復旧 | `SIGTTOU` で停止。`kill` → `dpkg --configure -a` → `loki` / `unpoller` 再起動で完了 |
+| quory | #943 | **success / 1分48秒**。修正後のコード(`41a55ae`)で走り、タイムアウト分岐にも失敗分岐にも入っていない |
+| authy | #944 | **success / 1分28秒**。failed unit 0、RADIUS 1812/1813 待受中 |
+| **ansy** | **未実施** | **`reboot_expected: True`。playbookが同一セッションで再起動するため、対話セッション・tmux・codexペインが落ちる**(agmsgサーバはDockerで自動復帰) |
 
-**順序: 修正 → 週末のまとめ適用。** ジョブ #938 の再実行も同じ制約下にある。
+**`timeout` の SIGTTOU 修正は本番で2回完走した**(`41a55ae`、`setsid -w` + 既定モードの `timeout`)。**ただし「修正が無ければ止まっていた」ことの証明にはならない** — quory / authy の apt が端末に触ったかどうかは分からない。機構が効くことの確認は sandbox の実測(`docs/ai/reviews/ubuntu_vm_apply_timeout_sigttou/2026-09-03_003_implement.md`)が担う。
 
+**ansy を押すときの手順**: 落ちてよい時間に押す → 再起動後 `ssh ansy` → セッションを立て直す → **SessionStart に出る agmsg の同期状態を見る**(`3aaad4d` で自動化した。`sync engine` はsystemd unitではないので再起動で必ず落ちる)。
+
+**残っている申し送り**: `NEEDRESTART_MODE=l` は再起動しないため、更新したパッケージのうち**動いているプロセスが旧版のまま**のものがある。authy は `libpam` 系が入ったが `freeradius` は旧ライブラリのまま動いている(再起動不要と出ており、急がない)。
 ## Next(着手候補) — 工程・体制
 
 | 項目 | 内容 | 根拠 |
