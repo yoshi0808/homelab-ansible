@@ -1,7 +1,7 @@
 # Incident: 停止を防ぐために入れた `timeout` が、apt を無期限に停止させた
 
 日付: 2026-09-03
-状態: 解決済み(復旧完了、恒久対策は未実施)
+状態: 解決済み(復旧完了、恒久対策も実施・本番実績あり)
 対象: `roles/ubuntu_vm_full_upgrade/tasks/apply.yml`(monnie、Semaphoreジョブ #938)
 種別: 動作不具合
 原因分類: #設計考慮ミス
@@ -45,7 +45,16 @@ Yoshinobu が「5分経過」と報告し、Coordinator が停止か進行かを
 `kill -9` → `dpkg --configure -a`(**設定待ちは1つも無かった**)→ `loki` / `unpoller` の再起動で完了した。**適用は実質的に終わっており、止まっていたのは後片付けだけだった。**
 実測は `docs/ai/reviews/ubuntu_vm_apply_timeout_sigttou/2026-09-03_002_recovery_result.md`。
 
+## 恒久対策
+
+apt 実行を `setsid -w` の内側へ移し、`timeout` は既定モードのまま使う(commit `41a55ae`)。制御端末を持たせないので job control signal 自体が発生せず、`timeout` は既定モードのままなのでプロセスグループごと閉じられる。**`--foreground` は独立レビューで否決された** — 停止は消えるが子孫が残り、上限が実効しない。
+
+**本番で3台が完走した** — quory #943(108秒)/ authy #944(88秒)/ ansy #945(116秒)。ただし**3台の apt が実際に端末へ触ったかは測っていないため、「修正が無ければ止まっていた」の証明ではない。** 機構の根拠は sandbox の実測である。
+
+案件記録は `docs/ai/reviews/ubuntu_vm_apply_timeout_sigttou/`(closeout は `_005`、監査は `_006`)。
+
 ## 残る弱点
 
 - **Operator は apt のログを読めない。** 本番で apt が止まったときに、運用側から中身を確かめる手段が無い
 - **`timeout` を同じ形で使っている箇所は repo 内で1つだけ**だが、`become: true` + 長時間コマンドの組み合わせは他にもありうる
+- **回帰テストはプロセス木側だけを見ている。** `setsid -w` を消して素の `timeout` に戻しても localhost では通るため、**この直接原因の再導入を機械では検出できない**

@@ -43,7 +43,7 @@
 
 **月次 apply は2026-09-03に4台とも完了した。開いているのは案件のクローズ判断だけである(2026-09-03)** — 発端は 9/3 08:09 の monnie への apply(#938)で、`Run apt full-upgrade` が無期限停止した。原因は2026-08-22 の conffile 対策が入れた `timeout` 自身である — `become: true` で Ansible が pty を割り当てる文脈で `timeout` が新しいプロセスグループを作り、それが背景グループとして制御端末に触って `SIGTTOU` で停止した(`timeout` も同じグループで止まるため、3600秒のアラームは発火しない)。**conffile 対策そのものは効いている** — 4台とも term.log に conffile プロンプトは1つも出ていない。復旧は同日 09時台に完了し(`dpkg --configure -a` は即返、`loki` / `unpoller` を再起動)、修正 `41a55ae`(`setsid -w` + 既定モードの `timeout`)で **quory #943 / authy #944 / ansy #945 の3台が完走した**。Incidentは `docs/ai/memory/incidents/2026-09-03_apt-stalled-by-the-timeout-added-to-prevent-stalls.md`。
 
-**`docs/ai/reviews/ubuntu_vm_apply_timeout_sigttou/` は requirement / recovery / implement / codexレビュー(blockingなし)の4本まで来ており、closeout と Auditor が無い。** **本番3台の完走は「修正が効いた」ことの証明ではない** — 3台の apt が端末に触ったかどうかは分からない。機構が効くことの確認は sandbox の実測(`.../2026-09-03_003_implement.md`)が担う。
+**案件 `docs/ai/reviews/ubuntu_vm_apply_timeout_sigttou/` はクローズした**(closeout `_005`、Auditor `_006` は条件付き受入 → 指摘を反映)。blockingだったIncidentの状態欄(「恒久対策は未実施」のまま取り残されていた)を是正し、非ブロッキング2件(3600秒の見直しを扱わなかったこと、差し替え前レビューの一次記録が無いこと)をcloseoutへ明記した。**本番3台の完走は「修正が効いた」ことの証明ではない** — 3台の apt が端末に触ったかどうかは分からない。機構が効くことの確認は sandbox の実測(`.../2026-09-03_003_implement.md`)が担う。**未commit。**
 
 **残存リスクと申し送り。**
 
