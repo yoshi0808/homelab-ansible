@@ -39,34 +39,13 @@
 - **良くなる確証は双方とも持っていない**(Yoshinobu、2026-08-18)。やってみる価値はあるという判断で始めた
 - **やめる条件は現段階では定めない**(Yoshinobu、2026-08-18)。Coordinatorが「効かなかったことを観測可能にするため先に決めるべき」と進言し、**現段階では不要と判断された**。再提案しない
 
-**観測待ち: Slack送信のuri移行が、一次調査の通知経路でも成立すること(AC3、2026-08-25 実装)** — `community.general.slack` は宛先を `slack.com` にハードコードし `domain` 引数も無視するため、**URLを差し替えるdecoyが原理的に成立しなかった**(この類のIncidentが5件)。送信2箇所を `ansible.builtin.uri` へ移し、宛先の決定をURLの側へ戻した。案件記録は `docs/ai/reviews/slack_notify_uri_migration/`
+**一次調査の先読みは成立した(2026-09-03 観測、案件クローズ)** — ジョブ #938 の失敗で一次調査が自然に動き、`notes` に `Permission denied` は現れず、`observations` が Semaphore のエラー本文(`rc=-9`)まで引用した。2026-08-25 の traverse ACL 付与(`bbf2afa`)が効いている。記録は `docs/ai/reviews/incident_prefetch_traverse/2026-09-03_006_observed.md`。**同じ通知で Slack uri 移行の AC3 も充足した**(色バー無し=プレーンテキスト。`docs/ai/reviews/slack_notify_uri_migration/2026-09-03_008_ac3_observed.md`)。
 
-- **AC1 / AC4 / AC5 / AC7 と `link_names` の構造は Tester が独立に実測して PASS。** AC7(無応答endpointでも `rescue` が親timeoutより前に完走する)は両経路とも約11秒で、親の30秒に達しない
-- **AC2 は本番の定期通知で PASS した**(2026-08-25、`#info` の `worktree_sync` 通知4本)。左端のカラーバーが出ていることが `attachments` の `color` が効いている証拠である
-- **残るのは AC3 だけ** — `incident_investigate_notify.yml` が `#alerts` へ**attachmentsでないプレーンテキスト**で届くこと。**意図的に起こせない** — Semaphoreジョブが失敗して一次調査が完了したときにしか動かない。次にそれが起きたときが唯一の確認機会である
-- **AC6(配備)は完了した**(2026-08-25、ジョブ #838)。`deployed-hash incident-investigate` が repo と一致することを確認済み
-- **回帰テストは置いていない。** 独立レビューが「4回再発した安全境界の修正が一回限りのscratchpad検証にしか残っていない」として `scripts/tests/` への新設を提案したが、Coordinatorが保留した。**`community.general.slack` へ戻す差分や `link_names` / `timeout` の脱落を機械的に止める仕組みは無い**
+**この2件から残った弱点は3つで、いずれも案件を起こしていない。**
 
-**観測待ち: 一次調査の先読みファイルが実際に書けること(2026-08-25 修正・配備済み)** — `homelab-semaphore-query` のAPI移行は**quoryへ配備完了**(commit `0196087`、Semaphoreジョブ #758〜#762)だが、**同じ配備が入れた先読み機構は導入以来1度も動いていない。**
-
-- **壊れていたことと直ったことの両方が実測で残っている** — `homelab-incident-capture.service` が5分ごとに `status=2` で失敗し続け、配備を境に緑になった。版上げ(8/18 20:29)から約14時間、本番の証拠収集が動いていなかった
-- **8/19以降の初発火(ジョブ #802、8/22)で失敗した。** 成果物の `notes` に `failed to write pre-fetched Semaphore context file for the LLM: [Errno 13] Permission denied: '/var/lib/incident-inspect/semaphore-context/semaphore-context-802.txt'`。LLMはSemaphoreのジョブ出力・ホスト結果・エラー本文を一切読めず、所見は「失敗タスクや直接エラーは特定不能」で終わった。`known_condition.suspected` も先読み欠落を理由に `false` へ落ちている
-- **回帰ではない。** `semaphore_context_dir` とディレクトリ作成タスクは `0196087`(8/19)が初出で、それ以前の #631(8/8)・#675(8/11)は旧経路で正常に所見を出していた。**配備した機能が最初から動いていない。**
-- **AC10が問おうとしていた層には到達していない。** 失敗は「sandbox内のLLMが外のファイルを読めるか」ではなく、その1段手前の**sandboxの外でyoshiがファイルを書く**ところである。unitは `User=yoshi`、roleはこのディレクトリを `owner: yoshi` / `mode: 0750` で作る建付け(`roles/incident_investigate/tasks/main.yml`)なので、**repo側の意図と本番の現物が食い違っている**
-- **配備物は最新である** — `deployed-hash incident-investigate` は repo と一致(`3a22c979…`)。差分ではなくディレクトリ側の問題
-- **観測手段を足して原因が確定した**(2026-08-25、`docs/ai/reviews/investigate_acl_observation/`)。`/var/lib/incident-inspect` は `incident-inspect` 所有・`0750`・**ACLエントリなし**で、`yoshi` は owner でも group でもなく「other」に落ちる。**`---` で traverse が無いため、そもそも親へ入れない。** 葉が `yoshi` 所有で正しく作られていても辿り着けない
-- **配備が `ok` を返していた理由もこれで説明が付く** — role は `become: true` で走り、**root は権限ビットを無視する**。root から見て正しいことと `yoshi` が使えることは別だった
-- **設計の穴は traverse が片方向しか無いこと。** `incident-inspect` → 葉の `x` は与えているが、**`yoshi` → 親の経路が無い**。読み手のための経路だけが設計されている
-- **修正して配備した**(2026-08-25、commit `bbf2afa`、Semaphoreジョブ #841。案件記録は `docs/ai/reviews/incident_prefetch_traverse/`)。既にある付与の鏡像で、`/var/lib/incident-inspect` へ `yoshi` の traverse を ACL で与えた。**`x` のみで `r` は与えていない** — 書き手は渡された正確なパスへ書くだけで、親の列挙を必要としない
-- **配備後に `user:yoshi:--x` を実測した。** `mask::r-x` に対して実効も `--x`。`dev-investigate` に対する葉の拒否は維持されており(negative check)、**付与が `yoshi` に限定されていることの証拠**になっている
-- **残っているのは「実際に書けたか」だけ。** 次に Semaphore ジョブが失敗して一次調査が動いたとき、成果物の `notes` に `failed to write pre-fetched Semaphore context file` が**現れず**、`observations` に Semaphore のジョブ出力・ホスト結果・エラー本文が引用されていれば充足する。**意図的に起こせない**
-- **残存リスク: `workspace` の本番現物を開発側から観測する手段が無い。** `acl-status` の表に arm が無く、repo 側の定義(`incident-inspect` 所有・`0750`)までしか言えない。親へ traverse を与えたことで `yoshi` がそこへ到達できるようになっていないことは、**実測していない**
-- **別に残っている問題**: 先読みが空でも「調査したがわからなかった」と同じ見た目で通知が出る。**通知が運ぶのは verdict / confidence / known_condition で、`notes` は運ばない** — #802 の `EACCES` は成果物の中にしか無く、Slack には「特定不能」+ 確信度low としか出なかった。**案件を起こしていない**
-- **旧 `semaphore.db` ACL は3識別子とも撤去済み**(`/var/lib/semaphore` に named-user エントリなし)
-- **`acl-status semaphore-db` は恒久的に `Permission denied` になった。** `dev-investigate` が traverse を失ったためで異常ではないが、**「ACLが付け直されていないか」を開発側から観測する手段は失われた**
-- **残存リスク**: タスク一覧が将来ページングされたとき、`task-time` は非ゼロで騒ぐが **`recent-failed` は静かに古い分を落とす**。現在757件で頭打ちは観測されていない
-- 記録は `docs/ai/reviews/semaphore_query_api/`(requirement / 実装 / レビュー3本 / 配備手順 / 配備結果)
-
+- **`workspace` の本番現物を開発側から観測する手段が無い。** `acl-status` の表に arm が無く、repo 側の定義までしか言えない
+- **`acl-status semaphore-db` は恒久的に `Permission denied`。** `dev-investigate` が traverse を失ったためで異常ではないが、**ACLが付け直されていないかを開発側から観測する手段は失われた**
+- **先読みが空でも「調査したがわからなかった」と同じ見た目で通知が出る。** 通知が運ぶのは verdict / confidence / known_condition で `notes` は運ばない。2026-08-22 の #802 では `EACCES` が成果物の中にしか無く、Slack には「特定不能」としか出なかった
 ## Next(着手候補) — 工程・体制
 
 | 項目 | 内容 | 根拠 |
