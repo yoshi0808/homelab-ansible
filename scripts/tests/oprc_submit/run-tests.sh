@@ -43,7 +43,21 @@ fi
 printf 'Team: %s\n\n%s\n\n2 member(s)\n' "$1" "${ROSTER:-  coordinator (claude-code) — /repo
   operator (remote — no local registration)}"
 EOF
-chmod +x "$work/bin/stub-client" "$work/agmsg/send.sh" "$work/agmsg/team.sh"
+# remote.sh は「engine が動いているか」と「最後に成功した同期」の2つを出す。
+# SYNC_MODE で ok / stale(engine死亡)/ old(古い同期)/ nosync(同期行なし)を切り替える。
+cat > "$work/agmsg/remote.sh" <<'EOF'
+#!/usr/bin/env bash
+case "${SYNC_MODE:-ok}" in
+  stale) echo "$2	connected (engine stale — pidfile 999 points at a dead or foreign process)"; exit 0 ;;
+  nosync) echo "$2	connected (engine running, pid 1)"; exit 0 ;;
+  old)  echo "$2	connected (engine running, pid 1)"
+        echo "		cycles: last successful sync 2026-08-29T00:04:05.810Z"; exit 0 ;;
+  fail) exit 1 ;;
+  *)    echo "$2	connected (engine running, pid 1)"
+        echo "		cycles: last successful sync $(date -u +%Y-%m-%dT%H:%M:%S).000Z"; exit 0 ;;
+esac
+EOF
+chmod +x "$work/bin/stub-client" "$work/agmsg/send.sh" "$work/agmsg/team.sh" "$work/agmsg/remote.sh"
 
 export OPRC_CLIENT="$work/bin/stub-client"
 export AGMSG_SCRIPTS_DIR="$work/agmsg"
@@ -95,14 +109,24 @@ ROSTER='  coordinator (claude-code) — /repo' run "$good_payload" "$good_notice
 ROSTER='  operator (remote — no local registration)' run "$good_payload" "$good_notice"
 [ "$rc" = "2" ] && ! grep -q submit "$STUB_LOG"; check "送信元 identity が無い: submit せず exit 2" $?
 
+# 6〜9. 通知がホストから出られない状態(sync engine)
+#
+# **send.sh の成功はローカルstoreへ書いたことしか意味しない。** remote team では
+# engine がサーバへ運ぶまでが送信であり、engine が死んでいてもエラーは出ない。
+for mode in stale old nosync fail; do
+  SYNC_MODE="$mode" run "$good_payload" "$good_notice"
+  [ "$rc" = "2" ] && ! grep -q submit "$STUB_LOG"
+  check "sync が成立していない($mode): submit せず exit 2" $?
+done
+
 # --- submit 後の失敗を黙って成功にしないこと ------------------------------
 
-# 6. submit 失敗なら通知を送らない
+# 10. submit 失敗なら通知を送らない
 SUBMIT_RC=1 SUBMIT_OUT='' run "$good_payload" "$good_notice"
 [ "$rc" != "0" ] && grep -q submit "$STUB_LOG" && ! grep -q send "$STUB_LOG"
 check "submit 失敗: 通知を送らない" $?
 
-# 7〜12. 応答の request_id が契約に適合しないとき、通知せず失敗する
+# 11〜16. 応答の request_id が契約に適合しないとき、通知せず失敗する
 #
 # **末尾LFの1件は JSON escape のまま渡す。** 生LFを埋めると JSON 自体が壊れて
 # json.load の失敗経路へ落ち、本体の `value != value.strip()` を一度も通らない
@@ -119,13 +143,13 @@ for bad in '{"conversation_id":"cnv-x"}' \
   check "request_id が契約に適合しない($bad): 通知を送らず失敗" $?
 done
 
-# 13. 応答が JSON として読めない(本文に生LFが入る)
+# 17. 応答が JSON として読めない(本文に生LFが入る)
 SUBMIT_RC=0 SUBMIT_OUT="$(printf '{"request_id":"%s\nEVIL"}' "$VALID_ID")" \
   run "$good_payload" "$good_notice"
 [ "$rc" != "0" ] && ! grep -q send "$STUB_LOG" && grep -q '登録された可能性' "$work/err"
 check "応答が JSON として読めない: 通知を送らず失敗" $?
 
-# 14. 通知の送信に失敗したら「登録済み・未通知」を明示して失敗
+# 18. 通知の送信に失敗したら「登録済み・未通知」を明示して失敗
 SUBMIT_RC=0 SUBMIT_OUT="{\"request_id\":\"$VALID_ID\",\"conversation_id\":\"cnv-x\"}" \
   SEND_RC=1 run "$good_payload" "$good_notice"
 [ "$rc" != "0" ] && grep -q send "$STUB_LOG" \
@@ -134,7 +158,7 @@ check "通知失敗: 登録済み・未送を明示して失敗" $?
 
 # --- 正常系 ---------------------------------------------------------------
 
-# 15. 登録し、request_id と要旨を載せて通知し、両方を報告する
+# 19. 登録し、request_id と要旨を載せて通知し、両方を報告する
 SUBMIT_RC=0 SUBMIT_OUT="{\"request_id\":\"$VALID_ID\",\"conversation_id\":\"cnv-x\"}" \
   run "$good_payload" "$good_notice"
 [ "$rc" = "0" ] \
