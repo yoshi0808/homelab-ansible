@@ -31,7 +31,7 @@
 
 **どのファイルが在るかは、ディレクトリそのものが正本である。この表へ一覧を持たない** — 一覧を持つと、Contextが増えたときに必ずドリフトする。各分類の定義は `docs/ai/context-classification.md`。
 
-**この表はansy側の開発工程のRoleだけを扱う。** quory側の Operator は本番運用を支援する別の工程に属するため列を持たない(漏れではない)。Operatorはこのリポジトリを読まず、指示・手順の正本はquory側にある(`docs/ai/roles/operator.md`「この文書の位置づけ」)。
+**この表はansy側の開発工程のRoleだけを扱う。** quory側の Operator は本番運用を支援する別の工程に属するため列を持たない(漏れではない)。Operatorが何を読むかを決めるのはquory側の指定であり、この表ではない(`docs/ai/roles/operator.md`「この文書の位置づけ」)。
 
 ## Auditorの参照範囲
 

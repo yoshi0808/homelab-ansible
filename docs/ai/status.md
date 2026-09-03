@@ -11,7 +11,7 @@
 
 ## Now(進行中)
 
-**Operator が起動時にこの repo を読むようになった。規範側3箇所が事実と食い違っている(2026-09-03)** — Yoshinobu が quory 側で設定した。OPREQ で繰り返しトラブったことへの対応である。**これで対象の文書は設計メモではなく、本番エージェントの起動時契約になった** — push すれば `worktree_sync` の timer で quory へ入り、次の起動から効く。**編集は「文書の更新」ではなく「本番の挙動を変える変更」として扱う。**
+**Operator が起動時にこの repo を読むようになり、規範側2箇所を追随させた。独立レビュー中(2026-09-03)** — Yoshinobu が quory 側で設定した。OPREQ で繰り返しトラブったことへの対応である。**これで対象の文書は設計メモではなく、本番エージェントの起動時契約になった** — push すれば `worktree_sync` の timer で quory へ入り、次の起動から効く。**編集は「文書の更新」ではなく「本番の挙動を変える変更」として扱う。**
 
 **実測(2026-09-03、agmsg で Operator に確認した)。** 読み込み元は `/home/yoshi/homelab-ansible` の **Git作業ツリーそのもの**で、別コピーではない。読むのは**毎セッションの作業開始時**(キャッシュで省略する仕組みは未確認)。**repo から読んでいるのは4本で、Yoshinobu の説明にあった2本より多い。**
 
@@ -21,21 +21,25 @@
 | `docs/ai/context/operations/operator-request-channel.md` / `docs/ai/policies/execution_boundary_policy.md` | repo 作業ツリー。**事前に把握していなかった2本** |
 | `AGENTS.md`(起動時指示) / `~/.agents/skills/agmsg/SKILL.md` / `/home/yoshi/operator-runtime/CONNECTIONS.md` | repo外 |
 
-**Operator 自身が矛盾を検出し、妥当に整理していた** — AGENTS.md を Yoshinobu の最新明示指示として従いつつ、`core.md` の開発Role専用規則(subagent成果物、Git操作等)を**Operator権限の根拠には使わない**、としている。**問題は、この切り分けが Operator の判断の中にしか無く、文書側に書かれていないことである。**
+**Operator 自身が矛盾を検出し、妥当に整理していた** — AGENTS.md を Yoshinobu の最新明示指示として従いつつ、`core.md` の開発Role専用規則(subagent成果物、Git操作等)を**Operator権限の根拠には使わない**、としている。**当初この切り分けは Operator の判断の中にしか無く、文書側には書かれていなかった。** いまは `operator.md` へ「正本の2軸」として書いてある(下記)。
 
-食い違っているのは次の3箇所で、いずれも「Operatorはこのリポジトリを読まない」を前提に書かれている。**引用関係があるので1案件でまとめて直す。**
+**変更したのは2箇所。3つめは評価のうえ変更不要とした。** 前2者はどちらも「Operatorはこのリポジトリを読まない」を前提に書かれていた。
 
-| 場所 | 書いてあること |
+| 場所 | 直す前に書いてあったこと |
 |---|---|
-| `docs/ai/roles/operator.md`「この文書の位置づけ」 | **正本。**「Operatorはこのリポジトリを読まない」「本ファイルは開発側がOperator役を設計・参照するための記録である」。**Operator は、自分がこれを読まないと書いてある文書を読んでいる** |
-| `docs/ai/role-context-matrix.md:34` | 同じ主張。上の節を引用している |
-| `docs/ai/core.md`「開発の作業時に読む情報」項2 | 実行境界Policyを**開発工程のRoleだけ**に絞り、その根拠として上の節を引いている。**Operator は現にこのPolicyを起動時に読んでいる** |
+| `docs/ai/roles/operator.md`「この文書の位置づけ」 | **正本。**「Operatorはこのリポジトリを読まない」「本ファイルは開発側がOperator役を設計・参照するための記録である」。**Operator は、自分がこれを読まないと書いてある文書を読んでいた** |
+| `docs/ai/role-context-matrix.md:34` | 同じ主張。上の節を引用していた |
+| `docs/ai/core.md`「開発の作業時に読む情報」項2 | **変更不要と判断した。** 上の節を絞り込みの根拠として引いているが、支えている主張は「実行境界Policyを起動時に読むのは開発工程のRoleである」で、その理由は**Operatorが別工程に属すること**。変更後も成り立つ |
 
-**`core.md` は冒頭で読者を Coordinator と開発工程の4 subagent に限定しており、Operator を含んでいない。** 中身も「Gitの扱い」「開発の作業時に読む情報」「Ansible変更の共通ゲート」「decoy inventory」は開発工程向けで噛み合わない(quory の作業ツリーが汚れている状態は異常だと `docs/ai/context/operations/code-delivery-to-production.md` が定義しているため、「作業開始時に `git status` で確認する」は Operator に対しては意味が反転する)。一方「人間の権限と安全境界」「開発と本番の境界」「公開情報と秘密情報」「作るものが満たすこと」はそのまま効いてほしい。**「subagentが共通して守ること」には、Operator にも効いてほしい安全則が同居している**(迂回せず止めて返す、記録どうしの不一致を勝手に統合しない)。
+**`core.md` は触らないことをYoshinobuが決めた(2026-09-03)。** あわせて設計の意図が示された — **Operatorをこのリポジトリで管理し切らない。** 独立性を担保するため起動時の入口は意図的にrepo外へ置いてあり、鍵などの情報もOperator側のプロンプトが持つ。repoを読ませた目的は限定的で、**OPREQの作法と構成がrepo側にしか無く、見えないとOperatorの作業が詰まる**ことへの対策である。
 
-**Coordinator の推奨は「`core.md` は触らず、`operator.md` 側に『`core.md` のうち Operator に効くのはこの節』と名指しする」。** `core.md` は5 Role が毎セッション読むファイルで、運用側の都合で構造を変える影響が大きい。値の複製ではなくポインタなので正本は1つのままである。**未決 — Yoshinobu の判断待ち。**
+**Coordinatorが当初出した「`operator.md` から `core.md` の該当節を名指しする」案は取り下げた。** repo側からOperatorの振る舞いを規定しにいく形で、独立性の担保と逆を向いている。
 
-**起動時の入口は quory 側にあり、repo直下の `AGENTS.md` は無関係だった(2026-09-03 確認済み)。** 適用されている `AGENTS.md` は `/home/yoshi/operator-runtime/AGENTS.md` で、セッションの cwd も `/home/yoshi/operator-runtime`。**repo直下の `AGENTS.md`(Codex entrypoint)は読まれておらず、起動時契約としても適用されていない** — cwd が作業ツリーなら codex が自動で読む経路を疑ったが、そうではなかった。`core.md` と `operator.md` を読む根拠は quory 側 runtime の `AGENTS.md` にある「作業開始時に読む正本」の指定である。**したがって直す対象は上の3箇所のままで、repo直下の入口は増えない。** ただし**その指定の現物は quory 側にあり、開発側からは観測も変更もできない** — 読ませる文書を増やす・減らすのは Yoshinobu 側の操作になる。
+**確定した関係は「正本の2軸」である。** 規範上の責務と禁止はrepoのRole文書と個別Policyが正本、起動時の入口・読む範囲・実効能力の現物はquory側が正本、**食い違うときは狭いほうが効く**。初版は「食い違うときはquory側が優先」と書いており、**独立レビューがCriticalで検出した** — `core.md:12,93` のRole/Policy正本宣言と衝突し、repo側の禁止まで退ける読み方を許していた。
+
+**案件は `docs/ai/reviews/operator_repo_read_scope/` で進行中。** 対象は requirement と3ファイル(`operator.md` / `role-context-matrix.md` / 本ファイル)の差分。**codexレビューは3巡してApprove**(blocking / non-blocking とも findings なし)。1巡目のCriticalは「quory側が優先する」が広すぎて repo側の禁止まで退ける読み方を許していた件で、下の「正本の2軸」へ差し替えて解消した。2巡目のMajorは本ファイルに確定前の状態が現在形で残っていた件。**commit承認待ち。**
+
+**起動時の入口は quory 側にあり、repo直下の `AGENTS.md` は無関係だった(2026-09-03 確認済み)。** 適用されている `AGENTS.md` は `/home/yoshi/operator-runtime/AGENTS.md` で、セッションの cwd も `/home/yoshi/operator-runtime`。**repo直下の `AGENTS.md`(Codex entrypoint)は読まれておらず、起動時契約としても適用されていない** — cwd が作業ツリーなら codex が自動で読む経路を疑ったが、そうではなかった。`core.md` と `operator.md` を読む根拠は quory 側 runtime の `AGENTS.md` にある「作業開始時に読む正本」の指定である。**したがって repo直下の入口は変更対象に増えない。** ただし**その指定の現物は quory 側にあり、開発側からは観測も変更もできない** — 読ませる文書を増やす・減らすのは Yoshinobu 側の操作になる。
 
 **月次 apply は2026-09-03に4台とも完了した。開いているのは案件のクローズ判断だけである(2026-09-03)** — 発端は 9/3 08:09 の monnie への apply(#938)で、`Run apt full-upgrade` が無期限停止した。原因は2026-08-22 の conffile 対策が入れた `timeout` 自身である — `become: true` で Ansible が pty を割り当てる文脈で `timeout` が新しいプロセスグループを作り、それが背景グループとして制御端末に触って `SIGTTOU` で停止した(`timeout` も同じグループで止まるため、3600秒のアラームは発火しない)。**conffile 対策そのものは効いている** — 4台とも term.log に conffile プロンプトは1つも出ていない。復旧は同日 09時台に完了し(`dpkg --configure -a` は即返、`loki` / `unpoller` を再起動)、修正 `41a55ae`(`setsid -w` + 既定モードの `timeout`)で **quory #943 / authy #944 / ansy #945 の3台が完走した**。Incidentは `docs/ai/memory/incidents/2026-09-03_apt-stalled-by-the-timeout-added-to-prevent-stalls.md`。
 
