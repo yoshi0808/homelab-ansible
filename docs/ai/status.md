@@ -15,7 +15,7 @@
 
 **しかし apply は `Run apt full-upgrade` で停止し、自力では終わらない状態になった。** 原因は**その修正が入れた `timeout` 自身**である — `become: true` で Ansible が pty を割り当てる文脈で、`timeout` が新しいプロセスグループを作り、それが**背景グループとして制御端末に触って `SIGTTOU`/`SIGTTIN` で停止**した。`timeout` も同じグループで止まるため、**3600秒のアラームは発火しない**。
 
-**案件は `docs/ai/reviews/ubuntu_vm_apply_timeout_sigttou/` へ引き継いだ。** 有力な実装は `timeout --foreground` + stdin を `/dev/null` へ。Incidentは `docs/ai/memory/incidents/2026-09-03_apt-stalled-by-the-timeout-added-to-prevent-stalls.md`。**復旧(kill → `dpkg --configure -a` → 版と稼働の確認)が完了するまで monnie を再起動しない。**
+**案件は `docs/ai/reviews/ubuntu_vm_apply_timeout_sigttou/` へ引き継いだ。** 有力な実装は `timeout --foreground` + stdin を `/dev/null` へ。Incidentは `docs/ai/memory/incidents/2026-09-03_apt-stalled-by-the-timeout-added-to-prevent-stalls.md`。**復旧は2026-09-03 09時台に完了した**(`.../2026-09-03_002_recovery_result.md`)。`dpkg --configure -a` は即返で設定待ちゼロ、`loki 3.7.7` と `unpoller 5.2.2+git` を再起動、unpollerのメトリクス1815本を確認、再起動要求なし。**適用は実質的に終わっており、止まっていたのは後片付けだけだった。**<br>**ジョブ #938 は失敗のまま残す。修正が入るまで再実行しない** — apt が即座に終わる場合でも終了時の端末操作で同じ停止を踏みうる。<br>**残存リスク**: `--force-confold` は手動管理の設定をメジャー版更新でも黙って保持する(今回 unpoller は 4.x → 5.x をまたいで旧設定のまま動いたが、**観測であって保証ではない**)。また `MAJOR_UPGRADE_DETECTED` は codename drift / 合計100超 / remove 30超の3信号だけで、**個々のパッケージのメジャー版差は見ていない**(守備範囲の違いであり欠陥ではない)。
 
 **あわせて判明した弱点**: Operator は apt のログを読めない(`root:adm 0640`、`ann` では拒否)。本番で apt が止まったとき、運用側から中身を確かめる手段が無い。
 

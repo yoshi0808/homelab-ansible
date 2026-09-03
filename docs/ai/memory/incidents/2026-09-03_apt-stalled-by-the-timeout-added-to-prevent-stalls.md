@@ -1,7 +1,7 @@
 # Incident: 停止を防ぐために入れた `timeout` が、apt を無期限に停止させた
 
 日付: 2026-09-03
-状態: 原因確定・復旧手当て中
+状態: 解決済み(復旧完了、恒久対策は未実施)
 対象: `roles/ubuntu_vm_full_upgrade/tasks/apply.yml`(monnie、Semaphoreジョブ #938)
 種別: 動作不具合
 原因分類: #設計考慮ミス
@@ -39,6 +39,11 @@ Yoshinobu が「5分経過」と報告し、Coordinator が停止か進行かを
 - **monnie のローカル journal を直接読む read-only チェックで、alloy を経由しない観測が取れた**(08:10:06 以降無音)。これで転送の問題は消えた
 - **term.log は Operator の `ann` identity では読めなかった**(`root:adm 0640`)。OPREQ は NG で返り、**Yoshinobu が root で読んで**初めてプロンプトが無いことが分かった
 - 決め手は `ps -o pgid,sid,tty,stat` の1行だった。**プロセスグループと前景/背景の別を見るまで、原因は特定できなかった**
+
+## 復旧
+
+`kill -9` → `dpkg --configure -a`(**設定待ちは1つも無かった**)→ `loki` / `unpoller` の再起動で完了した。**適用は実質的に終わっており、止まっていたのは後片付けだけだった。**
+実測は `docs/ai/reviews/ubuntu_vm_apply_timeout_sigttou/2026-09-03_002_recovery_result.md`。
 
 ## 残る弱点
 
