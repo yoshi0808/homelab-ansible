@@ -46,6 +46,12 @@
 - **`workspace` の本番現物を開発側から観測する手段が無い。** `acl-status` の表に arm が無く、repo 側の定義までしか言えない
 - **`acl-status semaphore-db` は恒久的に `Permission denied`。** `dev-investigate` が traverse を失ったためで異常ではないが、**ACLが付け直されていないかを開発側から観測する手段は失われた**
 - **先読みが空でも「調査したがわからなかった」と同じ見た目で通知が出る。** 通知が運ぶのは verdict / confidence / known_condition で `notes` は運ばない。2026-08-22 の #802 では `EACCES` が成果物の中にしか無く、Slack には「特定不能」としか出なかった
+**予定: authy / quory / ansy の月次 apply を週末にまとめて行う(2026-09-03 Yoshinobu)** — 9/2 の dry-run(#929)で3ホストとも更新対象あり(quory は38件、`REVIEW_REQUIRED`、重要は `python3-apt` / `python3-distupgrade` / `python3-pyasn1`)。**プロダクトの更新ではないのでまとめて扱う。** monnie は 2026-09-03 に適用済み。
+
+**その前に `timeout` の修正(`docs/ai/reviews/ubuntu_vm_apply_timeout_sigttou/`)が要る。** 停止の機構はホストに依存しない — `become: true` で pty が割り当てられ、`timeout` が新しいプロセスグループを作り、背景グループとして端末に触った時点で `SIGTTOU` で止まる。**修正前に流すと3ホストとも同じ形で止まり、`timeout` 自身も止まるため誰も終わらせられない。**
+
+**順序: 修正 → 週末のまとめ適用。** ジョブ #938 の再実行も同じ制約下にある。
+
 ## Next(着手候補) — 工程・体制
 
 | 項目 | 内容 | 根拠 |
