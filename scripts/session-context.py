@@ -19,6 +19,7 @@ Usage: session-context.py <chunk番号(1始まり)>
 中身の無いチャンクは何も出力しない(登録エントリ数が実際のチャンク数より多くてよい)。
 """
 
+import datetime
 import json
 import re
 import subprocess
@@ -54,10 +55,78 @@ def status_sections():
     return [part for part in re.split(r"(?m)^(?=## )", body) if part.strip()]
 
 
+AGMSG_STATUS = Path.home() / ".agents" / "skills" / "agmsg" / "scripts" / "remote.sh"
+AGMSG_TEAMS = ("homelab-ops",)
+# 「最後に成功した同期」がこれより古ければ、動いていないものとして出す。
+SYNC_STALE_SECONDS = 900
+
+
+def _humanize(seconds):
+    """経過を読める単位にする。分だけで出すと「7834分前」になり読み取れない。"""
+    if seconds < 3600:
+        return "約%d分" % (seconds // 60)
+    if seconds < 86400:
+        return "約%d時間" % (seconds // 3600)
+    return "約%.1f日" % (seconds / 86400)
+
+
+def agmsg_sync_block():
+    """agmsg remote team の同期状態を1ブロックにする。
+
+    **人が起動時の画面で読むことに頼らない。** 起動直後にCCの画面へ切り替わる
+    ため、`remote.sh status` の出力は実際には読まれない。2026-08-29から
+    2026-09-02まで sync engine が5日間死んでいたのを誰も気づかなかったのは
+    これが理由である(docs/ai/memory/incidents/
+    2026-09-02_agmsg-sync-engine-dead-for-five-days.md)。
+
+    **取得できないときは黙って空にせず、確認できなかったと書く。**
+    engine が生きていても「最後に成功した同期」が古ければ運べていない
+    (`docs/ai/context/operations/agent-messaging.md` §9)。
+    """
+    lines = []
+    for team in AGMSG_TEAMS:
+        if not AGMSG_STATUS.exists():
+            lines.append("- %s: **確認できず**(%s が無い)" % (team, AGMSG_STATUS))
+            continue
+        try:
+            result = subprocess.run(
+                ["bash", str(AGMSG_STATUS), "status", team],
+                capture_output=True, text=True, timeout=15,
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            lines.append("- %s: **確認できず**(%s)" % (team, type(exc).__name__))
+            continue
+        out = result.stdout
+        running = "engine running" in out
+        m = re.search(r"last successful sync ([0-9T:.\-]+)Z", out)
+        if not m:
+            lines.append("- %s: **同期していない。** engine=%s、"
+                         "「最後に成功した同期」の行が無い。"
+                         "**通常のシェルから `remote.sh sync start %s` が要る**"
+                         % (team, "running" if running else "not running", team))
+            continue
+        try:
+            last = datetime.datetime.strptime(m.group(1)[:19], "%Y-%m-%dT%H:%M:%S")
+            last = last.replace(tzinfo=datetime.timezone.utc)
+            age = (datetime.datetime.now(datetime.timezone.utc) - last).total_seconds()
+        except ValueError:
+            lines.append("- %s: 同期時刻を解釈できない: %s" % (team, m.group(1)))
+            continue
+        if age > SYNC_STALE_SECONDS:
+            lines.append("- %s: **同期が古い(%s前)。** engine=%s。"
+                         "engineが生きていても運べていないことがある"
+                         % (team, _humanize(age), "running" if running else "not running"))
+        else:
+            lines.append("- %s: 正常(最後の同期は%s前)" % (team, _humanize(age)))
+    return "\n## agmsg の同期状態\n\n%s\n" % "\n".join(lines)
+
+
 def build_blocks():
     """出力の素材を、分割してよい単位のリストとして組む。"""
     blocks = ["## docs/ai/status.md(状態の正本)\n\n"]
     blocks.extend(status_sections())
+
+    blocks.append(agmsg_sync_block())
 
     git_status = run_git(["status", "--short"])
     blocks.append("\n## git status --short(未commitの現物)\n\n%s\n"
