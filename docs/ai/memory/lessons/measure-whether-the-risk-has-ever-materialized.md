@@ -54,3 +54,4 @@ Coordinator は撤去の requirement に「**代わりに置くもの — 実装
 | 日付 | 何に対して踏んだか | 反した規範 | 気づかせたもの |
 |---|---|---|---|
 | 2026-08-25 | 登録直後のschedule発火が実際に起きたか測らず、有効化ゲートと二重の押下・commit手順を維持した。 | docs/ai/roles/coordinator.md「仮説で行動しない。仮説から懸念を広げない」 | Yoshinobu |
+| 2026-09-05 | sandboxのcloud-initの現在状態を確認せず、復元時に52unattended-upgrades-localが書き戻される懸念から99番への改名を推奨した。指摘後に無効化済みと確認した。 | docs/ai/roles/coordinator.md「仮説で行動しない。仮説から懸念を広げない」「確認手段があるなら先に確認する」。 | Yoshinobu |

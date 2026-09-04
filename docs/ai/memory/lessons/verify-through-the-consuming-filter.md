@@ -33,3 +33,4 @@ decoy検証を2者が独立に通過したうえで、実ホスト実行での�
 | 2026-08-18 | Policy群の規範文を代用指標(バッククォート識別子・大文字定数・数値閾値の有無)で仕分け、**その数字を検算せずに計画の前提にした**。抽出し直して初めて崩れた | `docs/ai/roles/coordinator.md`「確認していないものは未確認と明示する。確認手段があるなら先に確認する」 | 自分(次工程で消費したため) |
 | 2026-08-25 | regex_replaceの後方参照を含む実装を成立と判断したが、実Ansibleモジュールで評価すると状態3分岐が到達不能だった。 | docs/ai/core.md「説明文だけで変更済みと判断しない」 | Tester |
 | 2026-09-02 | incident-captureの要約をjournalへ出せばLokiで読めると判断したが、infoのためGrafana既定warning/errorフィルタでは隠れた。 | docs/ai/reviews/incident_capture_journal_legibility/2026-09-02_001_requirement.mdは、exit 2の理由をLokiから読み取れることを要求 | Claude側Reviewer |
+| 2026-09-05 | sandboxのapt-config dumpとAC9の設定検査だけで「再起動の側は証明済み」と断定した。自動再起動によるuptimeのリセットとreboot-requiredの消失は未観測だった。 | docs/ai/roles/coordinator.md「確認していないものは『未確認』と明示する」。依頼文のAC7は自動更新後の再起動とreboot-requiredの解消を観測する要求。 | 自分(ログの証明済みという断定とAC7の未観測事項を照合) |

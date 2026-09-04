@@ -83,7 +83,7 @@ Yoshinobu提起(同日)「monnieのLokiにwarning/errorが溜まっているが�
 
 - **配備物とrepoのhash一致**を確認済み(2026-09-02、`deployed-hash incident-capture-collector`)
 - **正常周期でjournalを汚さないこと**を実機で確認済み(配備後30分・6周期で余計な出力ゼロ)
-- **異常周期で `level="warning"` として Loki に入ること**は観測待ち。**意図的に起こせない**(notableな通知が相関ジョブ無しでspoolへ入る条件が要る)。正本は `docs/ai/status.md`
+- **異常周期で `level="warning"` として Loki に入ること**を確認済み(2026-09-05)。同日08:00・08:05の周期で、要約行と `[1]` `[2]` の内訳行がいずれも warning として着信していた(`loki-window ubuntu-nodes 2026-09-05T07:58 10m warning`)。`Failed with result 'exit-code'` と同じ画面に並ぶという意図どおりの形である
 
 ## 再発について
 
