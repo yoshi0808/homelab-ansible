@@ -11,37 +11,21 @@
 
 ## Now(進行中)
 
-**Operator が起動時にこの repo を読むようになり、規範側2箇所を追随させた。独立レビュー中(2026-09-03)** — Yoshinobu が quory 側で設定した。OPREQ で繰り返しトラブったことへの対応である。**これで対象の文書は設計メモではなく、本番エージェントの起動時契約になった** — push すれば `worktree_sync` の timer で quory へ入り、次の起動から効く。**編集は「文書の更新」ではなく「本番の挙動を変える変更」として扱う。**
+**Operator が起動時にこの repo を読む。`operator.md` は本番エージェントの起動時契約である(2026-09-03 クローズ、`42b639b`)** — Yoshinobu が quory 側で設定した。OPREQ で繰り返しトラブったことへの対応である。**編集は「文書の更新」ではなく「本番の挙動を変える変更」として扱う** — push すれば `worktree_sync` の timer で quory へ入り、次の起動から効く。
 
-**実測(2026-09-03、agmsg で Operator に確認した)。** 読み込み元は `/home/yoshi/homelab-ansible` の **Git作業ツリーそのもの**で、別コピーではない。読むのは**毎セッションの作業開始時**(キャッシュで省略する仕組みは未確認)。**repo から読んでいるのは4本で、Yoshinobu の説明にあった2本より多い。**
-
-| 読んでいるもの | 所在 |
+| | |
 |---|---|
-| `docs/ai/core.md` / `docs/ai/roles/operator.md` | repo 作業ツリー |
-| `docs/ai/context/operations/operator-request-channel.md` / `docs/ai/policies/execution_boundary_policy.md` | repo 作業ツリー。**事前に把握していなかった2本** |
-| `AGENTS.md`(起動時指示) / `~/.agents/skills/agmsg/SKILL.md` / `/home/yoshi/operator-runtime/CONNECTIONS.md` | repo外 |
+| repo から読む4文書 | `docs/ai/core.md` / `docs/ai/roles/operator.md` / `docs/ai/context/operations/operator-request-channel.md` / `docs/ai/policies/execution_boundary_policy.md` |
+| 読み込み元 | `/home/yoshi/homelab-ansible` の **Git作業ツリーそのもの**。毎セッションの作業開始時 |
+| 起動時の入口 | **repo外の `/home/yoshi/operator-runtime/AGENTS.md`**(cwd も同じ)。repo直下の `AGENTS.md` は読まれていない |
 
-**Operator 自身が矛盾を検出し、妥当に整理していた** — AGENTS.md を Yoshinobu の最新明示指示として従いつつ、`core.md` の開発Role専用規則(subagent成果物、Git操作等)を**Operator権限の根拠には使わない**、としている。**当初この切り分けは Operator の判断の中にしか無く、文書側には書かれていなかった。** いまは `operator.md` へ「正本の2軸」として書いてある(下記)。
+**正本は2軸に分かれる**(`operator.md`「この文書の位置づけ」が正本)。規範上の責務と禁止は repo の Role文書と個別Policy、起動時の入口・読む範囲・実効能力の現物は quory 側。**食い違うときは狭いほうが効く。** **Operator をこのリポジトリで管理し切ろうとしない** — 独立性の担保として入口が意図的に repo 外にある。
 
-**変更したのは2箇所。3つめは評価のうえ変更不要とした。** 前2者はどちらも「Operatorはこのリポジトリを読まない」を前提に書かれていた。
+**読ませる文書を増減させるのは Yoshinobu 側の操作で、開発側からは観測も変更もできない。** 変更後に再起動して往復を確認済み。
 
-| 場所 | 直す前に書いてあったこと |
-|---|---|
-| `docs/ai/roles/operator.md`「この文書の位置づけ」 | **正本。**「Operatorはこのリポジトリを読まない」「本ファイルは開発側がOperator役を設計・参照するための記録である」。**Operator は、自分がこれを読まないと書いてある文書を読んでいた** |
-| `docs/ai/role-context-matrix.md:34` | 同じ主張。上の節を引用していた |
-| `docs/ai/core.md`「開発の作業時に読む情報」項2 | **変更不要と判断した。** 上の節を絞り込みの根拠として引いているが、支えている主張は「実行境界Policyを起動時に読むのは開発工程のRoleである」で、その理由は**Operatorが別工程に属すること**。変更後も成り立つ |
+**申し送り**: `operator-request-channel.md` と `execution_boundary_policy.md` は本文を点検し、直すべき記述は無かった。ただし後者は冒頭で「AIが実ホストへ何をしてよいか」の正本と名乗る一方、中身は全て ansy 側で `EXEC-050` に Operator の行が無い。**穴ではなく「Operator を規定していない」意味で、Operator 自身もそう読めている。** 表題の広さと適用範囲のずれは、次に本書を改訂する機会に一緒に見る。
 
-**`core.md` は触らないことをYoshinobuが決めた(2026-09-03)。** あわせて設計の意図が示された — **Operatorをこのリポジトリで管理し切らない。** 独立性を担保するため起動時の入口は意図的にrepo外へ置いてあり、鍵などの情報もOperator側のプロンプトが持つ。repoを読ませた目的は限定的で、**OPREQの作法と構成がrepo側にしか無く、見えないとOperatorの作業が詰まる**ことへの対策である。
-
-**Coordinatorが当初出した「`operator.md` から `core.md` の該当節を名指しする」案は取り下げた。** repo側からOperatorの振る舞いを規定しにいく形で、独立性の担保と逆を向いている。
-
-**確定した関係は「正本の2軸」である。** 規範上の責務と禁止はrepoのRole文書と個別Policyが正本、起動時の入口・読む範囲・実効能力の現物はquory側が正本、**食い違うときは狭いほうが効く**。初版は「食い違うときはquory側が優先」と書いており、**独立レビューがCriticalで検出した** — `core.md:12,93` のRole/Policy正本宣言と衝突し、repo側の禁止まで退ける読み方を許していた。
-
-**案件は `docs/ai/reviews/operator_repo_read_scope/` で進行中。** 対象は requirement と3ファイル(`operator.md` / `role-context-matrix.md` / 本ファイル)の差分。**codexレビューは3巡してApprove**(blocking / non-blocking とも findings なし)。1巡目のCriticalは「quory側が優先する」が広すぎて repo側の禁止まで退ける読み方を許していた件で、下の「正本の2軸」へ差し替えて解消した。2巡目のMajorは本ファイルに確定前の状態が現在形で残っていた件。**commit承認待ち。**
-
-**起動時の入口は quory 側にあり、repo直下の `AGENTS.md` は無関係だった(2026-09-03 確認済み)。** 適用されている `AGENTS.md` は `/home/yoshi/operator-runtime/AGENTS.md` で、セッションの cwd も `/home/yoshi/operator-runtime`。**repo直下の `AGENTS.md`(Codex entrypoint)は読まれておらず、起動時契約としても適用されていない** — cwd が作業ツリーなら codex が自動で読む経路を疑ったが、そうではなかった。`core.md` と `operator.md` を読む根拠は quory 側 runtime の `AGENTS.md` にある「作業開始時に読む正本」の指定である。**したがって repo直下の入口は変更対象に増えない。** ただし**その指定の現物は quory 側にあり、開発側からは観測も変更もできない** — 読ませる文書を増やす・減らすのは Yoshinobu 側の操作になる。
-
-**月次 apply は2026-09-03に4台とも完了した。開いているのは案件のクローズ判断だけである(2026-09-03)** — 発端は 9/3 08:09 の monnie への apply(#938)で、`Run apt full-upgrade` が無期限停止した。原因は2026-08-22 の conffile 対策が入れた `timeout` 自身である — `become: true` で Ansible が pty を割り当てる文脈で `timeout` が新しいプロセスグループを作り、それが背景グループとして制御端末に触って `SIGTTOU` で停止した(`timeout` も同じグループで止まるため、3600秒のアラームは発火しない)。**conffile 対策そのものは効いている** — 4台とも term.log に conffile プロンプトは1つも出ていない。復旧は同日 09時台に完了し(`dpkg --configure -a` は即返、`loki` / `unpoller` を再起動)、修正 `41a55ae`(`setsid -w` + 既定モードの `timeout`)で **quory #943 / authy #944 / ansy #945 の3台が完走した**。Incidentは `docs/ai/memory/incidents/2026-09-03_apt-stalled-by-the-timeout-added-to-prevent-stalls.md`。
+**月次 apply は2026-09-03に4台とも完了し、`timeout` の SIGTTOU 案件もクローズした(`d95133c`)** — 発端は 9/3 08:09 の monnie への apply(#938)で、`Run apt full-upgrade` が無期限停止した。原因は2026-08-22 の conffile 対策が入れた `timeout` 自身である — `become: true` で Ansible が pty を割り当てる文脈で `timeout` が新しいプロセスグループを作り、それが背景グループとして制御端末に触って `SIGTTOU` で停止した(`timeout` も同じグループで止まるため、3600秒のアラームは発火しない)。**conffile 対策そのものは効いている** — 4台とも term.log に conffile プロンプトは1つも出ていない。復旧は同日 09時台に完了し(`dpkg --configure -a` は即返、`loki` / `unpoller` を再起動)、修正 `41a55ae`(`setsid -w` + 既定モードの `timeout`)で **quory #943 / authy #944 / ansy #945 の3台が完走した**。Incidentは `docs/ai/memory/incidents/2026-09-03_apt-stalled-by-the-timeout-added-to-prevent-stalls.md`。
 
 **案件 `docs/ai/reviews/ubuntu_vm_apply_timeout_sigttou/` はクローズした**(closeout `_005`、Auditor `_006` は条件付き受入 → 指摘を反映)。blockingだったIncidentの状態欄(「恒久対策は未実施」のまま取り残されていた)を是正し、非ブロッキング2件(3600秒の見直しを扱わなかったこと、差し替え前レビューの一次記録が無いこと)をcloseoutへ明記した。**本番3台の完走は「修正が効いた」ことの証明ではない** — 3台の apt が端末に触ったかどうかは分からない。機構が効くことの確認は sandbox の実測(`.../2026-09-03_003_implement.md`)が担う。**未commit。**
 
@@ -50,6 +34,20 @@
 - **`--force-confold` は手動管理の設定をメジャー版更新でも黙って保持する。** 今回 unpoller は 4.x → 5.x をまたいで旧設定のまま動いたが、**観測であって保証ではない**。また `MAJOR_UPGRADE_DETECTED` は codename drift / 合計100超 / remove 30超の3信号だけで、**個々のパッケージのメジャー版差は見ていない**(守備範囲の違いであり欠陥ではない)
 - **Operator は apt のログを読めない**(`root:adm 0640`、`ann` では拒否)。本番で apt が止まったとき、運用側から中身を確かめる手段が無い
 - **`NEEDRESTART_MODE=l` は再起動しないため、更新したパッケージのうち動いているプロセスが旧版のままのものがある。** authy は `libpam` 系が入ったが `freeradius` は旧ライブラリのまま動いている(再起動不要と出ており、急がない)
+
+**観測待ち: syslog週次ダイジェストの初回実行(2026-09-04 実装、commit `2eeb51c`)** — `SAFE: Syslog weekly digest`、**毎週月曜 09:00**。閾値を持たないダイジェストであって検知ではない(`level`を発火条件にしない)。**まだ動き始めていない** — pushは済んでいるが、**Semaphoreのreconcileを押すまでtemplateもscheduleも登録されない**。
+
+**独立レビュー6巡でApprove、Testerが実測でAC2〜AC6を検証した。AC1(実Slack送信)とAC7(実monnie上の無変化)は到達手段が無く未検証である** — ansyからmonnieへの鍵は2026-08-19に削除済みで、使えるのは`monnie-investigate`の24h窓だけ。**本実装が使う168hは配備前には原理的に確かめられない。**
+
+**初回実行で見るもの(観測計画の正本は `docs/ai/reviews/syslog_weekly_digest/2026-09-01_004_test_result.md` §4)。**
+
+- 実Lokiが168hのqueryと`limit=300`を受理するか
+- **実Slackで本文が6,000字に収まり省略表示が出るか** — Slackのattachment textの実上限はrepoのどこにも記録が無く、誰も測っていない。6,000は保守的に置いた値である
+- Semaphoreのジョブ出力にマスク前の生データが出ていないこと
+- **`error_total`と`error_entries`が食い違う頻度** — 食い違うと原因が何であれ「取得失敗」として届く設計にした(`core.md`「判定できないときは止める」に従った受容)。頻発するなら許容幅を設けるかを判断する
+- series件数と`MAX_SERIES=500`の余裕
+
+**承知の上の残存リスク**: 秘匿の保証は機械的に検出できるIPv4に限る。error全文を出す以上、IPv4以外のcredential/tokenが`#info`へ出る可能性は残る(**安全境界の緩和としてYoshinobuが判断した**、EXEC-030、requirement §5)。**Testerが実データで確認済み** — 実ログ行の`::ffff:`付きIPv4は伏せられ、`user=admin@pve`は伏せられない。
 
 **観測待ち: Semaphore の新版検知が初めて発火すること(2026-08-25 実装)** — `SAFE: Semaphore update check monthly`、**毎月10日 20:00**。**初回は 2026-09-10。** ansy / quory とも現在 2.19.8 で `releases/latest` と一致しているため、**鳴らずに静かに終わるのが正常**(「動いていない」と疑わないこと)。apt リポジトリが無く GitHub Releases からしか取れないため、この経路が唯一の検知手段である。**適用は手動**で、手順は `docs/ai/reviews/semaphore_upgrade/2026-08-18_002_manual_procedure.md`。**本番で1回手動実行して `up_to_date` を確認済み**(ジョブ #827)。案件記録は `docs/ai/reviews/semaphore_update_check/`。**同日、schedule の有効化ゲートを撤去した**(`docs/ai/reviews/semaphore_activation_gate_removal/`) — カタログが `active: true` と書けば1回の適用で有効になる
 
@@ -94,7 +92,6 @@
 
 | 項目 | 内容 | 根拠 |
 |---|---|---|
-| **syslog週次ダイジェスト(requirement合意済み・未実装)** | Yoshinobu提起(2026-09-01)「warning, error を見ていないので何かあっても気づけていないかもしれない」。**閾値を決めずに「見ていない」状態を解消する**ため、週に1度Lokiの中身の要約を Slack `#info` へ出す。着手前の実測で、error は1日7件で緊急の異常は出ておらず、warning 183件は大半がノイズ(Grafanaのファイルロック、canonical-livepatch)、**最大の系統である `network-devices` 7,457行/日には level が付かない**ことが分かっている。**flappingの検知は2026-09-03に「作らない」で閉じた**(`docs/ai/reviews/unifi_port_flapping_alert/2026-09-03_002_measurement_and_decision.md`) — 36日の実測で `Link Down` 123件はすべて説明が付き(居間のPC 54件、pve1の平日停止、週次パッチ再起動)、閾値3件/15分で発火するのは1回だけ、それも居間のPCだった。**この実測がそのままダイジェストの設計入力になる** — `network-devices` は件数で出せばよく、個々を通知する必要がない | `docs/ai/reviews/syslog_weekly_digest/2026-09-01_001_requirement.md` |
 | **apt以外のアップデートを機械的に当てる** | Yoshinobu表明(2026-08-23)「update は機械的に行う(人の判断が入らない)」。**aptはそうなっている**(Ubuntu Pro / unattended-upgrades)が、**apt以外は検知までで、適用は人が `dry_run=false` を明示する**。**この原則は現時点でPolicyに書いていない** — 現在形の規範として書くと `UV-035`〜`UV-038`(定期実行を `dry_run=true` に限定)と正面から矛盾するため(2026-08-23の独立レビューが検出)。実現するなら **`UV-035`〜`UV-038` と実装を同じ案件で改訂する**。`roles/prometheus_update_check/` は無人運用向けの機構を既に持つ(チェックサム検証・トランザクションロック・リトライ付きhealthcheck・**失敗時の自動ロールバック**・バックアップ3世代)。**ただし監視の中核を無人で入れ替える変更**なので、requirementとTesterを通す。**Semaphoreは同じ扱いになるが、そもそも検知経路が無い**(本表の別行) | Yoshinobu表明(2026-08-23)。現行の境界は `docs/ai/policies/ubuntu_vm_patch_policy.md` `UV-086` |
 | **DLP entropy の既存誤検知(14件)** | 2026-08-23 の corpus scan(**5ルート・376本に絞った母集団**での手分類)で、`high-entropy-string` が **PascalCase の長い識別子と hex 文字列 14 種**を BLOCK していることが分かった。**全追跡ファイル(1,737本)まで広げると、20文字以上の BLOCK は 57 種になる**(内訳の手分類は未実施)。**同日の候補パターン変更より前から BLOCK されており、今回の変更が持ち込んだものではない**(`git show HEAD` で着手前の状態を再判定して確認)。**文字クラスの調整では衝突ゼロに到達しない**ことが4ラウンドで分かっており、直すなら指標か適用範囲の側を変える案件になる。**急がない** — 止まったときは拒否メッセージが `rule_id at pointer` で場所を示すため、書き換えて再送できる | `docs/ai/reviews/oprc_dlp_false_positive/2026-08-23_005_review.md`。判定の境界は `docs/ai/context/operations/operator-request-channel.md` |
 | **ansy が自分自身を対象にする playbook を実行できない** | `id_ann` 削除(2026-08-19)以降、`dev_nodes` の group_vars が**存在しない鍵を指す**ため、ansy から ansy 自身への SSH が成立しない。2026-08-23 に `operator_request_channel_client_setup.yml` の配備が止まった(その場は暫定で通し、下記の理由で revert 済み)。**いま困ってはいない** — client は配備済みで、次に ansy が自分へ配備するときに再発する。<br>**素の `ansible_connection: local` を `host_vars/ansy.yml` へ入れてはいけない。** host_vars は inventory のデータで、**quory の Semaphore も同じものを読む**。2026-08-24、これにより quory が `ansy` を対象にした検査で **quory 自身を見て** drift 2件を誤報した(`89e822a` → `9e9daf5` で revert)。**変更系 playbook を流していれば quory が書き換わっていた。**<br>**正しい形は `inventories/homelab/host_vars/quory.yml` に既にある** — `lookup('pipe', 'hostname -s')` でコントローラを見て条件分岐する。**同じ問題が同じ inventory の中で既に解かれていた。**<br>**入れるときの受入条件**: quory から `ansy` を対象に `--check` を流し、**quory ではなく ansy を見ている**ことを確認する。これを確かめずに入れない | `9e9daf5` の commit メッセージ。ドリフトの実測は 8/22・8/23 が 0、8/24 00:40 が 2、revert 後の 07:50 が 0 |

@@ -17,7 +17,7 @@ homelabの観測は次の2系統からなる。**本Policyは、両系統の収�
 | 系統 | 収集 | 保存 | 検知の現状 |
 |---|---|---|---|
 | metrics | unpollerがネットワーク機器から収集 | Prometheus | **運用中**。Grafanaのalert ruleがport dropとerrorを検知して通知する。**定義はrepoのprovisioning YAMLが正本**(LOG-078〜LOG-084) |
-| syslog | rsyslogとGrafana Alloy | Loki | **未実装**。蓄積内容の事後参照に留まる |
+| syslog | rsyslogとGrafana Alloy | Loki | **検知は未実装**。事後参照に加え、週次ダイジェストが直近7日の要約をSlack `#info` へ送る(`playbooks/syslog_weekly_digest.yml`。閾値を持たず、`level`を発火条件にしないため検知ではない) |
 
 <!-- LOG-064 -->
 系統の使い分けは設計思想ではなく**パッケージの制約**による。unpollerがPrometheus形式で公開するためmetricsはPrometheusを使い、syslogを送る対象はLokiで受ける。同一機器が両系統に現れることは重複ではない。
@@ -30,10 +30,10 @@ metrics系統では、通知の**発生頻度そのものを運用者が判断�
 ### syslog系統で将来検知したい対象
 
 <!-- LOG-066 -->
-syslog系統の検知対象として、portのflappingと接続断の繰り返しを想定する。これらはmetricsの閾値では表れにくく、ログの発生パターンとして現れるため、syslog側で扱う適性がある。
+syslog系統の検知対象は、ログの発生パターンとして現れ、metricsの閾値では表れにくい事象とする。**当初想定していたportのflappingは、実測にもとづき対象から外した** — 36日分のLink Downを数えたところ想定した事象(スイッチ間リンクやAPの繰り返し断)が1件も無く、作れば人の生活の記録が鳴るだけになるため(`docs/ai/reviews/unifi_port_flapping_alert/2026-09-03_002_measurement_and_decision.md`)。**現時点で確定した検知対象は無い。**
 
 <!-- LOG-067 -->
-syslog系統の検知が未実装である理由は、閾値の時期尚早な設定を避け実データの蓄積を待つためである。実装時期は蓄積状況を見て判断する。設計の起点は [Phase 3 alerting requirement](../reviews/promtail_to_alloy/2026-07-19_phase3_alerting_requirement.md) とする。
+syslog系統の検知が未実装である理由は、閾値の時期尚早な設定を避け実データの蓄積を待つためである。**蓄積は済み、最初の対象候補(flapping)については実測から「作らない」という判断が出た**(LOG-066)。**次の検知対象は、週次ダイジェストの運用で得られる「普段どのくらい出るか」の感覚を設計入力として決める。** 設計の起点は [Phase 3 alerting requirement](../reviews/promtail_to_alloy/2026-07-19_phase3_alerting_requirement.md) とする。
 
 <!-- LOG-001 -->
 本Policyはlogの収集・保全・検索を扱い、service障害の検知・復旧を扱うautonomous recoveryとは目的を分離する。
@@ -360,5 +360,6 @@ log-based Slack alertはlabels / alert rulesをcollection plane上へ載せるPh
 | v2.2 | 2026-07-25 | 標準8節へ再編しcurrent factsをContextへ分離。notificationは未実装と明記 |
 | v3.0 | 2026-07-26 | Yoshinobuとの対話で目的を確定し全面補強。§1へ「異常の能動的検知と予兆把握」という目的と、metrics系統(運用中・本Policy対象外)とsyslog系統(未実装・本Policy対象)の2系統分離を新設(LOG-062〜067)。§2へ収集対象8つの一覧とseverity契約を新設し、`debug`を収集対象から除外(LOG-068〜071)。§4冒頭へlabel contractの前提となる全体規約を追加(LOG-072)。§6を実態に合わせ、metrics系統が運用中である事実とGit管理外である制約、将来の検知Policy分離方針を明記(LOG-073、LOG-074)。変更履歴の後ろに浮いていたLOG-004 / 044 / 045 / 046 / 061を§7へ移動。severity 4値→3値に伴いLOG-022 / 023 / 027 / 030を修正。退番: LOG-002(「log-based alertは現行scopeに含めない」は新しい目的と矛盾するため削除、再利用しない) |
 | v3.1 | 2026-07-26 | UniFiスイッチのLink Up/Down実測(Normal設定)を受け、LOG-025の帰結を明文化。monnieのrsyslogが受信時に行を書き換えるためseverityトークンが消え、UniFi由来の行の多くが`level`未設定になる事実をLOG-075として記録。LOG-030の既定フィルタと組み合わせると既定表示に現れないため、LOG-066の検知設計では`level`でなく`job`/`host`/message本文で特定すべきことをLOG-076として明記。構造・実装の変更はなし |
+| v3.3 | 2026-09-04 | 週次ダイジェスト(`playbooks/syslog_weekly_digest.yml`、月曜09:00、Slack `#info`)の実装を反映。§2の表から「蓄積内容の事後参照に留まる」を外した(検知が未実装であることは変わらない — ダイジェストは閾値を持たず`level`を発火条件にしないため検知ではない)。LOG-066から検知対象としてのportのflappingを外した(36日の実測で想定した事象が1件も無く「作らない」と判断済み。判断記録がLOG-066を名指ししていたが本Policyへ未反映のままだった)。LOG-067へ、蓄積待ちが解消したことと、次の検知対象はダイジェストの運用から決めることを追記。LOG番号の新設・退番はない。案件記録: `docs/ai/reviews/syslog_weekly_digest/` |
 | v3.2 | 2026-07-26 | UniFiスイッチのLink Up/Downを実dashboardで確認できるようにした対応を反映。LOG-076を実態に合わせて修正(既定フィルタの問題ではなく、`level`条件を含むセレクタが該当streamを一切返さない)。`level`保有source と非保有source をpanel単位で分離する規範をLOG-077として追加。実装は`infra_syslog_all_nodes.json`のpanel分割(Infra Events (Ubuntu / PVE / Sophos/uckg2) と Network Device Events)およびEvent Timelineの2系列化。旧`network_device_syslog.json`は役割を統合dashboardへ移したため削除。Lokiの全データをクリアし3値契約のみで再蓄積を開始(記録: 031) |
 | **v4.0** | **2026-07-30** | **scopeをsyslog収集から観測プレーン全体へ拡張**(Yoshinobu判断: 「`log_observability_policy.md`は、今は基盤の話であり、ダッシュボードの概念はここに含めても良いのではないでしょうか」)。冒頭とLOG-063を書き換え、metrics系統の配備方式を対象に含めた。**LOG-073を退番**(「metrics系統の規範は本書で定義せず将来別Policyで扱う」および「alert ruleの実体はGrafana UI側にありGit管理外」 — 後者は本改訂の契機となった案件で**事実として偽になった**)。**LOG-074を方針変更**(別Policyへの分離を撤回し、本Policyへ統合。理由3点を条項内に明記)。LOG-065へ「発火条件」と「障害判断の基準」の区別を追加(非対称は意図的な設計であり調整不足ではない)。LOG-047の「本Policy対象の2 playbook / 2 roleでは配備しない」という限定を外し、**Loki参照かどうかで未実装性を判断する**形へ変更(`grafana_provisioning.yml`がalert ruleを配備するようになったため、playbookを数え上げる形では表現できなくなった)。§3へ`grafana_provisioning.yml`を追加しLOG-032を3入口へ更新、LOG-087で起動とrestartの関係を明記。§2へ**LOG-088**(可視化・検知定義の対象範囲一覧)と**LOG-089**(provider名を変更しない)を追加。**LOG-078〜LOG-086を新設**(配備方式、用語定義、根拠併記義務、複製に限る原則、nameベース参照の拒否、policy tree非改変、export禁止、reload方式)。設計判断の正本は`docs/ai/adr/007-grafana-provisioning-as-code.md`、案件記録は`docs/ai/reviews/grafana_provisioning/` |
