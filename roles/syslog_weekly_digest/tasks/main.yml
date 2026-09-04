@@ -1,0 +1,94 @@
+---
+# syslog_weekly_digest: monnieのLoki(直近7日)の要約を週次でSlack #info へ
+# 送る role。requirement:
+# docs/ai/reviews/syslog_weekly_digest/2026-09-01_001_requirement.md
+# 設計判断の正本は同ファイル §6(Coordinator確定、2026-09-03/09-04訂正)。
+#
+# 責務分離(skills/ansible-implementation-style「check系shellの責務分離」):
+# collector(files/syslog-weekly-digest-collect.py)は観測のみ。判定・
+# 整形・マスク・通知はこのファイルとfilter_plugins/syslog_weekly_digest.py
+# (syslog_weekly_digest_render_message)が持つ。
+#
+# 検知(alerting)は実装しない — levelの値を発火条件・severityに使わず、
+# Slack statusは「収集できたか」だけで決める(collection ok→info /
+# collection失敗→error)。ログの中身(error件数の多寡)でstatusを変えない。
+
+- name: Run syslog digest collector (read-only Loki query; safe under --check)
+  ansible.builtin.script:
+    cmd: "{{ role_path }}/files/syslog-weekly-digest-collect.py"
+  register: syslog_weekly_digest_raw
+  changed_when: false
+  # AC7: Lokiへの読み取りのみで対象ホストの状態を変えない。--checkでも
+  # 実データを取得する(ansible-implementation-style「check_modeの実装上の
+  # 落とし穴」1、time_sync_checkと同じ扱い)。
+  check_mode: false
+  # no_log(2026-09-04是正、finding 2): stdoutはLokiから取得した未加工の
+  # job/host/errorログ本文(マスク前)を含む。no_logはこのtask自身が
+  # verbosity・Semaphoreのjob output・task result JSONへその内容を出す
+  # ことだけを止める — 後続taskが`syslog_weekly_digest_raw.stdout`を
+  # 読むことは妨げない(no_logはtask単位の表示抑制であり、変数の可用性
+  # には影響しない)。
+  # トレードオフ: collectorが空文字列でない壊れた出力(非JSON等)を返した
+  # 場合、その生の中身はこのtaskの出力からは見えなくなる。次の
+  # 「Parse collector output」taskがfrom_json失敗でfailしたときも、
+  # Ansibleの例外メッセージにstdoutの断片が含まれる経路をno_logで塞いで
+  # いるため、診断にはmonnie上でcollectorを手動実行する必要がある
+  # (playbook実行結果だけでは生データを再現できない)。
+  no_log: true
+
+- name: Fail closed if the collector produced no output
+  ansible.builtin.fail:
+    msg: >-
+      syslog-weekly-digest-collect.py が空の出力を返しました
+      (rc={{ syslog_weekly_digest_raw.rc }})。monnie上で手動実行して
+      診断してください。
+  when: (syslog_weekly_digest_raw.stdout | default('') | trim | length) == 0
+
+- name: Parse collector output
+  ansible.builtin.set_fact:
+    syslog_weekly_digest_data: "{{ syslog_weekly_digest_raw.stdout | from_json }}"
+  # no_log(2026-09-04是正、finding 2): このfactはcollectorの未加工JSON
+  # (series/error_entriesのjob・host・生ログ本文を含む、マスク前)を丸ごと
+  # 保持する。上のtaskと同じ理由・同じトレードオフでno_logを付ける。
+  # from_jsonが失敗した場合、Ansible本体の例外メッセージにstdoutの内容が
+  # 埋め込まれることがあるため、ここを塞がないとfinding 2の経路が残る。
+  no_log: true
+
+- name: "Render digest message (single sanitize point; AC2/AC3/AC4)"
+  # 2026-09-04是正(finding 1・2): 旧版はJinjaテンプレート内でseries/
+  # no-levelテーブルを直接組み立て、error本文だけを別filterで文字数予算
+  # 切り詰め・マスクしていた。これを syslog_weekly_digest_render_message()
+  # へ統合し、(a) マスクをjob/host/lineすべてに、フォーマット後の文字列に
+  # 対して適用し、(b) 300文字の上限をマスク後の最終行に対して判定し、
+  # (c) 6,000字の予算をseries表を含む通知全体の累積文字数に対して判定
+  # する。結果として出てくる syslog_weekly_digest_message はすでに
+  # マスク済みであり、そのままSlackとdebug出力の両方へ渡せる
+  # (no_logは付けない — これは安全に表示してよい最終成果物)。
+  # series行数の上限は渡さない(2026-09-04是正、Coordinator指摘) —
+  # syslog_weekly_digest_render_message()はcollectorの出力
+  # (`syslog_weekly_digest_data.series.limit`)から直接読むため、呼び出し
+  # 側がここで別の値を渡す経路自体を作らない(値の二重化を防ぐ)。
+  ansible.builtin.set_fact:
+    syslog_weekly_digest_message: >-
+      {{ syslog_weekly_digest_data
+         | syslog_weekly_digest_render_message(syslog_weekly_digest_error_char_budget) }}
+
+- name: "Send syslog weekly digest to Slack #info (AC1/AC5: 常に送る、無通知にしない)"
+  ansible.builtin.include_tasks: "{{ playbook_dir }}/../roles/common_slack/tasks/notify.yml"
+  vars:
+    slack_channel: "info"
+    slack_status: "{{ 'info' if (syslog_weekly_digest_data.ok | default(false)) else 'error' }}"
+    slack_title: >-
+      [Syslog Weekly Digest] {{ 'OK' if (syslog_weekly_digest_data.ok | default(false)) else 'COLLECTION FAILED' }}
+      ({{ syslog_weekly_digest_data.window.since }} 〜 {{ syslog_weekly_digest_data.window.until }})
+    slack_message: "{{ syslog_weekly_digest_message }}"
+
+- name: "Fail if any Loki query failed (AC4: 緑で終わらせない)"
+  ansible.builtin.fail:
+    msg: >-
+      syslog_weekly_digest: Lokiへの問い合わせの一部が失敗しました。
+      series.ok={{ syslog_weekly_digest_data.series.ok | default(false) }},
+      error_total.ok={{ syslog_weekly_digest_data.error_total.ok | default(false) }},
+      error_entries.ok={{ syslog_weekly_digest_data.error_entries.ok | default(false) }}。
+      詳細はSlackへ送った本文の[取得失敗]箇所を参照。
+  when: not (syslog_weekly_digest_data.ok | default(false))

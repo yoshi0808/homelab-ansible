@@ -304,6 +304,23 @@ semaphore_templates_catalog:
   - playbook: playbooks/semaphore_update_check.yml
     class: SAFE
 
+  # syslog_weekly_digest案件(requirement:
+  # docs/ai/reviews/syslog_weekly_digest/2026-09-01_001_requirement.md)。
+  # monnieのLoki(直近7日)への読み取りのみでjob×host×levelの週次集計と
+  # level=error全文を取得し、毎回必ずSlack #info へ送る(tester-gate:
+  # role-guarded — 副作用はSlack通知のみで、common_slackの抑止guard
+  # 〔TS-031〕で止まる。2026-09-04訂正: 起案時はsafe-readonlyとしていたが
+  # 「常時送信」は「完全read-only」ではなく誤りだった、独立レビューが検出。
+  # ここでのclass: SAFEはSemaphore template UI上の分類でtester-gateとは
+  # 別軸、一致検査はしない)。他のSAFE収集系(monitoring_healthcheck等)と
+  # 同じ理由でclass: SAFE、引数・survey_varsとも無し。**requirement §4は
+  # このカタログへのエントリ追加を明示していないが、下の
+  # semaphore_schedules_catalogの`template:`が名前解決する先(R2の命名規則
+  # で"SAFE: Syslog weekly digest"になる)がここに無いとscheduleが宙に浮く
+  # ため、Implementer判断で追加した(実装記録に判断理由を記載)。**
+  - playbook: playbooks/syslog_weekly_digest.yml
+    class: SAFE
+
   # --- sandbox版(recovery_*系のapplyと同じplaybookを共有) -------------------
   - playbook: playbooks/recovery_vm_reboot.yml
     class: SANDBOX
@@ -939,6 +956,25 @@ semaphore_schedules_catalog:
   - name: "SAFE: Semaphore update check monthly"
     template: "SAFE: Semaphore update check"
     cron: "0 20 10 * *"
+    active: true
+    task_params:
+      environment: "{}"
+
+  # syslog_weekly_digest案件(requirement:
+  # docs/ai/reviews/syslog_weekly_digest/2026-09-01_001_requirement.md §6.4)。
+  # **選定: 毎週月曜 09:00 JST。** Notion「バッチ処理工程管理表」との突合
+  # (Coordinator、2026-09-03実施)——毎日の窓は06:30(autonomous_recovery
+  # 監視停止の警告)の次が12:00(Semaphore DB退避)で空き、毎週の月曜は
+  # `fstrim`(OnCalendar=weekly + RandomizedDelaySec=100min、実測で月
+  # 00:00〜01:40)のみで重ならず、毎月の窓(1日/2日/10日/28日)にも該当日が
+  # 無い。**このエントリ自身が毎週月曜09:00の枠を占有する** — 次に同じ枠
+  # (またはその前後)を検討する者は、この行がいる前提で改めて表を確認する
+  # こと。requirement §6.4は「カタログへ足したらNotionの表の「毎週」へも
+  # 同じ行を足す」ことを求めており、Notion側の追記はCoordinatorが行う
+  # (Implementerはrepo内のみを扱う)。
+  - name: "SAFE: Syslog weekly digest"
+    template: "SAFE: Syslog weekly digest"
+    cron: "0 9 * * 1"
     active: true
     task_params:
       environment: "{}"

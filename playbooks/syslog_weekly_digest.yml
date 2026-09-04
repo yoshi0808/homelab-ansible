@@ -1,0 +1,37 @@
+---
+# tester-gate: role-guarded — 本playbookは毎回必ずSlackへ送るのが目的であり、TS-005の「副作用がSlack通知のみで、common_slackの抑止guard(TS-031)で止まる」にそのまま該当する(2026-09-04訂正。起案時の safe-readonly は「常時送信」を「完全read-only」と取り違えた誤り。独立レビューが検出、requirement §5訂正済み)
+#
+# syslog_weekly_digest: monnieのLoki(直近7日)の要約を週次でSlack #info へ
+# 送る。requirement:
+# docs/ai/reviews/syslog_weekly_digest/2026-09-01_001_requirement.md
+#
+# 背景: Alloy移行(2026-07-20)以降、syslog系統は蓄積するだけで誰も定期的
+# に見ていなかった(docs/ai/policies/log_observability_policy.md §4は
+# syslog系統の検知を「未実装」と明示)。本playbookは検知(alerting)を実装
+# せず、閾値を持たない週次ダイジェストで「見ていない」状態だけを解消する。
+#
+# 対象・実行元: hosts: monitoring_servers(実質monnie1台)。monnie上の
+# collectorがhttp://localhost:3100のLokiへ直接問い合わせる。
+# roles/recovery_exec/files/recovery-loki-helper は再利用しない
+# (requirement §6.1 — 週次7日窓を表現できないため。allowlistを広げると
+# SSH forced command経由の調査経路の認可境界を変えることになる)。
+#
+# --check: collector自体は読み取りのみで状態を変えないため、--checkでも
+# 実データを収集する(check_mode: false)。Slack送信はcommon_slackの
+# 既定ゲートにより--check下では行わず、本文をdebugで表示する(AC6)。
+#
+# AC4(緑で終わらせない): Lokiへの問い合わせが1つでも失敗した場合、その
+# 事実をSlack本文へ明示したうえで、playbook自体もfailさせる
+# (roles/syslog_weekly_digest/tasks/main.yml)。
+#
+# 実行スケジュール: 月曜09:00 JST(0 9 * * 1、
+# roles/semaphore_templates/defaults/main.yml `semaphore_schedules_catalog`)。
+# 選定根拠(Notion「バッチ処理工程管理表」との突合)はrequirement §6.4。
+
+- name: Syslog weekly digest
+  hosts: monitoring_servers
+  gather_facts: false
+  become: false
+
+  roles:
+    - syslog_weekly_digest

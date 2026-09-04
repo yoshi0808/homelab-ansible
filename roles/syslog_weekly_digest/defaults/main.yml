@@ -1,0 +1,18 @@
+---
+# requirement §6.3: error全文の上限は件数ではなく文字数の予算で持つ。
+# 6,000は保守的に置いた値で根拠は薄い(Slack attachment textの実上限は
+# 測っていない)。予算を超えたら打ち切り、省略した事実を本文へ明示する
+# (AC3)。2026-09-04是正: この予算はerror本文だけでなく、series表・
+# no-levelテーブルを含む通知全体の累積文字数に対して効く
+# (filter_plugins/syslog_weekly_digest.py の
+# syslog_weekly_digest_render_message() が消費する)。
+#
+# series行数の上限(MAX_SERIES相当)はここに置かない(2026-09-04是正、
+# Coordinator指摘)。実際に切り捨てるのは
+# roles/syslog_weekly_digest/files/syslog-weekly-digest-collect.py の
+# MAX_SERIES定数であり、Slack本文の「上限Nに到達したため残りは省略」の
+# Nはcollectorの出力(`series.limit`)からfilterが直接読む。ここへ変数を
+# 複製すると、片方だけ変更されたときに通知文の数字が実際の切り捨て基準と
+# 食い違う(docs/ai/core.md「値を二重に持たない」)。呼び出し側から上限を
+# 変えたいという要求も無いため、変数自体を持たない。
+syslog_weekly_digest_error_char_budget: 6000

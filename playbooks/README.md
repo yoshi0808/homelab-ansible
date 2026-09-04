@@ -35,6 +35,7 @@ playbook の入口を置く。処理本体は原則として `roles/` に実装�
 | [`prometheus_update_check.yml`](prometheus_update_check.yml) | `monnie` | 手動導入Prometheusの更新確認と承認された更新処理 | `check-mode-native` | `prometheus_update_check` |
 | [`semaphore_update_check.yml`](semaphore_update_check.yml) | `ansy` / `quory` | Semaphoreの新版検知(通知のみ。適用は手動手順) | `role-guarded` | `semaphore_update_check` |
 | [`rsyslog_forward_to_monnie.yml`](rsyslog_forward_to_monnie.yml) | `ansy:quory:authy` | Ubuntu系ノードのjournald/syslogをmonnieへ転送 | `check-mode-native` | `rsyslog_forward_to_monnie` |
+| [`syslog_weekly_digest.yml`](syslog_weekly_digest.yml) | `monitoring_servers` | monnieのLoki(直近7日)のjob×host×level集計とlevel=error全文をSlack #info へ週次送信(検知は実装しない) | `role-guarded` | `syslog_weekly_digest` |
 
 ## 証明書・CA
 
