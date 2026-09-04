@@ -77,6 +77,18 @@
 - **`acl-status semaphore-db` は恒久的に `Permission denied`。** `dev-investigate` が traverse を失ったためで異常ではないが、**ACLが付け直されていないかを開発側から観測する手段は失われた**
 - **先読みが空でも「調査したがわからなかった」と同じ見た目で通知が出る。** 通知が運ぶのは verdict / confidence / known_condition で `notes` は運ばない。2026-08-22 の #802 では `EACCES` が成果物の中にしか無く、Slack には「特定不能」としか出なかった
 
+**Implementer と Reviewer を入れ替えた(2026-09-04)** — **Implementer は agmsg 経由の codex(tmux右ペイン、`new-session.sh` が起動時に立てる)、Reviewer は Claude Code subagent** になった。正本は `docs/ai/roles/coordinator.md`「起動できるRoleと、その実現方式」、経路は `docs/ai/context/operations/agent-messaging.md`。**片側だけを動かす選択肢は無い** — 実装が codex なら codex Reviewer は自己レビューになり、別モデルであることによる独立性が失われる。
+
+狙いは利用量の平準化(Claude側が上限に当たり、Codex側に余裕があった)と、両モデルの得意・苦手を実地で知ること。**次の1〜2案件で判断する。1案件では決めない。**
+
+**測るもの**(新しい台帳は作らない。案件記録の implement / review ファイルに載る範囲で見る)。
+
+- **codexの過剰実装** — requirementに無い実装が入っていないか。2026-09-02にYoshinobuが実装をcodexへ回さない理由として挙げた傾向であり、今回はそれを承知で試している。歯止めは依頼文でのファイル列挙と、Reviewerへ渡す明示の観点(`coordinator.md`「委任するときの独立性」)
+- **Claude Reviewerの検出力** — 直前まではcodex Reviewerが2案件連続で正しかった。その優位を手放した影響が出るか
+- 実装の往復回数と差分規模
+
+**未確認: `~/.codex/rules/default.rules` が実装時に使うコマンドを許可しているか。** Reviewerで通る範囲しか実績が無い。足りなければcodexは迂回せず昇格を求めて止まる(`agent-messaging.md` §5 と同じ形)ので、危険ではなく手間として現れる。
+
 ## Next(着手候補) — 工程・体制
 
 | 項目 | 内容 | 根拠 |
@@ -85,7 +97,7 @@
 | **`loki-window` の本文にも埋め込み改行の同じ欠陥がある** | 2026-09-01の`loki-errors`案件で、独立レビューが**既存の`cmd_window`(2026-07-29導入、配備済み)にも同じ欠陥**を検出した。本文に埋め込み改行があると1 entryが複数の物理行へ展開され、`MAX_LINES`を回避する(実測: 本文`a\nb`の299 entriesで物理598行。1 entryは最大300物理行まで展開しうる)。**実害の本体は行数ではなく、切り詰め通知が正しく出ないこと** — 「要求した窓のうちどこまで読めたか」の開示がentry数で判定されるため、**膨らんだときに「全部読んだ」ように見える**。これは2026-07-29の事故(窓の前半だけ読んで「errorなし」と結論した)と同じ失敗の形である。**修正は`cmd_errors`と同じ1行**(`" ".join(line.splitlines())`)で、今回の実装が雛形になる。**急がない** — 埋め込み改行を含むログの実量は未測定で、rsyslog転送は通常1行1エントリ。影響は複数行を1エントリで送るアプリログに限られる | `docs/ai/reviews/loki_investigate_vocabulary/2026-09-01_003_review.md` |
 | **`docs/ai/roles/` 5本のプロンプト最適化(継続案件)** | Coordinator / Implementer / Reviewer / Tester / Auditorの各Role文書を、**実際に運用してみて出てきた歪みを持ち寄って協議しながら**直し続ける。対象は①**やること・やらないことの衝突**②**何を言われているのか読み取れない箇所**③**細かく指示するよりAIに任せた方が結果が良い箇所**の3クラス。一度に全部やる案件ではなく、気づいたものを溜めて定期的に議論する形を採る | Yoshinobu表明(2026-08-01)「ある程度最適化して随分良くなってきたが、まだ矛盾・不明瞭・非効率が残る」。**歪みの実例はCoordinatorが運用中に気づいた時点で書き溜める**(置き場は本行) |
 | **sandbox を検証環境として使い込む** | **inventory 登録と `serial_getty_mask` は2026-08-06に完了**(`b20c43d`。`NRestarts=20322` の agetty ループを停止、hostname も `ubuntu` から `sandbox` へ)。承認境界でも `monnie` / `ansy` と同じ「確認不要」側にある。**ここから先は使い道の話であって、必須の作業ではない。** Yoshinobu が挙げた候補は ①monnie のサービスの検証 ②**まだAnsibleへ移行していない FreeRADIUS**(`authy`)— ただしクライアント/サーバのテスト用公開鍵を一度置く必要があり、かつ RADIUS は設定をほとんど変えないため**費用対効果は未評価**。**この行の要点は「decoy より広く試せる実ホストが手に入った」ことで、個々の候補ではない。** 監視対象にはしない。`rsyslog_forward_to_monnie` を向けるには allow-list への追加とホストごとの recon が要る(未着手・急がない)。**次に手を加える機会があれば、`authorized_keys` をrepoへ入れる**(2026-08-19。いま「どの公開鍵がsandboxを開けるか」はrepoのどこにも無く、実体を見るしかない)。**そのとき排他上書きに注意する** — 既存のsetup系roleは `authorized_keys` を上書きするため、素直に当てると同居する quory の `ann` 鍵を消す。追記型にするかsandbox専用にするかを先に決める | Yoshinobu表明(2026-08-06)。前提・使い方・限界・壊したときの扱いは `docs/ai/context/operations/sandbox-vm.md` が正本 |
-| **Reviewerをcodex側へ委ねる — 渡し方の確定** | **agmsgの復活とReviewerの疎通は2026-08-09に完了した。** team `homelab` に `claude`(claude-code)と `reviewer`(codex)が登録され、双方向のmonitor配送が通っている。同日、実案件のレビューを1本流して**成立を確認済み** — commit `3743707` を対象に、`docs/ai/roles/reviewer.md` と `skills/code-review/SKILL.md` を指しただけで型どおりのfindingsが返り、「repoを変更しない」制限も作業ツリーで守られていた。**構成・落とし穴・権限層の正本は `docs/ai/context/operations/agent-messaging.md`**(値をここへ写さない)。Implementer / Auditor は現行のClaude subagentのまま据え置き。<br>**残っているのはTesterの扱いだけである。** codexがrepoへ書き込めることは2026-08-09に実証した — 査読記録4本を `docs/ai/reviews/semaphore_schedules_as_code/` へ直接書かせ、作業ツリーでその1ファイル以外を触っていないことを確認している。<br>**`claude → reviewer` の配送は、再spawn後に成立しないことがある**(同日実測。`delivery.sh status` が `bridge not running`、`history.sh` の既読マークが `●` のまま)。逆向きは通っていた。**依頼文をboot promptへ載せる回避は採らない**(`agent-messaging.md` §4/§6)。seat / bridge を張り直したうえで `send.sh` で送り直し、`○` で受け取りを確かめる。**原因は未特定** — 心当たりは `despawn.sh` が placement record を持たず `tmux kill-pane` で畳んだこと。<br>**Reviewerの実現方式は「適材適所」**(Yoshinobu、2026-09-02) — 現行の本節は「codexが正・Claude subagentは代替」と読めるが、実態は**両方走らせ、判定が割れたらcodexを採る**である(2案件連続でcodexが正しかった)。実装はcodexへ回さない(過剰実装するため)。`coordinator.md` の記述を実態へ合わせる改訂が要る。<br>**Testerの扱いは未確認** — Yoshinobuが「今のまま」と挙げたのはImplementerとAuditorのみ。**`ansible-playbook --syntax-check` はcodex側でも通る**ことを同日実測したので、実行可否は除外理由にならない。判断軸は実ホストへの到達手段の所在である | Yoshinobu決定(2026-08-09)。ペイン構成の意向は「左=implementer、右=ReviewerとTester」(同日、着手は未定) |
+| **Testerをcodex側へ移すか(未決)** | Implementer と Reviewer の交換で、codex側に残る未決はTesterだけになった。**`ansible-playbook --syntax-check` はcodex側でも通る**ことを2026-08-09に実測したので、実行可否は除外理由にならない。**判断軸は実ホストへの到達手段の所在である** — Testerはsubagentのうち実ホストへ到達してよい唯一のRoleであり(`docs/ai/policies/execution_boundary_policy.md` EXEC-050)、codexへ移すとその到達手段をcodex側の権限層(`~/.codex/rules/default.rules` と `[sandbox_workspace_write]`)で作り直すことになる。急がない | Yoshinobu決定(2026-08-09)。経路・落とし穴・権限層の正本は `docs/ai/context/operations/agent-messaging.md` |
 | **monnie の代わりになる開発機を作るか**(鍵は2026-08-19に切断済み) | **`id_ann` を ansy から削除し、monnie への到達は閉じた**(EXEC-005)。本番の管理は quory の Semaphore で走るため何も止まっていない。**残っているのは「開発とテストで monnie 相当の相手が要るか」だけで、これは不便を実際に測ってから決める**(Yoshinobu、2026-08-19)。`sandbox-mon`(requirement R19〜R21、D3 で別案件へ切り出し済み)がその受け皿になりうるが、当時の目的は「監視スタックのupgradeリハーサル」であり、**今回示された目的(ansy が本番へ触らないこと)の方が広い**。着手時期は未定 | Yoshinobu表明(2026-08-03、Phase 4 の D9 を決めた文脈)。`docs/ai/reviews/dev_prod_boundary/2026-08-03_015_plan_phase4.md` §3.1 |
 
 ## Next(着手候補) — システム・運用

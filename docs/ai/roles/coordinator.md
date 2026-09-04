@@ -10,12 +10,12 @@ Yoshinobuとの対話窓口として要求と判断材料を整え、自ら実�
 
 ## 起動できるRoleと、その実現方式
 
-常駐する識別子は `claude`(Coordinator、この対話セッション自身)のみである。Implementer / Reviewer / Tester / AuditorはCoordinatorが必要と判断したときにその場で起動する。**起動時は `docs/ai/roles/<role>.md` を読ませる。**
+常駐する識別子は `claude`(Coordinator、この対話セッション自身)と、codex側の `implementer`(tmuxの右ペイン、`new-session.sh` がセッション作成時に立てる)の2つである。Reviewer / Tester / AuditorはCoordinatorが必要と判断したときにその場で起動する。**起動時は `docs/ai/roles/<role>.md` を読ませる。**
 
 | Role | 実現方式 |
 |---|---|
-| Implementer | requirement/契約に基づき、Agent toolでsubagentとして起動する |
-| Reviewer | **agmsg経由でcodex側の `reviewer` として起動する**(経路は `docs/ai/context/operations/agent-messaging.md`)。独立性は別プロセス・別モデルであることで構造的に担保される。計画の査読も担う。**Claude Code subagentとしての定義(`.claude/agents/reviewer.md`)は代替として残す** — そちらを使うときは、Implementerを行ったsubagentを使い回さない |
+| Implementer | **agmsg経由でcodex側の `implementer` として起動する**(経路は `docs/ai/context/operations/agent-messaging.md`)。**Claude Code subagentとしての定義(`.claude/agents/implementer.md`)は代替として残す** |
+| Reviewer | **Agent toolでClaude Code subagentとして起動する。** 計画の査読も担う。**codex側の `reviewer` は使わない** — 実装がcodexであるため自己レビューになり、別モデルによる独立性が失われる。計画を査読したsubagentと差分をレビューするsubagentは別体とする |
 | Tester | 別のsubagentとして起動する。**subagentのうち、実ホストへ到達してよい唯一のRoleである**(到達してよい範囲は `docs/ai/policies/execution_boundary_policy.md` が定め、ansyが認証情報を持たないホストへは届かない) |
 | Auditor | **案件クローズ時に1回だけ**起動する。入力はrepoの成果物のみで、Coordinatorの説明を受け取らない |
 
@@ -23,7 +23,7 @@ Yoshinobuとの対話窓口として要求と判断材料を整え、自ら実�
 
 ### モデル・effort配分
 
-**Coordinatorは `Opus` 以上を原則とする**(「以上」は特定の1モデルへ固定しない)。モデルの選択はYoshinobuが行う。**subagentは指定しなければ親のモデルを継承する**ため、下表の値は `subagent_type` の指定で効かせる。**この表はClaude Code subagentとして起動する場合の値であり、codex側Reviewerのモデルはcodex側の設定が持つ。**
+**Coordinatorは `Opus` 以上を原則とする**(「以上」は特定の1モデルへ固定しない)。モデルの選択はYoshinobuが行う。**subagentは指定しなければ親のモデルを継承する**ため、下表の値は `subagent_type` の指定で効かせる。**この表はClaude Code subagentとして起動する場合の値であり、codex側Implementerのモデルはcodex側の設定が持つ。**
 
 | Role | model | effort |
 |---|---|---|
@@ -95,6 +95,7 @@ Coordinator固有の作法だけを本節に置く。
 分解の粒度や工程の重さはCoordinatorが決めてよいが、次は品質の前提なので崩さない。
 
 - **実装・レビュー・テストを同一subagentに兼務させない。** 計画を査読したReviewerと差分をレビューするReviewerも別体とする。
+- **codexへ実装を委ねるときは、触ってよいファイルを依頼文で列挙する。** requirementに無いものを作る傾向があるため、Reviewerへは「requirementに無い実装が入っていないか」を明示の観点として渡す。
 - **Auditorは案件クローズ時に1回だけ**起動し、**Coordinatorの説明を渡さない**(渡すと自己申告の清書になる)。条件付き受入が返ったら指摘を反映してクローズし、無条件受入の取得を目的に再起動しない。閉じる判断はCoordinatorが下し、判断と理由をAuditor成果物へ短く追記する。
 - **先行成果物・先行subagentの主張を、現物で確かめずに引き継がない。** 記録に書かれた判定・引用・残存リスクは、それ自体が検査対象である。
 - **自分が書いた規範文書の移設・削除・一括置換、Policy群の横断的な再配置では、対象範囲の選定が誤っていても自己検証では原理的に見えない。** 独立レビューを入れるかはCoordinatorの判断だが、この形の作業では最も効く(旧`core.md`退役では独立Reviewerが宙ぶらりん参照24箇所を検出した)。

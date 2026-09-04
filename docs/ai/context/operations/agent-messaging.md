@@ -4,18 +4,18 @@
 
 ## 位置づけ
 
-本書は、Coordinator(Claude Code)を起点とする agmsg の連絡経路を扱う runbook である。禁止・義務はこの経路の手順に閉じる(`docs/ai/context-classification.md`「Operations Context」「Policyとの境界」)。扱うのは2つ — **codex 側 Reviewer への依頼**(team `homelab`、local-only、§1〜§6)と、**quory 側 Operator とのすり合わせ**(team `homelab-ops`、remote、§7〜§9)。各Roleの責務・権限・成果物は `docs/ai/roles/<role>.md` が、承認境界は [`docs/ai/policies/execution_boundary_policy.md`](../../policies/execution_boundary_policy.md) が正本であり、競合時はそちらを優先する。IP、認証情報、秘密情報の実値は記載しない。
+本書は、Coordinator(Claude Code)を起点とする agmsg の連絡経路を扱う runbook である。禁止・義務はこの経路の手順に閉じる(`docs/ai/context-classification.md`「Operations Context」「Policyとの境界」)。扱うのは2つ — **codex 側 Implementer への依頼**(team `homelab`、local-only、§1〜§6)と、**quory 側 Operator とのすり合わせ**(team `homelab-ops`、remote、§7〜§9)。各Roleの責務・権限・成果物は `docs/ai/roles/<role>.md` が、承認境界は [`docs/ai/policies/execution_boundary_policy.md`](../../policies/execution_boundary_policy.md) が正本であり、競合時はそちらを優先する。IP、認証情報、秘密情報の実値は記載しない。
 
 ## 1. 構成
 
 agmsg 本体・team定義・メッセージDBは、いずれも**リポジトリの外**(`~/.agents/skills/agmsg/`)にある。upstream は `github.com/fujibee/agmsg`。**導入版はここへ写さない** — `scripts/version.sh` が持つ。
 
-team `homelab` に2者が登録されている。**この team は local-only であり、remote 化しない** — codex Reviewer の通信をネットワークへ出さないこと、および Operator の通信を Reviewer が読めないことを、team の境界で担保している。
+team `homelab` に2者が登録されている。**この team は local-only であり、remote 化しない** — codex Implementer の通信をネットワークへ出さないこと、および Operator の通信を Implementer が読めないことを、team の境界で担保している。
 
 | 識別子 | type | project |
 |---|---|---|
 | `claude` | `claude-code` | `/home/yoshi/homelab-ansible` |
-| `reviewer` | `codex` | 同上 |
+| `implementer` | `codex` | 同上 |
 
 **成果物をagmsgのメッセージだけに残さない。** 監査証跡は `docs/ai/reviews/<target>/` 配下のファイルであるという `docs/ai/core.md` の定めは、依頼先がcodexでも変わらない。メッセージDBはリポジトリ外にあり、`git log` からも案件記録からも辿れない。
 
@@ -55,7 +55,7 @@ despawn.sh <team> <from> <name> [--force]
 - **`--boot-prompt` に依頼文を載せない**(§6)。置くのは「agmsg で依頼が届くまで待て」という起動指示だけである
 - **`--fresh` を省くと、記録済みスレッドを `resume` する。** 古い transcript を再生した状態でプロンプトに止まり、新しい boot prompt は実行されない
 - codex には spawn の readiness handshake が無く、`--no-wait` が常に暗黙に効く
-- **Reviewer のペインは都度畳まない**(Yoshinobu、2026-09-02)。次の依頼はそのまま `send.sh` で送る。畳むのは作り直しが要るときだけであり、`despawn` → 再 `spawn` は配送が成立しなくなることがある(§10)
+- **codex のペインは都度畳まない**(Yoshinobu、2026-09-02)。次の依頼はそのまま `send.sh` で送る。畳むのは作り直しが要るときだけであり、`despawn` → 再 `spawn` は配送が成立しなくなることがある(§10)
 - `--force` で畳むと transcript は残らない。**後から原因を調べる必要があるものは、畳む前に `tmux capture-pane` で控える**
 
 ## 5. 権限の層
@@ -82,7 +82,7 @@ codex 側には2つの層があり、どちらもリポジトリ外にある。*
 - **成果物の返し先** — agmsg で返させるのか、`docs/ai/reviews/<target>/` へ書かせるのか
 - **リポジトリを変更してよいか**
 
-後者は宣言させるだけでは足りない。**`git status --short --untracked-files=all` で作業ツリーを見て確認する。** 相手の最終報告に「変更していない」と書かれていることは、変更していないことの証明ではない。
+後者は宣言させるだけでは足りない。**`git status --short --untracked-files=all` で作業ツリーを見て確認する。** 相手の最終報告は、変更していないことの証明にも、**依頼文で列挙した範囲に収まっていることの証明にもならない。**
 
 なお、リポジトリ直下の `AGENTS.md` から `docs/ai/core.md` への連鎖は、何も渡さなくても codex 側が自力で辿る(2026-08-09 実測)。共通原則を依頼文へ複製する必要はない。
 
