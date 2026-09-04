@@ -241,7 +241,11 @@ def cmd_window(argv):
 
     for ts_ns, host, line in entries:
         ts = datetime.fromtimestamp(ts_ns / 1e9, tz=timezone.utc).astimezone(JST)
-        formatted = f"{ts.strftime('%Y-%m-%dT%H:%M:%S+09:00')} [{host}] {line}"
+        # Keep one Loki entry on one physical stdout line before applying the
+        # per-line length cap (AR-098).  splitlines() covers CR/LF and the
+        # other Unicode line-boundary characters accepted by Python.
+        normalized_line = " ".join(line.splitlines()) if line else line
+        formatted = f"{ts.strftime('%Y-%m-%dT%H:%M:%S+09:00')} [{host}] {normalized_line}"
         if len(formatted) > MAX_LINE_LENGTH:
             formatted = formatted[: MAX_LINE_LENGTH - 3] + "..."
         print(formatted)
@@ -327,9 +331,8 @@ def cmd_errors(argv):
     # CR/LF/CRLFに加え他の物理改行相当の文字も含めて分割するため、本文
     # を1論理行へ正規化してから長さ制限・出力する — この時点で
     # entries内の件数と、以降で実際に出力される物理行数が一致すること
-    # が保証される(既存cmd_window/cmd_countは対象外。この語彙自身が
-    # AC2/AR-098を満たすための修正であり、既存2語の出力処理は変更しな
-    # い)。
+    # が保証される(cmd_windowも同じ正規化を行う。cmd_countは本文を出力
+    # しないため対象外。この語彙自身がAC2/AR-098を満たすための修正)。
     for ts_ns, job, host, line in entries:
         ts = datetime.fromtimestamp(ts_ns / 1e9, tz=timezone.utc).astimezone(JST)
         normalized_line = " ".join(line.splitlines()) if line else line

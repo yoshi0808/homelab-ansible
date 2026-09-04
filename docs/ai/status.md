@@ -11,6 +11,12 @@
 
 ## Now(進行中)
 
+**`loki-window` の埋め込み改行を塞いだ。配備は未了(2026-09-04、案件 `docs/ai/reviews/loki_window_embedded_newline/`)** — `cmd_window` が出力量の予算を **entry数** で組んでいたため、本文に埋め込み改行があると1 entryが複数の物理行へ展開されて `MAX_LINES` を超え、かつ**切り詰め通知が出なかった**(「窓を全部読んだ」ように見える)。修正は `cmd_errors`(2026-09-01)と同じ正規化1行。Implementer と Reviewer が独立にスタブで検証し、いずれも**物理行数の単位**(`len(stdout.splitlines())` と `stdout.count("\n")`)で測っている。**Tester は起動していない** — 実機を要するACが1つも無い(monnie への到達手段は2026-08-19に失われている)。
+
+**`playbooks/recovery_exec_setup.yml` を実行するまで monnie には入らない。** push 後・配備前は日次ドリフト検査が `deployed-hash loki-helper` の drift を報告する — **検査が正しく働いている状態であって異常ではない。**
+
+**同じ欠陥がこのファイルで2度出た**(1度目 `cmd_errors`、2度目 `cmd_window`)。repo へのテスト追加は本案件の非ゴールとした(requirement §3)。**3度目を機械で止める手段はいま無い。**
+
 **Operator が起動時にこの repo を読む。`operator.md` は本番エージェントの起動時契約である(2026-09-03 クローズ、`42b639b`)** — Yoshinobu が quory 側で設定した。OPREQ で繰り返しトラブったことへの対応である。**編集は「文書の更新」ではなく「本番の挙動を変える変更」として扱う** — push すれば `worktree_sync` の timer で quory へ入り、次の起動から効く。
 
 | | |
@@ -94,7 +100,6 @@
 | 項目 | 内容 | 根拠 |
 |---|---|---|
 | **規範監査の残余(小粒3点)** | 2026-08-25の横断監査は第1束・第2束とも実施済みでクローズ(Auditor受入=`_014`)。残るのは①findings 3本の「未確認」節のうち巻き取られていない項目 ②C3-3(現在は一致している複製群の扱い) ③credential保管pathの2Policy間のねじれ(`_013`のCoordinator判断節)。いずれも急がない。次の監査サイクルでまとめて判断する | 案件記録 `docs/ai/reviews/norm_docs_audit/` |
-| **`loki-window` の本文にも埋め込み改行の同じ欠陥がある** | 2026-09-01の`loki-errors`案件で、独立レビューが**既存の`cmd_window`(2026-07-29導入、配備済み)にも同じ欠陥**を検出した。本文に埋め込み改行があると1 entryが複数の物理行へ展開され、`MAX_LINES`を回避する(実測: 本文`a\nb`の299 entriesで物理598行。1 entryは最大300物理行まで展開しうる)。**実害の本体は行数ではなく、切り詰め通知が正しく出ないこと** — 「要求した窓のうちどこまで読めたか」の開示がentry数で判定されるため、**膨らんだときに「全部読んだ」ように見える**。これは2026-07-29の事故(窓の前半だけ読んで「errorなし」と結論した)と同じ失敗の形である。**修正は`cmd_errors`と同じ1行**(`" ".join(line.splitlines())`)で、今回の実装が雛形になる。**急がない** — 埋め込み改行を含むログの実量は未測定で、rsyslog転送は通常1行1エントリ。影響は複数行を1エントリで送るアプリログに限られる | `docs/ai/reviews/loki_investigate_vocabulary/2026-09-01_003_review.md` |
 | **`docs/ai/roles/` 5本のプロンプト最適化(継続案件)** | Coordinator / Implementer / Reviewer / Tester / Auditorの各Role文書を、**実際に運用してみて出てきた歪みを持ち寄って協議しながら**直し続ける。対象は①**やること・やらないことの衝突**②**何を言われているのか読み取れない箇所**③**細かく指示するよりAIに任せた方が結果が良い箇所**の3クラス。一度に全部やる案件ではなく、気づいたものを溜めて定期的に議論する形を採る | Yoshinobu表明(2026-08-01)「ある程度最適化して随分良くなってきたが、まだ矛盾・不明瞭・非効率が残る」。**歪みの実例はCoordinatorが運用中に気づいた時点で書き溜める**(置き場は本行) |
 | **sandbox を検証環境として使い込む** | **inventory 登録と `serial_getty_mask` は2026-08-06に完了**(`b20c43d`。`NRestarts=20322` の agetty ループを停止、hostname も `ubuntu` から `sandbox` へ)。承認境界でも `monnie` / `ansy` と同じ「確認不要」側にある。**ここから先は使い道の話であって、必須の作業ではない。** Yoshinobu が挙げた候補は ①monnie のサービスの検証 ②**まだAnsibleへ移行していない FreeRADIUS**(`authy`)— ただしクライアント/サーバのテスト用公開鍵を一度置く必要があり、かつ RADIUS は設定をほとんど変えないため**費用対効果は未評価**。**この行の要点は「decoy より広く試せる実ホストが手に入った」ことで、個々の候補ではない。** 監視対象にはしない。`rsyslog_forward_to_monnie` を向けるには allow-list への追加とホストごとの recon が要る(未着手・急がない)。**次に手を加える機会があれば、`authorized_keys` をrepoへ入れる**(2026-08-19。いま「どの公開鍵がsandboxを開けるか」はrepoのどこにも無く、実体を見るしかない)。**そのとき排他上書きに注意する** — 既存のsetup系roleは `authorized_keys` を上書きするため、素直に当てると同居する quory の `ann` 鍵を消す。追記型にするかsandbox専用にするかを先に決める | Yoshinobu表明(2026-08-06)。前提・使い方・限界・壊したときの扱いは `docs/ai/context/operations/sandbox-vm.md` が正本 |
 | **Testerをcodex側へ移すか(未決)** | Implementer と Reviewer の交換で、codex側に残る未決はTesterだけになった。**`ansible-playbook --syntax-check` はcodex側でも通る**ことを2026-08-09に実測したので、実行可否は除外理由にならない。**判断軸は実ホストへの到達手段の所在である** — Testerはsubagentのうち実ホストへ到達してよい唯一のRoleであり(`docs/ai/policies/execution_boundary_policy.md` EXEC-050)、codexへ移すとその到達手段をcodex側の権限層(`~/.codex/rules/default.rules` と `[sandbox_workspace_write]`)で作り直すことになる。急がない | Yoshinobu決定(2026-08-09)。経路・落とし穴・権限層の正本は `docs/ai/context/operations/agent-messaging.md` |
