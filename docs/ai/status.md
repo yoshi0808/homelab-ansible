@@ -27,7 +27,7 @@
 
 **月次 apply は2026-09-03に4台とも完了し、`timeout` の SIGTTOU 案件もクローズした(`d95133c`)** — 発端は 9/3 08:09 の monnie への apply(#938)で、`Run apt full-upgrade` が無期限停止した。原因は2026-08-22 の conffile 対策が入れた `timeout` 自身である — `become: true` で Ansible が pty を割り当てる文脈で `timeout` が新しいプロセスグループを作り、それが背景グループとして制御端末に触って `SIGTTOU` で停止した(`timeout` も同じグループで止まるため、3600秒のアラームは発火しない)。**conffile 対策そのものは効いている** — 4台とも term.log に conffile プロンプトは1つも出ていない。復旧は同日 09時台に完了し(`dpkg --configure -a` は即返、`loki` / `unpoller` を再起動)、修正 `41a55ae`(`setsid -w` + 既定モードの `timeout`)で **quory #943 / authy #944 / ansy #945 の3台が完走した**。Incidentは `docs/ai/memory/incidents/2026-09-03_apt-stalled-by-the-timeout-added-to-prevent-stalls.md`。
 
-**案件 `docs/ai/reviews/ubuntu_vm_apply_timeout_sigttou/` はクローズした**(closeout `_005`、Auditor `_006` は条件付き受入 → 指摘を反映)。blockingだったIncidentの状態欄(「恒久対策は未実施」のまま取り残されていた)を是正し、非ブロッキング2件(3600秒の見直しを扱わなかったこと、差し替え前レビューの一次記録が無いこと)をcloseoutへ明記した。**本番3台の完走は「修正が効いた」ことの証明ではない** — 3台の apt が端末に触ったかどうかは分からない。機構が効くことの確認は sandbox の実測(`.../2026-09-03_003_implement.md`)が担う。**未commit。**
+**案件 `docs/ai/reviews/ubuntu_vm_apply_timeout_sigttou/` はクローズした**(closeout `_005`、Auditor `_006` は条件付き受入 → 指摘を反映)。blockingだったIncidentの状態欄(「恒久対策は未実施」のまま取り残されていた)を是正し、非ブロッキング2件(3600秒の見直しを扱わなかったこと、差し替え前レビューの一次記録が無いこと)をcloseoutへ明記した。**本番3台の完走は「修正が効いた」ことの証明ではない** — 3台の apt が端末に触ったかどうかは分からない。機構が効くことの確認は sandbox の実測(`.../2026-09-03_003_implement.md`)が担う。
 
 **残存リスクと申し送り。**
 
@@ -35,7 +35,7 @@
 - **Operator は apt のログを読めない**(`root:adm 0640`、`ann` では拒否)。本番で apt が止まったとき、運用側から中身を確かめる手段が無い
 - **`NEEDRESTART_MODE=l` は再起動しないため、更新したパッケージのうち動いているプロセスが旧版のままのものがある。** authy は `libpam` 系が入ったが `freeradius` は旧ライブラリのまま動いている(再起動不要と出ており、急がない)
 
-**観測待ち: syslog週次ダイジェストの初回実行(2026-09-04 実装、commit `2eeb51c`)** — `SAFE: Syslog weekly digest`、**毎週月曜 09:00**。閾値を持たないダイジェストであって検知ではない(`level`を発火条件にしない)。**まだ動き始めていない** — pushは済んでいるが、**Semaphoreのreconcileを押すまでtemplateもscheduleも登録されない**。
+**観測待ち: syslog週次ダイジェストの初回実行(2026-09-04 実装、commit `2eeb51c`)** — `SAFE: Syslog weekly digest`、**毎週月曜 09:00**。閾値を持たないダイジェストであって検知ではない(`level`を発火条件にしない)。**登録は済んでおり、あとは発火を待つだけである** — template 56 / schedule 23(`0 9 * * 1`、`active: true`)。**実行回数は0回で、初回は2026-09-08(月)09:00**。
 
 **独立レビュー6巡でApprove、Testerが実測でAC2〜AC6を検証した。AC1(実Slack送信)とAC7(実monnie上の無変化)は到達手段が無く未検証である** — ansyからmonnieへの鍵は2026-08-19に削除済みで、使えるのは`monnie-investigate`の24h窓だけ。**本実装が使う168hは配備前には原理的に確かめられない。**
 
@@ -87,7 +87,9 @@
 - **Claude Reviewerの検出力** — 直前まではcodex Reviewerが2案件連続で正しかった。その優位を手放した影響が出るか
 - 実装の往復回数と差分規模
 
-**未確認: `~/.codex/rules/default.rules` が実装時に使うコマンドを許可しているか。** Reviewerで通る範囲しか実績が無い。足りなければcodexは迂回せず昇格を求めて止まる(`agent-messaging.md` §5 と同じ形)ので、危険ではなく手間として現れる。
+**1案件目は `docs/ai/reviews/loki_window_embedded_newline/`(2026-09-04、配備まで完了)。**codex Implementerは**過剰実装なし・往復0回**、Claude Reviewerは**findings 0でApprove**。ただし対象は同一ファイル内に雛形のある1行修正で、**検出力の比較材料にはなっていない**。**この回で欠陥が出たのは記録側で、拾ったのはAuditorだった** — Reviewerが自分の検証カバレッジを過小に書き(11種回して「10種」、実際に回した文字種を「未検証」と記載)、Coordinatorがそれを現物で確かめずに引き継いだ。**2案件目は、検出力が問われるものを当てる。**
+
+**`~/.codex/rules/default.rules` の実装時の許可は、1案件目では問題にならなかった** — ファイル編集・`python3`・`git diff` の範囲では昇格を求めて止まることは無かった。**Ansibleの実行を伴う実装ではまだ通していない。** Reviewerで通る範囲しか実績が無い。足りなければcodexは迂回せず昇格を求めて止まる(`agent-messaging.md` §5 と同じ形)ので、危険ではなく手間として現れる。
 
 ## Next(着手候補) — 工程・体制
 
