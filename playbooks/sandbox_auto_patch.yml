@@ -1,0 +1,23 @@
+---
+# Configure sandbox to consume the Ubuntu updates pocket through its existing
+# unattended-upgrades timer and to reboot itself at 04:00 when required.
+# Only sandbox_nodes is targeted; no production group, Semaphore template, or
+# external patch schedule is involved.
+#
+# Preview:
+#   scripts/safe-ansible-check.sh playbooks/sandbox_auto_patch.yml --check --diff
+# Apply and real-host verification belong to Tester; Implementer only writes
+# and syntax-checks this configuration.
+#
+# tester-gate: check-mode-native — the changing file migration/deployment and
+# its dependent effective-value verification are one block explicitly skipped
+# under --check, so preview cannot alter unattended-upgrades configuration.
+
+- name: Configure autonomous patching and reboot on sandbox
+  hosts: sandbox_nodes
+  gather_facts: false
+  become: true
+  tasks:
+    - name: Run sandbox_auto_patch role
+      ansible.builtin.import_role:
+        name: sandbox_auto_patch

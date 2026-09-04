@@ -1,0 +1,15 @@
+---
+sandbox_auto_patch_dropin_path: /etc/apt/apt.conf.d/99sandbox-auto-patch
+sandbox_auto_patch_legacy_dropin_paths:
+  - /etc/apt/apt.conf.d/52sandbox-auto-patch
+sandbox_auto_patch_dropin_owner: root
+sandbox_auto_patch_dropin_group: root
+
+# Reopening this APT list appends anonymous entries; it does not replace the
+# entries supplied by 50unattended-upgrades (apt.conf(5)).
+sandbox_auto_patch_allowed_origins:
+  - "${distro_id}:${distro_codename}-updates"
+
+sandbox_auto_patch_automatic_reboot: true
+sandbox_auto_patch_automatic_reboot_time: "04:00"
+sandbox_auto_patch_automatic_reboot_with_users: true

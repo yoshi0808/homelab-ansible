@@ -19,9 +19,9 @@
 
 ## 2. production との乖離
 
-**乖離しない仕組みが既に効いている。** `unattended-upgrades` が enabled かつ active で、Allowed-Origins に `-security` と `-updates` の両方を含む。Ubuntu のリリースも ansy / monnie と揃っている(2026-08-06 実測)。
+2026-09-04の実測では、`unattended-upgrades` はenabledかつactiveだが、Allowed-Originsはrelease / `-security` / ESM 2種だけで、`-updates` を含まなかった。保留更新は57件ですべて`-updates`由来、`/var/run/reboot-required`は2026-08-22から残っていた。Ubuntuのリリースがansy / monnieと揃っていることは2026-08-06に実測済みだが、それだけではパッチ状態の追随を保証しない。従来の「productionと乖離しない仕組みが既に効いている」という判断は成立しない。
 
-したがって**パッケージを追随させるために何かをする必要はない**。逆に、スナップショットへ定期的に巻き戻す運用はこの追随を打ち消すため採らない。
+repoから再現できる対処は`playbooks/sandbox_auto_patch.yml`である。cloud-init由来の`52unattended-upgrades-local`が`Automatic-Reboot "false"`を設定しているため、roleのdrop-inはこれより後に読む固有名`99sandbox-auto-patch`とする。`52unattended-upgrades-local`を逆の意味で使い回さず、他VMでのcloud-init管理名の意味を変えない。roleは適用直後の`apt-config dump`でoriginと再起動3設定を検証し、後続ファイルに上書きされていれば失敗する。運用確認では同じdumpに加え、`unattended-upgrade --dry-run --debug`で`-updates`由来のパッケージが選択されることを確認する。distro管理の`50unattended-upgrades`とcloud-init user-dataは変更せず、再起動が必要ならログイン中のセッションがあっても04:00に自動再起動する。設定を配った後の更新と再起動はsandbox自身のAPT timerが担い、quory / Semaphoreから定期実行しない。これにより遅れる方向の乖離は解消するが、sandboxが随時`-updates`を取り込んでproductionより先へ進む方向の乖離は受け入れる。スナップショットへ定期的に巻き戻す運用は追随を打ち消すため採らない。
 
 ## 3. 使い方 — sandbox インベントリ
 

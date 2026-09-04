@@ -11,6 +11,15 @@
 
 ## Now(進行中)
 
+**観測待ち: sandbox が自分でパッチを当てて再起動すること(2026-09-05 配備、案件 `docs/ai/reviews/sandbox_auto_patch/`)** — sandbox は `-security` しか当たらず、`/var/run/reboot-required` が2026-08-22から立ったままだった。原因は本番の `-updates` と再起動を担う月次 `ubuntu_vm_full_upgrade` レーンに `sandbox_nodes` が入っていないこと。**quory は sandbox の鍵を持たないためレーンへ足せない**(`id_sandbox` は ansy 専用)ので、箱自身の unattended-upgrades へ drop-in で `-updates` と `Automatic-Reboot`(04:00、ログイン中でも)を足した。Semaphore には登録していない — 配ったあと動かすのは sandbox 自身の apt timer である。
+
+**再起動の側は証明済み、インストールの側は未観測。** 実効値が `Automatic-Reboot "true"` / `04:00` / `WithUsers "true"` になっていることと、AC9(効いていなければ playbook が失敗する)は実機で確認した。**まだ確かめていないのは、日次実行が実際に `-updates` を入れるところである** — 2026-09-05 の `dpkg.log` は0行で、`-updates` を許可した状態での日次実行はまだ一度も起きていない。`apt.systemd.daily` は前回実行のスタンプが間隔より新しいと飛ばすため、**9/6 の発火(06:16)は現スタンプ(9/5 06:41)より早く、もう1回飛ぶ可能性がある。9/6 と 9/7 の両方を見る。**
+
+**drop-in が `99` でなければならない理由を消さないこと。** `52` にすると **cloud-init 由来の `/etc/apt/apt.conf.d/52unattended-upgrades-local`**(`Automatic-Reboot "false"` のみ)に名前順で負け、再起動設定が黙って無効化される。**これは実機でしか出ず、Implementer と Reviewer の fixture では通っていた。** 同ファイルは `ansy` にもあり、本番ではそれで正しい(再起動は月次playbookと03:30の条件付きrebootが担う)。**cloud-init の user-data は触らない** — 変えると今後作る全VMに効く。sandbox の cloud-init は seed が外れており再実行されない(2026-09-05実測)。
+
+**sandbox は本番より先へ進む。** `-updates` を随時取り込むため、月次でしか上がらない本番との間に「進んでいる側」の乖離が生まれる。**承知のうえで受け入れた**(requirement §8)。
+
+
 **Operator が起動時にこの repo を読む。`operator.md` は本番エージェントの起動時契約である(2026-09-03 クローズ、`42b639b`)** — Yoshinobu が quory 側で設定した。OPREQ で繰り返しトラブったことへの対応である。**編集は「文書の更新」ではなく「本番の挙動を変える変更」として扱う** — push すれば `worktree_sync` の timer で quory へ入り、次の起動から効く。
 
 | | |

@@ -1,0 +1,101 @@
+---
+# The tester-gate classification and rationale live in the calling playbook
+# header (playbooks/sandbox_auto_patch.yml; TS-036). The dependent migration,
+# deployment, and effective-value verification stay in one guarded block.
+- name: Deploy and verify sandbox unattended-upgrades policy
+  when: not ansible_check_mode
+  tags: [destructive]
+  block:
+    - name: Read effective APT configuration before deployment
+      ansible.builtin.command:
+        argv:
+          - apt-config
+          - dump
+      register: sandbox_auto_patch_apt_config_before
+      changed_when: false
+
+    - name: Remove obsolete sandbox auto-patch drop-ins
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop: "{{ sandbox_auto_patch_legacy_dropin_paths }}"
+
+    - name: Deploy sandbox unattended-upgrades policy drop-in
+      ansible.builtin.template:
+        src: 99sandbox-auto-patch.j2
+        dest: "{{ sandbox_auto_patch_dropin_path }}"
+        owner: "{{ sandbox_auto_patch_dropin_owner }}"
+        group: "{{ sandbox_auto_patch_dropin_group }}"
+        mode: "0644"
+
+    - name: Read effective APT configuration after deployment
+      ansible.builtin.command:
+        argv:
+          - apt-config
+          - dump
+      register: sandbox_auto_patch_apt_config
+      changed_when: false
+
+    - name: Verify deployment did not remove existing unattended-upgrades origins
+      ansible.builtin.assert:
+        that:
+          - >-
+            (
+              sandbox_auto_patch_apt_config_before.stdout_lines
+              | select('match', '^Unattended-Upgrade::Allowed-Origins:: ')
+              | list
+              | difference(
+                  sandbox_auto_patch_apt_config.stdout_lines
+                  | select('match', '^Unattended-Upgrade::Allowed-Origins:: ')
+                  | list
+                )
+              | length
+            ) == 0
+        fail_msg: >-
+          Existing Allowed-Origins entries disappeared after deploying
+          {{ sandbox_auto_patch_dropin_path }}. Refuse to continue with a
+          reduced unattended-upgrades origin set.
+        quiet: true
+
+    - name: Verify configured unattended-upgrades origins are effective
+      ansible.builtin.assert:
+        that:
+          - >-
+            ('Unattended-Upgrade::Allowed-Origins:: "' ~ item ~ '";')
+            in sandbox_auto_patch_apt_config.stdout_lines
+        fail_msg: >-
+          {{ sandbox_auto_patch_dropin_path }} was deployed, but apt-config
+          dump did not contain the requested Allowed-Origins entry {{ item }}.
+          Inspect later apt.conf.d files; do not treat a written drop-in as an
+          effective configuration.
+        quiet: true
+      loop: "{{ sandbox_auto_patch_allowed_origins }}"
+
+    - name: Verify unattended-upgrades reboot settings are effective
+      ansible.builtin.assert:
+        that:
+          - >-
+            (
+              'Unattended-Upgrade::Automatic-Reboot "' ~
+              (sandbox_auto_patch_automatic_reboot | bool | ternary('true', 'false')) ~
+              '";'
+            ) in sandbox_auto_patch_apt_config.stdout_lines
+          - >-
+            (
+              'Unattended-Upgrade::Automatic-Reboot-Time "' ~
+              sandbox_auto_patch_automatic_reboot_time ~
+              '";'
+            ) in sandbox_auto_patch_apt_config.stdout_lines
+          - >-
+            (
+              'Unattended-Upgrade::Automatic-Reboot-WithUsers "' ~
+              (sandbox_auto_patch_automatic_reboot_with_users | bool | ternary('true', 'false')) ~
+              '";'
+            ) in sandbox_auto_patch_apt_config.stdout_lines
+        fail_msg: >-
+          {{ sandbox_auto_patch_dropin_path }} was deployed, but apt-config
+          dump reported different effective reboot settings. Inspect later
+          apt.conf.d files; do not treat a written drop-in as an effective
+          configuration. Effective lines: {{ sandbox_auto_patch_apt_config.stdout_lines
+          | select('match', '^Unattended-Upgrade::Automatic-Reboot') | list }}
+        quiet: true

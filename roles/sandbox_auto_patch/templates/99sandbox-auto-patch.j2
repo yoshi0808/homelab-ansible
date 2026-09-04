@@ -1,0 +1,11 @@
+// Managed by Ansible (roles/sandbox_auto_patch). Local additions only;
+// do not copy or replace the distribution-owned 50unattended-upgrades.
+Unattended-Upgrade::Allowed-Origins {
+{% for origin in sandbox_auto_patch_allowed_origins %}
+  "{{ origin }}";
+{% endfor %}
+};
+
+Unattended-Upgrade::Automatic-Reboot "{{ sandbox_auto_patch_automatic_reboot | bool | ternary('true', 'false') }}";
+Unattended-Upgrade::Automatic-Reboot-Time "{{ sandbox_auto_patch_automatic_reboot_time }}";
+Unattended-Upgrade::Automatic-Reboot-WithUsers "{{ sandbox_auto_patch_automatic_reboot_with_users | bool | ternary('true', 'false') }}";

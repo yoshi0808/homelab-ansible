@@ -98,6 +98,7 @@ playbook の入口を置く。処理本体は原則として `roles/` に実装�
 | --- | --- | --- | --- | --- |
 | [`codex_update_check.yml`](codex_update_check.yml) | `localhost`, `ansy:quory` | Codex CLIの更新確認・更新 | `check-mode-native` | `codex_update_check` |
 | [`radius_healthcheck.yml`](radius_healthcheck.yml) | `radius_servers` | FreeRADIUS/RADIUS基盤のhealthcheck | `safe-readonly` | `radius_healthcheck` |
+| [`sandbox_auto_patch.yml`](sandbox_auto_patch.yml) | `sandbox_nodes` | sandbox自身のunattended-upgradesへupdates pocketと必要時04:00自動再起動を追加 | `check-mode-native` | `sandbox_auto_patch` |
 | [`serial_getty_mask.yml`](serial_getty_mask.yml) | `ansy:monnie:quory:authy` | 未使用`serial-getty@ttyS0`の停止・mask | `check-mode-native` | playbook内tasks |
 | [`sophos_trim.yml`](sophos_trim.yml) | `sophos` | Sophos Firewall SSDのtrim | `dry-run-aware` | `sophos_trim` |
 | [`time_sync_check.yml`](time_sync_check.yml) | `quory:pve1:pve2:ansy:monnie:authy:sophos` | 各ホストのNTP同期状態を確認 | `safe-readonly` | `time_sync_check` |
