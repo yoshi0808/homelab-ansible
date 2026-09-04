@@ -11,12 +11,6 @@
 
 ## Now(進行中)
 
-**`loki-window` の埋め込み改行を塞いだ。配備は未了(2026-09-04、案件 `docs/ai/reviews/loki_window_embedded_newline/`)** — `cmd_window` が出力量の予算を **entry数** で組んでいたため、本文に埋め込み改行があると1 entryが複数の物理行へ展開されて `MAX_LINES` を超え、かつ**切り詰め通知が出なかった**(「窓を全部読んだ」ように見える)。修正は `cmd_errors`(2026-09-01)と同じ正規化1行。Implementer と Reviewer が独立にスタブで検証し、いずれも**物理行数の単位**(`len(stdout.splitlines())` と `stdout.count("\n")`)で測っている。**Tester は起動していない** — 実機を要するACが1つも無い(monnie への到達手段は2026-08-19に失われている)。
-
-**`playbooks/recovery_exec_setup.yml` を実行するまで monnie には入らない。** push 後・配備前は日次ドリフト検査が `deployed-hash loki-helper` の drift を報告する — **検査が正しく働いている状態であって異常ではない。**
-
-**同じ欠陥がこのファイルで2度出た**(1度目 `cmd_errors`、2度目 `cmd_window`)。repo へのテスト追加は本案件の非ゴールとした(requirement §3)。**3度目を機械で止める手段はいま無い。**
-
 **Operator が起動時にこの repo を読む。`operator.md` は本番エージェントの起動時契約である(2026-09-03 クローズ、`42b639b`)** — Yoshinobu が quory 側で設定した。OPREQ で繰り返しトラブったことへの対応である。**編集は「文書の更新」ではなく「本番の挙動を変える変更」として扱う** — push すれば `worktree_sync` の timer で quory へ入り、次の起動から効く。
 
 | | |
