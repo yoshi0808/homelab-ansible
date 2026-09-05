@@ -73,7 +73,7 @@
 
 | 区分 | 扱い |
 |---|---|
-| `git commit` / `git push` | **Yoshinobuの都度承認を得てCoordinatorが実行する。** 承認プロンプトを出す前に、stageした内容の分類とcommitメッセージ案を提示する — プロンプト自体にはdiffが載らないため、提示が無ければ承認は形式になる。**subagentは承認の有無にかかわらず行わない。** |
+| `git commit` / `git push` | **Yoshinobuの都度承認を得てCoordinatorが実行する。既定はcommitとpushを1つの承認単位とし、続けて実行する**(Yoshinobu決定、2026-09-05)。**commitで止めるのは、Yoshinobuが明示したときか、よほど大規模な変更のときだけである。** 承認プロンプトを出す前に、stageした内容の分類とcommitメッセージ案を提示する — プロンプト自体にはdiffが載らないため、提示が無ければ承認は形式になる。**subagentは承認の有無にかかわらず行わない。** |
 | Policy本文の改訂、要件段階で未許可の破壊的操作、復旧不能なデータ削除、安全境界そのものの変更 | 常にYoshinobuへ上げる |
 | **保護対象ホスト**への非冪等操作でYoshinobu承認済みscope内のもの | Coordinatorが着手前に計画を確認し承認。scope外/不明なら停止してYoshinobuへ。**このうち `pve1` / `pve2` / `authy` / `sophos-fw` へは到達手段が無く、次行が優先する** — 届かない要求に発火しても無害であり、認証情報が復活したとき意図が生き残るため、行そのものは残す |
 | **到達手段が無いホスト** | **承認の対象ではない。届かない。** 配備・適用が要るときはquoryのSemaphore(Yoshinobu起動)へ回す |
@@ -148,6 +148,7 @@
 
 | 版 | 日付 | 内容 |
 |---|---|---|
+| v1.6 | 2026-09-05 | EXEC-030の`git commit` / `git push`行を、**commitとpushを1つの承認単位とする**既定へ改めた(Yoshinobu決定)。従来は2回に分けて承認を取っており、EXEC-060「打鍵を伴う承認の入口を増やさない」と実務が食い違っていた。commitで止めるのは明示があるときか大規模変更のときだけとする。承認前にstage内容とメッセージ案を提示する義務、subagentが行わない禁止はいずれも変更なし。EXEC番号の新設・退番はない。 |
 | v1.5 | 2026-09-01 | EXEC-003の`monnie`行へ、読み取り専用チェックの一覧が載るカタログ`docs/ai/reviews/dev_prod_boundary/2026-08-03_008_phase3_check_catalog.md`へのポインタを追加した(Loki横断ログ調査は§9であることも添えた)。従来の行は「`monnie-investigate`が今も通る」とだけ書き、何ができるかへの導線が無かった(`docs/ai/reviews/loki_investigate_vocabulary/2026-09-01_001_requirement.md` AC8)。ポインタは`§9`単体ではなくカタログ全体を指す形にした — `§9`だけを名指すとLoki語彙の節にしか着地せず、`monnie-investigate`の大半のチェックが載る§2/§6/§7へ辿れなくなるため(2026-09-01レビュー指摘)。EXEC番号の新設・退番はない。 |
 | v1.4 | 2026-08-25 | 冒頭の読み手を「全Roleが起動時に読む」から「開発工程のRole(Auditorを除く)が起動時に読む」へ改め、絞り込みの根拠として`docs/ai/role-context-matrix.md`と`docs/ai/roles/operator.md`「この文書の位置づけ」を指した(Auditorは技術Contextを読まない設計、Operatorは本リポジトリを読まない設計であり、両者を含めた「全Role」は成立していなかった)。EXEC-030の`git commit`/`git push`行へ「subagentは承認の有無にかかわらず行わない」を追加した(従来この禁止はcore.md「Gitの扱い」節だけが持っており、core.md側は本行への1行ポインタへ統合した)。EXEC-080/081の本文をcore.md「安全機構がブロックしたとき」への1行ポインタへ、EXEC-083の本文を同節への1行ポインタへ改めた(いずれもcore.mdの言い直しで領域適用を加えていなかった)。EXEC-082は領域固有のため本文のまま残した。EXEC番号の新設・退番はない。 |
 | v1.3 | 2026-08-25 | EXEC-005へ「quory側に登録された鍵をansyと同じ判断で消してはならない」を追加した。従来この禁止は`docs/ai/context/system/semaphore.md`だけが持っており、安全境界に触れる規範はContextを正本にせずPolicyへ置く整理に合わせて正本を本書へ移した。EXEC番号の新設・退番はない。 |
