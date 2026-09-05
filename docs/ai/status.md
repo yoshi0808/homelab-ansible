@@ -20,6 +20,11 @@
 **sandbox は本番より先へ進む。** `-updates` を随時取り込むため、月次でしか上がらない本番との間に「進んでいる側」の乖離が生まれる。**承知のうえで受け入れた**(requirement §8)。
 
 
+
+**中断中: 「判定不能が通る側へ倒れる」箇所の掃き出し(2026-09-05、案件 `docs/ai/reviews/undecidable_falls_through_sweep/`)** — codex側の枠切れで中断した。**成果物は未追跡のままディスク上にある。** `git grep -nE '\| *length' -- playbooks roles scripts` の383ヒットを母集団とし、**110件まで走査済み。再開点は `roles/deployment_drift_check/tasks/evaluate.yml:285`**(再開点は成果物の冒頭が正本)。`or []` / `or {}` / `or 0` の家族(23件)は Coordinator が完了済みで、新規の実欠陥ゼロ・既知1件(`roles/semaphore_templates/filter_plugins/semaphore_templates.py` の `or []`)だった。
+
+**確定した誤判定2件は、掃き出し完了後にまとめて別案件で直す**(Yoshinobu決定、2026-09-05)。`roles/deployment_drift_check/tasks/evaluate.yml:142,145` と `:240` が、収集`find`の `rc` を見ずに `stdout` だけを読むため、**収集が失敗した周期を「差分なし」として通す**(`collect.yml:98,140` が `failed_when: false`)。Coordinator が現物で確認済み。**残り273ヒットの半分近くが同じroleの中にあり、同型がまだ出る見込みが高いため1件ずつ直さない。**
+
 **Operator が起動時にこの repo を読む。`operator.md` は本番エージェントの起動時契約である(2026-09-03 クローズ、`42b639b`)** — Yoshinobu が quory 側で設定した。OPREQ で繰り返しトラブったことへの対応である。**編集は「文書の更新」ではなく「本番の挙動を変える変更」として扱う** — push すれば `worktree_sync` の timer で quory へ入り、次の起動から効く。
 
 | | |
@@ -58,7 +63,7 @@
 
 **承知の上の残存リスク**: 秘匿の保証は機械的に検出できるIPv4に限る。error全文を出す以上、IPv4以外のcredential/tokenが`#info`へ出る可能性は残る(**安全境界の緩和としてYoshinobuが判断した**、EXEC-030、requirement §5)。**Testerが実データで確認済み** — 実ログ行の`::ffff:`付きIPv4は伏せられ、`user=admin@pve`は伏せられない。
 
-**観測待ち: Semaphore の新版検知が初めて発火すること(2026-08-25 実装)** — `SAFE: Semaphore update check monthly`、**毎月10日 20:00**。**初回は 2026-09-10。** ansy / quory とも現在 2.19.8 で `releases/latest` と一致しているため、**鳴らずに静かに終わるのが正常**(「動いていない」と疑わないこと)。apt リポジトリが無く GitHub Releases からしか取れないため、この経路が唯一の検知手段である。**適用は手動**で、手順は `docs/ai/reviews/semaphore_upgrade/2026-08-18_002_manual_procedure.md`。**本番で1回手動実行して `up_to_date` を確認済み**(ジョブ #827)。案件記録は `docs/ai/reviews/semaphore_update_check/`。**同日、schedule の有効化ゲートを撤去した**(`docs/ai/reviews/semaphore_activation_gate_removal/`) — カタログが `active: true` と書けば1回の適用で有効になる
+**観測待ち: Semaphore の新版検知が初めて発火すること(2026-08-25 実装)** — `SAFE: Semaphore update check monthly`、**毎月10日 20:00**。**初回は 2026-09-10。** **2026-08-30 に v2.19.12 が出ており、ansy は 2.19.8 実測(quory は未確認)なので、次に回れば鳴るのが正常である**(2026-09-05 に WebFetch で確認)。**「鳴らないのが正常」と読まないこと。** Yoshinobu が検知ジョブを前倒しで手動実行する可能性がある。apt リポジトリが無く GitHub Releases からしか取れないため、この経路が唯一の検知手段である。**適用は手動**で、手順は `docs/ai/reviews/semaphore_upgrade/2026-08-18_002_manual_procedure.md`。**本番で1回手動実行して `up_to_date` を確認済み**(ジョブ #827)。案件記録は `docs/ai/reviews/semaphore_update_check/`。**同日、schedule の有効化ゲートを撤去した**(`docs/ai/reviews/semaphore_activation_gate_removal/`) — カタログが `active: true` と書けば1回の適用で有効になる
 
 **観測待ち: 誤りの再発を機械が刻む仕組み(2026-08-18 実装)** — **規範に書いても守れない誤りがあり、それを自己申告でしか検出できていない**という問題への手探り。**2回目の発火で過検出が確定し、2026-08-19に門を2段階で差し替えた。過検出は大きく下がったが、残っており、合否を判定する手段がまだ無い。**
 
