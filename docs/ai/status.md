@@ -21,10 +21,6 @@
 
 
 
-**中断中: 「判定不能が通る側へ倒れる」箇所の掃き出し(2026-09-05、案件 `docs/ai/reviews/undecidable_falls_through_sweep/`)** — codex側の枠切れで中断した。**成果物は未追跡のままディスク上にある。** `git grep -nE '\| *length' -- playbooks roles scripts` の383ヒットを母集団とし、**110件まで走査済み。再開点は `roles/deployment_drift_check/tasks/evaluate.yml:285`**(再開点は成果物の冒頭が正本)。`or []` / `or {}` / `or 0` の家族(23件)は Coordinator が完了済みで、新規の実欠陥ゼロ・既知1件(`roles/semaphore_templates/filter_plugins/semaphore_templates.py` の `or []`)だった。
-
-**確定した誤判定2件は、掃き出し完了後にまとめて別案件で直す**(Yoshinobu決定、2026-09-05)。`roles/deployment_drift_check/tasks/evaluate.yml:142,145` と `:240` が、収集`find`の `rc` を見ずに `stdout` だけを読むため、**収集が失敗した周期を「差分なし」として通す**(`collect.yml:98,140` が `failed_when: false`)。Coordinator が現物で確認済み。**残り273ヒットの半分近くが同じroleの中にあり、同型がまだ出る見込みが高いため1件ずつ直さない。**
-
 **Operator が起動時にこの repo を読む。`operator.md` は本番エージェントの起動時契約である(2026-09-03 クローズ、`42b639b`)** — Yoshinobu が quory 側で設定した。OPREQ で繰り返しトラブったことへの対応である。**編集は「文書の更新」ではなく「本番の挙動を変える変更」として扱う** — push すれば `worktree_sync` の timer で quory へ入り、次の起動から効く。
 
 | | |
@@ -119,6 +115,7 @@
 
 | 項目 | 内容 | 根拠 |
 |---|---|---|
+| **ドリフト検査が「見られなかった」を「差分なし」として通す(2件)** | `roles/deployment_drift_check/tasks/evaluate.yml:142,145`(所有権)と `:240`(禁止ファイル)が、収集`find`の `rc` を見ずに `stdout` だけを読む。`collect.yml:98,140` が `failed_when: false` のため、**収集が失敗した周期は finding が出ず、毎日「差分なし」で通る。** Coordinator が現物で確認済み。**誤検出ではなく検出漏れなので急がない。** 直す方向は「収集失敗そのものを finding にする」で、`--check` と通知経路への影響を見る必要がある | 掃き出し `docs/ai/reviews/undecidable_falls_through_sweep/`。**`\| length` の383ヒットを全件走査して確定したのはこの2件だけである**(未確定18)。`or []` / `or {}` / `or 0` の23件も走査済みで新規ゼロ。**`\| default(` の家族は未走査** |
 | **apt以外のアップデートを機械的に当てる** | Yoshinobu表明(2026-08-23)「update は機械的に行う(人の判断が入らない)」。**aptはそうなっている**(Ubuntu Pro / unattended-upgrades)が、**apt以外は検知までで、適用は人が `dry_run=false` を明示する**。**この原則は現時点でPolicyに書いていない** — 現在形の規範として書くと `UV-035`〜`UV-038`(定期実行を `dry_run=true` に限定)と正面から矛盾するため(2026-08-23の独立レビューが検出)。実現するなら **`UV-035`〜`UV-038` と実装を同じ案件で改訂する**。`roles/prometheus_update_check/` は無人運用向けの機構を既に持つ(チェックサム検証・トランザクションロック・リトライ付きhealthcheck・**失敗時の自動ロールバック**・バックアップ3世代)。**ただし監視の中核を無人で入れ替える変更**なので、requirementとTesterを通す。**Semaphoreは同じ扱いになるが、そもそも検知経路が無い**(本表の別行) | Yoshinobu表明(2026-08-23)。現行の境界は `docs/ai/policies/ubuntu_vm_patch_policy.md` `UV-086` |
 | **DLP entropy の既存誤検知(14件)** | 2026-08-23 の corpus scan(**5ルート・376本に絞った母集団**での手分類)で、`high-entropy-string` が **PascalCase の長い識別子と hex 文字列 14 種**を BLOCK していることが分かった。**全追跡ファイル(1,737本)まで広げると、20文字以上の BLOCK は 57 種になる**(内訳の手分類は未実施)。**同日の候補パターン変更より前から BLOCK されており、今回の変更が持ち込んだものではない**(`git show HEAD` で着手前の状態を再判定して確認)。**文字クラスの調整では衝突ゼロに到達しない**ことが4ラウンドで分かっており、直すなら指標か適用範囲の側を変える案件になる。**急がない** — 止まったときは拒否メッセージが `rule_id at pointer` で場所を示すため、書き換えて再送できる | `docs/ai/reviews/oprc_dlp_false_positive/2026-08-23_005_review.md`。判定の境界は `docs/ai/context/operations/operator-request-channel.md` |
 | **ansy が自分自身を対象にする playbook を実行できない** | `id_ann` 削除(2026-08-19)以降、`dev_nodes` の group_vars が**存在しない鍵を指す**ため、ansy から ansy 自身への SSH が成立しない。2026-08-23 に `operator_request_channel_client_setup.yml` の配備が止まった(その場は暫定で通し、下記の理由で revert 済み)。**いま困ってはいない** — client は配備済みで、次に ansy が自分へ配備するときに再発する。<br>**素の `ansible_connection: local` を `host_vars/ansy.yml` へ入れてはいけない。** host_vars は inventory のデータで、**quory の Semaphore も同じものを読む**。2026-08-24、これにより quory が `ansy` を対象にした検査で **quory 自身を見て** drift 2件を誤報した(`89e822a` → `9e9daf5` で revert)。**変更系 playbook を流していれば quory が書き換わっていた。**<br>**正しい形は `inventories/homelab/host_vars/quory.yml` に既にある** — `lookup('pipe', 'hostname -s')` でコントローラを見て条件分岐する。**同じ問題が同じ inventory の中で既に解かれていた。**<br>**入れるときの受入条件**: quory から `ansy` を対象に `--check` を流し、**quory ではなく ansy を見ている**ことを確認する。これを確かめずに入れない | `9e9daf5` の commit メッセージ。ドリフトの実測は 8/22・8/23 が 0、8/24 00:40 が 2、revert 後の 07:50 が 0 |
