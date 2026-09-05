@@ -17,7 +17,7 @@ Auditor pass for that project caught it.
 
 Checks
 ------
-1. playbook `# tester-gate:` header  <->  playbooks/README.md catalog tables
+1. playbook `# tester-gate:` header / hosts  <->  playbooks/README.md catalog tables
 2. `.claude/agents/<role>.md` frontmatter `model:`/`effort:`  <->
    docs/ai/roles/coordinator.md "モデル・effort配分" table
 3. Markdown internal links (normative layer only, explicit allowlist -
@@ -210,6 +210,172 @@ def _find_tester_gate(content):
     return m.group(1) if m else None
 
 
+def _host_scalar(value):
+    """Read the catalog's supported YAML scalar subset; never execute Jinja."""
+    value = value.strip()
+    if value.startswith(('"', "'")):
+        quote = value[0]
+        match = re.fullmatch(quote + r"(.*)" + quote + r"(?:\s+#.*)?", value)
+        if not match:
+            raise AnalysisError("check1 hosts: malformed quoted scalar: " + value)
+        return match.group(1)
+    return re.split(r"\s+#", value, maxsplit=1)[0].strip()
+
+
+def _inventory_host_groups(repo_root):
+    """Read direct host membership from the index, without Ansible/inventory execution.
+
+    Only the repository's all/children/group/hosts layout is supported. A
+    structural change must extend this parser, not silently lose membership.
+    Small standalone checker fixtures need not contain this inventory.
+    """
+    path = "inventories/homelab/hosts.yml"
+    if path not in git_ls_files(repo_root):
+        return {}
+    content = read_index_content(repo_root, path)
+    if content is None:
+        raise AnalysisError("check1 hosts: cannot read " + path)
+    groups = {}
+    group = None
+    for line in content.splitlines():
+        if not line.strip() or line.lstrip().startswith('#') or line == '---':
+            continue
+        if line in ('all:', '  children:', '      hosts:'):
+            continue
+        match = re.fullmatch(r'    ([\w-]+):', line)
+        if match:
+            group = match.group(1)
+            groups[group] = set()
+        elif re.fullmatch(r'        [\w-]+:', line) and group:
+            groups[group].add(line.strip()[:-1])
+        elif re.match(r'          \w+:\s+\S', line) and group:
+            continue  # Host variables do not change group membership.
+        else:
+            raise AnalysisError("check1 hosts: unsupported inventory structure: " + line)
+    if not groups or any(not members for members in groups.values()):
+        raise AnalysisError("check1 hosts: empty inventory group membership")
+    return groups
+
+
+def _playbook_host_patterns(path, sources, groups, bindings=None, stack=()):
+    """Return patterns plus aliases derived from the plays that create groups.
+
+    This is deliberately a bounded YAML/Jinja reader, not a YAML interpreter.
+    Each root list entry must be a play with a scalar hosts or an import with
+    literal scalar vars. Unsupported syntax, unreadable imports and cycles
+    fail closed. Task bodies are never executed.
+    """
+    if path in stack or path not in sources:
+        raise AnalysisError("check1 hosts: missing/cyclic import: " + path)
+    content = sources[path]
+    if content is None:
+        raise AnalysisError("check1 hosts: unreadable playbook: " + path)
+    bindings = dict(bindings or {})
+    patterns, aliases = set(), {}
+    blocks = re.split(r'(?=^- )', content, flags=re.MULTILINE)
+    if any(line.strip() and not line.lstrip().startswith(('#', '%'))
+           and line.strip() != '---' for line in blocks[0].splitlines()):
+        raise AnalysisError("check1 hosts: unsupported playbook prefix: " + path)
+    for block in blocks[1:]:
+        imported = re.match(r'- (?:ansible\.builtin\.)?import_playbook:\s*(.+)', block)
+        if imported:
+            target = _host_scalar(imported.group(1))
+            if not re.fullmatch(r'[\w./-]+\.yml', target):
+                raise AnalysisError("check1 hosts: unsupported import: " + target)
+            local_bindings = dict(bindings)
+            vars_block = re.search(r'^  vars:\n((?:    .*\n|\n)*)', block, re.MULTILINE)
+            if re.search(r'^  vars:', block, re.MULTILINE) and not vars_block:
+                raise AnalysisError("check1 hosts: unsupported import vars in " + path)
+            if vars_block:
+                for line in vars_block.group(1).splitlines():
+                    if not line.strip() or line.lstrip().startswith('#'):
+                        continue
+                    var = re.fullmatch(r'    (\w+):\s*([\w-]+)', line)
+                    if not var:
+                        raise AnalysisError("check1 hosts: unsupported import vars: " + line)
+                    local_bindings[var.group(1)] = var.group(2)
+            child = posixpath.normpath(posixpath.join(posixpath.dirname(path), target))
+            child_patterns, child_aliases = _playbook_host_patterns(
+                child, sources, groups, local_bindings, stack + (path,))
+            patterns.update(child_patterns)
+            aliases.update(child_aliases)
+            continue
+        hosts = re.findall(r'^(?:  |- )hosts:\s*([^\n]*)', block, re.MULTILINE)
+        if len(hosts) != 1:
+            raise AnalysisError("check1 hosts: expected one scalar hosts per play: " + path)
+        value = _host_scalar(hosts[0])
+        if value.startswith('{{'):
+            variable = re.fullmatch(r"{{\s*(\w+)\s*(?:\|\s*default\('([^']+)'\))?\s*}}", value)
+            destination = re.fullmatch(
+                r"{{\s*'([\w-]+)' if (\w+) == '([\w-]+)' else '([\w-]+)'\s*}}", value)
+            if variable:
+                name, default = variable.groups()
+                value = bindings.get(name, default or name)
+                if value == '__invalid_target__':
+                    value = name  # Required variable's fail-closed sentinel, not a host.
+                aliases[name] = value
+            elif destination:
+                yes, name, expected, no = destination.groups()
+                # 「移動先」 means the *other* member of the two-node group,
+                # not an arbitrary conditional that happens to return a host.
+                if (name != 'target_node' or expected != no or yes == no
+                        or {yes, no} != groups.get('proxmox')):
+                    raise AnalysisError("check1 hosts: unsupported destination selection: " + value)
+                value = (yes if bindings[name] == expected else no) if name in bindings else '移動先'
+            else:
+                raise AnalysisError("check1 hosts: unsupported Jinja in {}: {}".format(path, value))
+        if not re.fullmatch(r'[\w:-]+', value):
+            raise AnalysisError("check1 hosts: unsupported hosts in {}: {}".format(path, value))
+        patterns.add(value)
+        for group in re.findall(r'^\s+pen_target_group:\s*([\w-]+)\s*$', block, re.MULTILINE):
+            # proxmox_exec_node publishes one selected member of this play's hosts.
+            if not re.search(r'(?:role|name):\s*proxmox_exec_node\s*$', block, re.MULTILINE):
+                raise AnalysisError("check1 hosts: selection group without proxmox_exec_node")
+            aliases[group] = value
+        # The catalog names the restore destination descriptively. Unlike the
+        # execution-node groups above it must remain distinct from query hosts.
+        if re.search(r'^\s+groups:\s*brv_restore_targets\s*$', block, re.MULTILINE):
+            aliases['brv_restore_targets'] = '動的restore対象'
+    if not patterns:
+        raise AnalysisError("check1 hosts: no plays/imports parsed: " + path)
+    return patterns, aliases
+
+
+def _catalog_host_patterns(cell):
+    # Legacy catalog notation places the delegated host immediately before
+    # '(delegate_to)'. New annotations put the whole supplement in parentheses.
+    cell = re.sub(r'`?[\w.-]+`?\(delegate_to\)', '', cell)
+    out, closing = [], []
+    for char in cell:
+        if char in '(（':
+            closing.append(')' if char == '(' else '）')
+        elif char in ')）':
+            if not closing or closing.pop() != char:
+                raise AnalysisError("check1 hosts: unmatched annotation parentheses")
+        elif not closing:
+            out.append(char)
+    if closing:
+        raise AnalysisError("check1 hosts: unclosed annotation parentheses")
+    text = _strip_cell_markup(''.join(out))
+    tokens = re.split(r'[\s,/、]+', text)
+    patterns = {token for token in tokens if token}
+    if not patterns or any(not re.fullmatch(r'[\w:-]+', token) for token in patterns):
+        raise AnalysisError("check1 hosts: unsupported/empty target cell: " + cell)
+    return patterns
+
+
+def _normalize_host_patterns(patterns, aliases, groups):
+    def expand(token, seen=()):
+        if token in seen:
+            raise AnalysisError("check1 hosts: cyclic host alias: " + token)
+        if token in aliases and aliases[token] != token:
+            return expand(aliases[token], seen + (token,))
+        if ':' in token:
+            return set().union(*(expand(part, seen) for part in token.split(':')))
+        return groups.get(token, {token})
+    return set().union(*(expand(pattern) for pattern in patterns))
+
+
 def check_playbook_tester_gate(repo_root):
     findings = []
 
@@ -224,8 +390,10 @@ def check_playbook_tester_gate(repo_root):
         raise AnalysisError("check1: cannot read index content of {}".format(readme_path))
 
     actual_gate = {}
+    sources = {}
     for path in playbook_paths:
         content = read_index_content(repo_root, path)
+        sources[path] = content
         if content is None:
             findings.append("check1: cannot read index content of {}".format(path))
             continue
@@ -233,6 +401,7 @@ def check_playbook_tester_gate(repo_root):
         if actual_gate[path] is None:
             findings.append("check1: {} has no '# tester-gate:' header".format(path))
 
+    groups = _inventory_host_groups(repo_root)
     catalog_rows = []
     for block in extract_pipe_tables(readme_content):
         header_cells = [_strip_cell_markup(c).lower() for c in _split_row(block[0])]
@@ -241,19 +410,22 @@ def check_playbook_tester_gate(repo_root):
         gate_idx = next((i for i, c in enumerate(header_cells) if "tester-gate" in c), None)
         if gate_idx is None:
             continue
+        if "対象" not in header_cells:
+            raise AnalysisError("check1 hosts: catalog has no 対象 column")
+        hosts_idx = header_cells.index("対象")
         data_lines = block[1:]
         if data_lines and _is_separator_row(_split_row(data_lines[0])):
             data_lines = data_lines[1:]
         for line in data_lines:
             cells = _split_row(line)
-            if len(cells) <= gate_idx:
+            if len(cells) <= max(gate_idx, hosts_idx):
                 findings.append(
                     "check1: {}: malformed catalog row (too few columns): {!r}".format(
                         readme_path, line.strip()
                     )
                 )
                 continue
-            catalog_rows.append((cells[0], _strip_cell_markup(cells[gate_idx])))
+            catalog_rows.append((cells[0], _strip_cell_markup(cells[gate_idx]), cells[hosts_idx]))
 
     if not catalog_rows:
         raise AnalysisError(
@@ -263,7 +435,7 @@ def check_playbook_tester_gate(repo_root):
         )
 
     listed = set()
-    for link_cell, gate_value in catalog_rows:
+    for link_cell, gate_value, hosts_cell in catalog_rows:
         target = _extract_link_target(link_cell)
         if target is None:
             findings.append(
@@ -288,6 +460,18 @@ def check_playbook_tester_gate(repo_root):
                     readme_path, resolved, header_value, gate_value
                 )
             )
+        actual_patterns, aliases = _playbook_host_patterns(resolved, sources, groups)
+        actual_hosts = _normalize_host_patterns(actual_patterns, aliases, groups)
+        catalog_hosts = _normalize_host_patterns(_catalog_host_patterns(hosts_cell), aliases, groups)
+        # Existing summaries omit controller-only validation/reporting plays.
+        # Keep a localhost-only playbook strict; never ignore other missing hosts.
+        if 'localhost' in actual_hosts and len(actual_hosts) > 1:
+            actual_hosts.discard('localhost')
+            catalog_hosts.discard('localhost')
+        if actual_hosts != catalog_hosts:
+            findings.append(
+                "check1: hosts mismatch for {} (plays={}, README={})".format(
+                    resolved, sorted(actual_hosts), sorted(catalog_hosts)))
 
     for path in sorted(playbook_set - listed):
         findings.append("check1: {} is not listed in {}".format(path, readme_path))

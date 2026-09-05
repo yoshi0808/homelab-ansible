@@ -6,6 +6,16 @@ playbook の入口を置く。処理本体は原則として `roles/` に実装�
 新しい処理を作る前にこのカタログを確認し、既存 playbook / role で目的を満たせないか
 確認する。新しい playbook を追加した場合は、同じ変更でこのカタログにも登録する。
 
+## 対象列の見方
+
+**対象**は play の `hosts:` を転記する。複数playなら順に並べる。次のときだけ補う。
+
+- group名だけでは実体が分からない → 実体を添える
+- 到達性や引数で実行先が決まる → 選び方を添える
+- play の外へ接続・委譲する先がある → 添える
+
+この列は `scripts/check-doc-consistency.py` の check1 が機械検査する(playの `hosts:` を実ホストまで展開して突き合わせる)。playに新しい `hosts:` の書き方を持ち込むと検査が止まるので、同じ変更で検査側も拡張する。
+
 ## 安全区分の見方
 
 各表の `tester-gate` は playbook ヘッダの `# tester-gate:` を転記したものであり、
@@ -57,36 +67,36 @@ playbook の入口を置く。処理本体は原則として `roles/` に実装�
 | [`proxmox_patch_apply_node.yml`](proxmox_patch_apply_node.yml) | `target_node` | Proxmox単一ノードへのパッチ適用 | `check-mode-native` | `proxmox_patch_apply_node` |
 | [`proxmox_patch_dryrun.yml`](proxmox_patch_dryrun.yml) | `proxmox` | パッチ候補の収集・シミュレーション | `safe-readonly` | `proxmox_patch_dryrun`, `proxmox_healthcheck` |
 | [`proxmox_patch_weekly_full.yml`](proxmox_patch_weekly_full.yml) | `proxmox`, `localhost` | 退避、パッチ、healthcheck、配置復元を含む週次オーケストレーション | `check-mode-native` | 関連Proxmox playbookを順次import |
-| [`proxmox_restore_vm_placement.yml`](proxmox_restore_vm_placement.yml) | `localhost`, `target_node` | 退避後のVM配置を対象ノードへ戻す | `check-mode-native` | `proxmox_restore_vm_placement` |
+| [`proxmox_restore_vm_placement.yml`](proxmox_restore_vm_placement.yml) | `localhost`, `target_node`（移動元の`item.node`へdelegate_to） | 退避後のVM配置を対象ノードへ戻す | `check-mode-native` | `proxmox_restore_vm_placement` |
 | [`proxmox_snapshot_check.yml`](proxmox_snapshot_check.yml) | `proxmox` | VM snapshotの状態確認 | `safe-readonly` | `proxmox_snapshot_check` |
 
 ## 自律復旧
 
 | Playbook | 対象 | 用途 | `tester-gate` | 主な role / 実装 |
 | --- | --- | --- | --- | --- |
-| [`recovery_exec_setup.yml`](recovery_exec_setup.yml) | `dev_nodes:control_nodes` | recovery-exec、Codex runner、SSH鍵生成経路を配備 | `check-mode-native` | `recovery_exec` |
-| [`recovery_ha_failover.yml`](recovery_ha_failover.yml) | `pve1` | 承認された対象のHA failover | `check-mode-native` | `recovery_ha_failover` |
-| [`recovery_io_setup.yml`](recovery_io_setup.yml) | `dev_nodes:control_nodes` | Slack I/O bridgeを配備 | `check-mode-native` | `recovery_io` |
+| [`recovery_exec_setup.yml`](recovery_exec_setup.yml) | `control_nodes`（quory。既定でauthy / monnie、到達可能なpve1 / pve2へdelegate_to） | recovery-exec、Codex runner、SSH鍵生成経路を配備 | `check-mode-native` | `recovery_exec` |
+| [`recovery_ha_failover.yml`](recovery_ha_failover.yml) | `proxmox`, `recovery_exec_target`（到達可能なノードを1台選定。`target` のVMを別のonlineノードへ移動） | 承認された対象のHA failover | `check-mode-native` | `recovery_ha_failover` |
+| [`recovery_io_setup.yml`](recovery_io_setup.yml) | `control_nodes`（quory） | Slack I/O bridgeを配備 | `check-mode-native` | `recovery_io` |
 | [`recovery_monitoring_check.yml`](recovery_monitoring_check.yml) | `control_nodes` | 自律復旧が有効か（global pause継続・probe停止）の日次確認 | `safe-readonly` | playbook内tasks, `common_slack` notify tasks |
 | [`recovery_probe_notify.yml`](recovery_probe_notify.yml) | `localhost` | recovery probeのSlack通知 | `role-guarded` | `common_slack` notify tasks |
-| [`recovery_probe_setup.yml`](recovery_probe_setup.yml) | `dev_nodes:control_nodes` | recovery probeとmute CLIを配備 | `check-mode-native` | `recovery_probe`, `recovery_mute` |
+| [`recovery_probe_setup.yml`](recovery_probe_setup.yml) | `control_nodes`（quory） | recovery probeとmute CLIを配備 | `check-mode-native` | `recovery_probe`, `recovery_mute` |
 | [`recovery_probe_sandbox_setup.yml`](recovery_probe_sandbox_setup.yml) | `control_nodes` | recovery probeの**検証用第2インスタンス**を配備(unit/設定/state_dirのみ分離、daemon本体は本番と共有。既定でenableしない) | `check-mode-native` | `recovery_probe` |
 | [`deployment_drift_check.yml`](deployment_drift_check.yml) | `control_nodes:dev_nodes:monitoring_servers:radius_servers:proxmox` | 配備物がrepoとずれていないかを検査(hash / unit状態 / forced command構造 / reports所有権 / /etc/hosts)。差分時のみ通知、正常時は無通知・rc0 | `safe-readonly` | `deployment_drift_check` |
-| [`recovery_push_drill_setup.yml`](recovery_push_drill_setup.yml) | `quory` | recovery push drill用unitを配備 | `check-mode-native` | `recovery_push` drill tasks |
-| [`recovery_push_setup.yml`](recovery_push_setup.yml) | `quory` | recovery push triggerを配備 | `check-mode-native` | `recovery_push` |
-| [`recovery_service_restart.yml`](recovery_service_restart.yml) | `pve1` | 承認された対象サービスの復旧restart | `check-mode-native` | `recovery_service_restart` |
-| [`recovery_vm_reboot.yml`](recovery_vm_reboot.yml) | `pve1` | 承認された対象VMの復旧reboot | `check-mode-native` | `recovery_vm_reboot` |
+| [`recovery_push_drill_setup.yml`](recovery_push_drill_setup.yml) | `quory`（authy / monnieへdelegate_to） | recovery push drill用unitを配備 | `check-mode-native` | `recovery_push` drill tasks |
+| [`recovery_push_setup.yml`](recovery_push_setup.yml) | `quory`（既定でauthy / monnieへdelegate_to） | recovery push triggerを配備 | `check-mode-native` | `recovery_push` |
+| [`recovery_service_restart.yml`](recovery_service_restart.yml) | `proxmox`, `recovery_exec_target`（到達可能なノードを1台選定。`target` のauthy / monnie / sandboxへdelegate_to） | 承認された対象サービスの復旧restart | `check-mode-native` | `recovery_service_restart` |
+| [`recovery_vm_reboot.yml`](recovery_vm_reboot.yml) | `proxmox`, `recovery_exec_target`（到達可能なノードを1台選定。`target` のVMを操作） | 承認された対象VMの復旧reboot | `check-mode-native` | `recovery_vm_reboot` |
 
 ## 障害記録・振り返り
 
 | Playbook | 対象 | 用途 | `tester-gate` | 主な role / 実装 |
 | --- | --- | --- | --- | --- |
 | [`incident_capture_setup.yml`](incident_capture_setup.yml) | `quory` | 障害証拠バンドル収集器(collector)を配備。有効化オプション時のみtimerをenable+start | `check-mode-native` | `incident_capture` |
-| [`incident_inspect_setup.yml`](incident_inspect_setup.yml) | `dev_nodes:control_nodes` | 一次調査専用ユーザー(incident-inspect)とCodex起動口(wrapper)のみを配備。検出・調査本体・成果物書き出しは持たない | `check-mode-native` | `incident_inspect` |
+| [`incident_inspect_setup.yml`](incident_inspect_setup.yml) | `control_nodes`（quory） | 一次調査専用ユーザー(incident-inspect)とCodex起動口(wrapper)のみを配備。検出・調査本体・成果物書き出しは持たない | `check-mode-native` | `incident_inspect` |
 | [`dev_investigate_setup.yml`](dev_investigate_setup.yml) | `quory` | 開発環境(Claude Code)向けread専用SSHランディングアカウント(dev-investigate、sudoなし)を配備。障害バンドル/レポート/quory自身の状態を読む25本のread専用チェックと、Operator Request Channelの4本(submit / outbound-list / message-get / request-status)だけを公開するforced command dispatch。**書込の語彙を1つも持たない** | `check-mode-native` | `dev_investigate` |
 | [`operator_request_channel_server_setup.yml`](operator_request_channel_server_setup.yml) | `quory` | Operator Request Channelの本番側(共通ライブラリ、SSH受け口、Operator local CLI、schema、DLPルールセット、専用spoolとACL、監査ログ)を配備。**dispatcherの追加armは含まない** — 反映には`dev_investigate_setup.yml`の再実行が要る(`docs/ai/context/operations/operator-request-channel.md` §3) | `check-mode-native` | `operator_request_channel` |
 | [`operator_request_channel_client_setup.yml`](operator_request_channel_client_setup.yml) | `ansy` | Operator Request Channelの開発側client、共通ライブラリ、schema、DLPルールセット、configを配備。message storeは持たない | `check-mode-native` | `operator_request_channel` |
-| [`incident_investigate_setup.yml`](incident_investigate_setup.yml) | `quory` | 一次調査本体(バンドル走査・LLM呼び出し・成果物書き出し・同期起動鍵生成)のsystemd timer/oneshotを配備。有効化オプション時のみtimerをenable+start | `check-mode-native` | `incident_investigate` |
+| [`incident_investigate_setup.yml`](incident_investigate_setup.yml) | `quory` | 一次調査本体(バンドル走査・LLM呼び出し・成果物書き出し)のsystemd timer/oneshotを配備。有効化オプション時のみtimerをenable+start | `check-mode-native` | `incident_investigate` |
 | [`incident_investigate_notify.yml`](incident_investigate_notify.yml) | `localhost` | 一次調査1件完了ごとに`#alerts`へプレーンテキストで通知(incident-investigate.pyから起動される) | `check-mode-native` | playbook内tasks(`ansible.builtin.uri`直接呼び出し) |
 | [`incident_sync_teardown.yml`](incident_sync_teardown.yml) | `dev_nodes`, `quory` | **一度きりの後始末。** 退役した`incident_sync`(quory→ansy証拠バンドルのミラー同期)が残したsystemd unit・専用ユーザー・状態ディレクトリ・quory側鍵material を除去する。timerには載せない | `check-mode-native` | playbook内tasks |
 | [`knowledge_review.yml`](knowledge_review.yml) | `localhost`（ansy専用） | 月次Knowledge見直しの**きっかけ**をSlackへ通知する(障害バンドルの滞留件数と最古バンドルの残り日数を添える)。無人LLMセッションは起動しない | `check-mode-native` | `knowledge_review` |
@@ -101,7 +111,7 @@ playbook の入口を置く。処理本体は原則として `roles/` に実装�
 | [`sandbox_auto_patch.yml`](sandbox_auto_patch.yml) | `sandbox_nodes` | sandbox自身のunattended-upgradesへupdates pocketと必要時04:00自動再起動を追加 | `check-mode-native` | `sandbox_auto_patch` |
 | [`serial_getty_mask.yml`](serial_getty_mask.yml) | `ansy:monnie:quory:authy` | 未使用`serial-getty@ttyS0`の停止・mask | `check-mode-native` | playbook内tasks |
 | [`sophos_trim.yml`](sophos_trim.yml) | `sophos` | Sophos Firewall SSDのtrim | `dry-run-aware` | `sophos_trim` |
-| [`time_sync_check.yml`](time_sync_check.yml) | `quory:pve1:pve2:ansy:monnie:authy:sophos` | 各ホストのNTP同期状態を確認 | `safe-readonly` | `time_sync_check` |
+| [`time_sync_check.yml`](time_sync_check.yml) | `quory:pve1:pve2:ansy:monnie:authy:sophos`（localhostからSophos / CloudKeyへ接続） | 各ホストのNTP同期状態を確認 | `safe-readonly` | `time_sync_check` |
 | [`time_sync_ntp_reference.yml`](time_sync_ntp_reference.yml) | `pve1:pve2:ansy:monnie:authy` | quoryを追加NTP参照先として設定 | `check-mode-native` | `time_sync_ntp_reference` |
 | [`ubuntu_nightly.yml`](ubuntu_nightly.yml) | `radius_servers`, `monitoring_servers` | reboot-required判定、条件付き再起動、サービス確認 | `check-mode-native` | playbook内tasks、`monitoring_healthcheck` tasks |
 | [`ubuntu_vm_full_upgrade.yml`](ubuntu_vm_full_upgrade.yml) | `dev_nodes:control_nodes:radius_servers:monitoring_servers` | Ubuntu VMの更新判定と手動full-upgrade | `check-mode-native` | `ubuntu_vm_full_upgrade` |
@@ -114,7 +124,7 @@ playbook の入口を置く。処理本体は原則として `roles/` に実装�
 | [`semaphore_db_backup.yml`](semaphore_db_backup.yml) | `pve1`/`pve2`（選定）、quory(delegate_to) | quoryのSemaphore(semaphore.db / projects export JSON / config.json)を3点1世代でSynology NFSへ退避、原子的確定・世代ローテーション | `risk-accepted` | `semaphore_db_backup` |
 | [`semaphore_templates_setup.yml`](semaphore_templates_setup.yml) | `quory` | Semaphoreの「押せるボタン」定義(名前・playbook・引数・survey vars)をリポジトリのカタログからSemaphore REST APIへ冪等にreconcile。削除はしない | `check-mode-native` | `semaphore_templates` |
 | [`systemd_timers.yml`](systemd_timers.yml) | `target_hosts`（既定`control_nodes`） | Ansible定期実行用systemd timerを管理 | `check-mode-native` | `systemd_timers` |
-| [`unifi_backup_fetch.yml`](unifi_backup_fetch.yml) | `pve1`（CloudKeyへ接続） | CloudKeyのUniFiバックアップを取得・保存 | `risk-accepted` | `unifi_backup_fetch` |
+| [`unifi_backup_fetch.yml`](unifi_backup_fetch.yml) | `proxmox`, `unifi_backup_fetch_target`（pve1優先、到達不能ならpve2を選定。CloudKeyへ接続） | CloudKeyのUniFiバックアップを取得・保存 | `risk-accepted` | `unifi_backup_fetch` |
 | [`test_ca_env.yml`](test_ca_env.yml) | `localhost` | CA関連環境変数のローカル表示テスト | `safe-readonly` | playbook内tasks |
 | [`worktree_sync_setup.yml`](worktree_sync_setup.yml) | `quory` | quoryの作業ツリーをorigin/mainへ追随させる`git pull --ff-only`をsystemd timerから起動する仕組みを配備(Semaphoreジョブ実行中は見送り) | `check-mode-native` | `worktree_sync` |
 | [`worktree_sync_notify.yml`](worktree_sync_notify.yml) | `localhost` | `worktree_sync`の同期結果をSlackへ通知(worktree-sync.shから起動される) | `role-guarded` | `common_slack` notify tasks |
