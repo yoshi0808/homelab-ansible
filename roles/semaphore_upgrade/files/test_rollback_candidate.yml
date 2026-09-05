@@ -1,0 +1,50 @@
+---
+- name: Test rollback candidate selection through its real include boundary
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    semaphore_upgrade_backup_root: /tmp/semaphore-upgrade-test-rollback-candidate
+    semaphore_upgrade_rollback_to: ""
+  tasks:
+    - name: Create candidate fixture generations
+      ansible.builtin.file:
+        path: "{{ semaphore_upgrade_backup_root }}/{{ item }}"
+        state: directory
+        mode: "0700"
+      loop:
+        - 20260906T010000-valid
+        - 20260906T020000-preflight-only
+
+    - name: Write candidate fixture metadata
+      ansible.builtin.copy:
+        dest: "{{ semaphore_upgrade_backup_root }}/{{ item.generation }}/transaction.json"
+        mode: "0600"
+        content: "{{ {'current_version': item.version, 'generation': item.generation} | to_json }}"
+      loop:
+        - { generation: 20260906T010000-valid, version: 2.19.8 }
+        - { generation: 20260906T020000-preflight-only, version: 2.19.9 }
+
+    - name: Make the preflight-only generation newer
+      ansible.builtin.file:
+        path: "{{ semaphore_upgrade_backup_root }}/{{ item.path }}/transaction.json"
+        modification_time: "{{ item.mtime }}"
+        modification_time_format: "%Y%m%d%H%M.%S"
+      loop:
+        - { path: 20260906T010000-valid, mtime: '202609060100.00' }
+        - { path: 20260906T020000-preflight-only, mtime: '202609060200.00' }
+
+    - name: Mark only the older generation as rollback-ready
+      ansible.builtin.copy:
+        dest: "{{ semaphore_upgrade_backup_root }}/20260906T010000-valid/semaphore-final.db"
+        mode: "0600"
+        content: rollback-ready
+
+    - name: Exercise the real rollback candidate selector
+      ansible.builtin.include_tasks: "{{ playbook_dir }}/../tasks/select_rollback_candidate.yml"
+
+    - name: Require the newer preflight-only generation to be skipped
+      ansible.builtin.assert:
+        that:
+          - semaphore_upgrade_rollback_source.current_version == '2.19.8'
+          - semaphore_upgrade_rollback_source.generation == '20260906T010000-valid'

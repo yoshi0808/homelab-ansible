@@ -69,6 +69,8 @@
           the unused one-use webhook was removed.
 
 - name: Confirm detached transaction was accepted by systemd
+  # No timer is used: an active service may be waiting for the launching
+  # job row to become terminal. Acceptance is not upgrade completion.
   ansible.builtin.command:
     argv:
       - systemctl
@@ -83,7 +85,8 @@
 - name: Explain detached result semantics
   ansible.builtin.debug:
     msg: >-
-      Detached transaction {{ semaphore_upgrade_unit }} accepted
-      ({{ semaphore_upgrade_detached_state.stdout | trim }}). This green Ansible
-      job means only that detachment succeeded; upgrade/rollback success is
-      reported separately to Slack and {{ semaphore_upgrade_result_file }}.
+      切り離し処理 {{ semaphore_upgrade_unit }} を受理しました
+      ({{ semaphore_upgrade_detached_state.stdout | trim }})。
+      起動元ジョブの終端と他ジョブの終了を観測してから停止へ進みます。
+      このジョブの緑は切り離しの受理を意味します。版上げ・ロールバックの結果は
+      Slackと {{ semaphore_upgrade_result_file }} で別途報告します。

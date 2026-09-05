@@ -22,6 +22,7 @@ semaphore_upgrade_query_command: /usr/local/bin/homelab-semaphore-query
 semaphore_upgrade_query_token: /etc/homelab-recovery/semaphore-query-token
 semaphore_upgrade_http_url: "https://{{ inventory_hostname }}.internal:3000/"
 semaphore_upgrade_health_timeout: 120
+semaphore_upgrade_job_wait_timeout: 120
 semaphore_upgrade_stability_seconds: 30
 semaphore_upgrade_release_base: https://github.com/semaphoreui/semaphore/releases/download
 semaphore_upgrade_unit: "semaphore-upgrade-{{ inventory_hostname }}"

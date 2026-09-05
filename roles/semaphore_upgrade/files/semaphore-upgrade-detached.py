@@ -2,6 +2,8 @@
 """Finish a Semaphore self-upgrade outside semaphore.service's cgroup."""
 
 import hashlib
+from datetime import datetime, timedelta, timezone
+from contextlib import closing
 import json
 import os
 import pathlib
@@ -18,9 +20,124 @@ DEFAULT_WEBHOOK_FILE = "/run/semaphore-upgrade-webhook"
 DEFAULT_SUPPRESS_MARKER = "/run/semaphore-upgrade-notifications-suppressed"
 DEFAULT_RESULT_FILE = "/var/log/semaphore-upgrade-result.json"
 DPKG_BOOKKEEPING_NOTE = (
-    "binary restored outside dpkg; dpkg -V may report a checksum mismatch until "
-    "the next Semaphore upgrade reinstalls the pinned package"
+    "バイナリを直接復元したため、dpkg -V の不一致は想定内です。"
+    "次回の版上げでパッケージを再インストールすると解消します。"
 )
+
+
+class BoundaryTimeout(RuntimeError):
+    """The service must remain running; only the installed binary is undone."""
+
+
+def wait_for_jobs(cfg):
+    """Observe origin and all jobs through API, or SQLite after explicit skip."""
+    timeout = int(cfg["job_wait_timeout"])
+    if not 0 < timeout <= 600:
+        raise ValueError("job_wait_timeout must be between 1 and 600 seconds")
+    deadline = time.monotonic() + timeout
+    origin = cfg["origin_job_id"]
+    while True:
+        terminal = True
+        if cfg.get("skip_reading_path_check", False):
+            with closing(sqlite3.connect(f"file:{cfg['db']}?mode=ro", uri=True, timeout=1)) as conn:
+                if origin:
+                    row = conn.execute("select status from task where id = ?", (int(origin),)).fetchone()
+                    terminal = row is not None and row[0] in ("success", "error", "stopped")
+                active = conn.execute(
+                    "select count(*) from task where status is null or status not in ('success', 'error', 'stopped')"
+                ).fetchone()[0]
+        else:
+            if origin:
+                observed = run(
+                    [cfg["query_command"], "task-time", str(origin)],
+                    user=cfg["query_user"], check=False,
+                )
+                fields = observed.stdout.strip().split("|")
+                if observed.returncode != 0 or len(fields) != 6 or fields[0] != str(origin):
+                    raise RuntimeError("起動元ジョブの状態を読み取れません")
+                terminal = fields[3] in ("success", "error", "stopped")
+            running = run(
+                [cfg["query_command"], "running", "200"],
+                user=cfg["query_user"], check=False,
+            )
+            if running.returncode != 0:
+                raise RuntimeError("走行中ジョブを読み取れません")
+            lines = running.stdout.splitlines()
+            if any(len(line.split("|")) != 5 for line in lines):
+                raise RuntimeError("走行中ジョブの応答形式が不正です")
+            active = len(lines)
+        if terminal and active == 0:
+            return
+        if time.monotonic() >= deadline:
+            raise BoundaryTimeout("起動元ジョブの終端を確認できません" if not terminal else "他のジョブが終了しません")
+        time.sleep(min(1, max(0, deadline - time.monotonic())))
+
+
+def undo_install_without_stop(cfg):
+    """Replace the pathname atomically; never overwrite a running executable."""
+    source = pathlib.Path(cfg["backup_dir"]) / "semaphore.bin"
+    target = pathlib.Path(cfg["binary"])
+    temporary = target.with_name(target.name + ".upgrade-restore")
+    if sha256(source) != cfg["current_binary_sha256"]:
+        raise RuntimeError("退避バイナリのsha256が一致しません")
+    try:
+        shutil.copy2(source, temporary)
+        source_stat = source.stat()
+        os.chown(temporary, source_stat.st_uid, source_stat.st_gid)
+        os.replace(temporary, target)
+    finally:
+        temporary.unlink(missing_ok=True)
+    if sha256(target) != cfg["current_binary_sha256"]:
+        raise RuntimeError("中止時のバイナリ復元を確認できません")
+
+
+def notification_text(cfg, result):
+    def field(value):
+        return str(value).replace('\n', ' ')[:250]
+
+    status = result["status"]
+    icon, label = {"success": ("✅", "成功"), "aborted": ("⚠️", "中止")}.get(status, ("❌", "失敗"))
+    title = f"{icon} [Semaphore] {label}"
+    rollback = cfg.get("mode") == "rollback"
+    old = cfg.get("target_version" if rollback else "current_version", "不明")
+    new = cfg.get("current_version" if rollback else "target_version", "不明")
+    old_ed = cfg.get("target_edition" if rollback else "current_edition", "不明")
+    old = cfg.get("report_from_version", old)
+    old_ed = cfg.get("report_from_edition", old_ed)
+    new_ed = cfg.get("current_edition" if rollback else "target_edition", "不明")
+    transition = "予定" if status == "aborted" or (status == "failed" and not result.get("rollback")) else "変更"
+    if status == "failed" and result.get("rollback"):
+        transition = "版上げ試行"
+    lines = [f"ホスト: {field(os.uname().nodename)}", f"結果: {label}（{'ロールバック' if rollback else '版上げ'}）",
+             f"{transition}バージョン: {field(old)} → {field(new)}", f"{transition}エディション: {field(old_ed)} → {field(new_ed)}",
+             f"時刻: {datetime.now(timezone(timedelta(hours=9))).isoformat(timespec='seconds')}",
+             f"退避先: {field(cfg.get('backup_dir', '不明'))}"]
+    if (result.get("binary_restored") or result.get("binary_unchanged")) and not result.get("service_stop_attempted"):
+        lines.append("安全に引き返しました。Semaphoreの停止・再起動は行っていません。稼働中の版は変更していません。")
+        lines.append(
+            "install前のバイナリへ復元しました。"
+            if result.get("binary_restored") else "バイナリ変更は行っていません。"
+        )
+    if result.get("rollback") or (rollback and status == "success"):
+        lines.append(f"ロールバック: {field(result.get('rollback', 'success'))} / 復帰先: {field(cfg.get('current_version', '不明'))} ({field(cfg.get('current_edition', '不明'))})")
+    if result.get("rollback") == "success" or (rollback and status == "success"):
+        restore_point = cfg.get("ledger_restore_point")
+        if not restore_point:
+            restore_point = pathlib.Path(cfg.get("backup_dir", "不明")).name.split("-from-", 1)[0]
+        lines.append(
+            f"ジョブ台帳: 退避時点（{field(restore_point)}）へ巻き戻しました。"
+            "これ以降のジョブ記録は失われ、退避時に走行中だった行が running として復活します。"
+        )
+        lines.append(
+            "復活した走行中行は次回版上げの preflight を止める場合があります。"
+            "Semaphore UI で該当行を stopped にしてから再実行してください。"
+        )
+    for key, label in (("error", "理由"), ("rollback_error", "復元エラー"), ("recovery_error", "安全網エラー")):
+        if key in result:
+            lines.append(f"{label}: {field(result[key])}")
+    if "dpkg_bookkeeping" in result:
+        lines.append(DPKG_BOOKKEEPING_NOTE)
+    return title, '\n'.join(lines)[:2900]
 
 
 def interrupted(signum, _frame):
@@ -159,7 +276,8 @@ def notify(webhook_file, title, message):
     try:
         webhook = path.read_text(encoding="utf-8").strip()
         body = json.dumps(
-            {"attachments": [{"title": title, "text": message, "color": "good" if "SUCCESS" in title else "danger"}]}
+            {"link_names": 1, "attachments": [{"title": title, "text": message, "fallback": title,
+              "color": "good" if title.startswith("✅") else "warning" if title.startswith("⚠️") else "danger"}]}
         ).encode()
         request = urllib.request.Request(
             webhook, data=body, headers={"Content-Type": "application/json"}, method="POST"
@@ -205,6 +323,8 @@ def main():
     result = {"status": "failed", "mode": "unknown", "error": "unexpected exit"}
     exit_code = 1
     rollback_recovery = None
+    boundary_crossed = False
+    result["service_stop_attempted"] = False
     try:
         if len(sys.argv) != 2:
             raise RuntimeError("usage: semaphore-upgrade-detached <config.json>")
@@ -213,10 +333,18 @@ def main():
             raise RuntimeError("transaction configuration is not an object")
         cfg.update(loaded)
         result["mode"] = cfg["mode"]
+        # Observed transaction state, not the exception type, drives safety
+        # reporting. Rollback does not mutate the binary before its boundary.
+        result["binary_unchanged"] = cfg["mode"] == "rollback"
         result["reading_path_check"] = (
             "skipped" if cfg.get("skip_reading_path_check", False) else "pending"
         )
+        # The unit can be active while waiting here. Ansible can finish and
+        # Semaphore can persist the launching row before any service stop.
+        wait_for_jobs(cfg)
+        boundary_crossed = True
         if cfg["mode"] == "upgrade":
+            result["service_stop_attempted"] = True
             stop(cfg["service"])
             final_db = pathlib.Path(cfg["backup_dir"]) / "semaphore-final.db"
             sqlite_backup(cfg["db"], final_db)
@@ -239,8 +367,18 @@ def main():
                 "sha256": sha256(cfg["binary"]),
                 "counts": counts(cfg["db"]),
             }
+            # The saved upgrade target need not be the version currently
+            # running when an older rollback generation is selected.
+            cfg["report_from_version"] = rollback_recovery["version"]
+            cfg["report_from_edition"] = (
+                cfg["target_edition"] if rollback_recovery["sha256"] == cfg["target_binary_sha256"]
+                else cfg["current_edition"] if rollback_recovery["sha256"] == cfg["current_binary_sha256"]
+                else "不明（保存済みhashと不一致）"
+            )
             sqlite_backup(cfg["db"], current / "semaphore.db")
             shutil.copy2(cfg["binary"], current / "semaphore.bin")
+            result["binary_unchanged"] = False
+            result["service_stop_attempted"] = True
             restore(cfg)
             result = {
                 "status": "success",
@@ -254,7 +392,18 @@ def main():
         exit_code = 0
     except Exception as error:
         result["error"] = str(error)[:500]
-        if cfg.get("mode") == "upgrade":
+        if not boundary_crossed:
+            try:
+                if cfg.get("mode") == "upgrade":
+                    undo_install_without_stop(cfg)
+                    result["binary_restored"] = True
+                    result["dpkg_bookkeeping"] = DPKG_BOOKKEEPING_NOTE
+                if isinstance(error, BoundaryTimeout):
+                    result["status"] = "aborted"
+                    exit_code = 0
+            except Exception as recovery_error:
+                result["recovery_error"] = str(recovery_error)[:500]
+        elif cfg.get("mode") == "upgrade":
             try:
                 restore(cfg)
                 result["rollback"] = "success"
@@ -281,11 +430,7 @@ def main():
                 result["pre_rollback_recovery"] = "failed"
                 result["recovery_error"] = str(recovery_error)[:500]
     finally:
-        title = f"[Semaphore upgrade] {result['status'].upper()} ({cfg.get('mode', 'unknown')})"
-        message = (
-            f"host={os.uname().nodename} result={result}; "
-            "the launching Semaphore job only confirmed detachment, not this result"
-        )
+        title, message = notification_text(cfg, result)
         marker = pathlib.Path(cfg.get("notification_suppress_marker", DEFAULT_SUPPRESS_MARKER))
         suppressed = bool(cfg.get("skip_notifications", False)) or marker.exists()
         result["notification"] = {

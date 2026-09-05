@@ -16,6 +16,16 @@
       target version/edition must be valid. Apply requires -e dry_run=false;
       rollback requires -e dry_run=false -e rollback=true.
 
+- name: Validate detached job wait timeout
+  ansible.builtin.assert:
+    that:
+      - semaphore_upgrade_job_wait_timeout | string is match('^[0-9]+$')
+      - semaphore_upgrade_job_wait_timeout | int > 0
+      - semaphore_upgrade_job_wait_timeout | int <= 600
+    fail_msg: >-
+      semaphore_upgrade_job_wait_timeout must be an integer from 1 through 600
+      seconds. Got {{ semaphore_upgrade_job_wait_timeout }}.
+
 - name: Decide detached notification suppression in Ansible
   ansible.builtin.set_fact:
     semaphore_upgrade_notifications_suppressed: >-

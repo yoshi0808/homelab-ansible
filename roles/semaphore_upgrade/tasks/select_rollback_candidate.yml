@@ -1,0 +1,62 @@
+---
+- name: Find completed Semaphore transaction metadata
+  ansible.builtin.find:
+    paths: "{{ semaphore_upgrade_backup_root }}"
+    patterns: transaction.json
+    recurse: true
+    file_type: file
+  register: semaphore_upgrade_rollback_metadata_files
+
+- name: Inspect irreversible-point rollback payloads
+  ansible.builtin.stat:
+    path: "{{ item.path | dirname }}/semaphore-final.db"
+  loop: "{{ semaphore_upgrade_rollback_metadata_files.files | sort(attribute='mtime', reverse=true) }}"
+  register: semaphore_upgrade_rollback_payload_stats
+  # semaphore-final.db is created only after the detached upgrade has stopped
+  # Semaphore and completed its final SQLite backup. Preflight-only transactions
+  # lack it, so this is the explicit marker for crossing the irreversible point.
+
+- name: Build rollback-ready metadata path list
+  ansible.builtin.set_fact:
+    semaphore_upgrade_rollback_ready_metadata_files: >-
+      {{ (semaphore_upgrade_rollback_ready_metadata_files | default([])) + [item.item.path] }}
+  loop: "{{ semaphore_upgrade_rollback_payload_stats.results }}"
+  when:
+    - item.stat.exists | default(false)
+    - item.stat.isreg | default(false)
+    - item.stat.size | default(0) | int > 0
+
+- name: Read rollback-ready transaction metadata
+  ansible.builtin.slurp:
+    src: "{{ item }}"
+  loop: "{{ semaphore_upgrade_rollback_ready_metadata_files | default([]) }}"
+  register: semaphore_upgrade_rollback_metadata_raw
+  no_log: true
+
+- name: Select rollback candidates
+  ansible.builtin.set_fact:
+    semaphore_upgrade_rollback_candidates: >-
+      {{ (semaphore_upgrade_rollback_candidates | default([])) +
+         [item.content | b64decode | from_json] }}
+  loop: "{{ semaphore_upgrade_rollback_metadata_raw.results }}"
+  when: >-
+    (semaphore_upgrade_rollback_to | length == 0) or
+    ((item.content | b64decode | from_json).current_version == semaphore_upgrade_rollback_to)
+  no_log: true
+
+- name: Require a matching rollback generation
+  ansible.builtin.assert:
+    that:
+      - semaphore_upgrade_rollback_candidates | default([]) | length > 0
+    fail_msg: >-
+      No rollback-ready transaction matches
+      rollback_to={{ semaphore_upgrade_rollback_to | default('latest', true) }}.
+      A rollback point requires a non-empty semaphore-final.db proving that the
+      detached upgrade reached the irreversible boundary; preflight-only
+      transactions are not rollback points.
+
+- name: Build rollback transaction configuration
+  ansible.builtin.set_fact:
+    semaphore_upgrade_rollback_source: "{{ semaphore_upgrade_rollback_candidates[0] }}"
+    semaphore_upgrade_rollback_generation: >-
+      {{ lookup('pipe', "TZ='Asia/Tokyo' date '+%Y%m%dT%H%M%S+0900'") }}

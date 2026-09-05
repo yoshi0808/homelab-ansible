@@ -1,0 +1,87 @@
+---
+- name: Read Semaphore service control group
+  ansible.builtin.command:
+    argv:
+      - systemctl
+      - show
+      - semaphore.service
+      - --property=ControlGroup
+      - --value
+  register: semaphore_upgrade_service_control_group
+  changed_when: false
+
+- name: Read this Ansible task process control group
+  ansible.builtin.command:
+    argv:
+      - cat
+      - /proc/self/cgroup
+  register: semaphore_upgrade_task_control_group
+  changed_when: false
+
+- name: Determine launching execution shape from observed control groups
+  ansible.builtin.set_fact:
+    semaphore_upgrade_launched_by_semaphore: >-
+      {{ semaphore_upgrade_service_control_group.stdout | trim | length > 0 and
+         ('::' + (semaphore_upgrade_service_control_group.stdout | trim)) in
+         (semaphore_upgrade_task_control_group.stdout_lines | join('\n')) }}
+
+- name: Observe active upgrade jobs through the consumer path
+  ansible.builtin.command:
+    argv:
+      - "{{ semaphore_upgrade_query_command }}"
+      - running
+      - "200"
+  become: true
+  become_user: "{{ semaphore_upgrade_origin_query_user }}"
+  register: semaphore_upgrade_origin_api_rows
+  changed_when: false
+  when: semaphore_upgrade_origin_reading_path_available
+
+- name: Select active upgrade job IDs from consumer output
+  ansible.builtin.set_fact:
+    semaphore_upgrade_origin_api_ids: >-
+      {{ semaphore_upgrade_origin_api_rows.stdout_lines |
+         select('search', '[|]playbooks/semaphore_upgrade[.]yml[|]') |
+         map('regex_replace', '^([0-9]+)[|].*$', '\1') | list }}
+  when: semaphore_upgrade_origin_reading_path_available
+
+- name: Observe active upgrade job IDs in the local database after explicit API skip
+  ansible.builtin.command:
+    argv:
+      - sqlite3
+      - -readonly
+      - "{{ semaphore_upgrade_db }}"
+      - >-
+        select task.id from task join project__template tpl on task.template_id = tpl.id
+        where task.status not in ('success', 'error', 'stopped')
+        and tpl.playbook = 'playbooks/semaphore_upgrade.yml';
+  register: semaphore_upgrade_origin_db_rows
+  changed_when: false
+  when: not (semaphore_upgrade_origin_reading_path_available | bool)
+
+- name: Normalize active upgrade job IDs from the selected reading path
+  ansible.builtin.set_fact:
+    semaphore_upgrade_origin_rows:
+      stdout_lines: >-
+        {{ semaphore_upgrade_origin_api_ids
+           if semaphore_upgrade_origin_reading_path_available
+           else semaphore_upgrade_origin_db_rows.stdout_lines }}
+
+- name: Reject ambiguous launching job identity
+  ansible.builtin.assert:
+    that:
+      - >-
+        (semaphore_upgrade_launched_by_semaphore and semaphore_upgrade_origin_rows.stdout_lines | length == 1) or
+        (not semaphore_upgrade_launched_by_semaphore and semaphore_upgrade_origin_rows.stdout_lines | length == 0)
+      - semaphore_upgrade_origin_rows.stdout_lines | reject('match', '^[0-9]+$') | list | length == 0
+    fail_msg: >-
+      Launching job observation disagrees with the execution shape:
+      launched_by_semaphore={{ semaphore_upgrade_launched_by_semaphore }},
+      matching_active_jobs={{ semaphore_upgrade_origin_rows.stdout_lines | length }}.
+      Semaphore execution requires exactly one matching job; direct CLI execution requires zero.
+
+- name: Preserve launching job identity for detached observation
+  ansible.builtin.set_fact:
+    semaphore_upgrade_origin_job_id: >-
+      {{ semaphore_upgrade_origin_rows.stdout_lines | first
+         if semaphore_upgrade_launched_by_semaphore else '' }}

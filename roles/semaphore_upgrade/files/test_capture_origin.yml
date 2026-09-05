@@ -1,0 +1,86 @@
+---
+- name: Test capture_origin through its real include boundary
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    semaphore_upgrade_test_root: /tmp/semaphore-upgrade-test-capture-origin
+    semaphore_upgrade_query_command: /tmp/semaphore-upgrade-test-capture-origin/bin/query
+    semaphore_upgrade_db: /tmp/semaphore-upgrade-test-capture-origin/semaphore.db
+  environment:
+    PATH: "/tmp/semaphore-upgrade-test-capture-origin/bin:/usr/bin:/bin"
+  tasks:
+    - name: Create fixture command directory
+      ansible.builtin.file:
+        path: "{{ semaphore_upgrade_test_root }}/bin"
+        state: directory
+        mode: "0700"
+
+    - name: Install fixture commands
+      ansible.builtin.copy:
+        dest: "{{ semaphore_upgrade_test_root }}/bin/{{ item.name }}"
+        mode: "0700"
+        content: "{{ item.content }}"
+      loop:
+        - name: systemctl
+          content: |
+            #!/bin/sh
+            printf '%s\n' '/fixture/semaphore.service'
+        - name: cat
+          content: |
+            #!/bin/sh
+            if /bin/grep -q semaphore "{{ semaphore_upgrade_test_root }}/launch-shape"; then
+              printf '%s\n' '0::/fixture/semaphore.service'
+            else
+              printf '%s\n' '0::/fixture/cli.scope'
+            fi
+        - name: query
+          content: |
+            #!/bin/sh
+            printf '%s\n' '986|Semaphore upgrade|playbooks/semaphore_upgrade.yml|running|start'
+        - name: sqlite3
+          content: |
+            #!/bin/sh
+            exit 0
+
+    - name: Select Semaphore-launched API fixture
+      ansible.builtin.copy:
+        dest: "{{ semaphore_upgrade_test_root }}/launch-shape"
+        mode: "0600"
+        content: semaphore
+
+    - name: Exercise the real API capture include with upgrade call-site variables
+      ansible.builtin.include_tasks: "{{ playbook_dir }}/../tasks/capture_origin.yml"
+      vars:
+        semaphore_upgrade_origin_reading_path_available: true
+        semaphore_upgrade_origin_query_user: "{{ lookup('env', 'USER') }}"
+
+    - name: Require the Semaphore-launched origin to be captured
+      ansible.builtin.assert:
+        that:
+          - semaphore_upgrade_launched_by_semaphore | bool
+          - semaphore_upgrade_origin_job_id == '986'
+
+    - name: Select CLI-launched explicit-skip fixture
+      ansible.builtin.copy:
+        dest: "{{ semaphore_upgrade_test_root }}/launch-shape"
+        mode: "0600"
+        content: cli
+
+    - name: Model the skipped rollback register without stdout
+      ansible.builtin.set_fact:
+        semaphore_upgrade_rollback_query_user_raw:
+          skipped: true
+
+    - name: Exercise the real local-DB capture include with rollback call-site variables
+      ansible.builtin.include_tasks: "{{ playbook_dir }}/../tasks/capture_origin.yml"
+      vars:
+        semaphore_upgrade_origin_reading_path_available: false
+        semaphore_upgrade_origin_query_user: >-
+          {{ semaphore_upgrade_rollback_query_user_raw.stdout | default('') | trim }}
+
+    - name: Require the CLI launch to need no origin ID
+      ansible.builtin.assert:
+        that:
+          - not (semaphore_upgrade_launched_by_semaphore | bool)
+          - semaphore_upgrade_origin_job_id == ''
