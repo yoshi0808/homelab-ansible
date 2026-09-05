@@ -50,3 +50,4 @@
 | 日付 | 何に対して踏んだか | 反した規範 | 気づかせたもの |
 |---|---|---|---|
 | 2026-08-25 | Reviewerにrejected-proposals.mdの確認を依頼したが、Reviewerはmemory配下を読めず、検証不能な対象を確認済み扱いしかけた。 | docs/ai/core.md:86「Reviewerはdocs/ai/memory/を読まない」 | Reviewer |
+| 2026-09-05 | findingsが存在しないことからCodexは着手前で成果物ゼロと断定したが、後に旧要件で全ファイル走査中だったと判明した。 | docs/ai/roles/coordinator.md「仮説で行動しない」「確認していないものは未確認と明示する。確認手段があるなら先に確認する」 | 自分(後から生成されたfindingsに旧要件で走査していた旨が記録されていた) |

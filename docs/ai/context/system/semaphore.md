@@ -57,7 +57,7 @@ quory 側の鍵を、ansy と同じ判断で消してはならない義務の正
 
 ## インストールと版上げ(2026-08-10 ansy 実測)
 
-**apt リポジトリは存在しない。`apt upgrade` では上がらない。** 導入は GitHub Releases の `.deb` を `apt install ./semaphore_X.Y.Z_linux_amd64.deb` で入れた形で、apt から見た供給元は `/var/lib/dpkg/status` だけである(`apt-cache policy semaphore`)。`/etc/apt/sources.list.d/` に semaphore の source は無い。上流も apt リポジトリを提供しておらず、公式の Upgrading 手順自体が「Releases から `.deb` を落として `dpkg -i`」である。**新版が出たことを知る経路が無い。**
+**apt リポジトリは存在しない。`apt upgrade` では上がらない。** 導入は GitHub Releases の `.deb` を `apt install ./semaphore_X.Y.Z_linux_amd64.deb` で入れた形で、apt から見た供給元は `/var/lib/dpkg/status` だけである(`apt-cache policy semaphore`)。`/etc/apt/sources.list.d/` に semaphore の source は無い。上流も apt リポジトリを提供しておらず、公式の Upgrading 手順自体が「Releases から `.deb` を落として `dpkg -i`」である。**新版の検知は `roles/semaphore_update_check/` が GitHub Releases API で行う**(毎月10日、`SAFE: Semaphore update check monthly`)。**適用は `playbooks/semaphore_upgrade.yml` が行い、schedule には載せない**(手順の正本はこの playbook と `roles/semaphore_upgrade/` であり、`docs/ai/reviews/semaphore_upgrade/2026-08-18_002_manual_procedure.md` は自動化が使えないときの退避路として残す)。
 
 **この `.deb` が持つファイルは `/usr/bin/semaphore` の1つだけで、maintainer script を持たない**(`/var/lib/dpkg/info/semaphore.list`、postinst / prerm ともに存在しない)。したがって:
 
@@ -69,9 +69,13 @@ quory 側の鍵を、ansy と同じ判断で消してはならない義務の正
 
 版の読み取りは `semaphore version` で、出力は `2.19.8-3449a04-1786894505` の形(`X.Y.Z` の後に commit hash とビルド番号が付く)。
 
-**ansy / quory とも非 community 版**(`semaphore_X.Y.Z_linux_amd64.deb`)である。2026-08-18〜19 に**両ホスト・両版**(2.18.4 / 2.19.8)で `/usr/bin/semaphore` の sha256 を upstream の `.deb` から展開したバイナリと照合して確定した。**`.deb` は2種類公開されており(`semaphore_` と `semaphore_community_`)、取り違えると版と一緒にエディションまで入れ替わる。** **版上げのたびに、入れる前(現行バイナリ)と入れた後の両方で照合する。**期待値はここへ書かない — 版ごとに変わるため、upstream の該当リリースの `.deb` を展開して都度求める。
+**エディションは ansy と quory で異なる。ansy は community 版(2.19.12、2026-09-05)、quory は非 community 版(2.19.8)である。**2026-08-18〜19 に**両ホスト・両版**(2.18.4 / 2.19.8)で `/usr/bin/semaphore` の sha256 を upstream の `.deb` から展開したバイナリと照合して確定した。**`.deb` は2種類公開されており(`semaphore_` と `semaphore_community_`)、取り違えると版と一緒にエディションまで入れ替わる。** **版上げのたびに、入れる前(現行バイナリ)と入れた後の両方で照合する**(`roles/semaphore_upgrade/` が自動で行う)。期待値はここへ書かない — 版ごとに変わるため、upstream の該当リリースの `.deb` を展開して都度求める。
 
-**未確認**: quory の unit と config の中身は測っていない。`quory-investigate` の forced command に apt / dpkg / systemctl-cat 系の操作が無く、この経路では読めない。
+**quory の unit は `unit-cat semaphore.service` で読める**(2026-09-05 実測。`journal-unit` / `unit-cat` の enum に `semaphore.service` が入っている)。**ansy と内容が同一である** — `User=yoshi` / `Group=yoshi`、`Restart=always`、`RestartSec=10s`、`ConditionPathExists` 2件、`KillMode` の明示は無く systemd 既定の `control-group` が効く。**config の中身は今も測っていない。**
+
+**`ConditionPathExists=/usr/bin/semaphore` があるため、バイナリが壊れていると condition 不成立で「起動しないまま成功」する。** `systemctl start` の rc を健全の根拠にしない。**`Restart=always` / `RestartSec=10s` があるため、1回の `is-active` も根拠にならない。**
+
+**ロールバックはバイナリを直接書き戻すため、直後は `dpkg -V semaphore` が checksum 不一致を示す。破損ではない。** 次の版上げが pin 済み package を `--reinstall` した時点で解消する。
 
 ## 可用性
 

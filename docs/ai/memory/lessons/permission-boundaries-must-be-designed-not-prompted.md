@@ -100,3 +100,4 @@ Coordinatorの寄与も記録する。「globを使わず名前を明示指定�
 |---|---|---|---|
 | 2026-08-25 | Operatorのread-only sandbox拒否に対しwritable_roots追加を勧め、意図された都度承認の権限境界を広げようとした。 | quoryのoperator-runtime/AGENTS.md「安全機構に拒否された操作を、別のcommandや別経路で迂回しない」 | 自分(new-session.shの境界記述を確認) |
 | 2026-09-02 | safe-ansible-check.shを「--checkなしでは動かない実行経路」と断定したが、強制機構はなくPolicy上の指示だけだった。 | docs/ai/core.md「確認できていない値を推測で固定しない」、docs/ai/roles/coordinator.md「確認手段があるなら先に確認する」 | Yoshinobu(config.tomlを提示) |
+| 2026-09-05 | commitだけの承認後、git commitとgit pushを同一コマンドに連結し、pushの個別承認を得ずorigin/mainへ送信した。 | docs/ai/policies/execution_boundary_policy.md EXEC-030の当時の要求「git commit / git pushはYoshinobuの都度承認を得てCoordinatorが実行する」 | 自分(commit後の応答で、pushまで通したことを明示して謝罪) |

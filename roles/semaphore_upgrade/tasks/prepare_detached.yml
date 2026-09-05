@@ -1,0 +1,89 @@
+---
+- name: Check for an existing detached Semaphore transaction  # noqa: command-instead-of-module
+  ansible.builtin.command: >-
+    systemctl is-active {{ semaphore_upgrade_unit }}.service
+  register: semaphore_upgrade_existing_detached
+  changed_when: false
+  failed_when: false
+
+- name: Refuse to overlap detached Semaphore transactions
+  ansible.builtin.assert:
+    that: semaphore_upgrade_existing_detached.stdout | trim not in ['active', 'activating']
+    fail_msg: "Detached Semaphore transaction is already active; refusing to overwrite its one-use webhook."
+
+- name: Deploy detached Semaphore transaction script
+  ansible.builtin.copy:
+    src: semaphore-upgrade-detached.py
+    dest: "{{ semaphore_upgrade_script }}"
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Load Slack webhook variables on the controller
+  ansible.builtin.include_vars:
+    file: "{{ inventory_dir }}/../vars/slack.yml"
+  no_log: true
+  when: not (semaphore_upgrade_notifications_suppressed | bool)
+
+- name: Write one-use root-only Slack webhook file
+  ansible.builtin.copy:
+    content: "{{ slack_webhook_patches }}\n"
+    dest: "{{ semaphore_upgrade_webhook_file }}"
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+  when: not (semaphore_upgrade_notifications_suppressed | bool)
+
+- name: Record notification suppression for detached startup failures
+  ansible.builtin.file:
+    path: "{{ semaphore_upgrade_notification_suppress_marker }}"
+    state: "{{ 'touch' if semaphore_upgrade_notifications_suppressed | bool else 'absent' }}"
+    owner: root
+    group: root
+    mode: "0600"
+
+- name: Start detached transaction with startup-failure cleanup
+  block:
+    - name: Start detached Semaphore transaction through PID 1
+      ansible.builtin.command:
+        argv:
+          - systemd-run
+          - "--unit={{ semaphore_upgrade_unit }}"
+          - --collect
+          - "{{ semaphore_upgrade_script }}"
+          - "{{ semaphore_upgrade_detached_config }}"
+      register: semaphore_upgrade_systemd_run
+      changed_when: true
+  rescue:
+    - name: Remove unused webhook when detached unit creation fails
+      ansible.builtin.file:
+        path: "{{ semaphore_upgrade_webhook_file }}"
+        state: absent
+      no_log: true
+
+    - name: Report detached unit creation failure
+      ansible.builtin.fail:
+        msg: >-
+          systemd-run did not create the detached Semaphore transaction;
+          the unused one-use webhook was removed.
+
+- name: Confirm detached transaction was accepted by systemd
+  ansible.builtin.command:
+    argv:
+      - systemctl
+      - show
+      - "{{ semaphore_upgrade_unit }}.service"
+      - --property=ActiveState
+      - --value
+  register: semaphore_upgrade_detached_state
+  changed_when: false
+  failed_when: semaphore_upgrade_detached_state.stdout | trim not in ['active', 'activating']
+
+- name: Explain detached result semantics
+  ansible.builtin.debug:
+    msg: >-
+      Detached transaction {{ semaphore_upgrade_unit }} accepted
+      ({{ semaphore_upgrade_detached_state.stdout | trim }}). This green Ansible
+      job means only that detachment succeeded; upgrade/rollback success is
+      reported separately to Slack and {{ semaphore_upgrade_result_file }}.

@@ -1,0 +1,45 @@
+---
+- name: Require an explicit dry_run choice
+  ansible.builtin.assert:
+    that: dry_run is defined
+    fail_msg: >-
+      dry_run must be specified explicitly: -e dry_run=true for preflight and
+      backup only, or -e dry_run=false for apply/rollback.
+
+- name: Validate Semaphore upgrade inputs
+  ansible.builtin.assert:
+    that:
+      - semaphore_upgrade_target_version is match('^[0-9]+[.][0-9]+[.][0-9]+$')
+      - semaphore_upgrade_target_edition in ['community', 'pro']
+      - semaphore_upgrade_rollback_to | length == 0 or semaphore_upgrade_rollback_to is match('^[0-9]+[.][0-9]+[.][0-9]+$')
+    fail_msg: >-
+      target version/edition must be valid. Apply requires -e dry_run=false;
+      rollback requires -e dry_run=false -e rollback=true.
+
+- name: Decide detached notification suppression in Ansible
+  ansible.builtin.set_fact:
+    semaphore_upgrade_notifications_suppressed: >-
+      {{ skip_notifications | default(false) | bool
+         or ansible_check_mode
+         or (lookup('env', 'CLAUDECODE') | default('', true) | trim | length > 0) }}
+
+- name: Show check-mode plan without downloading, installing, or restarting
+  ansible.builtin.debug:
+    msg:
+      host: "{{ inventory_hostname }}"
+      mode: "{{ 'rollback' if semaphore_upgrade_rollback | bool else 'upgrade' }}"
+      target: "{{ semaphore_upgrade_target_version }}-{{ semaphore_upgrade_target_edition }}"
+      action: check_mode_no_changes
+  when: ansible_check_mode
+
+- name: Run Semaphore rollback preparation
+  ansible.builtin.include_tasks: rollback.yml
+  when:
+    - not ansible_check_mode
+    - semaphore_upgrade_rollback | bool
+
+- name: Run Semaphore upgrade preparation
+  ansible.builtin.include_tasks: upgrade.yml
+  when:
+    - not ansible_check_mode
+    - not (semaphore_upgrade_rollback | bool)

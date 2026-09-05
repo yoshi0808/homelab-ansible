@@ -304,6 +304,27 @@ semaphore_templates_catalog:
   - playbook: playbooks/semaphore_update_check.yml
     class: SAFE
 
+  # Version upgrade and explicit rollback both stop/restart Semaphore. The
+  # launching job only proves systemd-run detachment; the detached unit sends
+  # the actual result separately. No schedule is registered for this template.
+  - playbook: playbooks/semaphore_upgrade.yml
+    class: UN-SAFE
+    variant: apply
+    title: "Semaphore upgrade"
+    arguments: ["--limit", "quory"]
+    survey_vars:
+      - { name: dry_run, title: dry_run, required: true, description: "falseで版上げを開始。ジョブ緑は切り離し成功のみ", default_value: "false" }
+
+  - playbook: playbooks/semaphore_upgrade.yml
+    class: UN-SAFE
+    variant: rollback
+    title: "Semaphore rollback"
+    arguments: ["--limit", "quory"]
+    survey_vars:
+      - { name: rollback, title: rollback, required: true, description: "明示ロールバック", default_value: "true" }
+      - { name: dry_run, title: dry_run, required: true, default_value: "false" }
+      - { name: rollback_to, title: rollback_to, description: "復帰する旧版。空なら最新backup" }
+
   # syslog_weekly_digest案件(requirement:
   # docs/ai/reviews/syslog_weekly_digest/2026-09-01_001_requirement.md)。
   # monnieのLoki(直近7日)への読み取りのみでjob×host×levelの週次集計と

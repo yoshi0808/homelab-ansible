@@ -1,0 +1,20 @@
+---
+# Semaphore self-upgrade/rollback. Apply is deliberately opt-in with
+# -e dry_run=false. Restart and post-restart verification run in a transient
+# systemd unit because restarting Semaphore kills its own job cgroup.
+#
+# Rehearsal on ansy (consumer query is intentionally absent there):
+#   -l ansy -e ansible_connection=local -e dry_run=true
+#   -e skip_reading_path_check=true
+# Apply:    -l <ansy|quory> -e dry_run=false
+# Rollback: -l <ansy|quory> -e dry_run=false -e rollback=true
+#
+# tester-gate: check-mode-native — --checkはdry_runと独立した全面停止ゲートである。preflight自体がDB・バイナリ退避、package取得、transaction書込みを伴いread-onlyではないため、取得・退避・install・再起動・通知を全て抑止する
+- name: Upgrade Semaphore one host at a time
+  hosts: semaphore_servers
+  gather_facts: false
+  become: true
+  serial: 1
+  any_errors_fatal: true
+  roles:
+    - semaphore_upgrade

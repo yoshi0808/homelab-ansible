@@ -1,0 +1,179 @@
+---
+- name: Inspect consumer reading-path files before rollback
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  loop:
+    - "{{ semaphore_upgrade_query_command }}"
+    - "{{ semaphore_upgrade_query_token }}"
+  register: semaphore_upgrade_rollback_reading_path_files
+
+- name: Determine whether the rollback reading path is available
+  ansible.builtin.set_fact:
+    semaphore_upgrade_rollback_reading_path_available: >-
+      {{ semaphore_upgrade_rollback_reading_path_files.results |
+         map(attribute='stat.exists') | select('equalto', true) | list | length == 2 }}
+
+- name: Fail closed when the rollback reading path is unavailable
+  ansible.builtin.assert:
+    that:
+      - semaphore_upgrade_rollback_reading_path_available or semaphore_upgrade_skip_reading_path_check
+    fail_msg: >-
+      Consumer reading path is unavailable. Refusing rollback by default;
+      skipping it requires -e skip_reading_path_check=true.
+
+- name: Record explicit rollback reading-path verification skip
+  ansible.builtin.debug:
+    msg:
+      reading_path_check: skipped_by_explicit_request
+      query_command: "{{ semaphore_upgrade_query_command }}"
+      query_token: "{{ semaphore_upgrade_query_token }}"
+  when: not (semaphore_upgrade_rollback_reading_path_available | bool)
+
+- name: Find completed Semaphore transaction metadata
+  ansible.builtin.find:
+    paths: "{{ semaphore_upgrade_backup_root }}"
+    patterns: transaction.json
+    recurse: true
+    file_type: file
+  register: semaphore_upgrade_rollback_metadata_files
+
+- name: Inspect irreversible-point rollback payloads
+  ansible.builtin.stat:
+    path: "{{ item.path | dirname }}/semaphore-final.db"
+  loop: "{{ semaphore_upgrade_rollback_metadata_files.files | sort(attribute='mtime', reverse=true) }}"
+  register: semaphore_upgrade_rollback_payload_stats
+  # semaphore-final.db is created only after the detached upgrade has stopped
+  # Semaphore and completed its final SQLite backup.  Preflight-only
+  # transactions have transaction.json but not this rollback payload, so the
+  # payload is also the explicit marker that the irreversible point was reached.
+
+- name: Build rollback-ready metadata path list
+  ansible.builtin.set_fact:
+    semaphore_upgrade_rollback_ready_metadata_files: >-
+      {{ (semaphore_upgrade_rollback_ready_metadata_files | default([])) + [item.item.path] }}
+  loop: "{{ semaphore_upgrade_rollback_payload_stats.results }}"
+  when:
+    - item.stat.exists | default(false)
+    - item.stat.isreg | default(false)
+    - item.stat.size | default(0) | int > 0
+
+- name: Read rollback-ready transaction metadata
+  ansible.builtin.slurp:
+    src: "{{ item }}"
+  loop: "{{ semaphore_upgrade_rollback_ready_metadata_files | default([]) }}"
+  register: semaphore_upgrade_rollback_metadata_raw
+  no_log: true
+
+- name: Select rollback candidates
+  ansible.builtin.set_fact:
+    semaphore_upgrade_rollback_candidates: >-
+      {{ (semaphore_upgrade_rollback_candidates | default([])) +
+         [item.content | b64decode | from_json] }}
+  loop: "{{ semaphore_upgrade_rollback_metadata_raw.results }}"
+  when: >-
+    (semaphore_upgrade_rollback_to | length == 0) or
+    ((item.content | b64decode | from_json).current_version == semaphore_upgrade_rollback_to)
+  no_log: true
+
+- name: Require a matching rollback generation
+  ansible.builtin.assert:
+    that:
+      - semaphore_upgrade_rollback_candidates | default([]) | length > 0
+    fail_msg: >-
+      No rollback-ready transaction matches
+      rollback_to={{ semaphore_upgrade_rollback_to | default('latest', true) }}.
+      A rollback point requires a non-empty semaphore-final.db proving that the
+      detached upgrade reached the irreversible boundary; preflight-only
+      transactions are not rollback points.
+
+- name: Build rollback transaction configuration
+  ansible.builtin.set_fact:
+    semaphore_upgrade_rollback_source: "{{ semaphore_upgrade_rollback_candidates[0] }}"
+    semaphore_upgrade_rollback_generation: >-
+      {{ lookup('pipe', "TZ='Asia/Tokyo' date '+%Y%m%dT%H%M%S+0900'") }}
+
+- name: Read current Semaphore service owner for rollback verification
+  ansible.builtin.command: systemctl show semaphore.service --property=User --value  # noqa command-instead-of-module
+  register: semaphore_upgrade_rollback_service_owner
+  changed_when: false
+  when: semaphore_upgrade_rollback_reading_path_available
+
+- name: Rediscover rollback consumer identity from current token ACL
+  ansible.builtin.shell: |
+    set -o pipefail
+    getfacl -cp {{ semaphore_upgrade_query_token | quote }} |
+      awk -F: -v owner={{ semaphore_upgrade_rollback_service_owner.stdout | trim | quote }} \
+        '$1 == "user" && $2 != "" && $2 != owner && $2 != "root" { print $2; exit }'
+  args:
+    executable: /bin/bash
+  register: semaphore_upgrade_rollback_query_user_raw
+  changed_when: false
+  failed_when: >-
+    semaphore_upgrade_rollback_query_user_raw.rc != 0 or
+    semaphore_upgrade_rollback_query_user_raw.stdout | trim | length == 0
+  when: semaphore_upgrade_rollback_reading_path_available
+
+- name: Capture current rollback reading-path shape as its consumer identity
+  ansible.builtin.command:
+    argv:
+      - "{{ semaphore_upgrade_query_command }}"
+      - template-list
+      - "1"
+  become: true
+  become_user: "{{ semaphore_upgrade_rollback_query_user_raw.stdout | trim }}"
+  register: semaphore_upgrade_rollback_query_baseline_raw
+  changed_when: false
+  when: semaphore_upgrade_rollback_reading_path_available
+
+- name: Parse current rollback reading-path shape
+  ansible.builtin.set_fact:
+    semaphore_upgrade_rollback_query_baseline_keys: >-
+      {{ (semaphore_upgrade_rollback_query_baseline_raw.stdout_lines[0] | from_json).keys() | list | sort }}
+  when:
+    - semaphore_upgrade_rollback_reading_path_available
+    - semaphore_upgrade_rollback_query_baseline_raw.stdout_lines | length == 1
+
+- name: Require a valid current rollback consumer baseline
+  ansible.builtin.assert:
+    that:
+      - semaphore_upgrade_rollback_query_baseline_raw.stdout_lines | length == 1
+      - semaphore_upgrade_rollback_query_baseline_keys | default([]) | length > 0
+    fail_msg: "Rollback consumer identity returned no single structured template."
+  when: semaphore_upgrade_rollback_reading_path_available
+
+- name: Create pre-rollback backup directory
+  ansible.builtin.file:
+    path: "{{ semaphore_upgrade_backup_root }}/{{ semaphore_upgrade_rollback_generation }}-pre-rollback"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Write rollback transaction metadata
+  ansible.builtin.copy:
+    dest: "{{ semaphore_upgrade_backup_root }}/{{ semaphore_upgrade_rollback_generation }}-pre-rollback/rollback.json"
+    owner: root
+    group: root
+    mode: "0600"
+    content: >-
+      {{ semaphore_upgrade_rollback_source | combine({
+        'mode': 'rollback',
+        'pre_rollback_dir': semaphore_upgrade_backup_root + '/' + semaphore_upgrade_rollback_generation + '-pre-rollback',
+        'webhook_file': semaphore_upgrade_webhook_file,
+        'notification_suppress_marker': semaphore_upgrade_notification_suppress_marker,
+        'skip_notifications': semaphore_upgrade_notifications_suppressed | bool,
+        'skip_reading_path_check': not (semaphore_upgrade_rollback_reading_path_available | bool),
+        'query_user': (semaphore_upgrade_rollback_query_user_raw.stdout | trim)
+          if semaphore_upgrade_rollback_reading_path_available else '',
+        'query_baseline_keys': semaphore_upgrade_rollback_query_baseline_keys | default([]),
+        'service_owner': (semaphore_upgrade_rollback_service_owner.stdout | trim)
+          if semaphore_upgrade_rollback_reading_path_available else semaphore_upgrade_rollback_source.service_owner,
+        'result_file': semaphore_upgrade_result_file
+      }) | to_nice_json }}
+
+- name: Set detached rollback config path
+  ansible.builtin.set_fact:
+    semaphore_upgrade_detached_config: "{{ semaphore_upgrade_backup_root }}/{{ semaphore_upgrade_rollback_generation }}-pre-rollback/rollback.json"
+
+- name: Prepare and start detached rollback transaction
+  ansible.builtin.include_tasks: prepare_detached.yml

@@ -44,8 +44,14 @@ playbook の入口を置く。処理本体は原則として `roles/` に実装�
 | [`monitoring_healthcheck.yml`](monitoring_healthcheck.yml) | `monitoring_servers` | Prometheus、Grafana、Loki等の監視基盤healthcheck | `safe-readonly` | `monitoring_healthcheck` |
 | [`prometheus_update_check.yml`](prometheus_update_check.yml) | `monnie` | 手動導入Prometheusの更新確認と承認された更新処理 | `check-mode-native` | `prometheus_update_check` |
 | [`semaphore_update_check.yml`](semaphore_update_check.yml) | `ansy` / `quory` | Semaphoreの新版検知(通知のみ。適用は手動手順) | `role-guarded` | `semaphore_update_check` |
+| [`semaphore_upgrade.yml`](semaphore_upgrade.yml) | `ansy` / `quory`（`serial: 1`、`-l`で1台へ限定） | Semaphoreの版上げ・明示rollback。`dry_run`は必須で、trueならpreflight/退避のみ。再起動後は切り離したtransient unitが検証・自動rollback・通知する | `check-mode-native` | `semaphore_upgrade` |
 | [`rsyslog_forward_to_monnie.yml`](rsyslog_forward_to_monnie.yml) | `ansy:quory:authy` | Ubuntu系ノードのjournald/syslogをmonnieへ転送 | `check-mode-native` | `rsyslog_forward_to_monnie` |
 | [`syslog_weekly_digest.yml`](syslog_weekly_digest.yml) | `monitoring_servers` | monnieのLoki(直近7日)のjob×host×level集計とlevel=error全文をSlack #info へ週次送信(検知は実装しない) | `role-guarded` | `syslog_weekly_digest` |
+
+Semaphoreのロールバックは復旧をdpkgの状態に依存させないため、バイナリを直接
+書き戻す。したがってロールバック直後の`dpkg -V semaphore`によるchecksum不一致は
+想定済みであり、破損を意味しない。次回のSemaphore版上げがpin済みpackageを
+`--reinstall`し、実バイナリのsha256を確認した時点でこの一時的不一致は解消する。
 
 ## 証明書・CA
 

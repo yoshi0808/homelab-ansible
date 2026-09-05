@@ -1,0 +1,27 @@
+---
+semaphore_upgrade_target_version: "{{ semaphore_target_version | default('2.19.12') }}"
+semaphore_upgrade_target_edition: "{{ semaphore_target_edition | default('community') }}"
+semaphore_upgrade_target_deb_sha256: 3858f6bc6eaef3a6223e55fc03eebf69fec89bcf802afb48449321de2964d170
+semaphore_upgrade_target_binary_sha256: 9a54577383992d79458cc6d4714a26b9aa6e14b3eb0bc51ea221e17ada97e6f0
+semaphore_upgrade_dry_run: "{{ dry_run | bool }}"
+semaphore_upgrade_rollback: "{{ rollback | default(false) | bool }}"
+semaphore_upgrade_rollback_to: "{{ rollback_to | default('') }}"
+semaphore_upgrade_skip_reading_path_check: "{{ skip_reading_path_check | default(false) | bool }}"
+
+semaphore_upgrade_service: semaphore.service
+semaphore_upgrade_binary: /usr/bin/semaphore
+semaphore_upgrade_db: /var/lib/semaphore/semaphore.db
+semaphore_upgrade_config: /etc/semaphore/config.json
+semaphore_upgrade_backup_root: /var/backups/semaphore-upgrade
+semaphore_upgrade_work_root: /var/tmp/semaphore-upgrade
+semaphore_upgrade_script: /usr/local/libexec/semaphore-upgrade-detached
+semaphore_upgrade_webhook_file: /run/semaphore-upgrade-webhook
+semaphore_upgrade_notification_suppress_marker: /run/semaphore-upgrade-notifications-suppressed
+semaphore_upgrade_result_file: /var/log/semaphore-upgrade-result.json
+semaphore_upgrade_query_command: /usr/local/bin/homelab-semaphore-query
+semaphore_upgrade_query_token: /etc/homelab-recovery/semaphore-query-token
+semaphore_upgrade_http_url: "https://{{ inventory_hostname }}.internal:3000/"
+semaphore_upgrade_health_timeout: 120
+semaphore_upgrade_stability_seconds: 30
+semaphore_upgrade_release_base: https://github.com/semaphoreui/semaphore/releases/download
+semaphore_upgrade_unit: "semaphore-upgrade-{{ inventory_hostname }}"
