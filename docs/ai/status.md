@@ -11,15 +11,17 @@
 
 ## Now(進行中)
 
-**Coordinator を Codex へ引き継ぐ(2026-09-06、`b450a4a`)** — 規範と設定は入った。**残るのは切り替えの操作だけで、これは Yoshinobu にしかできない。**
+**Codex 更新後に Coordinator の monitor 起動を確認する(2026-09-06)** — Coordinator の Codex 移行と、`homelab` / `homelab-ops` 両teamの identity統一は完了した。残るのは更新後の新規セッションでの起動確認である。
 
-1. `reviewer-migration` を畳む。移行前の「作る側=Claude Code」だったから立てた一時的な体で、移行後は codex が作る側になるため役として不整合になる
-2. `rename.sh homelab claude coordinator` で `homelab-ops` 側と識別子を揃える。**走行中の自分自身は rename できない**(actasロックとwatcherが旧名で動く)ので、Claude Code のセッションを閉じてから行う
-3. `./new-session.sh --reset` を叩く。**書き換え済み**(pane 0 が codex、Implementer は `gpt-5.6-sol`、boot promptの宛先は `coordinator`、`agent-messaging.md` §10 の掃除と seat 張り直しを実装)。**未実測** — 効くのは次の起動時で、書いた側はそこに居ない。壊れていたら `new-session.sh.bak-pre-codex-coordinator-20260906-143522` を戻す
+現セッションで Codex monitor wrapper は、app-server がlisten portを返さなかったためplain Codexへfallbackした。`delivery.sh status codex <project>` では `homelab/coordinator` と `homelab-ops/coordinator` の両方が `has no session recorded`、`homelab/implementer` は stale pidfile と表示された。Yoshinobuが本セッションを終了し、Codexを更新してから再起動する。
 
-**seat は2つ要る。** この Coordinator は `homelab` と `homelab-ops` の両方に属し、codex の配送は pair ごとだからである(quory の Operator は1teamなので §10 の例には出てこない)。`codex-record-session.sh` は seat を既に持つスレッドを推論で書き換えないため、2つ目は `CODEX_THREAD_ID` を明示して呼ぶ。**この分岐はスクリプトにしか無い。**
+1. `./new-session.sh --reset` で起動する。スクリプトは書き換え済み(pane 0 が Codex、Implementer は `gpt-5.6-sol`、boot prompt の宛先は `coordinator`、`agent-messaging.md` §10 の掃除と seat 張り直しを実装)だが、**更新後の起動は未実測**。壊れていたら `new-session.sh.bak-pre-codex-coordinator-20260906-143522` を戻す
+2. Codex Coordinator が本ファイルを自分で読み、`delivery.sh status` で `homelab/coordinator` と `homelab-ops/coordinator` の2つの seat および bridge を確認する。seat が2つ要る理由と掃除・張り直しの契約は `agent-messaging.md` §10が正本
+3. local teamと`homelab-ops`の両方でagmsgの往復配送を確認する。cross-teamへ送る文面は従来どおりYoshinobuの同意を得る
+4. `codex execpolicy check` で `git reset --hard` と `rm` が `prompt` になることを確認する。**対象ファイルを実際に削除・resetして試さない**
+5. `homelab/implementer` を次に使うときは、`agent-messaging.md` §4 / §10に従って `--fresh` で起動し、stale pidfileの解消と配送を確認する
 
-**切り替え後に確かめること** — codex Coordinator が `docs/ai/status.md` を自分で読むこと(**自動では載らない**)、`git reset --hard` が prompt になること、`spawn.sh claude-code reviewer --fresh` で Claude Code の役が立ち配送が `○` になること。
+未追跡の `.codex/rules/default.rules.bak-before-coordinator-monitor-20260906` は、更新後の正常起動を確認するまでrollback用に保持し、成立後に削除する。
 
 **auto-memory 110件の仕分けは保留**(Yoshinobu、2026-09-06)。**Codex は auto-memory を読まないため、移行後この知識は使われない。** Coordinator が Claude Code へ戻る機会があれば再開する。案件記録は `docs/ai/reviews/coordinator_platform_migration/`。
 
