@@ -34,3 +34,11 @@
 
 - `docs/ai/memory/lessons/sweep-all-documents-stating-a-changed-boundary.md`(層間でなく文書間に同じ操作を適用したもの)
 - `docs/ai/memory/lessons/verify-the-outside-of-a-claimed-boundary.md`(「確認済み」の主張が何を確認していないか)
+
+## 再発記録
+
+**機械が追記する節である。人は手で書かない。** 契約(何を記録し、何を記録しないか)は `docs/ai/memory-classification.md`「`lessons/`の「再発記録」節」が正本。
+
+| 日付 | 何に対して踏んだか | 反した規範 | 気づかせたもの |
+|---|---|---|---|
+| 2026-09-06 | 更新後のmain.ymlを再読せず古いinclude順を前提に、capture_origin.ymlは必ず未定義変数で失敗すると断定し、後で撤回した。 | docs/ai/roles/coordinator.mdの、仮説で行動せず確認手段があるなら先に確認する要求、およびdocs/ai/core.mdの確認できていない値を推測で固定しない要求 | 自分(main.ymlの再確認) |

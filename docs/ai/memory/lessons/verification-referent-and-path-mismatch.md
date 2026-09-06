@@ -39,3 +39,5 @@
 | 2026-09-04 | tmuxのpane_current_commandがbashであることからcodex Reviewerペインは存在しないと断定したが、後に子プロセスとして稼働中と判明した。 | docs/ai/roles/coordinator.mdの「確認していないものは『未確認』と明示し、確認手段があるなら先に確認する」「仮説で行動しない」という要求。 | 自分（ペインのプロセスツリーを再確認して断定が覆った） |
 | 2026-09-05 | loki-windowのReviewer記録だけでNEL等を未検証と判断し、補完したと報告した。Auditorの指摘後にverify.pyを確認すると、既に検証されていた。 | docs/ai/core.md「先行成果物・先行subagentの主張を、現物で確かめずに引き継がない」。 | Auditor |
 | 2026-09-05 | sophos-fwの停止を確認していないまま、worktree-syncのDNS失敗は同VM停止が直接原因だと「確定」した。 | docs/ai/roles/coordinator.md「到達できない本番の状態を推測で埋めない」「確認していないものは未確認と明示する」 | 自分(同じ回答の末尾でsophos-fwのrelocate・再起動は未確認と訂正) |
+| 2026-09-06 | 未pushの案件Aではなくcommit 864e5c7を使うquoryで#988〜#991を実行し、修正版の本番検証として扱おうとした。 | docs/ai/roles/coordinator.mdの、確認手段があるなら先に確認し、確認していないものは未確認と明示する要求 | 自分(#990のcommit_hash再確認) |
+| 2026-09-06 | `scripts/check-doc-consistency.py` が git index を読むことを確かめず、未stageの規範文書変更を3回「機械検査OK」と報告した。stageして回すとcheck3が2件FAILした。 | docs/ai/roles/coordinator.mdの、事実を述べるときは確認した手段を示す要求 | Reviewer(検査関数の入力だけを作業ツリーへ差し替えてFAILを提示した) |
