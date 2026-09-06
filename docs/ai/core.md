@@ -1,6 +1,6 @@
 # homelab-ansible AI共通原則
 
-このファイルは、Claude CodeによるCoordinatorと、Coordinatorが呼び出すsubagent(Implementer / Reviewer / Tester / Auditor)が作業開始時に読む共通原則の正本である。製品別入口はリポジトリ直下の `AGENTS.md` と `CLAUDE.md` とし、共通原則をそれらへ複製しない。
+このファイルは、Coordinatorと、Coordinatorが呼び出すsubagent(Implementer / Reviewer / Tester / Auditor)が作業開始時に読む共通原則の正本である。製品別入口はリポジトリ直下の `AGENTS.md` と `CLAUDE.md` とし、共通原則をそれらへ複製しない。
 
 ## 目的と正本
 
@@ -34,9 +34,9 @@ harnessの安全機構(permission classifier、`permissions.deny`、`autoMode`)�
 - **ブロックが妥当かどうかを判定しない。** 被ブロック側もCoordinatorも解除できない。Yoshinobuへ上げる。
 - **ただし、その操作が目的に本当に必要かは問い直してよい。** 必要でなければ、迂回でも停止でもなく、**その結果を必要としない形へ検証設計を組み替える**のが正解になる。これは別の手段で同じ結果へ到達することとは別物で、到達すべき結果の側を小さくしている。**この場合は必ず報告する** — 報告が無ければ迂回と区別が付かず、本質かどうかを都合よく判定していないことの担保がそれしかない。
 - ブロックされた事実とその後の対応を記録に残す。迂回して成功だけを記録に残さない。
-- **この機構(`.claude/settings.json` の `permissions.defaultMode` と `autoMode`)を変更したときは、症状ではなく設定そのものを確認する。** 両方が揃って初めて機能し、片方が欠けたときの症状は「確認プロンプトが増える」という安全側の壊れ方であるため、壊れていても異常に見えない。
+- **この機構を変更したときは、症状ではなく設定そのものを確認する。** 権限設定は複数の要素が揃って初めて機能するため、**そのすべてを確認する**(Claude Codeでは `permissions.defaultMode` と `autoMode` の2つ)。1つ欠けたときの症状は「確認プロンプトが増える」という安全側の壊れ方であるため、**壊れていても異常に見えない。**
 
-設定そのものは `.claude/settings.json` が正本であり、値を文書へ写さない。実効的な境界は文章ではなく、能力の不在(鍵・到達先・wrapperが存在しないこと)で作る。
+設定そのものが正本であり、値を文書へ写さない。**どのファイルが強制機構かはプラットフォームごとに違い、その所在は各入口(`CLAUDE.md` / `AGENTS.md`)が持つ。**実効的な境界は文章ではなく、能力の不在(鍵・到達先・wrapperが存在しないこと)で作る。
 
 ## 開発と本番の境界
 
@@ -79,7 +79,7 @@ quory = Gitから取得した確定済みコードの本番実行基盤
 情報は必要な範囲だけを、次の順序で選ぶ。
 
 1. 本ファイルで共通原則を確認する。
-2. **`docs/ai/policies/execution_boundary_policy.md` と、自分のRole文書 `docs/ai/roles/<role>.md` を読む。** 実行境界のPolicyは、対象業務に関わらず開発工程のRole(Auditorを除く)が起動時に読む(4項の「対象業務のPolicyだけ」の例外はこれ1本である。絞り込みの根拠は`docs/ai/role-context-matrix.md`と`docs/ai/roles/operator.md`「この文書の位置づけ」)。 対話セッションのCoordinatorは `docs/ai/roles/coordinator.md` が該当し、あわせて `docs/ai/status.md` で現在地を確認する(SessionStart hookが自動で載せる。載っていなければ読む)。
+2. **`docs/ai/policies/execution_boundary_policy.md` と、自分のRole文書 `docs/ai/roles/<role>.md` を読む。** 実行境界のPolicyは、対象業務に関わらず開発工程のRole(Auditorを除く)が起動時に読む(4項の「対象業務のPolicyだけ」の例外はこれ1本である。絞り込みの根拠は`docs/ai/role-context-matrix.md`と`docs/ai/roles/operator.md`「この文書の位置づけ」)。 対話セッションのCoordinatorは `docs/ai/roles/coordinator.md` が該当し、あわせて `docs/ai/status.md` で現在地を確認する(**起動時に自動で文脈へ載るかはプラットフォームによる。載っていなければ読む**)。
 3. requirement、review、test_planなど、依頼で指定された案件記録を読む。
 4. 対象領域のSystem / Repository / Operations Contextと、対象業務のPolicyだけを辿る(分類の定義は `docs/ai/context-classification.md`、誰がいつ読むかは `docs/ai/role-context-matrix.md`)。
 5. 作業内容に一致するSkillを使う。

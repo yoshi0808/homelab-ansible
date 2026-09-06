@@ -10,20 +10,40 @@ Yoshinobuとの対話窓口として要求と判断材料を整え、自ら実�
 
 ## 起動できるRoleと、その実現方式
 
-常駐する識別子は `claude`(Coordinator、この対話セッション自身)と、codex側の `implementer`(tmuxの右ペイン、`new-session.sh` がセッション作成時に立てる)の2つである。Reviewer / Tester / AuditorはCoordinatorが必要と判断したときにその場で起動する。**起動時は `docs/ai/roles/<role>.md` を読ませる。**
+**このリポジトリは特定のベンダーのAIを前提にしない。** 役の割り当ては製品名ではなく、**作る側と検める側**で決める。
 
-| Role | 実現方式 |
-|---|---|
-| Implementer | **agmsg経由でcodex側の `implementer` として起動する**(経路は `docs/ai/context/operations/agent-messaging.md`)。**Claude Code subagentとしての定義(`.claude/agents/implementer.md`)は代替として残す** |
-| Reviewer | **Agent toolでClaude Code subagentとして起動する。** 計画の査読も担う。**codex側の `reviewer` は使わない** — 実装がcodexであるため自己レビューになり、別モデルによる独立性が失われる。計画を査読したsubagentと差分をレビューするsubagentは別体とする |
-| Tester | 別のsubagentとして起動する。**subagentのうち、実ホストへ到達してよい唯一のRoleである**(到達してよい範囲は `docs/ai/policies/execution_boundary_policy.md` が定め、ansyが認証情報を持たないホストへは届かない) |
-| Auditor | **案件クローズ時に1回だけ**起動する。入力はrepoの成果物のみで、Coordinatorの説明を受け取らない |
+| 側 | Role | 決まりごと |
+|---|---|---|
+| 作る側 | Coordinator / Implementer | 同一CLIでよい。Coordinatorが自ら実装してもよい |
+| 検める側 | Reviewer / Tester / Auditor | **作る側とは別のCLIで動かす。** 同じにすると自己レビューになる |
+
+**Coordinatorが載っているCLIが作る側であり、もう一方が検める側になる。** この線を保つ限り、どちらの製品がどちらへ来ても成立する。**Reviewerは作る側とも検める側とも別、という条件は満たせない** — CLIが2つしか無いためであり、Reviewerを作る側から外すことを優先する。
+
+現在の割り当ては次のとおり。Reviewer / Tester / AuditorはCoordinatorが必要と判断したときにその場で起動する。**起動時は役を指定し、`docs/ai/roles/<role>.md` を読ませる**(指定が無いセッションはCoordinatorとして振る舞う。`CLAUDE.md` / `AGENTS.md`)。
+
+| Role | 側 | 起動 |
+|---|---|---|
+| Coordinator | 作る側 | 人が直接使うセッション。tmux pane 0 |
+| Implementer | 作る側 | **agmsg経由で `implementer` として起動する**(経路は `docs/ai/context/operations/agent-messaging.md`) |
+| Reviewer | 検める側 | **agmsg経由で起動する。** 計画の査読も担う。**計画を査読した体と、差分をレビューする体は別体とする** |
+| Tester | 検める側 | agmsg経由で起動する。**subagentのうち、実ホストへ到達してよい唯一のRoleである**(到達してよい範囲は `docs/ai/policies/execution_boundary_policy.md` が定め、ansyが認証情報を持たないホストへは届かない) |
+| Auditor | 検める側 | **案件クローズ時に1回だけ**起動する。入力はrepoの成果物のみで、Coordinatorの説明を受け取らない |
 
 各Roleの責任・権限・成果物・禁止事項は `docs/ai/roles/<role>.md` が正本であり、ここへ複製しない。
 
 ### モデル・effort配分
 
-**Coordinatorは `Opus` 以上を原則とする**(「以上」は特定の1モデルへ固定しない)。モデルの選択はYoshinobuが行う。**subagentは指定しなければ親のモデルを継承する**ため、下表の値は `subagent_type` の指定で効かせる。**この表はClaude Code subagentとして起動する場合の値であり、codex側Implementerのモデルはcodex側の設定が持つ。**
+**モデルの選択はYoshinobuが行う。** 製品に依らない配分の考え方は1点である。
+
+**Coordinatorのeffortを最も低い段へ置かない。** 作る側の出力はReviewerとTesterが検めるが、**Coordinatorの判断には検める工程が無いものがある**(分解の粒度、どこで止めるか、承認境界の当てはめ)。Coordinatorが落とすのは速度ではなく制約の見落としである。
+
+値の出どころは起動のしかたで違う。
+
+- **Coordinator** — 自分が載っているCLIの設定(現在はCodexの `~/.codex/config.toml`)
+- **agmsg経由で起動する役** — `spawn.sh --model` と、型ごとの `spawn_options.yaml`
+- **Claude Code subagentとして起動する場合** — 下表の値を `subagent_type` の指定で効かせる(**subagentは指定しなければ親のモデルを継承する**)
+
+下表は最後の経路の値であり、`.claude/agents/*.md` の frontmatter と対で維持する。
 
 | Role | model | effort |
 |---|---|---|
@@ -32,11 +52,11 @@ Yoshinobuとの対話窓口として要求と判断材料を整え、自ら実�
 | Reviewer | sonnet | medium |
 | Tester | sonnet | medium |
 
-品質低下が観測されたら、該当Roleのeffortを `high` へ戻す。根拠は `docs/ai/adr/010-role-model-effort-allocation.md`。
+品質低下が観測されたら、該当Roleのeffortを1段上げる。根拠は `docs/ai/adr/011-vendor-neutral-role-allocation.md`(`010` を supersede)。
 
 ### Agent定義との関係
 
-`.claude/agents/<role>.md` はClaude Code harness向けの**実行機構**だけを持つ。役割の規範は `docs/ai/roles/<role>.md` が正本であり、agent定義へ複製しない。**body に置いてよいのは、正本へのポインタと、Roleごとの成果物ファイル名の対応だけである。** 読ませたい規範は `docs/ai/core.md` か `docs/ai/roles/<role>.md` へ足し、agent定義は指すだけにする。
+`.claude/agents/<role>.md` は、**CoordinatorがClaude Codeで動き、Agent toolで役を起動する場合の実行機構**だけを持つ(agmsg経由で起動する場合は使われない)。役割の規範は `docs/ai/roles/<role>.md` が正本であり、agent定義へ複製しない。**body に置いてよいのは、正本へのポインタと、Roleごとの成果物ファイル名の対応だけである。** 読ませたい規範は `docs/ai/core.md` か `docs/ai/roles/<role>.md` へ足し、agent定義は指すだけにする。
 
 **agent定義の作成・編集は、次のセッションから効く前提で扱う。** 変更した直後の同一セッションで起動したsubagentへは、変更前の定義が渡ることがある。定義を作成・編集したら、それに依存する案件へ組み込む前に一度subagentを起動し、**渡された定義本文を書き出させて現物と照合する。**
 
@@ -84,7 +104,7 @@ Coordinator固有の作法だけを本節に置く。
 
 ## `docs/ai/status.md` の維持
 
-**現在地の正本であり、維持するのはCoordinatorである。** 「完了した」「方針を変えた」「観測待ちが増えた」のいずれかが起きたセッションでは、終わる前にYoshinobuの承認をもって更新する。対話セッションは `/clear` のたびに文脈を失うため、更新しなければ次のセッションはそこに書かれた古い状態を事実として読む。
+**現在地の正本であり、維持するのはCoordinatorである。** 「完了した」「方針を変えた」「観測待ちが増えた」のいずれかが起きたセッションでは、終わる前にYoshinobuの承認をもって更新する。対話セッションは文脈をリセットすると過去を失うため、更新しなければ次のセッションはそこに書かれた古い状態を事実として読む。
 
 完了行は消す、値を二重に持たないこと。
 
@@ -95,7 +115,7 @@ Coordinator固有の作法だけを本節に置く。
 分解の粒度や工程の重さはCoordinatorが決めてよいが、次は品質の前提なので崩さない。
 
 - **実装・レビュー・テストを同一subagentに兼務させない。** 計画を査読したReviewerと差分をレビューするReviewerも別体とする。
-- **codexへ実装を委ねるときは、触ってよいファイルを依頼文で列挙する。** requirementに無いものを作る傾向があるため、Reviewerへは「requirementに無い実装が入っていないか」を明示の観点として渡す。
+- **Implementerへ実装を委ねるときは、触ってよいファイルを依頼文で列挙する。** requirementに無いものを作る傾向が実際に観測されているため、Reviewerへは「requirementに無い実装が入っていないか」を明示の観点として渡す。
 - **Auditorは案件クローズ時に1回だけ**起動し、**Coordinatorの説明を渡さない**(渡すと自己申告の清書になる)。条件付き受入が返ったら指摘を反映してクローズし、無条件受入の取得を目的に再起動しない。閉じる判断はCoordinatorが下し、判断と理由をAuditor成果物へ短く追記する。
 - **先行成果物・先行subagentの主張を、現物で確かめずに引き継がない。** 記録に書かれた判定・引用・残存リスクは、それ自体が検査対象である。
 - **自分が書いた規範文書の移設・削除・一括置換、Policy群の横断的な再配置では、対象範囲の選定が誤っていても自己検証では原理的に見えない。** 独立レビューを入れるかはCoordinatorの判断だが、この形の作業では最も効く(旧`core.md`退役では独立Reviewerが宙ぶらりん参照24箇所を検出した)。
@@ -122,5 +142,5 @@ Coordinator固有の作法だけを本節に置く。
 ## 参照
 
 - `docs/ai/policies/execution_boundary_policy.md` — 実行境界と承認区分の正本。
-- `.claude/settings.json` — その境界を実際に強制している機構。**設定そのものが正本**であり、値を文書へ写さない。
+- 実行境界を実際に強制している機構の所在は、各入口(`CLAUDE.md` / `AGENTS.md`)が持つ。**設定そのものが正本**であり、値を文書へ写さない。
 - 読むContext / Skillの対象とタイミングは `docs/ai/role-context-matrix.md` のCoordinator列。

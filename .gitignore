@@ -65,7 +65,11 @@ swap-right.sh
 tmux-ask-watch.sh
 
 
-.codex
+# codex側の設定。skill登録(repoの skills/ へのsymlink)だけ追跡し、
+# 絶対パスを含む hooks.json とローカル設定は追跡しない。
+.codex/*
+!.codex/skills
+!.codex/rules
 .claude/settings.local.json
 
 # テスト出力（ローカル。スクショ等を含むため public リポジトリに入れない）

@@ -4,18 +4,21 @@
 
 ## 位置づけ
 
-本書は、Coordinator(Claude Code)を起点とする agmsg の連絡経路を扱う runbook である。禁止・義務はこの経路の手順に閉じる(`docs/ai/context-classification.md`「Operations Context」「Policyとの境界」)。扱うのは2つ — **codex 側 Implementer への依頼**(team `homelab`、local-only、§1〜§6)と、**quory 側 Operator とのすり合わせ**(team `homelab-ops`、remote、§7〜§9)。各Roleの責務・権限・成果物は `docs/ai/roles/<role>.md` が、承認境界は [`docs/ai/policies/execution_boundary_policy.md`](../../policies/execution_boundary_policy.md) が正本であり、競合時はそちらを優先する。IP、認証情報、秘密情報の実値は記載しない。
+本書は、Coordinator を起点とする agmsg の連絡経路を扱う runbook である。禁止・義務はこの経路の手順に閉じる(`docs/ai/context-classification.md`「Operations Context」「Policyとの境界」)。扱うのは2つ — **同一ホスト上の役への依頼**(team `homelab`、local-only、§1〜§6)と、**quory 側 Operator とのすり合わせ**(team `homelab-ops`、remote、§7〜§9)。各Roleの責務・権限・成果物は `docs/ai/roles/<role>.md` が、承認境界は [`docs/ai/policies/execution_boundary_policy.md`](../../policies/execution_boundary_policy.md) が正本であり、競合時はそちらを優先する。IP、認証情報、秘密情報の実値は記載しない。
 
 ## 1. 構成
 
 agmsg 本体・team定義・メッセージDBは、いずれも**リポジトリの外**(`~/.agents/skills/agmsg/`)にある。upstream は `github.com/fujibee/agmsg`。**導入版はここへ写さない** — `scripts/version.sh` が持つ。
 
-team `homelab` に2者が登録されている。**この team は local-only であり、remote 化しない** — codex Implementer の通信をネットワークへ出さないこと、および Operator の通信を Implementer が読めないことを、team の境界で担保している。
+**識別子は製品名ではなく役の名前にする。** どの製品がどの役を担うかは変わるが、役は変わらない(割り当ての正本は `docs/ai/roles/coordinator.md`)。**この team は local-only であり、remote 化しない** — Implementer の通信をネットワークへ出さないこと、および Operator の通信を Implementer が読めないことを、team の境界で担保している。
 
 | 識別子 | type | project |
 |---|---|---|
 | `claude` | `claude-code` | `/home/yoshi/homelab-ansible` |
 | `implementer` | `codex` | 同上 |
+| `reviewer` | `claude-code` | 同上 |
+
+Tester と Auditor は必要になった時点で join する。**`claude` は Coordinator の識別子で、名前が製品名なのは移行前の名残である。** Coordinator を別のCLIへ移す時点で `rename.sh homelab claude coordinator` により `homelab-ops` 側と揃える。**走行中の自分自身を rename しない** — `run/` の actas ロックと watcher は旧名で動いており、`rename.sh` はそこを意図的に触らない。
 
 **成果物をagmsgのメッセージだけに残さない。** 監査証跡は `docs/ai/reviews/<target>/` 配下のファイルであるという `docs/ai/core.md` の定めは、依頼先がcodexでも変わらない。メッセージDBはリポジトリ外にあり、`git log` からも案件記録からも辿れない。
 
@@ -60,18 +63,18 @@ despawn.sh <team> <from> <name> [--force]
 
 ## 5. 権限の層
 
-codex 側には2つの層があり、どちらもリポジトリ外にある。**症状が似ているので取り違えない。**
+codex 側には2つの層がある。**一方は repo で追跡され、もう一方は repo の外にある。症状が似ているので取り違えない。**
 
 | 層 | 実体 | 何を決めるか |
 |---|---|---|
-| 承認ルール | `~/.codex/rules/default.rules` | コマンドを許可するか、都度プロンプトを出すか |
+| 承認ルール | `~/.codex/rules/default.rules`(**repo の `.codex/rules/default.rules` への symlink**) | コマンドを許可するか、都度プロンプトを出すか |
 | sandbox | `~/.codex/config.toml` の `[sandbox_workspace_write]` | 書き込んでよいパス |
 
-**この2層は、Coordinator側の `.claude/settings.json`(`permissions` / `autoMode`)に対応する。** 両者を非対称にしない — 一方だけを広げると、Role文書が同じことを定めていても実効的な能力が食い違う。
+**この2層は、Claude Code 側の `.claude/settings.json`(`permissions` / `autoMode`)に対応する。** 両者を非対称にしない — 一方だけを広げると、Role文書が同じことを定めていても実効的な能力が食い違う。**表現力そのものが違う点は残る** — 一方はホストや意図を散文で判定し、もう一方は argv の前方一致でしか書けない。前方一致で書けないものは、規則ではなく能力の不在で担保する(`docs/ai/policies/execution_boundary_policy.md` EXEC-002)。
 
 **Ansible を扱わせるなら `~/.ansible/tmp` が writable_roots に要る**(Yoshinobu、2026-08-22 に追加)。`ansible-playbook` は既定の一時ディレクトリをここへ作るため、無いと**コードを評価する前に停止する**。**症状は「レビューが始まらない」ではなく「途中で昇格を求めてくる」**で、codex は迂回せず正しく止まる。Coordinator 側は同じ場所へ元から書けるので、これは非対称を**減らす**変更である。
 
-**`~/.codex/config.toml` は Ansible 管理外である。** repo からは配備されず、`git` にも現れない。ここを変えたことは記録に残さないと、次に読む者は現物を見るまで知りようがない。
+**承認ルールは repo にあるが、`~/.codex/config.toml` は無い。** 前者は `.codex/rules/default.rules` として追跡され `git log` で追えるが、**後者は Ansible 管理外で repo からは配備されず、`git` にも現れない。** config.toml を変えたことは記録に残さないと、次に読む者は現物を見るまで知りようがない。
 
 ## 6. 依頼文
 
@@ -90,7 +93,7 @@ codex 側には2つの層があり、どちらもリポジトリ外にある。*
 
 | 識別子 | ホスト | 位置づけ |
 |---|---|---|
-| `coordinator` | ansy | この対話セッション。team `homelab` では `claude` を名乗るが、**team ごとに識別子は別である** |
+| `coordinator` | ansy | 人が直接使っているセッション。team `homelab` では移行が済むまで `claude` を名乗る(**team ごとに識別子は別である**) |
 | `operator` | quory | watcher は Operator セッションの一部。**セッションと共に消える**(sync engine は別、§9) |
 
 - **サーバは ansy 上にある**(Docker + nginx の TLS 終端)。配備の正本は `roles/agmsg_server/` と `playbooks/agmsg_server_setup.yml`、設計と実測は `docs/ai/reviews/agmsg_remote_ops_channel/`。ポート・パス・到達許可の値をここへ写さない。
@@ -117,7 +120,7 @@ codex 側には2つの層があり、どちらもリポジトリ外にある。*
 **Node は system trust store を見ない。** サーバは私設 CA の証明書を提示するため、sync engine(Node)は既定では `UNABLE_TO_GET_ISSUER_CERT_LOCALLY` で落ちる。`remote.sh` に `CURL_CA_BUNDLE` を渡すと、`remote-sync.sh` がそれを Node へ `NODE_EXTRA_CA_CERTS` として引き継ぐ。curl 側は system store で通るため、**症状は「curl は通るのに engine だけ起動しない」**という形で出る。
 
 - ansy 側は `~/.bashrc` に `export CURL_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt` を置いてある(**非対話ガードより上**)。
-- **再起動後の復帰は `session-start.sh` が接続済み team の engine を自動起動する**が、これは Claude Code を起動したシェルの環境を引き継ぐ。`.bashrc` を読まない経路から起動すると、engine は上記の理由で立たない。**この自動起動がリブートを跨いで成立することは 2026-08-17 に ansy で実測した**(下記「リブート後」)。
+- **再起動後の復帰は `session-start.sh` が接続済み team の engine を自動起動する**が、これは対話セッションを起動したシェルの環境を引き継ぐ。`.bashrc` を読まない経路から起動すると、engine は上記の理由で立たない。**この自動起動がリブートを跨いで成立することは 2026-08-17 に ansy で実測した**(下記「リブート後」)。
 - **engine を、エージェントのツール実行から起動しない。** `nohup` + `disown` は SIGHUP からしか守らない。**エージェントのコマンド実行はプロセスグループごと片付けるため、engine は残らない。** 症状は「起動したと報告されるのに同期が始まらない」で、**ログにエラーは残らない**(quory で実測: ログ末尾は capabilities 取得成功の1行だけ、`status` は pidfile を stale と判定、成功した同期の行が出ない)。**通常のシェルから起動すること。** 起動し直せば、溜まっていた join とメッセージはまとめて流れる。
 - **stale lock で engine が fatal 終了することがある。** `teams/<team>/.config.lock` が残っていると registry lock を10秒待って `roster sync prepare failed` で落ちる。**症状は無音**で、`send.sh` は成功を返し続け、メッセージはローカルstoreへ溜まる。復旧は空の stale lock を除去してから `sync start`。実際に5日間止まった(`docs/ai/memory/incidents/2026-09-02_agmsg-sync-engine-dead-for-five-days.md`)
 - **sync engine は `nohup` + `disown` で起動し、シェルもセッションも越えて生き続ける**(`remote.sh` の engine 起動部)。**公開 CLI に停止手段は無い** — 止まるのは `disconnect` / `forget` / `set-endpoint` / `unlock` の副作用としてだけである。したがって **quory 側にも engine は常駐する**(2026-08-16、Yoshinobu 決定。判断の記録は requirement R5 / AC6)。**engine が運ぶのはローカル store までで、AI の文脈へ入れるのは watcher である** — 常駐と非常駐の線はここに引かれている。
@@ -176,7 +179,9 @@ seat の実体は `run/role-session.<team>__<agent>` の1ファイル(中身は 
 1. **起動の前に掃除する** — seat、残存 bridge の pid(`run/codex-bridge.<team>.<agent>.pid`)、そのプロジェクトの app-server。**app-server は窓が消えたスレッドも loaded のまま抱える**ため、残っていると 2 の特定が曖昧になり、**黙って失敗する**
 2. **起動の後に seat を張り直す**
 
-**ansy** は `spawn.sh --fresh` が両方を担う(§4)。**quory** は pane 0 が人の対話セッションそのものなので spawn を使えず、`new-session.sh` が自前で行う。
+**spawn で立てる役は `spawn.sh --fresh` が両方を担う(§4)。pane 0 だけは spawn を使えない** — そこは人が直接使っているセッションそのものだからで、`new-session.sh` が自前で行う。**quory はもとからこの形であり、Coordinator が codex になった ansy も同じ形になる。**
+
+**`--fresh` を省かない。** 検める側の役では、`resume` すると**計画を査読した体と差分をレビューする体が同一になる**(`docs/ai/roles/coordinator.md`「委任するときの独立性」)。**この破れ方はエラーを出さない。**
 
 ```
 rm -f <run>/role-session.homelab-ops__operator     # 1. 掃除

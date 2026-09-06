@@ -1,6 +1,8 @@
 # ADR-010: Role別のmodel/effort配分
 
-**Status:** Accepted
+**Status:** Superseded by [`docs/ai/adr/011-vendor-neutral-role-allocation.md`](011-vendor-neutral-role-allocation.md)(2026-09-06)
+
+> **配分の軸が変わった。** 本ADRは「Coordinator vs subagent」で分けていたが、CLIが2つある構成では独立性を決めるのは**どちらのCLIがどの役を持つか**であり、軸が足りなかった。`Opus`以上という指定も1ベンダーのモデル名であり、Coordinatorが別のCLIで動くと意味を持たない。**Sonnet / mediumで本番影響前に実バグを検出できたという実績と根拠は、本ADRに残す。**
 
 > **表の置き場が変わった(2026-08-04)。** `docs/ai/role-routing-index.md` は解体・削除され、「モデル・effort配分」表は `docs/ai/roles/coordinator.md` へ移した。**決定そのもの(値と選定理由)は変えていない。** 以下で同索引を指している箇所は、すべて現在の `docs/ai/roles/coordinator.md` と読み替えること。`scripts/check-doc-consistency.py` の check2 も同じ移設に追随している。
 
