@@ -42,3 +42,4 @@
 |---|---|---|---|
 | 2026-08-25 | host_vars/ansy.ymlのlocal接続はansyだけに効くと断定したが、quoryからも効き、drift検査が別ホストを見た。 | docs/ai/roles/coordinator.md「到達できない本番の状態を推測で埋めない」およびdocs/ai/core.md「確認できていない値を推測で固定しない」 | 自分(#824のdrift結果を確認) |
 | 2026-09-02 | MAX_LINESをentry数の境界試験だけで満たすと判断したが、本文の埋め込み改行により299件が599物理行へ展開した。 | docs/ai/reviews/loki_investigate_vocabulary/2026-09-01_001_requirement.mdは、loki-errorsの物理出力行数を上限内に制限することを要求 | Codex Reviewer |
+| 2026-09-06 | ~/.claude/CLAUDE.mdが0バイトだったことから「ユーザ層に暗黙の規範はありません」と断定したが、その後auto-memory 110件を暗黙のルールの実体と報告した。 | docs/ai/roles/coordinator.md：「確認していないものは『未確認』と明示する。確認手段があるなら先に確認する」「仮説で行動しない。仮説から懸念を広げない」 | 自分(auto-memoryの内訳と規範の所在を整理して先の断定と矛盾する事実を報告) |

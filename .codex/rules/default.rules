@@ -6,18 +6,12 @@ prefix_rule(pattern=["git", "log"], decision="allow")
 prefix_rule(pattern=["git", "show"], decision="allow")
 prefix_rule(pattern=["git", "rev-parse"], decision="allow")
 prefix_rule(pattern=["git", "add"], decision="allow")
-prefix_rule(pattern=["git", "restore"], decision="prompt")
-prefix_rule(pattern=["git", "checkout"], decision="prompt")
-prefix_rule(pattern=["git", "switch"], decision="prompt")
-prefix_rule(pattern=["git", "stash"], decision="prompt")
-prefix_rule(pattern=["git", "reset"], decision="prompt")
-prefix_rule(pattern=["git", "clean"], decision="prompt")
+prefix_rule(pattern=["git", ["restore", "checkout", "switch", "stash", "reset", "clean"]], decision="prompt")
 prefix_rule(pattern=["scripts/safe-ansible-check.sh"], decision="allow")
 prefix_rule(pattern=["ansible-playbook"], decision="allow")
 
 prefix_rule(pattern=["ssh"], decision="prompt", justification="SSH connects to an external host and should be confirmed")
 prefix_rule(pattern=["rm"], decision="prompt", justification="File removal should be confirmed")
-prefix_rule(pattern=["sudo", "visudo", "-cf"], decision="prompt")
 prefix_rule(pattern=["stat", "-c"], decision="allow")
 prefix_rule(pattern=["cmp", "-s"], decision="allow")
 
@@ -53,6 +47,12 @@ prefix_rule(pattern=["apt", "list", "--upgradable"], decision="allow")
 prefix_rule(pattern=["dpkg-query", "-W"], decision="allow")
 
 prefix_rule(pattern=["sleep", "2"], decision="allow")
-prefix_rule(pattern=["tmux", "send-keys"], decision="allow")
 prefix_rule(pattern=["tmux", "capture-pane", "-p", "-t", "%5", "-S", "-30"], decision="allow")
 prefix_rule(pattern=["tmux", "capture-pane", "-p", "-t", "%5", "-S", "-35"], decision="allow")
+
+# Yoshinobu: tmux operations do not require confirmation (2026-09-06).
+prefix_rule(pattern=["tmux"], decision="allow")
+
+# Read-only Operator Request Channel retrieval. `submit` is intentionally not
+# included: it appends an irreversible request to the production-side spool.
+prefix_rule(pattern=["operator-channel-client", ["list", "get", "status"]], decision="allow")

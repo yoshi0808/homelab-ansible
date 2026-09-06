@@ -15,7 +15,9 @@
 
 1. `reviewer-migration` を畳む。移行前の「作る側=Claude Code」だったから立てた一時的な体で、移行後は codex が作る側になるため役として不整合になる
 2. `rename.sh homelab claude coordinator` で `homelab-ops` 側と識別子を揃える。**走行中の自分自身は rename できない**(actasロックとwatcherが旧名で動く)ので、Claude Code のセッションを閉じてから行う
-3. pane 0 を codex で立てる。`new-session.sh` が `docs/ai/context/operations/agent-messaging.md` §10 の掃除と seat 張り直しを行う必要がある(**quory と同じ形になる**。スクリプトは repo が持たないため §10 が要件の正本)
+3. `./new-session.sh --reset` を叩く。**書き換え済み**(pane 0 が codex、Implementer は `gpt-5.6-sol`、boot promptの宛先は `coordinator`、`agent-messaging.md` §10 の掃除と seat 張り直しを実装)。**未実測** — 効くのは次の起動時で、書いた側はそこに居ない。壊れていたら `new-session.sh.bak-pre-codex-coordinator-20260906-143522` を戻す
+
+**seat は2つ要る。** この Coordinator は `homelab` と `homelab-ops` の両方に属し、codex の配送は pair ごとだからである(quory の Operator は1teamなので §10 の例には出てこない)。`codex-record-session.sh` は seat を既に持つスレッドを推論で書き換えないため、2つ目は `CODEX_THREAD_ID` を明示して呼ぶ。**この分岐はスクリプトにしか無い。**
 
 **切り替え後に確かめること** — codex Coordinator が `docs/ai/status.md` を自分で読むこと(**自動では載らない**)、`git reset --hard` が prompt になること、`spawn.sh claude-code reviewer --fresh` で Claude Code の役が立ち配送が `○` になること。
 
