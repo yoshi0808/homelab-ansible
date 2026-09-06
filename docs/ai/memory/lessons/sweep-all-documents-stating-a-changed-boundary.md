@@ -52,7 +52,7 @@ grep -rn "<変更した境界のキーワード>" docs/ai/ CLAUDE.md AGENTS.md s
 
 ## 再発記録
 
-**機械が追記する節である。人は手で書かない。** 契約(何を記録し、何を記録しないか)は `docs/ai/memory-classification.md`「`lessons/`の「再発記録」節」が正本。
+**記録主体と判定契約は `docs/ai/memory-classification.md`「`lessons/`の「再発記録」節」が正本。**
 
 | 日付 | 何に対して踏んだか | 反した規範 | 気づかせたもの |
 |---|---|---|---|
