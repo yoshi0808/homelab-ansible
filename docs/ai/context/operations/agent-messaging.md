@@ -119,6 +119,7 @@ codex 側には2つの層がある。**一方は repo で追跡され、もう�
 
 **Node は system trust store を見ない。** サーバは私設 CA の証明書を提示するため、sync engine(Node)は既定では `UNABLE_TO_GET_ISSUER_CERT_LOCALLY` で落ちる。`remote.sh` に `CURL_CA_BUNDLE` を渡すと、`remote-sync.sh` がそれを Node へ `NODE_EXTRA_CA_CERTS` として引き継ぐ。curl 側は system store で通るため、**症状は「curl は通るのに engine だけ起動しない」**という形で出る。
 
+- **エージェントの sandbox 内で得たプロセスの否定結果を、ホスト上での不在と読まない。** sandbox からはホスト側の PID や `/proc` の情報が見えず、実際には動いている engine に対して `remote.sh status` が `engine stale — ... dead or foreign process`、`ps` が該当なしを返すことがある。エージェント側で `stale` が出た場合は停止と断定せず、**同じホストの通常シェルから** `remote.sh status <team>` を実行する。そこで `engine running` と直近の `last successful sync` の両方が出ることを成立の根拠とする。通常シェルと sandbox の結果が食い違う場合は、通常シェル側をプロセス状態の観測結果として採る。
 - ansy 側は `~/.bashrc` に `export CURL_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt` を置いてある(**非対話ガードより上**)。
 - **再起動後の復帰は `session-start.sh` が接続済み team の engine を自動起動する**が、これは対話セッションを起動したシェルの環境を引き継ぐ。`.bashrc` を読まない経路から起動すると、engine は上記の理由で立たない。**この自動起動がリブートを跨いで成立することは 2026-08-17 に ansy で実測した**(下記「リブート後」)。
 - **engine を、エージェントのツール実行から起動しない。** `nohup` + `disown` は SIGHUP からしか守らない。**エージェントのコマンド実行はプロセスグループごと片付けるため、engine は残らない。** 症状は「起動したと報告されるのに同期が始まらない」で、**ログにエラーは残らない**(quory で実測: ログ末尾は capabilities 取得成功の1行だけ、`status` は pidfile を stale と判定、成功した同期の行が出ない)。**通常のシェルから起動すること。** 起動し直せば、溜まっていた join とメッセージはまとめて流れる。
