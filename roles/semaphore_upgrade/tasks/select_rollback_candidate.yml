@@ -58,5 +58,3 @@
 - name: Build rollback transaction configuration
   ansible.builtin.set_fact:
     semaphore_upgrade_rollback_source: "{{ semaphore_upgrade_rollback_candidates[0] }}"
-    semaphore_upgrade_rollback_generation: >-
-      {{ lookup('pipe', "TZ='Asia/Tokyo' date '+%Y%m%dT%H%M%S+0900'") }}

@@ -1,0 +1,162 @@
+---
+- name: Exercise Semaphore upgrade native check mode without host side effects
+  hosts: localhost
+  connection: local
+  become: true
+  gather_facts: false
+  environment:
+    PATH: "/tmp/semaphore-upgrade-native-check/bin:{{ lookup('env', 'PATH') }}"
+  vars:
+    semaphore_upgrade_test_root: /tmp/semaphore-upgrade-native-check
+    semaphore_upgrade_binary: /tmp/semaphore-upgrade-native-check/bin/semaphore
+    semaphore_upgrade_db: /tmp/semaphore-upgrade-native-check/semaphore.db
+    semaphore_upgrade_config: /tmp/semaphore-upgrade-native-check/config.json
+    semaphore_upgrade_service: semaphore-upgrade-native-check.service
+    semaphore_upgrade_release_base: https://invalid.example.invalid/semaphore
+    semaphore_upgrade_fixture_reading_path_available: true
+    semaphore_upgrade_query_command: >-
+      {{ semaphore_upgrade_test_root }}/{{ 'bin/query' if semaphore_upgrade_fixture_reading_path_available | bool else 'missing-query' }}
+    semaphore_upgrade_query_token: >-
+      {{ semaphore_upgrade_test_root }}/{{ 'query-token' if semaphore_upgrade_fixture_reading_path_available | bool else 'missing-token' }}
+    semaphore_upgrade_backup_root: /tmp/semaphore-upgrade-native-check/backups
+    semaphore_upgrade_work_root: /tmp/semaphore-upgrade-native-check/work
+    semaphore_upgrade_script: /tmp/semaphore-upgrade-native-check/detached
+    semaphore_upgrade_webhook_file: /tmp/semaphore-upgrade-native-check/webhook
+    semaphore_upgrade_notification_suppress_marker: /tmp/semaphore-upgrade-native-check/suppress
+    semaphore_upgrade_result_file: /tmp/semaphore-upgrade-native-check/result.json
+    semaphore_upgrade_skip_reading_path_check: "{{ not (semaphore_upgrade_fixture_reading_path_available | bool) }}"
+  pre_tasks:
+    - name: Require this fixture to run only in Ansible check mode
+      ansible.builtin.assert:
+        that: ansible_check_mode
+        fail_msg: >-
+          This fixture is intentionally check-mode-only. Run it through
+          scripts/safe-ansible-check.sh or pass --check explicitly.
+      tags: [always]
+
+    - name: Reset native check-mode fixture root
+      ansible.builtin.file:
+        path: "{{ semaphore_upgrade_test_root }}"
+        state: absent
+      check_mode: false
+
+    - name: Create native check-mode fixture directories
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        mode: "0755"
+      loop:
+        - "{{ semaphore_upgrade_test_root }}/bin"
+        - "{{ semaphore_upgrade_backup_root }}/fixture"
+      check_mode: false
+
+    - name: Install native check-mode command fixtures
+      ansible.builtin.copy:
+        dest: "{{ semaphore_upgrade_test_root }}/bin/{{ item.name }}"
+        mode: "0755"
+        content: "{{ item.content }}"
+      loop:
+        - name: semaphore
+          content: |
+            #!/bin/sh
+            printf '%s\n' '2.19.8 community'
+        - name: systemctl
+          content: |
+            #!/bin/sh
+            case "$*" in
+              *--property=User*) printf '%s\n' 'semaphore' ;;
+              *--property=MainPID*) printf '%s\n' '1234' ;;
+              *) exit 1 ;;
+            esac
+        - name: query
+          content: |
+            #!/bin/sh
+            case "$1" in
+              running) printf '%s\n' '42|Semaphore upgrade|playbooks/semaphore_upgrade.yml|running|start' ;;
+              template-list) printf '%s\n' '{"id":1,"name":"fixture"}' ;;
+              *) exit 1 ;;
+            esac
+        - name: getfacl
+          content: |
+            #!/bin/sh
+            printf '%s\n' 'user::rw-' 'user:nobody:r--'
+      check_mode: false
+
+    - name: Create consumer query token fixture
+      ansible.builtin.file:
+        path: "{{ semaphore_upgrade_query_token }}"
+        state: touch
+        mode: "0644"
+      check_mode: false
+
+    - name: Remove consumer reading path for the unavailable fixture variant
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - "{{ semaphore_upgrade_test_root }}/bin/query"
+        - "{{ semaphore_upgrade_test_root }}/query-token"
+      when: not (semaphore_upgrade_fixture_reading_path_available | bool)
+      check_mode: false
+
+    - name: Create native check-mode SQLite fixture
+      ansible.builtin.command:
+        argv:
+          - sqlite3
+          - "{{ semaphore_upgrade_db }}"
+          - >-
+            create table if not exists task(id integer, status text);
+            create table if not exists project__template(id integer);
+            create table if not exists project__schedule(id integer, active integer);
+      changed_when: false
+      check_mode: false
+
+    - name: Create rollback transaction fixture
+      ansible.builtin.copy:
+        dest: "{{ semaphore_upgrade_backup_root }}/fixture/transaction.json"
+        mode: "0600"
+        content: >-
+          {{ {
+            'current_version': '2.19.7',
+            'current_edition': 'community',
+            'service_owner': 'semaphore'
+          } | to_json }}
+      check_mode: false
+
+    - name: Create rollback-ready payload fixture
+      ansible.builtin.copy:
+        dest: "{{ semaphore_upgrade_backup_root }}/fixture/semaphore-final.db"
+        mode: "0600"
+        content: rollback-ready
+      check_mode: false
+
+  roles:
+    - semaphore_upgrade
+
+  post_tasks:
+    - name: Inspect paths forbidden in native check mode
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      loop:
+        - "{{ semaphore_upgrade_work_root }}"
+        - "{{ semaphore_upgrade_webhook_file }}"
+        - "{{ semaphore_upgrade_notification_suppress_marker }}"
+        - "{{ semaphore_upgrade_result_file }}"
+      register: semaphore_upgrade_forbidden_check_paths
+
+    - name: Require native check mode to leave forbidden paths absent
+      ansible.builtin.assert:
+        that:
+          - semaphore_upgrade_forbidden_check_paths.results | map(attribute='stat.exists') | select('equalto', true) | list | length == 0
+
+    - name: Inspect backup generations after native check mode
+      ansible.builtin.find:
+        paths: "{{ semaphore_upgrade_backup_root }}"
+        recurse: false
+        file_type: directory
+      register: semaphore_upgrade_check_backup_generations
+
+    - name: Require native check mode not to create a backup generation
+      ansible.builtin.assert:
+        that:
+          - semaphore_upgrade_check_backup_generations.files | map(attribute='path') | map('basename') | list == ['fixture']

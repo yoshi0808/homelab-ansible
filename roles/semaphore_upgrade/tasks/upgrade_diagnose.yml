@@ -1,0 +1,248 @@
+---
+- name: Collect installed Semaphore version
+  ansible.builtin.command: "{{ semaphore_upgrade_binary }} version"
+  register: semaphore_upgrade_current_version_raw
+  changed_when: false
+  check_mode: false
+
+- name: Parse installed Semaphore version
+  ansible.builtin.set_fact:
+    semaphore_upgrade_current_version: >-
+      {{ semaphore_upgrade_current_version_raw.stdout | trim |
+         regex_replace('^([0-9]+[.][0-9]+[.][0-9]+).*$', '\1') }}
+
+- name: Validate readable installed version
+  ansible.builtin.assert:
+    that: semaphore_upgrade_current_version is match('^[0-9]+[.][0-9]+[.][0-9]+$')
+    fail_msg: "Cannot parse installed Semaphore version; refusing to continue."
+
+- name: Inspect consumer reading-path files
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  loop:
+    - "{{ semaphore_upgrade_query_command }}"
+    - "{{ semaphore_upgrade_query_token }}"
+  register: semaphore_upgrade_reading_path_files
+
+- name: Determine whether the consumer reading path is available
+  ansible.builtin.set_fact:
+    semaphore_upgrade_reading_path_available: >-
+      {{ semaphore_upgrade_reading_path_files.results |
+         map(attribute='stat.exists') | select('equalto', true) | list | length == 2 }}
+
+- name: Fail closed when the consumer reading path is unavailable
+  ansible.builtin.assert:
+    that:
+      - semaphore_upgrade_reading_path_available or semaphore_upgrade_skip_reading_path_check
+    fail_msg: >-
+      Consumer reading path is unavailable. Refusing by default; an environment
+      that intentionally lacks it requires -e skip_reading_path_check=true.
+
+- name: Record explicit reading-path verification skip
+  ansible.builtin.debug:
+    msg:
+      reading_path_check: skipped_by_explicit_request
+      query_command: "{{ semaphore_upgrade_query_command }}"
+      query_token: "{{ semaphore_upgrade_query_token }}"
+  when: not (semaphore_upgrade_reading_path_available | bool)
+
+- name: Collect running Semaphore jobs through the consumer path
+  ansible.builtin.command:
+    argv:
+      - "{{ semaphore_upgrade_query_command }}"
+      - running
+      - "200"
+  register: semaphore_upgrade_running_jobs_raw
+  changed_when: false
+  check_mode: false
+  when: semaphore_upgrade_reading_path_available
+
+- name: Classify the current upgrade job explicitly
+  ansible.builtin.set_fact:
+    semaphore_upgrade_self_job_lines: >-
+      {{ semaphore_upgrade_running_jobs_raw.stdout_lines |
+         select('search', '[|]playbooks/semaphore_upgrade[.]yml[|]') | list }}
+    semaphore_upgrade_other_job_lines: >-
+      {{ semaphore_upgrade_running_jobs_raw.stdout_lines |
+         reject('search', '[|]playbooks/semaphore_upgrade[.]yml[|]') | list }}
+  when: semaphore_upgrade_reading_path_available
+
+- name: Require no other running job and at most this one upgrade job
+  ansible.builtin.assert:
+    that:
+      - semaphore_upgrade_other_job_lines | length == 0
+      - semaphore_upgrade_self_job_lines | length <= 1
+    fail_msg: >-
+      Refusing upgrade.
+      {% if semaphore_upgrade_other_job_lines | length > 0 %}
+      Other running Semaphore rows: {{ semaphore_upgrade_other_job_lines | to_json }}.
+      Wait for or stop these jobs before retrying.
+      {% endif %}
+      {% if semaphore_upgrade_self_job_lines | length > 1 %}
+      Multiple semaphore_upgrade rows: {{ semaphore_upgrade_self_job_lines | to_json }}.
+      This can occur immediately after rollback because restoring semaphore.db
+      can revive rows that were running at the backup point. Stop stale matching
+      rows in the Semaphore UI before retrying.
+      {% endif %}
+  when: semaphore_upgrade_reading_path_available
+
+- name: Count running jobs from the local database when reading-path check is explicitly skipped
+  ansible.builtin.command:
+    argv:
+      - sqlite3
+      - "{{ semaphore_upgrade_db }}"
+      - >-
+        select count(*) from task
+        where status not in ('success', 'error', 'stopped');
+  register: semaphore_upgrade_local_running_count
+  changed_when: false
+  check_mode: false
+  when: not (semaphore_upgrade_reading_path_available | bool)
+
+- name: Require zero running jobs when no current job can be identified
+  ansible.builtin.assert:
+    that:
+      - semaphore_upgrade_local_running_count.stdout | trim is match('^[0-9]+$')
+      - semaphore_upgrade_local_running_count.stdout | trim | int == 0
+    fail_msg: "A running Semaphore job exists while consumer-path verification is skipped."
+  when: not (semaphore_upgrade_reading_path_available | bool)
+
+- name: Read Semaphore service owner
+  ansible.builtin.command: systemctl show semaphore.service --property=User --value  # noqa command-instead-of-module
+  register: semaphore_upgrade_service_owner
+  changed_when: false
+  check_mode: false
+
+- name: Discover non-owner consumer identity from token ACL
+  ansible.builtin.shell: |
+    set -o pipefail
+    getfacl -cp {{ semaphore_upgrade_query_token | quote }} |
+      awk -F: '$1 == "user" && $2 != "" && $2 != "yoshi" && $2 != "root" { print $2; exit }'
+  args:
+    executable: /bin/bash
+  register: semaphore_upgrade_query_user_raw
+  changed_when: false
+  failed_when: semaphore_upgrade_query_user_raw.rc != 0 or semaphore_upgrade_query_user_raw.stdout | trim | length == 0
+  check_mode: false
+  when: semaphore_upgrade_reading_path_available
+
+- name: Require the selected query identity to differ from the service owner
+  ansible.builtin.assert:
+    that:
+      - semaphore_upgrade_service_owner.stdout | trim | length > 0
+      - semaphore_upgrade_query_user_raw.stdout | trim != semaphore_upgrade_service_owner.stdout | trim
+    fail_msg: "Selected query identity is the Semaphore service owner."
+  when: semaphore_upgrade_reading_path_available
+
+- name: Capture pre-upgrade reading-path shape as its consumer identity
+  ansible.builtin.command:
+    argv:
+      - "{{ semaphore_upgrade_query_command }}"
+      - template-list
+      - "1"
+  become: true
+  become_user: "{{ semaphore_upgrade_query_user_raw.stdout | trim }}"
+  register: semaphore_upgrade_query_baseline_raw
+  changed_when: false
+  check_mode: false
+  when: semaphore_upgrade_reading_path_available
+
+- name: Require exactly one reading-path baseline object
+  ansible.builtin.assert:
+    that:
+      - semaphore_upgrade_query_baseline_raw.stdout_lines | length == 1
+    fail_msg: "Consumer-identity query must return exactly one JSON object."
+  when: semaphore_upgrade_reading_path_available
+
+- name: Parse pre-upgrade reading-path shape
+  ansible.builtin.set_fact:
+    semaphore_upgrade_query_baseline_keys: >-
+      {{ (semaphore_upgrade_query_baseline_raw.stdout_lines[0] | from_json).keys() | list | sort }}
+  when: semaphore_upgrade_reading_path_available
+
+- name: Require a non-empty structured reading-path baseline
+  ansible.builtin.assert:
+    that:
+      - semaphore_upgrade_query_baseline_keys | length > 0
+    fail_msg: "Consumer-identity homelab-semaphore-query returned no structured template."
+  when: semaphore_upgrade_reading_path_available
+
+- name: Record the explicitly skipped consumer reading path
+  ansible.builtin.set_fact:
+    semaphore_upgrade_query_user_raw:
+      stdout: ""
+    semaphore_upgrade_query_baseline_keys: []
+  when: not (semaphore_upgrade_reading_path_available | bool)
+
+- name: Collect current binary checksum
+  ansible.builtin.stat:
+    path: "{{ semaphore_upgrade_binary }}"
+    checksum_algorithm: sha256
+  register: semaphore_upgrade_current_binary
+
+- name: Require a readable installed Semaphore binary
+  ansible.builtin.assert:
+    that:
+      - semaphore_upgrade_current_binary.stat.exists | default(false)
+      - semaphore_upgrade_current_binary.stat.isreg | default(false)
+      - semaphore_upgrade_current_binary.stat.checksum | default('') | length > 0
+    fail_msg: "Installed Semaphore binary is missing or unreadable."
+
+- name: Classify the installed target state without downloading a package
+  ansible.builtin.set_fact:
+    semaphore_upgrade_check_already_current: >-
+      {{ semaphore_upgrade_current_version == semaphore_upgrade_target_version
+         and semaphore_upgrade_current_binary.stat.checksum == semaphore_upgrade_target_binary_sha256 }}
+    semaphore_upgrade_check_current_edition: >-
+      {{ semaphore_upgrade_target_edition
+         if (semaphore_upgrade_current_version == semaphore_upgrade_target_version
+             and semaphore_upgrade_current_binary.stat.checksum == semaphore_upgrade_target_binary_sha256)
+         else 'unknown_without_package_download' }}
+
+- name: Capture baseline object counts
+  ansible.builtin.command:
+    argv:
+      - sqlite3
+      - "{{ semaphore_upgrade_db }}"
+      - >-
+        select count(*) from project__template;
+        select count(*) from project__schedule;
+        select count(*) from project__schedule where active=1;
+  register: semaphore_upgrade_baseline_raw
+  changed_when: false
+  check_mode: false
+
+- name: Validate baseline count shape
+  ansible.builtin.assert:
+    that:
+      - semaphore_upgrade_baseline_raw.stdout_lines | length == 3
+      - semaphore_upgrade_baseline_raw.stdout_lines | select('match', '^[0-9]+$') | list | length == 3
+
+- name: Read MainPID before preparation
+  ansible.builtin.command: systemctl show semaphore.service --property=MainPID --value  # noqa command-instead-of-module
+  register: semaphore_upgrade_preflight_pid_before
+  changed_when: false
+  check_mode: false
+
+- name: Show Semaphore upgrade diagnostic
+  ansible.builtin.debug:
+    msg:
+      host: "{{ inventory_hostname }}"
+      mode: upgrade
+      current: "{{ semaphore_upgrade_current_version }}-{{ semaphore_upgrade_check_current_edition }}"
+      target: "{{ semaphore_upgrade_target_version }}-{{ semaphore_upgrade_target_edition }}"
+      rollback_candidate: null
+      action: "{{ 'already_current' if semaphore_upgrade_check_already_current else 'would_apply' }}"
+      running_jobs: >-
+        {{ ((semaphore_upgrade_self_job_lines | default([])) +
+            (semaphore_upgrade_other_job_lines | default([]))) | length
+           if semaphore_upgrade_reading_path_available
+           else semaphore_upgrade_local_running_count.stdout | trim | int }}
+      service_owner: "{{ semaphore_upgrade_service_owner.stdout | trim }}"
+      reading_path_check: "{{ 'passed' if semaphore_upgrade_reading_path_available else 'skipped_by_explicit_request' }}"
+      pending_apply_preflight:
+        - current_edition_package_match
+        - target_package_download
+        - pinned_package_checksum
+        - pinned_binary_checksum
+  when: ansible_check_mode

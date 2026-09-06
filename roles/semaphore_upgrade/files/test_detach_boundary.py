@@ -97,6 +97,8 @@ class BoundaryTests(unittest.TestCase):
     def test_actual_include_order_defines_capture_inputs(self):
         tasks_dir = Path(__file__).parents[1] / "tasks"
         main = yaml.safe_load((tasks_dir / "main.yml").read_text())
+        upgrade_diagnose = yaml.safe_load((tasks_dir / "upgrade_diagnose.yml").read_text())
+        rollback_diagnose = yaml.safe_load((tasks_dir / "rollback_diagnose.yml").read_text())
         upgrade = yaml.safe_load((tasks_dir / "upgrade.yml").read_text())
         rollback = yaml.safe_load((tasks_dir / "rollback.yml").read_text())
 
@@ -106,26 +108,84 @@ class BoundaryTests(unittest.TestCase):
             return next(i for i, task in enumerate(tasks) if task.get("name") == name)
 
         upgrade_capture = index(upgrade, "Identify launching job before package installation")
-        self.assertLess(index(upgrade, "Determine whether the consumer reading path is available"), upgrade_capture)
-        self.assertLess(index(upgrade, "Discover non-owner consumer identity from token ACL"), upgrade_capture)
-        self.assertLess(index(upgrade, "Record the explicitly skipped consumer reading path"), upgrade_capture)
+        self.assertGreaterEqual(index(upgrade_diagnose, "Determine whether the consumer reading path is available"), 0)
+        self.assertGreaterEqual(index(upgrade_diagnose, "Discover non-owner consumer identity from token ACL"), 0)
+        self.assertGreaterEqual(index(upgrade_diagnose, "Record the explicitly skipped consumer reading path"), 0)
         upgrade_vars = upgrade[upgrade_capture]["vars"]
         self.assertIn("semaphore_upgrade_origin_reading_path_available", upgrade_vars)
         self.assertIn("semaphore_upgrade_origin_query_user", upgrade_vars)
 
         rollback_capture = index(rollback, "Identify launching rollback job")
-        self.assertLess(index(rollback, "Determine whether the rollback reading path is available"), rollback_capture)
-        self.assertLess(index(rollback, "Rediscover rollback consumer identity from current token ACL"), rollback_capture)
+        self.assertGreaterEqual(index(rollback_diagnose, "Determine whether the rollback reading path is available"), 0)
+        self.assertGreaterEqual(index(rollback_diagnose, "Rediscover rollback consumer identity from current token ACL"), 0)
         rollback_vars = rollback[rollback_capture]["vars"]
         self.assertIn("semaphore_upgrade_origin_reading_path_available", rollback_vars)
         self.assertIn("semaphore_upgrade_origin_query_user", rollback_vars)
 
-        preflight = upgrade[index(upgrade, "Require no other running job and at most this one upgrade job")]
+        preflight = upgrade_diagnose[index(upgrade_diagnose, "Require no other running job and at most this one upgrade job")]
         fail_msg = preflight["ansible.builtin.assert"]["fail_msg"]
         self.assertIn("semaphore_upgrade_other_job_lines", fail_msg)
         self.assertIn("semaphore_upgrade_self_job_lines", fail_msg)
         self.assertIn("immediately after rollback", fail_msg)
         self.assertIn("Semaphore UI", fail_msg)
+
+    def test_native_check_mode_routes_diagnostics_before_normal_execution(self):
+        tasks_dir = Path(__file__).parents[1] / "tasks"
+        main = yaml.safe_load((tasks_dir / "main.yml").read_text())
+
+        def named(name):
+            return next(task for task in main if task.get("name") == name)
+
+        legacy_guard = named("Reject the removed dry_run argument")
+        self.assertEqual(legacy_guard["ansible.builtin.assert"]["that"], "dry_run is not defined")
+        self.assertEqual(legacy_guard["tags"], ["always"])
+        host_guard = named("Require exactly one Semaphore upgrade target")
+        self.assertIn("ansible_play_hosts_all | length == 1", host_guard["ansible.builtin.assert"]["that"])
+        self.assertEqual(host_guard["tags"], ["always"])
+
+        for mode in ("upgrade", "rollback"):
+            diagnose = named(f"Diagnose Semaphore {mode}")
+            normal = named(f"Run normal Semaphore {mode} preparation")
+            self.assertNotIn("not ansible_check_mode", diagnose.get("when", []))
+            self.assertIn("not ansible_check_mode", normal["when"])
+            self.assertIn("destructive", normal["tags"])
+            self.assertIn("destructive", normal["ansible.builtin.include_tasks"]["apply"]["tags"])
+
+        role_root = tasks_dir.parent
+        active_text = "\n".join(
+            [
+                (role_root / "defaults" / "main.yml").read_text(),
+                *[path.read_text() for path in tasks_dir.glob("*.yml")],
+            ]
+        )
+        self.assertNotIn("semaphore_upgrade_" + "dry_run", active_text)
+        self.assertNotIn("check_mode_no_changes", active_text)
+
+        fixture = yaml.safe_load((Path(__file__).with_name("test_native_check_mode.yml")).read_text())[0]
+        check_assert = fixture["pre_tasks"][0]
+        self.assertEqual(check_assert["ansible.builtin.assert"]["that"], "ansible_check_mode")
+        self.assertEqual(check_assert["tags"], ["always"])
+
+    def test_template_catalog_uses_only_native_dry_run(self):
+        catalog_path = Path(__file__).parents[2] / "semaphore_templates" / "defaults" / "main.yml"
+        catalog = yaml.safe_load(catalog_path.read_text())
+        templates = [
+            item for item in catalog["semaphore_templates_catalog"]
+            if item.get("playbook") == "playbooks/semaphore_upgrade.yml"
+        ]
+        self.assertEqual({item["variant"] for item in templates}, {"apply", "rollback"})
+        apply = next(item for item in templates if item["variant"] == "apply")
+        rollback = next(item for item in templates if item["variant"] == "rollback")
+        self.assertEqual(apply["arguments"], ["--limit", "quory"])
+        self.assertNotIn("dry_run", {item["name"] for item in apply.get("survey_vars", [])})
+        self.assertEqual(
+            {item["name"] for item in rollback["survey_vars"]},
+            {"rollback", "rollback_to"},
+        )
+        self.assertFalse(any(
+            "Semaphore upgrade" in item.get("template", "")
+            for item in catalog["semaphore_schedules_catalog"]
+        ))
 
     def test_non_timeout_failure_reports_observed_safe_state(self):
         self.cfg["db"] = str(self.root / "missing" / "db")

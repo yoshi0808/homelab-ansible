@@ -312,8 +312,6 @@ semaphore_templates_catalog:
     variant: apply
     title: "Semaphore upgrade"
     arguments: ["--limit", "quory"]
-    survey_vars:
-      - { name: dry_run, title: dry_run, required: true, description: "falseで版上げを開始。ジョブ緑は切り離し成功のみ", default_value: "false" }
 
   - playbook: playbooks/semaphore_upgrade.yml
     class: UN-SAFE
@@ -322,7 +320,6 @@ semaphore_templates_catalog:
     arguments: ["--limit", "quory"]
     survey_vars:
       - { name: rollback, title: rollback, required: true, description: "明示ロールバック", default_value: "true" }
-      - { name: dry_run, title: dry_run, required: true, default_value: "false" }
       - { name: rollback_to, title: rollback_to, description: "復帰する旧版。空なら最新backup" }
 
   # syslog_weekly_digest案件(requirement:

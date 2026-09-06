@@ -3,7 +3,6 @@ semaphore_upgrade_target_version: "{{ semaphore_target_version | default('2.19.1
 semaphore_upgrade_target_edition: "{{ semaphore_target_edition | default('community') }}"
 semaphore_upgrade_target_deb_sha256: 3858f6bc6eaef3a6223e55fc03eebf69fec89bcf802afb48449321de2964d170
 semaphore_upgrade_target_binary_sha256: 9a54577383992d79458cc6d4714a26b9aa6e14b3eb0bc51ea221e17ada97e6f0
-semaphore_upgrade_dry_run: "{{ dry_run | bool }}"
 semaphore_upgrade_rollback: "{{ rollback | default(false) | bool }}"
 semaphore_upgrade_rollback_to: "{{ rollback_to | default('') }}"
 semaphore_upgrade_skip_reading_path_check: "{{ skip_reading_path_check | default(false) | bool }}"

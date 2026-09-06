@@ -1,10 +1,21 @@
 ---
-- name: Require an explicit dry_run choice
+- name: Reject the removed dry_run argument
   ansible.builtin.assert:
-    that: dry_run is defined
+    that: dry_run is not defined
     fail_msg: >-
-      dry_run must be specified explicitly: -e dry_run=true for preflight and
-      backup only, or -e dry_run=false for apply/rollback.
+      dry_run is no longer supported. Use Ansible --check (Semaphore UI Dry
+      Run) for read-only diagnostics, or omit --check for an approved normal
+      upgrade/rollback.
+  tags: [always]
+
+- name: Require exactly one Semaphore upgrade target
+  ansible.builtin.assert:
+    that:
+      - ansible_play_hosts_all | length == 1
+    fail_msg: >-
+      semaphore_upgrade requires exactly one target host. Select one host with
+      --limit before running diagnostics, upgrade, or rollback.
+  tags: [always]
 
 - name: Validate Semaphore upgrade inputs
   ansible.builtin.assert:
@@ -13,8 +24,7 @@
       - semaphore_upgrade_target_edition in ['community', 'pro']
       - semaphore_upgrade_rollback_to | length == 0 or semaphore_upgrade_rollback_to is match('^[0-9]+[.][0-9]+[.][0-9]+$')
     fail_msg: >-
-      target version/edition must be valid. Apply requires -e dry_run=false;
-      rollback requires -e dry_run=false -e rollback=true.
+      target version/edition must be valid. Rollback requires -e rollback=true.
 
 - name: Validate detached job wait timeout
   ansible.builtin.assert:
@@ -33,23 +43,30 @@
          or ansible_check_mode
          or (lookup('env', 'CLAUDECODE') | default('', true) | trim | length > 0) }}
 
-- name: Show check-mode plan without downloading, installing, or restarting
-  ansible.builtin.debug:
-    msg:
-      host: "{{ inventory_hostname }}"
-      mode: "{{ 'rollback' if semaphore_upgrade_rollback | bool else 'upgrade' }}"
-      target: "{{ semaphore_upgrade_target_version }}-{{ semaphore_upgrade_target_edition }}"
-      action: check_mode_no_changes
-  when: ansible_check_mode
+- name: Diagnose Semaphore rollback
+  ansible.builtin.include_tasks: rollback_diagnose.yml
+  when: semaphore_upgrade_rollback | bool
 
-- name: Run Semaphore rollback preparation
-  ansible.builtin.include_tasks: rollback.yml
+- name: Diagnose Semaphore upgrade
+  ansible.builtin.include_tasks: upgrade_diagnose.yml
+  when: not (semaphore_upgrade_rollback | bool)
+
+- name: Run normal Semaphore rollback preparation
+  ansible.builtin.include_tasks:
+    file: rollback.yml
+    apply:
+      tags: [destructive]
   when:
-    - not ansible_check_mode
     - semaphore_upgrade_rollback | bool
-
-- name: Run Semaphore upgrade preparation
-  ansible.builtin.include_tasks: upgrade.yml
-  when:
     - not ansible_check_mode
+  tags: [destructive]
+
+- name: Run normal Semaphore upgrade preparation
+  ansible.builtin.include_tasks:
+    file: upgrade.yml
+    apply:
+      tags: [destructive]
+  when:
     - not (semaphore_upgrade_rollback | bool)
+    - not ansible_check_mode
+  tags: [destructive]

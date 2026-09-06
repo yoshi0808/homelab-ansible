@@ -1,0 +1,157 @@
+---
+- name: Collect installed Semaphore version before rollback
+  ansible.builtin.command: "{{ semaphore_upgrade_binary }} version"
+  register: semaphore_upgrade_current_version_raw
+  changed_when: false
+  check_mode: false
+
+- name: Parse installed Semaphore version before rollback
+  ansible.builtin.set_fact:
+    semaphore_upgrade_current_version: >-
+      {{ semaphore_upgrade_current_version_raw.stdout | trim |
+         regex_replace('^([0-9]+[.][0-9]+[.][0-9]+).*$', '\1') }}
+
+- name: Validate readable installed version before rollback
+  ansible.builtin.assert:
+    that: semaphore_upgrade_current_version is match('^[0-9]+[.][0-9]+[.][0-9]+$')
+    fail_msg: "Cannot parse installed Semaphore version; refusing rollback."
+
+- name: Inspect consumer reading-path files before rollback
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  loop:
+    - "{{ semaphore_upgrade_query_command }}"
+    - "{{ semaphore_upgrade_query_token }}"
+  register: semaphore_upgrade_rollback_reading_path_files
+
+- name: Determine whether the rollback reading path is available
+  ansible.builtin.set_fact:
+    semaphore_upgrade_rollback_reading_path_available: >-
+      {{ semaphore_upgrade_rollback_reading_path_files.results |
+         map(attribute='stat.exists') | select('equalto', true) | list | length == 2 }}
+
+- name: Fail closed when the rollback reading path is unavailable
+  ansible.builtin.assert:
+    that:
+      - semaphore_upgrade_rollback_reading_path_available or semaphore_upgrade_skip_reading_path_check
+    fail_msg: >-
+      Consumer reading path is unavailable. Refusing rollback by default;
+      skipping it requires -e skip_reading_path_check=true.
+
+- name: Record explicit rollback reading-path verification skip
+  ansible.builtin.debug:
+    msg:
+      reading_path_check: skipped_by_explicit_request
+      query_command: "{{ semaphore_upgrade_query_command }}"
+      query_token: "{{ semaphore_upgrade_query_token }}"
+  when: not (semaphore_upgrade_rollback_reading_path_available | bool)
+
+- name: Collect running Semaphore jobs before rollback
+  ansible.builtin.command:
+    argv:
+      - "{{ semaphore_upgrade_query_command }}"
+      - running
+      - "200"
+  register: semaphore_upgrade_rollback_running_jobs_raw
+  changed_when: false
+  check_mode: false
+  when: semaphore_upgrade_rollback_reading_path_available
+
+- name: Count running jobs locally when rollback reading-path check is skipped
+  ansible.builtin.command:
+    argv:
+      - sqlite3
+      - "{{ semaphore_upgrade_db }}"
+      - >-
+        select count(*) from task
+        where status not in ('success', 'error', 'stopped');
+  register: semaphore_upgrade_rollback_local_running_count
+  changed_when: false
+  check_mode: false
+  when: not (semaphore_upgrade_rollback_reading_path_available | bool)
+
+- name: Select a rollback-ready transaction
+  ansible.builtin.include_tasks: select_rollback_candidate.yml
+
+- name: Read current Semaphore service owner for rollback verification
+  ansible.builtin.command: systemctl show semaphore.service --property=User --value  # noqa command-instead-of-module
+  register: semaphore_upgrade_rollback_service_owner
+  changed_when: false
+  check_mode: false
+  when: semaphore_upgrade_rollback_reading_path_available
+
+- name: Rediscover rollback consumer identity from current token ACL
+  ansible.builtin.shell: |
+    set -o pipefail
+    getfacl -cp {{ semaphore_upgrade_query_token | quote }} |
+      awk -F: -v owner={{ semaphore_upgrade_rollback_service_owner.stdout | trim | quote }} \
+        '$1 == "user" && $2 != "" && $2 != owner && $2 != "root" { print $2; exit }'
+  args:
+    executable: /bin/bash
+  register: semaphore_upgrade_rollback_query_user_raw
+  changed_when: false
+  failed_when: >-
+    semaphore_upgrade_rollback_query_user_raw.rc != 0 or
+    semaphore_upgrade_rollback_query_user_raw.stdout | trim | length == 0
+  check_mode: false
+  when: semaphore_upgrade_rollback_reading_path_available
+
+- name: Capture current rollback reading-path shape as its consumer identity
+  ansible.builtin.command:
+    argv:
+      - "{{ semaphore_upgrade_query_command }}"
+      - template-list
+      - "1"
+  become: true
+  become_user: "{{ semaphore_upgrade_rollback_query_user_raw.stdout | trim }}"
+  register: semaphore_upgrade_rollback_query_baseline_raw
+  changed_when: false
+  check_mode: false
+  when: semaphore_upgrade_rollback_reading_path_available
+
+- name: Parse current rollback reading-path shape
+  ansible.builtin.set_fact:
+    semaphore_upgrade_rollback_query_baseline_keys: >-
+      {{ (semaphore_upgrade_rollback_query_baseline_raw.stdout_lines[0] | from_json).keys() | list | sort }}
+  when:
+    - semaphore_upgrade_rollback_reading_path_available
+    - semaphore_upgrade_rollback_query_baseline_raw.stdout_lines | length == 1
+
+- name: Require a valid current rollback consumer baseline
+  ansible.builtin.assert:
+    that:
+      - semaphore_upgrade_rollback_query_baseline_raw.stdout_lines | length == 1
+      - semaphore_upgrade_rollback_query_baseline_keys | default([]) | length > 0
+    fail_msg: "Rollback consumer identity returned no single structured template."
+  when: semaphore_upgrade_rollback_reading_path_available
+
+- name: Record the explicitly skipped rollback consumer reading path
+  ansible.builtin.set_fact:
+    semaphore_upgrade_rollback_query_user_raw:
+      stdout: ""
+    semaphore_upgrade_rollback_query_baseline_keys: []
+  when: not semaphore_upgrade_rollback_reading_path_available
+
+- name: Show Semaphore rollback diagnostic
+  ansible.builtin.debug:
+    msg:
+      host: "{{ inventory_hostname }}"
+      mode: rollback
+      current: "{{ semaphore_upgrade_current_version }}-unknown_without_package_download"
+      target: null
+      rollback_candidate: "{{ semaphore_upgrade_rollback_source.current_version }}-{{ semaphore_upgrade_rollback_source.current_edition }}"
+      action: would_rollback
+      running_jobs: >-
+        {{ semaphore_upgrade_rollback_running_jobs_raw.stdout_lines | length
+           if semaphore_upgrade_rollback_reading_path_available
+           else semaphore_upgrade_rollback_local_running_count.stdout | trim | int }}
+      service_owner: >-
+        {{ semaphore_upgrade_rollback_service_owner.stdout | trim
+           if semaphore_upgrade_rollback_reading_path_available
+           else semaphore_upgrade_rollback_source.service_owner }}
+      reading_path_check: "{{ 'passed' if semaphore_upgrade_rollback_reading_path_available else 'skipped_by_explicit_request' }}"
+      pending_apply_preflight:
+        - pre_rollback_backup_creation
+        - rollback_metadata_write
+        - detached_restart_verification
+  when: ansible_check_mode
