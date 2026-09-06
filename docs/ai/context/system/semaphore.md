@@ -69,7 +69,9 @@ quory 側の鍵を、ansy と同じ判断で消してはならない義務の正
 
 版の読み取りは `semaphore version` で、出力は `2.19.8-3449a04-1786894505` の形(`X.Y.Z` の後に commit hash とビルド番号が付く)。
 
-**エディションは ansy と quory で異なる。ansy は community 版(2.19.12、2026-09-05)、quory は非 community 版(2.19.8)である。**2026-08-18〜19 に**両ホスト・両版**(2.18.4 / 2.19.8)で `/usr/bin/semaphore` の sha256 を upstream の `.deb` から展開したバイナリと照合して確定した。**`.deb` は2種類公開されており(`semaphore_` と `semaphore_community_`)、取り違えると版と一緒にエディションまで入れ替わる。** **版上げのたびに、入れる前(現行バイナリ)と入れた後の両方で照合する**(`roles/semaphore_upgrade/` が自動で行う)。期待値はここへ書かない — 版ごとに変わるため、upstream の該当リリースの `.deb` を展開して都度求める。
+**ansy / quory とも community 版 2.19.12 である**(ansy 2026-09-05、quory 2026-09-06。ビルドは両ホストとも `2.19.12-012ed06-1788086239`)。2026-08-18〜19 に**両ホスト・両版**(2.18.4 / 2.19.8)で `/usr/bin/semaphore` の sha256 を upstream の `.deb` から展開したバイナリと照合して確定した。**`.deb` は2種類公開されており(`semaphore_` と `semaphore_community_`)、取り違えると版と一緒にエディションまで入れ替わる。** **版上げのたびに、入れる前(現行バイナリ)と入れた後の両方で照合する**(`roles/semaphore_upgrade/` が自動で行う)。期待値はここへ書かない — 版ごとに変わるため、upstream の該当リリースの `.deb` を展開して都度求める。
+
+**ロールバックは Semaphore 自身のジョブ台帳を巻き戻す。** `semaphore.db` を書き戻す以上、**退避時点より後のジョブ記録は失われ、退避時に走行中だった行が `running` として復活する**(2026-09-06 実測。#992 / #993 が消え、別の回では手で止めた #986 が `running` へ戻った)。**復活した行は次の版上げを preflight で止める。** UI で `stopped` にしてから再実行する。この説明は `roles/semaphore_upgrade/` の通知と preflight の `fail_msg` が実行時に出す。**ansy はジョブを実行しないため、この性質は quory でしか現れない。**
 
 **quory の unit は `unit-cat semaphore.service` で読める**(2026-09-05 実測。`journal-unit` / `unit-cat` の enum に `semaphore.service` が入っている)。**ansy と内容が同一である** — `User=yoshi` / `Group=yoshi`、`Restart=always`、`RestartSec=10s`、`ConditionPathExists` 2件、`KillMode` の明示は無く systemd 既定の `control-group` が効く。**config の中身は今も測っていない。**
 

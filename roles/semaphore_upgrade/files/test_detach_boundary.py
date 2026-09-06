@@ -1,6 +1,7 @@
 """Local SQLite and mocked service/Slack fixtures; no host operations."""
 import importlib.util
 import json
+import os
 from contextlib import closing
 from pathlib import Path
 import sqlite3
@@ -121,6 +122,7 @@ class BoundaryTests(unittest.TestCase):
 
         preflight = upgrade[index(upgrade, "Require no other running job and at most this one upgrade job")]
         fail_msg = preflight["ansible.builtin.assert"]["fail_msg"]
+        self.assertIn("semaphore_upgrade_other_job_lines", fail_msg)
         self.assertIn("semaphore_upgrade_self_job_lines", fail_msg)
         self.assertIn("immediately after rollback", fail_msg)
         self.assertIn("Semaphore UI", fail_msg)
@@ -184,7 +186,8 @@ class BoundaryTests(unittest.TestCase):
         self.assertIn("dpkg -V", text)
         self.assertLessEqual(len(text), 2900)
         rollback_cfg = dict(self.cfg, mode="rollback", report_from_version="2.19.12",
-                            report_from_edition="community")
+                            report_from_edition="community",
+                            ledger_restored_at="2026-09-06T01:00:00+09:00")
         _, text = mod.notification_text(rollback_cfg, {"status": "success"})
         self.assertIn("変更バージョン: 2.19.12 → 2.19.8", text)
         self.assertIn("変更エディション: community → pro", text)
@@ -193,6 +196,34 @@ class BoundaryTests(unittest.TestCase):
         self.assertIn("running として復活", text)
         self.assertIn("次回版上げの preflight", text)
         self.assertIn("Semaphore UI", text)
+
+    def test_upgrade_failure_reports_timestamp_of_actually_restored_db(self):
+        snapshot = self.root / "semaphore-final.db"
+        snapshot.write_bytes(b"snapshot")
+        snapshot_epoch = 1788624000
+        os.utime(snapshot, (snapshot_epoch, snapshot_epoch))
+        self.cfg.update(
+            service="semaphore.service",
+            db_uid=os.getuid(),
+            db_gid=os.getgid(),
+            db_mode="0600",
+            baseline={},
+            target_binary_sha256="target-hash",
+        )
+        config = self.root / "upgrade-auto-rollback.json"
+        config.write_text(json.dumps(self.cfg))
+        with patch.object(sys, "argv", ["detached", str(config)]), \
+             patch.object(mod, "wait_for_jobs"), \
+             patch.object(mod, "stop"), \
+             patch.object(mod, "sqlite_backup"), \
+             patch.object(mod.os, "chown"), \
+             patch.object(mod, "start_and_verify", side_effect=[RuntimeError("verify failed"), None]):
+            self.assertEqual(mod.main(), 1)
+        result = json.loads((self.root / "result.json").read_text())
+        self.assertEqual(result["rollback"], "success")
+        self.assertEqual((self.root / "db").read_bytes(), b"snapshot")
+        self.assertIn("2026-09-06T01:00:00+09:00", result["notification"]["message"])
+        self.assertIn("これ以降のジョブ記録は失われ", result["notification"]["message"])
 
     def test_rollback_main_reports_observed_source(self):
         pre_rollback = self.root / "pre-rollback"

@@ -78,12 +78,17 @@
       - semaphore_upgrade_other_job_lines | length == 0
       - semaphore_upgrade_self_job_lines | length <= 1
     fail_msg: >-
-      Refusing upgrade: another Semaphore job is running, or multiple
-      semaphore_upgrade jobs are concurrent. Matching semaphore_upgrade rows:
-      {{ semaphore_upgrade_self_job_lines | to_json }}.
+      Refusing upgrade.
+      {% if semaphore_upgrade_other_job_lines | length > 0 %}
+      Other running Semaphore rows: {{ semaphore_upgrade_other_job_lines | to_json }}.
+      Wait for or stop these jobs before retrying.
+      {% endif %}
+      {% if semaphore_upgrade_self_job_lines | length > 1 %}
+      Multiple semaphore_upgrade rows: {{ semaphore_upgrade_self_job_lines | to_json }}.
       This can occur immediately after rollback because restoring semaphore.db
       can revive rows that were running at the backup point. Stop stale matching
       rows in the Semaphore UI before retrying.
+      {% endif %}
   when: semaphore_upgrade_reading_path_available
 
 - name: Count running jobs from the local database when reading-path check is explicitly skipped
@@ -337,7 +342,6 @@
         'db_gid': semaphore_upgrade_current_db.stat.gid,
         'db_mode': semaphore_upgrade_current_db.stat.mode,
         'backup_dir': semaphore_upgrade_backup_dir,
-        'ledger_restore_point': semaphore_upgrade_generation,
         'current_version': semaphore_upgrade_current_version,
         'current_binary_sha256': semaphore_upgrade_current_binary.stat.checksum,
         'current_edition': semaphore_upgrade_current_edition,

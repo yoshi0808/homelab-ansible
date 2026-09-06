@@ -120,12 +120,9 @@ def notification_text(cfg, result):
         )
     if result.get("rollback") or (rollback and status == "success"):
         lines.append(f"ロールバック: {field(result.get('rollback', 'success'))} / 復帰先: {field(cfg.get('current_version', '不明'))} ({field(cfg.get('current_edition', '不明'))})")
-    if result.get("rollback") == "success" or (rollback and status == "success"):
-        restore_point = cfg.get("ledger_restore_point")
-        if not restore_point:
-            restore_point = pathlib.Path(cfg.get("backup_dir", "不明")).name.split("-from-", 1)[0]
+    if cfg.get("ledger_restored_at"):
         lines.append(
-            f"ジョブ台帳: 退避時点（{field(restore_point)}）へ巻き戻しました。"
+            f"ジョブ台帳: 退避時点（{field(cfg['ledger_restored_at'])}）へ巻き戻しました。"
             "これ以降のジョブ記録は失われ、退避時に走行中だった行が running として復活します。"
         )
         lines.append(
@@ -260,7 +257,15 @@ def restore(cfg):
     # operator; the next upgrade's forced reinstall reconciles it.
     stop(cfg["service"])
     shutil.copy2(pathlib.Path(cfg["backup_dir"]) / "semaphore.bin", cfg["binary"])
-    shutil.copy2(pathlib.Path(cfg["backup_dir"]) / "semaphore-final.db", cfg["db"])
+    saved_db = pathlib.Path(cfg["backup_dir"]) / "semaphore-final.db"
+    saved_db_mtime = saved_db.stat().st_mtime
+    shutil.copy2(saved_db, cfg["db"])
+    # Record the snapshot timestamp from the file that was actually restored.
+    # Do this immediately after the copy so later recovery errors cannot hide a
+    # ledger rewind that has already happened.
+    cfg["ledger_restored_at"] = datetime.fromtimestamp(
+        saved_db_mtime, timezone(timedelta(hours=9))
+    ).isoformat(timespec="seconds")
     os.chown(cfg["db"], int(cfg["db_uid"]), int(cfg["db_gid"]))
     os.chmod(cfg["db"], int(cfg["db_mode"], 8))
     start_and_verify(
