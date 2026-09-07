@@ -43,7 +43,18 @@ Yoshinobuとの対話窓口として要求と判断材料を整え、自ら実�
 - **agmsg経由で起動する役** — `spawn.sh --model` と、型ごとの `spawn_options.yaml`
 - **Claude Code subagentとして起動する場合** — 下表の値を `subagent_type` の指定で効かせる(**subagentは指定しなければ親のモデルを継承する**)
 
-下表は最後の経路の値であり、`.claude/agents/*.md` の frontmatter と対で維持する。
+現在のagmsg配分では次を既定とする。**modelを省略せず、`spawn.sh --model`へこの表の値を渡す。**
+
+| Role | 現在のCLI | 起動時指定 | 既定段 |
+|---|---|---|---|
+| Implementer | Codex | `gpt-5.6-luna` | medium |
+| Reviewer | Claude Code | `sonnet` | medium |
+| Tester | Claude Code | `sonnet` | medium |
+| Auditor | Claude Code | `sonnet` | medium |
+
+Implementerは、複数role、複雑なcheck mode、rollback、shell / Pythonを含む場合にhighへ引き上げる。Testerをlowにできるのは、**実ホストへ到達せず、期待値と手順が完全に固定されたローカル検査で、起動時に明示した場合だけ**である。現在値と理由は`docs/ai/adr/012-role-model-effort-defaults.md`が正本で、CLI分離の理由はADR-011が持つ。
+
+下表はClaude Code subagent経路の値であり、`.claude/agents/*.md` の frontmatter と対で維持する。
 
 | Role | model | effort |
 |---|---|---|

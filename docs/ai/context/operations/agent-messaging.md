@@ -51,10 +51,11 @@ Tester と Auditor は必要になった時点で join する。**`claude` は C
 ## 4. spawn と despawn
 
 ```bash
-spawn.sh codex <name> --team <team> --split h --fresh --boot-prompt "<起動指示>"
+spawn.sh codex <name> --team <team> --split h --fresh --model <Roleのmodel> --boot-prompt "<起動指示>"
 despawn.sh <team> <from> <name> [--force]
 ```
 
+- **`--model`を省略しない。** 現在値とeffortの例外条件は`docs/ai/roles/coordinator.md`「モデル・effort配分」を参照する
 - **`--boot-prompt` に依頼文を載せない**(§6)。置くのは「agmsg で依頼が届くまで待て」という起動指示だけである
 - **`--fresh` を省くと、記録済みスレッドを `resume` する。** 古い transcript を再生した状態でプロンプトに止まり、新しい boot prompt は実行されない
 - codex には spawn の readiness handshake が無く、`--no-wait` が常に暗黙に効く

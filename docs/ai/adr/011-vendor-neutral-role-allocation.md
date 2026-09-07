@@ -38,7 +38,7 @@ ADR-010の決定は、次の2点で成立しなくなる。
 
 - **割り当ての軸を「作る側 / 検める側」にする。** Coordinatorが載っているCLIが作る側、もう一方が検める側になる。**製品名で決めない。**
 - **Coordinatorのeffortを最も低い段へ置かない**(Yoshinobu決定、2026-09-06)。
-- 現在の値(Yoshinobu決定、2026-09-06)。
+- 決定時点の値(Yoshinobu決定、2026-09-06)。**現在のImplementer / Reviewer / Tester / Auditorのmodel / effort値はADR-012が該当行をsupersedeする。**
 
 | Role | 側 | CLI | モデル | 段 |
 |---|---|---|---|---|
