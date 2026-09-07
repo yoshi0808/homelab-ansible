@@ -1,8 +1,9 @@
 ---
 # semaphore_db_backup role defaults.
-# quory の Semaphore を3点セット(semaphore.db / projects export JSON /
-# config.json)で1世代として Synology NFS へ退避する。
-# 詳細は docs/ai/reviews/semaphore_db_backup/2026-08-17_001_requirement.md。
+# quory の Semaphore を2点セット(project backup API JSON / config.json)で
+# 1世代として Synology NFS へ退避する。
+# 詳細は docs/ai/reviews/semaphore_db_backup/
+# 2026-09-07_011_requirement_api_backup.md。
 # 2026-08-17差し戻し対応(独立レビュー`2026-08-17_003_review.md` Critical
 # #1〜#3)は `docs/ai/reviews/semaphore_db_backup/2026-08-17_002_implement.md`
 # を参照。
@@ -11,23 +12,15 @@
 # playが対象とするhost(選定済みpveノード)とは別に `delegate_to: quory` で扱う。
 #
 # **これらはextra-vars等で変更してよい値ではない。** tasks/main.yml
-# Phase 0.2がこの既定値そのものと厳密一致することを確認してから使う
-# (Critical #2、2026-08-18 round2差し戻し対応 — round1はbinary pathの2つ
-# しか検査しておらず、`semaphore_db_backup_config_path`を任意の
-# root-readableファイルへ向けると、その内容を"config.json"の名でNFSへ
-# 搬出できてしまう抜け穴が残っていた)。
-semaphore_db_backup_db_path: /var/lib/semaphore/semaphore.db
+# Phase 0.2がこの既定値そのものと厳密一致することを確認してから使う。
+# config_pathを任意のroot-readableファイルへ差し替えた搬出や、API/token
+# pathの差し替えを防ぐためである。
 semaphore_db_backup_config_path: /etc/semaphore/config.json
-semaphore_db_backup_sqlite_bin: /usr/bin/sqlite3
-semaphore_db_backup_semaphore_bin: /usr/bin/semaphore
+semaphore_db_backup_api_url: https://quory.internal:3000/api
+semaphore_db_backup_api_token_path: /etc/homelab-recovery/semaphore-query-token
 
-# `semaphore projects export --project-name <name> --file <path>` に渡す
-# project名。IDはインスタンスごとに異なる(ansy=2 / quory=1、
-# docs/ai/context/system/semaphore.md)ため、IDではなく名前で指定する。
-# quoryのproject名がこの既定値と一致するかは未確認
-# (roles/semaphore_templates/defaults/main.yml の
-# semaphore_templates_project_name と同じ前提に揃えた、同ファイルのコメント
-# 参照)。誤っていれば export task がエラーで停止し、推測で先には進まない。
+# `GET /api/projects`で解決するproject名。IDはインスタンスごとに異なり、
+# 同じhostでも変わりうるため固定しない。
 semaphore_db_backup_project_name: homelab-ansible
 
 # **quory側の作業ディレクトリと、controller側の一時受け渡し先は、ここでは

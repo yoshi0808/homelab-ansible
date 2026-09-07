@@ -1,10 +1,8 @@
 ---
 # semaphore_db_backup.yml - quory の Semaphore(制御平面)を定期的に退避する。
-# 変更系: quory上でDBスナップショット(sqlite3 .backup)・projects export・
-#         config.jsonコピーを作り、選定されたpveノードがSynology NFSへ原子的に
-#         確定・世代ローテーションする。quoryの稼働中サービスへの変更は行わない
-#         (semaphore.dbは.backupで読み取るのみ、config.jsonはremote_srcコピーの
-#         み)。
+# 変更系: quory上で公式REST APIのproject backup JSONとconfig.jsonコピーを
+#         作り、選定されたpveノードがSynology NFSへ原子的に確定・世代
+#         ローテーションする。quoryの稼働中サービスへの変更は行わない。
 #
 # 対象: 実行ノードは共通role roles/proxmox_exec_node で選定する(pve1優先、
 #       到達不能ならpve2にフェイルオーバー。どちらもSynology NFSマウントを持つ
@@ -12,7 +10,8 @@
 #       `delegate_to: quory` で行う。
 # 実行元: quoryのSemaphore(quoryがVMでないためProxmoxのバックアップに乗らない。
 #       ansyからquoryへは到達手段が無い)。
-# 詳細は docs/ai/reviews/semaphore_db_backup/2026-08-17_001_requirement.md。
+# 詳細は docs/ai/reviews/semaphore_db_backup/
+# 2026-09-07_011_requirement_api_backup.md。
 #
 # 通知: 結果をSlackへ通知する(退避・確定 OK = info/ok、失敗 = alerts/error)。
 #       pve1/pve2が両方到達不能で実行ノードを選定できなかった場合も
@@ -21,14 +20,13 @@
 # tester-gate: risk-accepted — この playbook に dry-run 区分はない。--check
 # を渡すと pre_tasks の停止 assert により変更を一切行わずに停止する。
 # --check なしの通常実行では常に本実行する。
-# tester-gate-condition2: sqlite3 .backupによるスナップショット取得・
-# semaphore projects export・NFSへの原子的確定・世代ローテーションという一連の
+# tester-gate-condition2: API取得・NFSへの原子的確定・世代ローテーションという一連の
 # 非冪等操作そのものが検証対象であり、それを省いた検証には意味がない
 # (unifi_backup_fetch / proxmox_backup_restore_verifyと同じ理由)。
 # 理由: 退避先はこのplaybook専用のディレクトリに閉じ、既存の管理対象VM・
-# サービスには一切触れない(semaphore.dbはsqlite3 .backupで読み取るのみ、
-# config.jsonはremote_srcコピーのみで、quoryの稼働中Semaphoreサービスを
-# stop/restartしない)。最悪ケースは退避先ディレクトリの世代1件分の書き損じ、
+# サービスには一切触れない(API GETとconfig.jsonのremote_srcコピーのみで、
+# quoryの稼働中Semaphoreサービスをstop/restartしない)。最悪ケースは
+# 退避先ディレクトリの世代1件分の書き損じ、
 # または(keep_generationsの設定次第で)このディレクトリ内の古い世代が
 # 意図した保持数まで削除されることに留まる。
 #
@@ -206,7 +204,7 @@
     # 失敗として扱われ、この下の「Build success summary」には到達せず
     # rescueへ入る — 「backup本体は成功したがcleanupに失敗した」状態が
     # info/okとして通知されることはない。
-    - name: Back up quory Semaphore (DB + export + config) to Synology NFS
+    - name: Back up quory Semaphore (project API JSON + config) to Synology NFS
       check_mode: false
       block:
         # round6 High #1: 明示setup。これがblock内の最初のtaskであるため、
@@ -240,7 +238,9 @@
               dest: {{ semaphore_db_backup_dest_dir | default('n/a') }}
               result: generation created
               generation: {{ semaphore_db_backup_generation_name | default('n/a') }}
-              files: semaphore.db, semaphore_projects_export.json, config.json
+              files: semaphore_project_backup.json, config.json
+              templates: {{ semaphore_db_backup_template_count | default('n/a') }}
+              schedules: {{ semaphore_db_backup_schedule_count | default('n/a') }}
               kept generations: {{ semaphore_db_backup_kept | default('n/a') }}
               deleted generations: {{ semaphore_db_backup_deleted_summary | default('none') }}
 

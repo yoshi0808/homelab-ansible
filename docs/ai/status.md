@@ -11,6 +11,13 @@
 
 ## Now(進行中)
 
+**Semaphore日次backupのAPI移行はrepo実装・ローカル検証まで完了し、配備判断待ち
+(2026-09-07)** — SQLite直接backupをやめ、公式project backup API JSONと参考用
+`config.json`の2点を原子的に保存する。requirement、実装内容、未実施項目は
+`docs/ai/reviews/semaphore_db_backup/2026-09-07_011_requirement_api_backup.md`と
+`2026-09-07_012_implement_api_backup.md`が正本。次はcommit/push承認後、既存の
+12:00 scheduleまたは明示的な手動実行で、実token/API/NFS/Slackを確認する。
+
 **Codex 更新後に Coordinator の monitor 起動を確認する(2026-09-06)** — Coordinator の Codex 移行と、`homelab` / `homelab-ops` 両teamの identity統一は完了した。残るのは更新後の新規セッションでの起動確認である。
 
 現セッションで Codex monitor wrapper は、app-server がlisten portを返さなかったためplain Codexへfallbackした。`delivery.sh status codex <project>` では `homelab/coordinator` と `homelab-ops/coordinator` の両方が `has no session recorded`、`homelab/implementer` は stale pidfile と表示された。Yoshinobuが本セッションを終了し、Codexを更新してから再起動する。

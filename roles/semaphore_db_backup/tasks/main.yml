@@ -1,12 +1,11 @@
 ---
-# semaphore_db_backup role: quory の Semaphore を3点セット(semaphore.db /
-# projects export JSON / config.json)で1世代として Synology NFS へ退避する。
+# semaphore_db_backup role: quory の Semaphore を2点セット(project backup
+# API JSON / config.json)で1世代として Synology NFS へ退避する。
 #
 # 呼び出し規約: このroleは、選定済みのpve実行ノード(roles/proxmox_exec_node が
 # semaphore_db_backup_target グループへ登録した1ホスト)を hosts: に持つplayから
-# include_role すること。quory側の処理(DBスナップショット・export・config.json
-# 取得)はこのrole内で `delegate_to: quory` を使って行う — quory は常に固定の
-# inventoryホスト名であり、呼び出し元playの対象host集合には含めない。
+# include_role すること。quory側の処理(API取得・config.json取得)はこのrole内で
+# `delegate_to: quory` を使って行う。
 #
 # ライフサイクル:
 #   Phase 0   予約変数の事前定義を拒否し(Critical #1)、固定入力の健全性を
@@ -14,22 +13,15 @@
 #             保存先pathがこのrole専用の固定サブパスと一致することを検証
 #             する。**quoryへのdelegate_toを一切伴わない**ため、実ホストに
 #             触れないnegative fixtureで検証できる。
-#   Phase 1   前提確認(sqlite3の存在 R8/AC5、NFSマウントの実在かつ実体が
-#             NFSであること R3/AC6/Critical #2)。ここから先はquoryまたは
-#             選定pveノードへの実接続を伴う
-#   Phase 2-6 quory上でDBスナップショット・export・config.jsonコピーを作り、
+#   Phase 1   API tokenの存在とNFSマウントの実在・FSTYPEを確認する。
+#   Phase 2-6 quory上でAPI JSONとconfig.jsonコピーを作り、
 #             コントローラ経由で選定pveノードのSynology NFSへ原子的に確定・
 #             世代ローテーションする。**この一連は1つのblockに包み、
 #             blockのalwaysだけがtempfileで実際に作られた3つの一時
 #             ディレクトリを削除する(Critical #1、詳細は後述のコメント)**
 #
-# 秘密情報の扱い(R5): config.jsonの内容はいかなるtaskの出力・変数にも
-# 平文で載せない設計にしている — slurp(base64をvarへ載せる)ではなく
-# fetch/copyだけを使い、ファイルの中身をAnsibleの変数として一度も経由させない。
-# config.jsonを扱うtaskにはno_logも重ねて付ける(多層防御)。**ただし
-# `fetch`は`become`使用時、対象ホスト側の実装が内容を一度メモリ上で扱う
-# (slurp相当)。この一文は「変数として恒久的に保持・表示しない」という
-# 保証であって、「一切のメモリ経由が無い」という意味ではない。**
+# 秘密情報の扱い(R4/R5): API tokenとAPI responseを`no_log`で覆う。
+# config.jsonはfetch/copyだけで運び、内容をtask出力へ載せない。
 #
 # 予約変数(Critical #1、2026-08-17差し戻し対応): 以下はこのrole内部だけで
 # 計算し、破壊的なfile操作へ直結する。Ansibleのextra-vars(`-e`)は
@@ -43,66 +35,10 @@
 # 対応 — 固定sentinel文字列との値比較では、外部値がsentinelそのものと
 # 一致する場合に事前定義を見逃す、round2 Suggestion #1)。
 #
-# 2026-08-18 round2差し戻し対応の要点(詳細は実装記録):
-#   - Critical #1: 予約変数preflightを強めても、cleanupが変数の値を
-#     信用する限り同じ穴が再生産される(preflightが拒否した外部値を、
-#     呼び出し元playbookのalwaysがそのまま削除していた)。今回は
-#     Phase 2-6を1つのblockへ包み、そのblockのalwaysだけがcleanupを行う
-#     構造にした — このblockはPhase 0(予約変数preflightを含む)が
-#     成功した後でなければ開始されないため、cleanup taskが参照する
-#     `semaphore_db_backup_*_raw`は、その時点で「Phase 0.1を通過した後に
-#     このrole自身のtempfile taskが書いた値」以外ではあり得ない
-#     (validationの強さではなく、到達可能性そのもので閉じる)。
-#   - Critical #2: 既定値と厳密一致で照合する対象に
-#     `semaphore_db_backup_db_path` / `config_path` / `nfs_mount_path`を
-#     追加(Phase 0.2)。ただしmountについては厳密一致だけでは、
-#     `nfs_mount_path`を`/`のような実在の非NFSマウント点へ向けられた場合に
-#     `findmnt -T /`が「マウントされている」で通ってしまう抜け穴が残るため、
-#     Phase 1のfindmntにFSTYPE確認を追加した。
-#   - High #3: controller側のtempfileがPlay 2の`become: true`を継承し、
-#     rootだけがアクセスできるdirectoryを作っていた。`fetch`のcontroller
-#     側書き込みはansible-playbook process自身(通常は非root)が行うため、
-#     このままでは通常経路でfetchがpermission deniedになる。Phase 3.1と
-#     controller cleanupを明示的に`become: false`にした。
-#
-# 2026-08-18 round4差し戻し対応の要点(詳細は実装記録): round3で追加した
-# cleanupの`ignore_errors: true`は、UNREACHABLE(接続断)には効かない
-# (Ansible公式仕様。`ignore_errors`はtaskが実行されて`failed`を返す場合
-# だけに効く別物で、connection failureには`ignore_unreachable`が要る)。
-# さらにblockはunreachable hostに対して`rescue`/`always`を起動しない
-# ため、`delegate_to: quory`を持つtask(Phase 1のsqlite3確認、Phase 2の
-# quory作業、Phase 3のfetch、cleanupのquory work dir削除)のいずれかで
-# quoryが単にUNREACHABLEになっただけでも、対処前は「cleanupが動かない」
-# 「呼び出し元playbookのrescue(R6のalerts/error通知)が動かない」という、
-# この案件で最も避けたい「黙って失敗する」状態になっていた。対処は
-# `delegate_to: quory`を持つ全taskへ`ignore_unreachable: true`を足し
-# (host自体を殺させない)、直後(または各Phaseの末尾)でPhase 0.1と同じ
-# loop形式のassertにより`is unreachable`を明示的に検査して通常の失敗へ
-# 変換する、という2属性の組み合わせのみで対処した — 新しいblock/rescue
-# 構造は増やしていない。
-#
-# 2026-08-18 round5差し戻し対応の要点(詳細は実装記録):
-#   - High #1(round4対応の適用漏れ): Phase 2.1のtempfileだけ、直後の
-#     Phase 2.2が`.path`を参照するため、Phase 2末尾の集約assertへ
-#     到達する前に未定義属性エラーで落ちていた(round4のnegative matrix
-#     も「tempfile成功後の後続task」しか注入しておらず、tempfile自身の
-#     UNREACHABLEを検証できていなかった)。Phase 1のstatと同じ形
-#     (`.path`参照の直前に専用assert)をPhase 2.1・Phase 3.1・Phase 4.1・
-#     Phase 6の`find`(直後の`.files`参照)にも同じ形で当てた。
-#   - High #2(pve実行ノード喪失は「controllerが落ちるので対処不可」では
-#     ない): Ansibleのcontrollerはquory上のSemaphore processであり、
-#     `hosts: semaphore_db_backup_target`が指すpveノードはあくまで
-#     remote targetである。pveがUNREACHABLEになってもcontroller
-#     (quory)自身は生きているため、quory delegateに対して行ったのと
-#     同じ方式(`ignore_unreachable` + 明示的な`is unreachable`検査)が
-#     そのまま使える。この因果を取り違えて「残存リスクとしてTesterへ
-#     渡す」と判定したのは誤りだった。対処: `ignore_unreachable: true`
-#     をplay自身(`playbooks/semaphore_db_backup.yml`)へ設定して
-#     `gather_facts`を含む全taskへ継承させ、Phase 1のfindmnt・Phase 4の
-#     各task・Phase 5のrename・Phase 6のrotation・staging cleanupの
-#     結果を、quory側と同じ形の専用/集約assertで検査する。pve側
-#     stagingを実際に消せない場合でも、その残存pathはcleanup末尾assertの
-#     `fail_msg`(既存)に載るため、failure通知から読める。
+# Phase 2-6は1つのblockに包み、そのblock内のtempfile taskが実際に
+# 作成したpathだけをalwaysでcleanupする。delegate先のUNREACHABLEは
+# `ignore_unreachable`でhost死亡を防いだうえで、直後またはphase末尾の
+# assertにより通常failureへ変換し、cleanupと失敗通知へ必ず到達させる。
 
 
 - name: "Phase 0.1 - Reject external predefinition of internal-only computed variables (Critical #1)"
@@ -124,9 +60,16 @@
     - semaphore_db_backup_quory_work_dir_raw
     - semaphore_db_backup_controller_tmp_dir_raw
     - semaphore_db_backup_staging_dir_raw
-    - semaphore_db_backup_sqlite_stat
+    - semaphore_db_backup_token_stat
+    - semaphore_db_backup_token_raw
+    - semaphore_db_backup_token
+    - semaphore_db_backup_projects_api
+    - semaphore_db_backup_project_matches
+    - semaphore_db_backup_project_id
+    - semaphore_db_backup_project_backup_api
+    - semaphore_db_backup_template_count
+    - semaphore_db_backup_schedule_count
     - semaphore_db_backup_findmnt
-    - semaphore_db_backup_integrity
     - semaphore_db_backup_existing
     - semaphore_db_backup_sorted
     - semaphore_db_backup_delete_targets
@@ -136,16 +79,12 @@
     - semaphore_db_backup_cleanup_quory
     - semaphore_db_backup_cleanup_controller
     - semaphore_db_backup_cleanup_staging
-    - semaphore_db_backup_backup_cmd
-    - semaphore_db_backup_export_cmd
     - semaphore_db_backup_config_copy
-    - semaphore_db_backup_fetch_db
-    - semaphore_db_backup_fetch_export
+    - semaphore_db_backup_fetch_project_backup
     - semaphore_db_backup_fetch_config
     - semaphore_db_backup_dest_dir_ensure
     - semaphore_db_backup_staging_perms
-    - semaphore_db_backup_place_db
-    - semaphore_db_backup_place_export
+    - semaphore_db_backup_place_project_backup
     - semaphore_db_backup_place_config
     - semaphore_db_backup_commit_result
     - semaphore_db_backup_rotation_delete
@@ -153,17 +92,17 @@
 - name: "Phase 0.2 - Confirm the fixed inputs this role trusts have not drifted from expected constants (Critical #2)"
   ansible.builtin.assert:
     that:
-      - semaphore_db_backup_sqlite_bin == '/usr/bin/sqlite3'
-      - semaphore_db_backup_semaphore_bin == '/usr/bin/semaphore'
-      - semaphore_db_backup_db_path == '/var/lib/semaphore/semaphore.db'
+      - semaphore_db_backup_api_url == 'https://quory.internal:3000/api'
+      - semaphore_db_backup_api_token_path == '/etc/homelab-recovery/semaphore-query-token'
+      - semaphore_db_backup_project_name == 'homelab-ansible'
       - semaphore_db_backup_config_path == '/etc/semaphore/config.json'
       - semaphore_db_backup_nfs_mount_path == '/mnt/pve/Synology-nfs'
       - (semaphore_db_backup_keep_generations | int) >= 1
     fail_msg: >-
       One or more configuration values do not match the constants this role
       trusts for root-level command execution and destructive file
-      operations (sqlite3/semaphore binary paths, semaphore.db/config.json
-      source paths, and the NFS mount point must all be exactly the expected
+      operations (Semaphore API URL/token/project, config.json source path,
+      and the NFS mount point must all be exactly the expected
       installation values; keep_generations must be >= 1 — 0 or negative
       would delete the generation this run just committed). Pointing
       config_path at an arbitrary root-readable file, for example, would let
@@ -221,32 +160,33 @@
 # ここから先はquoryへの delegate_to(実ホスト到達)を伴う。Phase 0までの
 # 純粋な入力検証は、実ホストが1台も無い状態でも成立する。
 
-- name: Phase 1 - Check sqlite3 is present on quory
+- name: Phase 1 - Check the read-only Semaphore API token is present on quory
   ansible.builtin.stat:
-    path: "{{ semaphore_db_backup_sqlite_bin }}"
-  register: semaphore_db_backup_sqlite_stat
+    path: "{{ semaphore_db_backup_api_token_path }}"
+  register: semaphore_db_backup_token_stat
   delegate_to: quory
   become: true
   ignore_unreachable: true
+  no_log: true
 
 - name: "Phase 1 - Stop if quory is unreachable (R6/Critical #1 round4 — see header)"
   ansible.builtin.assert:
-    that: not (semaphore_db_backup_sqlite_stat is unreachable)
+    that: not (semaphore_db_backup_token_stat is unreachable)
     fail_msg: >-
-      quory was unreachable while checking for sqlite3. This run creates no
+      quory was unreachable while checking for the Semaphore API token. This run creates no
       backup. (R6: a connection failure must still reach cleanup and the
       alerts/error Slack notification, not fail silently.)
     quiet: true
 
-- name: Phase 1 - Stop if sqlite3 is missing on quory (R8/AC5)
+- name: Phase 1 - Stop if the Semaphore API token is missing or empty (R4/AC3)
   ansible.builtin.assert:
-    that: semaphore_db_backup_sqlite_stat.stat.exists
+    that:
+      - semaphore_db_backup_token_stat.stat.exists
+      - semaphore_db_backup_token_stat.stat.isreg
+      - (semaphore_db_backup_token_stat.stat.size | int) > 0
     fail_msg: >-
-      sqlite3 ({{ semaphore_db_backup_sqlite_bin }}) is not present on quory.
-      A consistent snapshot of semaphore.db requires "sqlite3 <db> .backup"
-      because journal_mode is delete (not WAL): a plain copy of a live
-      database can capture a mid-write, inconsistent state. This run creates
-      no backup (R1/R2/R8).
+      The read-only Semaphore API token file is missing, empty, or not a
+      regular file on quory. This run creates no backup (R4/AC3).
     quiet: true
 
 - name: Phase 1 - Locate the Synology NFS mount without mounting it
@@ -302,7 +242,7 @@
 # 「固めずに減らす」方向)。tempfile task自体が失敗していれば対応する
 # `*_raw`は未定義のままなので、`is defined`は「作られなかった」を正しく
 # 表す。
-- name: "Back up the 3-file generation to Synology NFS (Critical #1 - cleanup is scoped to what this block actually created)"
+- name: "Back up the 2-file generation to Synology NFS (cleanup is scoped to what this block actually created)"
   block:
     # ---- Phase 2: quory上でスナップショットを作る ----
     # 作業ディレクトリは`tempfile`(Python `tempfile.mkdtemp()`相当)でrun
@@ -338,57 +278,159 @@
       ansible.builtin.set_fact:
         semaphore_db_backup_quory_work_dir: "{{ semaphore_db_backup_quory_work_dir_raw.path }}"
 
-    - name: Phase 2 - Take a consistent snapshot of semaphore.db (sqlite3 .backup)
-      ansible.builtin.command:
-        argv:
-          - "{{ semaphore_db_backup_sqlite_bin }}"
-          - -readonly
-          - "{{ semaphore_db_backup_db_path }}"
-          - ".backup {{ semaphore_db_backup_quory_work_dir }}/semaphore.db"
-      register: semaphore_db_backup_backup_cmd
+    - name: Phase 2 - Read the dedicated read-only Semaphore API token
+      ansible.builtin.slurp:
+        src: "{{ semaphore_db_backup_api_token_path }}"
+      register: semaphore_db_backup_token_raw
       delegate_to: quory
       become: true
       ignore_unreachable: true
-      changed_when: true
+      failed_when: false
+      no_log: true
 
-    - name: Phase 2 - Verify the snapshot passes PRAGMA integrity_check (AC4)
-      ansible.builtin.command:
-        argv:
-          - "{{ semaphore_db_backup_sqlite_bin }}"
-          - -readonly
-          - "{{ semaphore_db_backup_quory_work_dir }}/semaphore.db"
-          - "PRAGMA integrity_check;"
-      register: semaphore_db_backup_integrity
-      delegate_to: quory
-      become: true
-      ignore_unreachable: true
-      changed_when: false
-
-    - name: Phase 2 - Assert the snapshot is a usable, consistent database (AC4)
+    - name: Phase 2 - Stop if quory is unreachable while reading the API token
       ansible.builtin.assert:
-        that: (semaphore_db_backup_integrity.stdout | default('') | trim) == 'ok'
+        that:
+          - not (semaphore_db_backup_token_raw is unreachable)
+          - not (semaphore_db_backup_token_raw is failed)
+          - semaphore_db_backup_token_raw.content is defined
         fail_msg: >-
-          PRAGMA integrity_check on the sqlite3 .backup snapshot did not
-          return 'ok' (got:
-          '{{ semaphore_db_backup_integrity.stdout | default('') | trim }}').
-          Treating the snapshot as unusable; this run creates no backup.
+          The Semaphore API token could not be read on quory. This run creates
+          no backup and must be reported as a failure.
         quiet: true
 
-    - name: Phase 2 - Export Semaphore project (templates/schedules/inventories/...)
-      ansible.builtin.command:
-        argv:
-          - "{{ semaphore_db_backup_semaphore_bin }}"
-          - projects
-          - export
-          - "--project-name"
-          - "{{ semaphore_db_backup_project_name }}"
-          - "--file"
-          - "{{ semaphore_db_backup_quory_work_dir }}/semaphore_projects_export.json"
-      register: semaphore_db_backup_export_cmd
+    - name: Phase 2 - Decode the Semaphore API token for this run only
+      ansible.builtin.set_fact:
+        semaphore_db_backup_token: "{{ semaphore_db_backup_token_raw.content | b64decode | trim }}"
+      no_log: true
+
+    - name: Phase 2 - Require a non-empty decoded Semaphore API token
+      ansible.builtin.assert:
+        that: (semaphore_db_backup_token | length) > 0
+        fail_msg: The Semaphore API token decoded to an empty value. This run creates no backup.
+        quiet: true
+      no_log: true
+
+    - name: Phase 2 - List projects through the supported Semaphore REST API
+      ansible.builtin.uri:
+        url: "{{ semaphore_db_backup_api_url }}/projects"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ semaphore_db_backup_token }}"
+          Accept: application/json
+        status_code: 200
+        validate_certs: true
+      register: semaphore_db_backup_projects_api
       delegate_to: quory
       become: true
       ignore_unreachable: true
-      changed_when: true
+      failed_when: false
+      no_log: true
+
+    - name: Phase 2 - Stop if quory is unreachable while listing projects
+      ansible.builtin.assert:
+        that: not (semaphore_db_backup_projects_api is unreachable)
+        fail_msg: >-
+          quory was unreachable while listing Semaphore projects. This run
+          creates no backup and must be reported as a failure.
+        quiet: true
+
+    - name: Phase 2 - Require the projects API request to succeed (R1/AC3)
+      ansible.builtin.assert:
+        that: (semaphore_db_backup_projects_api.status | default(-1) | int) == 200
+        fail_msg: >-
+          The Semaphore projects API request failed (HTTP status
+          {{ semaphore_db_backup_projects_api.status | default('unavailable') }}).
+          This run creates no backup.
+        quiet: true
+
+    - name: Phase 2 - Require the projects endpoint to return a JSON array
+      ansible.builtin.assert:
+        that: (semaphore_db_backup_projects_api.json | type_debug) == 'list'
+        fail_msg: The Semaphore projects endpoint did not return a JSON array. This run creates no backup.
+        quiet: true
+
+    - name: Phase 2 - Select the configured project by name
+      ansible.builtin.set_fact:
+        semaphore_db_backup_project_matches: >-
+          {{ semaphore_db_backup_projects_api.json
+             | selectattr('name', 'defined')
+             | selectattr('name', 'equalto', semaphore_db_backup_project_name)
+             | list }}
+      no_log: true
+
+    - name: Phase 2 - Require exactly one matching Semaphore project (R1/AC3)
+      ansible.builtin.assert:
+        that: (semaphore_db_backup_project_matches | length) == 1
+        fail_msg: >-
+          The configured Semaphore project name did not resolve to exactly
+          one project. This run creates no backup.
+        quiet: true
+
+    - name: Phase 2 - Require the resolved project id to be an integer
+      ansible.builtin.assert:
+        that:
+          - semaphore_db_backup_project_matches[0].id is defined
+          - (semaphore_db_backup_project_matches[0].id | type_debug) == 'int'
+        fail_msg: The resolved Semaphore project id is not an integer. This run creates no backup.
+        quiet: true
+
+    - name: Phase 2 - Record the resolved project id
+      ansible.builtin.set_fact:
+        semaphore_db_backup_project_id: "{{ semaphore_db_backup_project_matches[0].id }}"
+      no_log: true
+
+    - name: Phase 2 - Download the official project backup JSON (R2)
+      ansible.builtin.uri:
+        url: "{{ semaphore_db_backup_api_url }}/project/{{ semaphore_db_backup_project_id }}/backup"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ semaphore_db_backup_token }}"
+          Accept: application/json
+        dest: "{{ semaphore_db_backup_quory_work_dir }}/semaphore_project_backup.json"
+        owner: root
+        mode: "0600"
+        status_code: 200
+        validate_certs: true
+      register: semaphore_db_backup_project_backup_api
+      delegate_to: quory
+      become: true
+      ignore_unreachable: true
+      failed_when: false
+      no_log: true
+
+    - name: Phase 2 - Stop if quory is unreachable while downloading the project backup
+      ansible.builtin.assert:
+        that: not (semaphore_db_backup_project_backup_api is unreachable)
+        fail_msg: >-
+          quory was unreachable while downloading the Semaphore project
+          backup. This run creates no backup and must be reported as a failure.
+        quiet: true
+
+    - name: Phase 2 - Require the project backup API request to succeed (R2/AC3)
+      ansible.builtin.assert:
+        that: (semaphore_db_backup_project_backup_api.status | default(-1) | int) == 200
+        fail_msg: >-
+          The Semaphore project backup API request failed (HTTP status
+          {{ semaphore_db_backup_project_backup_api.status | default('unavailable') }}).
+          This run creates no backup.
+        quiet: true
+
+    - name: Phase 2 - Validate the backup contains template and schedule arrays (R3/AC2)
+      ansible.builtin.assert:
+        that:
+          - (semaphore_db_backup_project_backup_api.json | type_debug) == 'dict'
+          - (semaphore_db_backup_project_backup_api.json.templates | default(none) | type_debug) == 'list'
+          - (semaphore_db_backup_project_backup_api.json.schedules | default(none) | type_debug) == 'list'
+        fail_msg: >-
+          The Semaphore project backup is not a JSON object containing
+          templates and schedules arrays. This run creates no backup.
+        quiet: true
+
+    - name: Phase 2 - Record non-sensitive project backup counts for notification
+      ansible.builtin.set_fact:
+        semaphore_db_backup_template_count: "{{ semaphore_db_backup_project_backup_api.json.templates | length }}"
+        semaphore_db_backup_schedule_count: "{{ semaphore_db_backup_project_backup_api.json.schedules | length }}"
 
     - name: Phase 2 - Snapshot config.json (content never leaves the file system as a variable)
       ansible.builtin.copy:
@@ -411,7 +453,7 @@
     # するため、ここで明示的に`unreachable`を検査して通常の失敗へ変換しない
     # 限り、cleanupは動いてもrun全体は成功したまま(=呼び出し元playbookの
     # rescue/alerts通知に届かない)になる。Phase 0.1と同じloop形式で、
-    # Phase 2の5つのtask結果をまとめて検査する。
+    # Phase 2のremote task結果をまとめて検査する。
     - name: "Phase 2 - Stop if quory became unreachable during this phase (R6/round4)"
       ansible.builtin.assert:
         that: not (lookup('vars', item) is unreachable)
@@ -423,9 +465,9 @@
         quiet: true
       loop:
         - semaphore_db_backup_quory_work_dir_raw
-        - semaphore_db_backup_backup_cmd
-        - semaphore_db_backup_integrity
-        - semaphore_db_backup_export_cmd
+        - semaphore_db_backup_token_raw
+        - semaphore_db_backup_projects_api
+        - semaphore_db_backup_project_backup_api
         - semaphore_db_backup_config_copy
 
     # ---- Phase 3: quoryからコントローラへ引き上げる ----
@@ -470,22 +512,12 @@
       ansible.builtin.set_fact:
         semaphore_db_backup_controller_tmp_dir: "{{ semaphore_db_backup_controller_tmp_dir_raw.path }}"
 
-    - name: Phase 3 - Fetch semaphore.db snapshot to the controller
+    - name: Phase 3 - Fetch project backup JSON to the controller
       ansible.builtin.fetch:
-        src: "{{ semaphore_db_backup_quory_work_dir }}/semaphore.db"
-        dest: "{{ semaphore_db_backup_controller_tmp_dir }}/semaphore.db"
+        src: "{{ semaphore_db_backup_quory_work_dir }}/semaphore_project_backup.json"
+        dest: "{{ semaphore_db_backup_controller_tmp_dir }}/semaphore_project_backup.json"
         flat: true
-      register: semaphore_db_backup_fetch_db
-      delegate_to: quory
-      become: true
-      ignore_unreachable: true
-
-    - name: Phase 3 - Fetch projects export JSON to the controller
-      ansible.builtin.fetch:
-        src: "{{ semaphore_db_backup_quory_work_dir }}/semaphore_projects_export.json"
-        dest: "{{ semaphore_db_backup_controller_tmp_dir }}/semaphore_projects_export.json"
-        flat: true
-      register: semaphore_db_backup_fetch_export
+      register: semaphore_db_backup_fetch_project_backup
       delegate_to: quory
       become: true
       ignore_unreachable: true
@@ -514,8 +546,7 @@
           silently.)
         quiet: true
       loop:
-        - semaphore_db_backup_fetch_db
-        - semaphore_db_backup_fetch_export
+        - semaphore_db_backup_fetch_project_backup
         - semaphore_db_backup_fetch_config
 
     # ---- Phase 4: pveノードのステージングディレクトリへ置く ----
@@ -572,21 +603,13 @@
         mode: "0700"
       register: semaphore_db_backup_staging_perms
 
-    - name: Phase 4 - Place semaphore.db snapshot into staging
+    - name: Phase 4 - Place project backup JSON into staging
       ansible.builtin.copy:
-        src: "{{ semaphore_db_backup_controller_tmp_dir }}/semaphore.db"
-        dest: "{{ semaphore_db_backup_staging_dir }}/semaphore.db"
+        src: "{{ semaphore_db_backup_controller_tmp_dir }}/semaphore_project_backup.json"
+        dest: "{{ semaphore_db_backup_staging_dir }}/semaphore_project_backup.json"
         owner: root
         mode: "0640"
-      register: semaphore_db_backup_place_db
-
-    - name: Phase 4 - Place projects export JSON into staging
-      ansible.builtin.copy:
-        src: "{{ semaphore_db_backup_controller_tmp_dir }}/semaphore_projects_export.json"
-        dest: "{{ semaphore_db_backup_staging_dir }}/semaphore_projects_export.json"
-        owner: root
-        mode: "0640"
-      register: semaphore_db_backup_place_export
+      register: semaphore_db_backup_place_project_backup
 
     - name: Phase 4 - Place config.json into staging (R5 - root-only, opaque)
       ansible.builtin.copy:
@@ -611,12 +634,11 @@
       loop:
         - semaphore_db_backup_dest_dir_ensure
         - semaphore_db_backup_staging_perms
-        - semaphore_db_backup_place_db
-        - semaphore_db_backup_place_export
+        - semaphore_db_backup_place_project_backup
         - semaphore_db_backup_place_config
 
     # ---- Phase 5: 原子的に確定する ----
-    # 3ファイルが全て正しくステージングへ揃って初めて到達するtask。ここまでの
+    # 2ファイルが全て正しくステージングへ揃って初めて到達するtask。ここまでの
     # どのtaskが失敗しても、このrenameへは到達せず、destには何も残らない
     # (このblockのalwaysがステージングディレクトリを掃除する。R4/R7/AC6)。
     # `mv -T`は「distへ入れ子で移動する」ではなく「dist自身の名前として
@@ -721,6 +743,15 @@
              if (semaphore_db_backup_deleted_names | length > 0) else 'none' }}
 
   always:
+    - name: Forget API credential and response data after use
+      ansible.builtin.set_fact:
+        semaphore_db_backup_token: ""
+        semaphore_db_backup_token_raw: {}
+        semaphore_db_backup_projects_api: {}
+        semaphore_db_backup_project_matches: []
+        semaphore_db_backup_project_backup_api: {}
+      no_log: true
+
     # cleanupの対象は「このblock自身が作ったもの」だけ(Critical #1)。
     # `is defined`は、Phase 0.1を通過した後にこのblock内のtempfile taskが
     # 実際に書いた場合にだけ真になる — Phase 0.1で拒否された外部値が

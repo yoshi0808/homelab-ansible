@@ -193,9 +193,11 @@ semaphore_templates_catalog:
     class: SEMI-SAFE
     legacy_name: "SEMI-SAFE:Unifi backup fetch"
 
-  # semaphore_db_backup案件(2026-08-17)。quoryのSemaphoreを3点セット
-  # (semaphore.db / projects export JSON / config.json)でSynology NFSへ退避
-  # する。unifi_backup_fetchと同じ骨格(quoryのSemaphoreから起動→pveが
+  # semaphore_db_backup案件(2026-09-07更新)。quoryのSemaphoreを2点セット
+  # (project backup API JSON / config.json)でSynology NFSへ退避する。
+  # project JSONはtemplate/schedule等のproject設定用、config.jsonは
+  # 新規インストール後の設定参考用であり、完全DB復旧は目的にしない。
+  # unifi_backup_fetchと同じ骨格(quoryのSemaphoreから起動→pveが
   # NFSへ書く→世代ローテーション→Slack通知)のためclass・survey_vars/argumentsの
   # 有無ともunifi_backup_fetchに揃える(引数・surveyなし。対象ノードの選定は
   # roles/proxmox_exec_nodeに委ねplaybook自身のhosts:には現れない)。
