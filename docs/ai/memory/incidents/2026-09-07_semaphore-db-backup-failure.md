@@ -1,7 +1,7 @@
 # Incident: Semaphore定時バックアップ失敗と自動起票欠落
 
 日付: 2026-09-07
-状態: 対応中(repo修正済み、未配備・未実機確認)
+状態: 解決済み
 対象: `playbooks/semaphore_db_backup.yml` / incident capture pipeline / quory Semaphore
 種別: 動作不具合
 原因分類: サポート境界外の内部DB依存 / バックアップ要件との不一致
@@ -71,5 +71,10 @@ token、task履歴/output、secret実体、製品インストール時に決ま�
 - loopbackのHTTP fixtureで、project一覧からのID解決、backup endpointからのJSON
   保存、`templates`/`schedules`型検証を同じAnsible式で実行: PASS。
 - `schedules`を文字列にしたnegative fixtureが型検証でfailすることを確認: PASS。
-- 本番quory/NFSへの通常実行は未実施。配備後のjob終了コード、NFS上の2ファイル、
-  Slack通知のtemplate/schedule件数を確認して解決済みへ移す。
+- 修正commit `c943c96` をpush後、2026-09-07 19:03 JSTにSemaphore job
+  #1009 (`SEMI-SAFE: Semaphore db backup`)を本番実行し、`success`で終了した。
+- job出力で公式APIによるproject一覧取得とproject backup JSON取得、
+  `templates`/`schedules`配列の検証、`semaphore_project_backup.json`と
+  `config.json`のNFS staging配置、原子的な世代確定、後始末がすべて成功した。
+- play recapはpve1 `failed=0` / `unreachable=0`、pve2 `failed=0` /
+  `unreachable=0`。`task-errors 1009`は空で、Slack送信も成功した。

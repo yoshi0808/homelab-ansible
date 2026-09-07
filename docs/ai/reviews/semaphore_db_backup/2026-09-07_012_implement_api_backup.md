@@ -46,10 +46,14 @@ playbook全体の`ansible-lint`には、既存の`proxmox_exec_node`、`common_s
 由来する19件が残る。変更した`semaphore_db_backup` role単体はproduction profileを
 通過しており、本変更で増えた指摘はない。
 
-## 未実施
+## 本番確認
 
-- quory/NFSへ書き込む通常実行（`risk-accepted`）。
-- 実tokenでのproject backup endpoint疎通と、実世代2ファイルの確認。
-- commit / push / Semaphore job実行。
-
-これらはYoshinobuの次の実行判断後に行う。
+- 修正commit `c943c96`を`origin/main`へpushした。
+- 2026-09-07 19:03 JSTにSemaphore job #1009
+  (`SEMI-SAFE: Semaphore db backup`)を本番実行し、約25秒で`success`となった。
+- 実tokenによるproject一覧取得とproject backup endpoint取得、
+  `templates`/`schedules`配列検証が成功した。
+- `semaphore_project_backup.json`と`config.json`のNFS staging配置、原子的な
+  世代確定、後始末が成功した。rotation対象はなく、既存世代は削除していない。
+- play recapはpve1 `failed=0` / `unreachable=0`、pve2 `failed=0` /
+  `unreachable=0`。`task-errors 1009`は空で、Slack送信も成功した。
