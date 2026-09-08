@@ -246,7 +246,9 @@ def _cron_is_valid(cron):
 # 19 real, already-running schedules -- the exact 3 that carry a non-empty
 # `environment`. All 4 shapes actually seen across the 19 schedules are
 # captured in the allowlist below and in scripts/tests/semaphore_
-# schedules/_fixtures.py (`REAL_TASK_PARAMS_FIXTURES`).
+# schedules/_fixtures.py (`REAL_TASK_PARAMS_FIXTURES`). The two namespaced
+# operation extra-vars added in 2026-09 are also accepted in `environment`,
+# but only with values from their playbook enums.
 #
 #   16x  {"environment": "{}"}
 #    1x  {"environment": "{\"force_renew\":\"false\"}"}
@@ -255,11 +257,10 @@ def _cron_is_valid(cron):
 #         "params": {"debug_level": 4, "dry_run": false}}
 #
 # The rule stays an allowlist, not a loosened denylist: only 2 top-level
-# keys (`environment`, `params`), only 3 named keys inside either of them
-# (`force_renew`, `dry_run`, `debug_level`), and only the specific value
-# shapes actually observed for each (native bool/int/float everywhere,
-# plus the literal strings `"true"`/`"false"` inside `environment` only,
-# since that field's own values are observed to always be stringified).
+# keys (`environment`, `params`); `params` retains its 3 observed keys;
+# `environment` additionally permits the 2 namespaced operation keys.
+# Primitive keys retain their observed value types, while operation values
+# must match the corresponding enum exactly.
 # Anything else -- an unrecognized top-level key, an unrecognized nested
 # key, a value of any other shape (an arbitrary string, a nested dict/list
 # -- exactly what a secret, a token, or an internal hostname/IP would take)
@@ -284,9 +285,20 @@ def _cron_is_valid(cron):
 # all 19 schedules): `environment` always, `params` on 1 of the 19.
 _TASK_PARAMS_ALLOWED_TOP_LEVEL_KEYS = frozenset({'environment', 'params'})
 
-# The only keys ever observed inside either `environment`'s decoded JSON or
+# The primitive keys observed inside `environment`'s decoded JSON or
 # `params`'s native dict (requirement 6.5 + 2026-08-09 全19件実測).
-_TASK_PARAM_ALLOWED_KEYS = frozenset({'force_renew', 'dry_run', 'debug_level'})
+# The two operation keys added in 2026-09 are environment-only Ansible
+# extra-vars. They are deliberately absent from `_PARAMS_ALLOWED_KEYS`:
+# Semaphore native params and playbook operation are independent axes.
+_PRIMITIVE_ALLOWED_KEYS = frozenset({'force_renew', 'dry_run', 'debug_level'})
+_PARAMS_ALLOWED_KEYS = _PRIMITIVE_ALLOWED_KEYS
+_ENVIRONMENT_OPERATION_VALUES = {
+    'ubuntu_vm_full_upgrade_operation': frozenset({'inspect', 'apply'}),
+    'prometheus_update_check_operation': frozenset({'inspect', 'update', 'rollback'}),
+}
+_ENVIRONMENT_ALLOWED_KEYS = frozenset(
+    _PRIMITIVE_ALLOWED_KEYS | _ENVIRONMENT_OPERATION_VALUES.keys()
+)
 
 # `params` is a native dict on the raw object (not JSON-string-encoded) --
 # its values observed so far are native bool/int, so only native
@@ -306,32 +318,37 @@ _PARAMS_ALLOWED_VALUE_TYPES = (bool, int, float)
 _ENVIRONMENT_BOOL_STRINGS = frozenset({'true', 'false'})
 
 
-def _environment_value_is_allowed(value):
+def _environment_value_is_allowed(key, value):
+    if key in _ENVIRONMENT_OPERATION_VALUES:
+        return isinstance(value, str) and value in _ENVIRONMENT_OPERATION_VALUES[key]
     if isinstance(value, _PARAMS_ALLOWED_VALUE_TYPES):
         return True
     return isinstance(value, str) and value in _ENVIRONMENT_BOOL_STRINGS
 
 
-def _named_params_problems(parsed, path, value_is_allowed):
-    """Shared allowlist walk for a *decoded* flat dict of the 3 known
-    keys, used for both `environment` (after JSON-decoding the string)
-    and `params` (already a native dict) -- the only difference between
-    the two is which value shapes are accepted, passed in as `value_is_
-    allowed`.
+def _named_params_problems(parsed, path, allowed_keys, value_is_allowed, allowed_text):
+    """Shared closed-world walk for a decoded flat dict.
+
+    `environment` and native `params` deliberately receive different key
+    sets and key-aware value validators. This prevents a playbook operation
+    key from being accepted in Semaphore's native params axis.
     """
     problems = []
     for key, value in parsed.items():
         key_str = key if isinstance(key, str) else "<{}>".format(type(key).__name__)
         sub_path = "{}.{}".format(path, key_str)
-        if not isinstance(key, str) or key not in _TASK_PARAM_ALLOWED_KEYS:
+        if not isinstance(key, str) or key not in allowed_keys:
             problems.append(
-                "{} は許可されていないキー(現状 force_renew / dry_run / "
-                "debug_level のみ許可)".format(sub_path)
+                "{} は許可されていないキー(現状 {} のみ許可)".format(
+                    sub_path, allowed_text
+                )
             )
             continue
-        if not value_is_allowed(value):
+        if not value_is_allowed(key, value):
             problems.append(
-                "{} の値の型 ({}) が許可されていない".format(sub_path, type(value).__name__)
+                "{} の値 ({}) が許可契約に一致しない".format(
+                    sub_path, type(value).__name__
+                )
             )
     return problems
 
@@ -355,7 +372,14 @@ def _environment_public_problems(environment):
         return []
     if not isinstance(parsed, dict):
         return ["{} が JSON object でない".format(path)]
-    return _named_params_problems(parsed, path, _environment_value_is_allowed)
+    return _named_params_problems(
+        parsed,
+        path,
+        _ENVIRONMENT_ALLOWED_KEYS,
+        _environment_value_is_allowed,
+        "force_renew / dry_run / debug_level / "
+        "ubuntu_vm_full_upgrade_operation / prometheus_update_check_operation",
+    )
 
 
 def _params_public_problems(params):
@@ -367,7 +391,11 @@ def _params_public_problems(params):
     if not isinstance(params, dict):
         return ["{} が dict でない".format(path)]
     return _named_params_problems(
-        params, path, lambda value: isinstance(value, _PARAMS_ALLOWED_VALUE_TYPES)
+        params,
+        path,
+        _PARAMS_ALLOWED_KEYS,
+        lambda _key, value: isinstance(value, _PARAMS_ALLOWED_VALUE_TYPES),
+        "force_renew / dry_run / debug_level",
     )
 
 
