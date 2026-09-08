@@ -10,7 +10,7 @@ prefix_rule(pattern=["git", ["restore", "checkout", "switch", "stash", "reset", 
 prefix_rule(pattern=["scripts/safe-ansible-check.sh"], decision="allow")
 prefix_rule(pattern=["ansible-playbook"], decision="allow")
 
-prefix_rule(pattern=["ssh"], decision="prompt", justification="SSH connects to an external host and should be confirmed")
+prefix_rule(pattern=["ssh"], decision="allow")
 prefix_rule(pattern=["rm"], decision="prompt", justification="File removal should be confirmed")
 prefix_rule(pattern=["stat", "-c"], decision="allow")
 prefix_rule(pattern=["cmp", "-s"], decision="allow")

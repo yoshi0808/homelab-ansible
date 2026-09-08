@@ -37,5 +37,8 @@ Python構文、doc consistency、`git diff --check`がすべてrc=0となった�
 preflight出力を公開diffへ渡すconsumer pathを確認し、追加のcross-enum・非文字列・native
 `params`混入spot-checkを含めてコードとtestを適合と判定した。
 
-修正後の実Semaphore Dry Run、template / schedule readback、通常inspection通知は未確認であり、
-commit / push後の配備観測として別途実施する。
+commit `33bc03b`配備後、job #1028のnative Dry Runがrc=0となり、template 5件・schedule
+2件だけをin-place変更として検出した。job #1029の通常実行で5件・2件を適用し、schedule
+2件はPUT直後GETのexact verifyを通過した。forced commandのtemplate API readbackでも5件すべてが
+対応するoperation enumを持ち、旧`dry_run` Surveyを持たないことを確認した。job #1030 / #1031の
+通常inspectionはrc=0で、変更経路をskipしSlack送信に成功した。
