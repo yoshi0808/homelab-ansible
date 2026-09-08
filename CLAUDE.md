@@ -8,6 +8,6 @@ Claude Codeは作業開始時に、次の3つを読む。共通原則やRole本�
 
 **このリポジトリは特定のベンダーのAIを前提にしない。** この入口と同じ内容をCodex向けに [`AGENTS.md`](AGENTS.md) が持つ。どのRoleをどちらが担うかは `docs/ai/roles/coordinator.md` が定める。
 
-実行境界を実際に強制している機構は、Claude Codeの設定 `.claude/settings.json`(`permissions` と `autoMode`)である。**設定そのものが正本**であり、値を文書へ写さない。
+機械的な実行境界を強制している機構は、Claude Codeの設定 `.claude/settings.json`(`permissions` と `autoMode`)である。会話上の明示承認を実行権限とする境界は `execution_boundary_policy.md` が定める。**設定そのものが正本**であり、値を文書へ写さない。
 
 Ansible実行を伴う作業を行うときは、安全分類の正本として [`docs/ai/policies/ansible_test_safety_policy.md`](docs/ai/policies/ansible_test_safety_policy.md) を確認する(他のPolicyと同様、対象作業のときだけでよく、作業開始時の読み込みには含めない)。

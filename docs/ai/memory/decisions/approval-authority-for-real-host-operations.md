@@ -2,7 +2,7 @@
 
 決定日: 2026-07-26 / 決定者: Yoshinobu / 起案: Coordinator
 
-> **一部が更新された(2026-08-03)。** 本ファイルが前提とする「`git commit` / `git push` の deny を維持するため、リポジトリへの確定操作は必ずYoshinobuの手を通る」は、denyから都度承認(ask)へ変わっている。後継は `docs/ai/reviews/git_gate_deny_to_ask/2026-08-03_001_requirement.md`、現行の規範は `docs/ai/core.md`「人間の権限と安全境界」。**以下は2026-07-26時点の決定の記録として読むこと。**
+> **一部が更新された(2026-08-03、2026-09-08)。** 本ファイルが前提とする「`git commit` / `git push` の deny を維持するため、リポジトリへの確定操作は必ずYoshinobuの手を通る」は、2026-08-03にdenyから都度承認へ変わり、2026-09-08に会話上の明示承認を権限の根拠とする形へ明確化された。後継は `docs/ai/reviews/git_gate_deny_to_ask/2026-08-03_001_requirement.md`、現行の規範は `docs/ai/policies/execution_boundary_policy.md` EXEC-030。**以下は2026-07-26時点の決定の記録として読むこと。**
 
 ## 決定
 

@@ -10,7 +10,7 @@
 
 ```text
 ansy(開発)
-  │  git commit / git push  ← Yoshinobuの都度承認(ask)。ここが唯一の人間ゲート
+  │  git commit / git push  ← Yoshinobuの会話上の明示承認。ここが唯一の人間ゲート
   ▼
 GitHub(origin/main)= 確定済みコードの正本
   │  git pull --ff-only     ← quoryのtimerが自動で行う(worktree_sync)
@@ -24,7 +24,7 @@ quory /home/yoshi/homelab-ansible(作業ツリー)
 Semaphore schedule / systemd timer が実行
 ```
 
-**承認は `git push` の1回に畳まれている。** 「コードを確定してよい」と「いま本番へ入れてよい」を分けない判断(2026-08-03、`docs/ai/reviews/quory_worktree_sync/`)。pushした内容は次のtimer周期でquoryへ入る。
+**commitとpushは1つの会話上の承認単位に畳まれている。** 「コードを確定してよい」と「いま本番へ入れてよい」を分けない判断(2026-08-03、`docs/ai/reviews/quory_worktree_sync/`)。pushした内容は次のtimer周期でquoryへ入る。CLIが追加の承認UIを持つかどうかは、この権限の成立条件ではない(`docs/ai/policies/execution_boundary_policy.md` EXEC-030)。
 
 ### ansy と quory を結ぶ経路は、これだけではない
 
@@ -46,14 +46,14 @@ Semaphore schedule / systemd timer が実行
 |---|---|---|
 | 1 | ansyで修正してstage | AI |
 | 2 | **pre-commitが「配備が要る: `playbooks/X_setup.yml`」と予告する**(カタログに載る`copy`配備物を触った場合。§2) | 自動 |
-| 3 | `git commit` / `git push` | **人が承認**(AIが実行) |
+| 3 | stage内容とcommitメッセージ案を見て、`git commit` / `git push`を会話で明示承認 | **人が判断、AIが実行** |
 | 4 | quoryが作業ツリーをpull(間隔は`roles/worktree_sync/defaults/main.yml`を正本とする)。Semaphoreはジョブ実行時に`/opt`へ自分でcloneする(§3) | 自動 |
 | 5 | **配備物はまだ古い** | — |
 | 6 | Semaphoreで該当templateを押す。**テンプレートから新規に起動する**(過去のタスクの再実行では古いcommitが走る。§3.1) | **人** |
 | 7 | 押し忘れた場合、翌日の日次ドリフト検査がSlackへ「食い違い + 直し方」を出す(§2) | 自動 |
 | 8 | 直すまで毎朝再通知される(エッジ抑止が無い) | 自動 |
 
-**打鍵が要るのは3と6だけで、どちらも「判断」である。** コマンドを組み立てる作業は残っていない — 状態を変えない確認はAIがdispatch経由で行い、本番への適用はSemaphoreのボタンが担う。
+**人の判断が要るのは3と6だけである。** 3は会話上の明示承認、6はSemaphoreの操作で表す。コマンドを組み立てる作業は残っていない — 状態を変えない確認はAIがdispatch経由で行い、本番への適用はSemaphoreのボタンが担う。
 
 **逆に、3と6を自動化してはならない。** そこが人間のゲートそのものである(`docs/ai/core.md`「人間の権限と安全境界」)。2026-08-04に、配備をansy側から起動できるようにする案を検討して**却下した** — ansyに本番へのroot適用を発火する能力を与えることになり、能力の不在で作った境界が消えるため。
 
