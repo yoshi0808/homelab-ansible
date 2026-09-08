@@ -212,11 +212,19 @@ quoryは`turn`へ落とさない(2026-08-16、Yoshinobu決定)。Operatorへの�
 ansyもReviewer / Tester / Auditorとの即時配送を優先し、Codex Coordinatorを`monitor`で使う(2026-09-08、Yoshinobu決定)。gitignoredの`new-session.sh`はfresh create時に次をこの順で行う。
 
 ```
+app-serverの所有者をpreflight          # tmuxを止める前に判定
 delivery.sh set off codex <project>     # 旧bridgeとagmsg app-serverを停止
 codex remote-control stop --json        # managed daemonがあれば停止
+旧app-serverの終了を待つ               # control socket解放後だけ先へ進む
 delivery.sh set monitor codex <project> # SessionStart / SessionEnd hookを導入
 codex-monitor.sh ... resume <thread>    # tmux pane 0でseat済みthreadを再開
 ```
+
+preflightで許容するのは、native managed daemonのpidfileか、このprojectのagmsg
+app-server pidfileで所有者を確認できるapp-serverだけである。Codex app / IDEが起動した
+管理外app-serverなど、どちらの所有物とも確認できないプロセスがcontrol socketを持つ場合は、
+**既存tmuxをkillする前に停止する**。`delivery.sh set off`はapp-serverへ終了要求を送るだけで
+直ちにprocess終了を保証しないため、control socketの解放を待たずに次のapp-serverを起動しない。
 
 `new-session.sh`は`homelab/coordinator`と`homelab-ops/coordinator`のseatが同じthreadを指すことを確認し、不在または不一致なら曖昧な配送先を推測せず停止する。pane 0ではshell functionやPATH順序に依存せず、`codex-monitor.sh`を明示的に呼ぶ。非対話shellで実Codexへ解決され、plain Codexが起動して配送だけ失われたIncidentは`docs/ai/memory/incidents/2026-09-07_agmsg-codex-monitor-bypassed-after-reset.md`。
 
