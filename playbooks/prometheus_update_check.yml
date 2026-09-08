@@ -1,32 +1,31 @@
 ---
 # prometheus_update_check.yml - quoryからmonnieへ手動導入したPrometheusを管理する。
-# dry_run extra-varが主モード選択で、未指定は意図しない自動upgradeを防ぐためfail-closed。
+# prometheus_update_check_operation が主モード選択。旧変数は値に関係なく拒否する。
 # config/storage/unit/retentionは変更せず、binary 2本だけを安全機構付きで更新/復元する。
 #
 # Weekly inspection / existing Friday Semaphore schedule:
-#   ansible-playbook playbooks/prometheus_update_check.yml -e dry_run=true
+#   ansible-playbook playbooks/prometheus_update_check.yml -e prometheus_update_check_operation=inspect
 # Manual apply (optional version pin):
-#   ansible-playbook playbooks/prometheus_update_check.yml -e dry_run=false
+#   ansible-playbook playbooks/prometheus_update_check.yml -e prometheus_update_check_operation=update
 #   Optional: append -e prometheus_target_version=X.Y.Z
 # Manual rollback (optional backup version):
 #   ansible-playbook playbooks/prometheus_update_check.yml \
-#     -e rollback=true -e dry_run=false
+#     -e prometheus_update_check_operation=rollback
 #   Optional: append -e rollback_to=X.Y.Z
-# Rollback inspection only:
+# Rollback inspection (the rollback operation is always discovery-first):
 #   ansible-playbook playbooks/prometheus_update_check.yml \
-#     -e rollback=true -e dry_run=true
+#     -e prometheus_update_check_operation=rollback
 # Validate the apply path without changing binaries or restarting:
 #   ansible-playbook playbooks/prometheus_update_check.yml --check \
-#     -e dry_run=false
+#     -e prometheus_update_check_operation=update
 #
-# Deployment requirement: add `-e dry_run=true` to the existing Friday
-# Semaphore task. Until updated, that job fails at the required-variable
-# assertion; it never falls through to automatic upgrade.
+# Deployment requirement: existing Friday Semaphore task passes inspect in
+# environment and native params.dry_run=false.
 # Design record: docs/ai/reviews/prometheus_update_check/2026-07-19_015_implement.md
 #
 # tester-gate: check-mode-native — read-only収集(current/latest version取得・
-# 分類・rollback discovery)は--checkでも実走する。destructive blockはdry_run=false
-# に加えnot ansible_check_modeも必須とし、--check -e dry_run=falseで適用引数経路を
+# 分類・rollback discovery)は--checkでも実走する。destructive blockはoperation=update|rollback
+# に加えnot ansible_check_modeも必須とし、--checkで適用引数経路を
 # 無変更のまま検証できる。
 #
 # 2026-07-31撤回(R4、docs/ai/reviews/check_mode_semantics/2026-07-31_001_requirement.md):
@@ -38,25 +37,33 @@
 
 - name: prometheus_update_check - verify execution host
   hosts: localhost
-  gather_facts: true
+  gather_facts: false
   connection: local
   tasks:
-    - name: Require an explicit Prometheus dry-run mode
+    - name: Reject legacy Prometheus mode variables
       ansible.builtin.assert:
-        that: dry_run is defined
+        that:
+          - dry_run is not defined
+          - rollback is not defined
         fail_msg: >-
-          dry_run must be specified explicitly: -e dry_run=true for
-          inspection or -e dry_run=false for deliberate apply. Update the
-          existing Friday Semaphore task to pass -e dry_run=true.
+          Legacy dry_run/rollback variables are rejected. Use
+          -e prometheus_update_check_operation=inspect|update|rollback.
         quiet: true
+      tags: [always]
 
-    - name: Validate the explicit Prometheus dry-run mode
+    - name: Require an explicit Prometheus operation
       ansible.builtin.assert:
-        that: (dry_run | string | lower) in ['true', 'false']
+        that:
+          - prometheus_update_check_operation is defined
+          - prometheus_update_check_operation in ['inspect', 'update', 'rollback']
         fail_msg: >-
-          dry_run must be boolean true or false. Got
-          dry_run={{ dry_run | string }}.
+          prometheus_update_check_operation must be inspect, update, or rollback.
         quiet: true
+      tags: [always]
+
+    - name: Collect execution host facts after input guards
+      ansible.builtin.setup:
+      tags: [always]
 
     - name: Ensure this playbook is running on quory
       ansible.builtin.assert:

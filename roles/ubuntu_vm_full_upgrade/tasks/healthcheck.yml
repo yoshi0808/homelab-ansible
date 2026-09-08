@@ -13,7 +13,7 @@
 # resolved against ubuntu_vm_full_upgrade's own files/ (which doesn't have
 # it) instead of radius_healthcheck's files/ — "Could not find or access
 # 'radius-healthcheck.sh'" on both hosts, blocking the entire monthly
-# dry-run. include_role actually enters the target role's context, so
+# inspection. include_role actually enters the target role's context, so
 # files/templates resolve against roles/radius_healthcheck/files/ and
 # roles/monitoring_healthcheck/files/ as intended. tasks_from: check keeps
 # the same "collect + classify only, no notify/report/fail" behavior as

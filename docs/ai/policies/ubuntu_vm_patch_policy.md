@@ -50,7 +50,7 @@ Ubuntu nodeを追加する場合はSystem Contextの対象表へ追記し、方�
 security patch、ESM patch、ESM Apps patchの定常更新はUbuntu Proとunattended-upgradesが自動実行する。
 
 <!-- UV-025 -->
-non-apt productはgeneric registryへ登録済みの対象だけを、`dry_run=true`のmonthly実行時に確認する。
+non-apt productはgeneric registryへ登録済みの対象だけを、`ubuntu_vm_full_upgrade_operation=inspect`のmonthly実行時に確認する。
 
 <!-- UV-026 -->
 non-apt productの初期対象は`monnie`へmanual installされたPrometheusだけとする。
@@ -67,7 +67,7 @@ non-apt productの初期対象は`monnie`へmanual installされたPrometheusだ
 | `ubuntu_vm_full_upgrade.yml` | monthly read-only判定と確認付きsingle-node manual apply |
 | `prometheus_update_check.yml` | non-apt Prometheusの確認・manual update・rollbackの専用入口。UV-035〜UV-039が許可・禁止境界を定める |
 
-`prometheus_update_check.yml`はmonnieのnon-apt Prometheusを対象に、確認(`dry_run=true`)・manual apply(`dry_run=false`)・rollback(`rollback=true`)を1本のplaybookで扱う。旧Policy §3.4は実装拡張前の「確認+通知のみ」設計を凍結した規範であり、実装がその範囲を超えて拡張された結果、不一致が生じていた。本書はこの不一致を実装に合わせて解消し、UV-035〜UV-039を現行実装の許可・禁止境界として再定義する。
+`prometheus_update_check.yml`はmonnieのnon-apt Prometheusを対象に、`prometheus_update_check_operation=inspect|update|rollback`を1本のplaybookで扱う。
 
 <!-- UV-053 -->
 本Policy対応playbookは方針1 VMだけを対象とし、方針2 nodeをAnsible管理対象にしない。
@@ -97,7 +97,7 @@ healthcheck playbookはmanualで単体実行してよい。
 **aptはこの2つのレーンに跨がる。** Ubuntu Pro / unattended-upgradesが当てない通常更新はmonthlyへ回るため、apt側は周期だけでレーンを決められない。
 
 <!-- UV-086 -->
-**Ubuntu Pro / unattended-upgradesが対象とするaptのアップデートは、人の判断を経ずに当たる。** Semaphoreは関与しない。**その対象外のapt更新はmonthly full-upgradeへ回り、適用は人が行う**(UV-018、UV-085)。**apt以外のアップデートは機械が検知するところまでとし、適用は人が`dry_run=false`を明示して行う**(UV-035〜UV-038)。
+**Ubuntu Pro / unattended-upgradesが対象とするaptのアップデートは、人の判断を経ずに当たる。** Semaphoreは関与しない。**その対象外のapt更新はmonthly full-upgradeへ回り、適用は人が行う**(UV-018、UV-085)。**apt以外のアップデートは機械が検知するところまでとし、適用は人がnamespaced operationを明示して行う**(UV-035〜UV-038)。
 
 <!-- UV-087 -->
 **アップグレードの採否と適用する版の指定は人が行う。** 機械は検知して提示するところまでとし、**「上げるべき」を表すStatusを持たない。** 系統を移すかどうかを機械に判定させない。
@@ -291,7 +291,7 @@ reboot後のpost-checkが`OK`なら、reboot実施と`OK`を通知する。
 reboot後のpost-checkが`NG`なら`CRITICAL`を通知する。
 
 <!-- UV-070 -->
-full-upgradeのmonthly dry-runとmanual applyはnode単位で通知し、通常は`#patches`、`BLOCKED`の場合だけ`#alerts`を使う。
+full-upgradeのmonthly inspectとmanual applyはnode単位で通知し、通常は`#patches`、`BLOCKED`の場合だけ`#alerts`を使う。
 
 <!-- UV-071 -->
 healthcheckが`OK`なら通知しない。
@@ -317,7 +317,7 @@ nightly、full-upgrade、healthcheckを次のchannel / statusへ割り当てる�
 | nightly: reboot正常完了 | `#info` | `ok` |
 | nightly: service異常 | `#alerts` | `critical` |
 | nightly: reboot timeout | `#alerts` | `critical` |
-| full-upgrade: monthly dry-run / manual apply | 通常`#patches`、`BLOCKED`だけ`#alerts` | Statusに応じた`info` / `ok` / `warning` / `critical` |
+| full-upgrade: monthly inspect / manual apply | 通常`#patches`、`BLOCKED`だけ`#alerts` | Statusに応じた`info` / `ok` / `warning` / `critical` |
 | healthcheck: `WARNING` | `#alerts` | `warning` |
 | healthcheck: `CRITICAL` | `#alerts` | `critical` |
 
@@ -338,26 +338,26 @@ Ansibleで定常的な自動patch適用を行わず、Ubuntu Pro対象外の通�
 serviceを`Package-Blacklist`へ追加してmanual管理へ切り替える方式を採用しない。
 
 <!-- UV-019 -->
-monthly実行は`dry_run=true`のread-only判定に限定し、実適用は確認文字列を伴うsingle-node manual applyだけを許可する。
+monthly実行は`ubuntu_vm_full_upgrade_operation=inspect`のread-only判定に限定し、実適用は確認文字列を伴うsingle-node manual applyだけを許可する。
 
 ### Non-apt Prometheusの許可・禁止境界
 
 次の5条件は`prometheus_update_check.yml`による非apt Prometheus管理の許可・禁止境界である。
 
 <!-- UV-035 -->
-定期実行(`dry_run=true`)はPrometheus artifactのdownloadを一切行わない。downloadは`dry_run=false`による明示的なmanual apply実行時にだけ発生する。
+定期実行(`prometheus_update_check_operation=inspect`)はPrometheus artifactのdownloadを一切行わない。downloadは`operation=update`による明示的なmanual apply実行時にだけ発生する。
 
 <!-- UV-036 -->
-Prometheusのupdateは`dry_run=false`という明示的なextra-var指定なしには発生しない。`dry_run`未指定はfail-closedでassert失敗し、自動updateを構造的に防止する。
+Prometheusのupdateは`prometheus_update_check_operation=update`という明示的なextra-var指定なしには発生しない。未指定や旧変数はfail-closedでassert失敗する。
 
 <!-- UV-037 -->
-Prometheusのservice restartは、`dry_run=false`かつ`not ansible_check_mode`によるbinary swap成功後にだけ発生する。確認専用実行(`dry_run=true`)および`--check`実行ではrestartを一切行わない。
+Prometheusのservice restartは、`operation=update|rollback`かつ`not ansible_check_mode`によるbinary swap成功後にだけ発生する。確認専用実行および`--check`実行ではrestartを一切行わない。
 
 <!-- UV-038 -->
-Prometheusのupdateとrollbackは、人間が`prometheus_update_check.yml`を`-e dry_run=false`(update)または`-e rollback=true -e dry_run=false`(rollback)で明示的に実行することで行う。実行判断は人間が行うが、artifactのdownload・検証・backup・binary差し替え・restart・health確認は本playbookが一括して行う。update失敗時はbackupから自動でrollbackする。手動でrollbackするPlaybookを用意する。
+Prometheusのupdateとrollbackは、人間が`prometheus_update_check.yml`を`-e prometheus_update_check_operation=update|rollback`で明示的に実行することで行う。実行判断は人間が行うが、artifactのdownload・検証・backup・binary差し替え・restart・health確認は本playbookが一括して行う。update失敗時はbackupから自動でrollbackする。手動でrollbackするPlaybookを用意する。
 
 <!-- UV-039 -->
-`dry_run=false`のapt full-upgrade適用経路(`ubuntu_vm_full_upgrade.yml`)ではnon-apt Prometheusのcheckを実行しない。
+`ubuntu_vm_full_upgrade_operation=apply`のapt full-upgrade適用経路(`ubuntu_vm_full_upgrade.yml`)ではnon-apt Prometheusのcheckを実行しない。
 
 ### Rebootと対象境界
 
@@ -371,6 +371,7 @@ Prometheusのupdateとrollbackは、人間が`prometheus_update_check.yml`を`-e
 | 2026-05-09 | 初版作成 |
 | 2026-07-17 | 旧v1.5へ更新 |
 | 2026-07-24 | Git HEADの旧289行版を標準8節へ再編。Policy核を維持して非規範のSystem / Repository / Operations情報をContextへ分離し、§3.4の既知実装不一致を未解決のまま見える化 |
-| 2026-07-25 | UV-035〜UV-039を`prometheus_update_check.yml`の現行実装(dry_run gate・manual update・rollback)に合わせて再定義し、Policy/実装不一致を解消 |
+| 2026-07-25 | UV-035〜UV-039を`prometheus_update_check.yml`の現行実装に合わせて再定義 |
+| 2026-09-09 | dry_run衝突をnamespaced operationとnative checkの二軸へ移行し、旧入力はreject-only guardとして保持 |
 | 2026-07-25 | UV-079〜UV-082をSemaphore移行済みの実態に合わせて再定義し、具体的な時刻表記をOperations Contextへ委譲。単独で浮いていたUV-083をUV-079へ統合し削除。主力product明示の規範としてUV-084を追加し、`ubuntu_vm_full_upgrade`のunpoller対応(実装)と対応付け |
 | 2026-08-23 | アップデート(系統内のリビジョン)とアップグレード(系統を跨ぐバージョン)の軸をUV-085〜UV-089として明文化。aptが両レーンに跨がることと、apt以外の適用が人の明示を要すること(UV-035〜UV-038)を、現行の境界どおりに書いた。実装にしか無かったStatus 5値とreasonの定義をUV-090〜UV-094として取り込み、`UPGRADE_READY`が適用の推奨でないことを明記。UV-032からapt以外の結果によるStatus昇格を外し、事実の提示に留めた |

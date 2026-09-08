@@ -243,20 +243,20 @@ semaphore_templates_catalog:
     class: SEMI-SAFE
     legacy_name: "SEMI-SAFE:Codex update check(Only on Quory)"
 
-  # --- Ubuntu VM full upgrade: dry-run / apply の2template -------------------
+  # --- Ubuntu VM full upgrade: inspect / apply の2template -------------------
   - playbook: playbooks/ubuntu_vm_full_upgrade.yml
     class: SEMI-SAFE
     variant: dry-run
     legacy_name: "SEMI-SAFE:Ubuntu vm full upgrade(dry_run=true)"
     survey_vars:
-      - { name: dry_run, title: dry_run, required: true, description: "アップグレードせずに情報収集を行います", default_value: "true" }
+      - { name: ubuntu_vm_full_upgrade_operation, title: ubuntu_vm_full_upgrade_operation, required: true, type: enum, description: "inspect: アップグレードせず情報収集", default_value: "inspect", values: [{ name: inspect, value: inspect }, { name: apply, value: apply }] }
 
   - playbook: playbooks/ubuntu_vm_full_upgrade.yml
     class: UN-SAFE
     variant: apply
     legacy_name: "UN-SAFE:Ubuntu vm full upgrade(Manual)"
     survey_vars:
-      - { name: dry_run, title: dry_run, required: true, description: "実際にアップグレードを適用します", default_value: "false" }
+      - { name: ubuntu_vm_full_upgrade_operation, title: ubuntu_vm_full_upgrade_operation, required: true, type: enum, description: "実際にアップグレードを適用します", default_value: "apply", values: [{ name: inspect, value: inspect }, { name: apply, value: apply }] }
       - { name: node, title: node, required: true, type: enum, description: "対象ノードを指定します",
           values: [{ name: ansy, value: ansy }, { name: monnie, value: monnie }, { name: authy, value: authy }, { name: quory, value: quory }] }
       - { name: ubuntu_vm_full_upgrade_confirm, title: ubuntu_vm_full_upgrade_confirm, required: true, description: "アップグレードの対象ノードを指定します" }
@@ -270,14 +270,14 @@ semaphore_templates_catalog:
     variant: apply
     legacy_name: "UN-SAFE:Prometheus update(Manual)"
     survey_vars:
-      - { name: dry_run, title: dry_run, required: true, description: update適用, default_value: "false" }
+      - { name: prometheus_update_check_operation, title: prometheus_update_check_operation, required: true, type: enum, description: update適用, default_value: "update", values: [{ name: inspect, value: inspect }, { name: update, value: update }, { name: rollback, value: rollback }] }
 
   - playbook: playbooks/prometheus_update_check.yml
     class: SAFE
     variant: check
     legacy_name: "SAFE:Prometheus update check"
     survey_vars:
-      - { name: dry_run, title: dry_run, required: true, description: チェックのみ, default_value: "true" }
+      - { name: prometheus_update_check_operation, title: prometheus_update_check_operation, required: true, type: enum, description: チェックのみ, default_value: "inspect", values: [{ name: inspect, value: inspect }, { name: update, value: update }, { name: rollback, value: rollback }] }
 
   # legacy_nameの "UNSAFE:" は表記ゆれ。UN-SAFE として扱う(依頼文の指示どおり)。
   - playbook: playbooks/prometheus_update_check.yml
@@ -285,8 +285,7 @@ semaphore_templates_catalog:
     variant: rollback
     legacy_name: "UNSAFE:Prometheus rollback(Manual)"
     survey_vars:
-      - { name: dry_run, title: dry_run, required: true, description: ロールバック実行, default_value: "false" }
-      - { name: rollback, title: rollback, description: ロールバック指定, default_value: "true" }
+      - { name: prometheus_update_check_operation, title: prometheus_update_check_operation, required: true, type: enum, description: ロールバック実行, default_value: "rollback", values: [{ name: inspect, value: inspect }, { name: update, value: update }, { name: rollback, value: rollback }] }
       - { name: rollback_to, title: rollback_to, description: 指定バージョンへのRollback }
 
   - playbook: playbooks/recovery_monitoring_check.yml
@@ -761,14 +760,13 @@ semaphore_schedules_catalog:
   #
   # **ここから先の`task_params`は、押したときに何が起きるかを変える値を持つ。**
   # requirementが「査読が止めた本番事故」の筆頭に挙げたのがこの3件で、6項目だけの
-  # PUTは`task_params`を消す — `dry_run`が失われれば本番のfull upgradeが定期実行
-  # される(requirement 6.5 / R8)。転記を1文字も間違えないこと。
+  # PUTは`task_params`を消す — operation environmentが失われればplaybookは
+  # fail-closedし、その回のinspectionと通知が止まる。転記を1文字も間違えないこと。
   #
   # **`environment`と`params`は層が違う。** `environment`はplaybookへ`-e`で渡る
   # Ansible変数(値は文字列)。`params`はSemaphore自身の起動オプションで、
-  # `dry_run`は`--check`、`debug_level`は冗長度を指す(値はnative型)。
-  # `SAFE:Prometheus update check`は両方を持ち、**同じ`dry_run`という名前が別の
-  # 意味で2つある**。片方だけ写すと意味が変わる。
+  # operationはAnsibleのenvironment、native `params.dry_run`は`--check`、
+  # `debug_level`は冗長度を指す。二軸を混同しないこと。
   #
   # 値の出所: ansy(quoryのSemaphoreをRestoreした複製)のAPIから2026-08-10に取得。
   # quory自身のscheduleを読む手段は現在無い(dispatchのカタログにschedule照会が
@@ -786,14 +784,16 @@ semaphore_schedules_catalog:
     cron: "15 18 2 * *"
     active: true
     task_params:
-      environment: '{"dry_run":"true"}'
+      environment: '{"ubuntu_vm_full_upgrade_operation":"inspect"}'
+      params:
+        dry_run: false
 
   - name: "SAFE:Prometheus update check"
     template: "SAFE: Prometheus update check (check)"
     cron: "5 17 * * 5"
     active: true
     task_params:
-      environment: '{"dry_run":"true"}'
+      environment: '{"prometheus_update_check_operation":"inspect"}'
       params:
         debug_level: 4
         dry_run: false
@@ -955,7 +955,7 @@ semaphore_schedules_catalog:
   # 03:30=毎日nightly、05:30-05:50=毎日healthcheck群、06:00=土曜Weekly Full
   # Patch/日曜Cert renew、06:30=毎日recovery monitoring check、12:00=毎日db
   # backup、17:00-18:30=金曜週次群、18:00=木曜Proxmox snapshot check、
-  # 18:15=2日Ubuntu vm full upgrade dry-run、18:30=28日Proxmox backup restore
+  # 18:15=2日Ubuntu vm full upgrade inspect、18:30=28日Proxmox backup restore
   # verify。木曜18:00のProxmox snapshot checkは当初この列挙から抜けており、
   # レビュー2026-08-24_003指摘で補った。比較対象は本エントリ追加前の20件)。
   #

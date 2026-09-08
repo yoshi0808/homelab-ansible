@@ -24,6 +24,7 @@
     slack_message: |
       Prometheus update operation
       - host: {{ inventory_hostname }}
+      - operation: {{ prometheus_update_check_effective_operation | default(prometheus_update_check_operation) }}
       - status: {{ prometheus_update_check_status }}
       {% if prometheus_update_check_status == 'update_available' %}
       - update available (not applied{{ ' under --check' if ansible_check_mode else '' }}): {{ prometheus_update_check_current_version }} → {{ prometheus_update_check_effective_target_version }}
@@ -60,7 +61,7 @@
       - current version after recovery: {{ prometheus_update_check_result_version | default('?', true) }}
       - error: {{ prometheus_update_check_error }}
       {% elif prometheus_update_check_status == 'rollback_available' %}
-      - rollback target (not executed in dry-run mode): {{ prometheus_update_check_current_version | default('?', true) }} → {{ prometheus_update_check_selected_backup.version }}
+      - rollback target (not executed in check mode): {{ prometheus_update_check_current_version | default('?', true) }} → {{ prometheus_update_check_selected_backup.version }}
       - backup: {{ prometheus_update_check_selected_backup.path }}
       {% elif prometheus_update_check_status == 'rolled_back' %}
       - rolled_back: {{ prometheus_update_check_current_version | default('?', true) }} → {{ prometheus_update_check_result_version }}

@@ -9,7 +9,7 @@ ubuntu_vm_full_upgrade_report_dir: "{{ reports_base_dir }}/ubuntu-vm-full-upgrad
 # ---------------------------------------------------------------------------
 # Non-apt product update registry (2026-07-17_035). Each entry describes two
 # read-only JSON endpoints and the JMESPath expressions used to extract their
-# versions. Collection runs only during the monthly dry_run=true path; it
+# versions. Collection runs only during the monthly inspect operation; it
 # never downloads or installs an artifact. The schema is product-agnostic so
 # future manually managed products can be registered without changing the
 # collection flow. The first registered product is monnie's manually
@@ -248,7 +248,7 @@ ubuntu_vm_full_upgrade_conffile_notice: >-
   保持したファイルの特定は未実装です(別案件で対応予定)。
 
 # ---------------------------------------------------------------------------
-# Manual apply (dry_run=false) safety
+# Manual apply (operation=apply) safety
 # ---------------------------------------------------------------------------
 # Confirmation required for manual apply: the caller must pass
 # -e ubuntu_vm_full_upgrade_confirm=<node> where <node> matches -e node=<node>

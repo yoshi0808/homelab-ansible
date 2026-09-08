@@ -7,8 +7,8 @@
 # Phase 0    : argument validation
 # Phase 0.5  : manual-apply confirmation string check (apply target only)
 # Phase 1-8  : common processing (healthcheck / simulate / classify / notify)
-#              — runs on all 4 hosts when dry_run=true, or on the single
-#              apply target only when dry_run=false. check_mode: false below
+#              — runs on all 4 hosts for inspect, or on the single
+#              apply target only for apply. check_mode: false below
 #              makes this always run for real even under --check, because
 #              none of it mutates installed packages (apt-get update/check/
 #              -s full-upgrade only touch the package index cache, matching
@@ -18,14 +18,27 @@
 #              boundary; tester-gate: check-mode-native, see the playbook
 #              header for the full classification rationale).
 
-- name: Assert dry_run is defined
+- name: Reject legacy mode variable
   ansible.builtin.assert:
-    that: dry_run is defined
+    that: dry_run is not defined
     fail_msg: >-
-      dry_run must be specified explicitly: -e dry_run=true (monthly
-      judgement, all nodes, read-only) or -e dry_run=false -e node=<node>
-      (manual apply, single node). See playbooks/ubuntu_vm_full_upgrade.yml.
+      Legacy dry_run is rejected; use ubuntu_vm_full_upgrade_operation=inspect|apply.
     quiet: true
+  tags: [always]
+
+- name: Require explicit Ubuntu VM upgrade operation
+  ansible.builtin.assert:
+    that:
+      - ubuntu_vm_full_upgrade_operation is defined
+      - ubuntu_vm_full_upgrade_operation in ['inspect', 'apply']
+    fail_msg: ubuntu_vm_full_upgrade_operation must be inspect or apply.
+    quiet: true
+  tags: [always]
+
+- name: Normalize Ubuntu VM full-upgrade operation
+  ansible.builtin.set_fact:
+    ubuntu_vm_full_upgrade_effective_operation: "{{ ubuntu_vm_full_upgrade_operation }}"
+  tags: [always]
 
 - name: Assert node is a known target when performing a manual apply
   ansible.builtin.assert:
@@ -33,18 +46,18 @@
       - node is defined
       - node in ['ansy', 'monnie', 'authy', 'quory']
     fail_msg: >-
-      Manual apply (dry_run=false) requires -e node=<ansy|monnie|authy|quory>
+      Manual apply requires -e node=<ansy|monnie|authy|quory>
       (single node only — requirement §4). Got node={{ node | default('undefined') }}.
     quiet: true
-  when: not (dry_run | bool)
+  when: ubuntu_vm_full_upgrade_effective_operation == 'apply'
 
 - name: Determine whether this host is the manual-apply target
   ansible.builtin.set_fact:
-    ubuntu_vm_full_upgrade_is_apply_target: "{{ (not (dry_run | bool)) and (inventory_hostname == (node | default(''))) }}"
+    ubuntu_vm_full_upgrade_is_apply_target: "{{ ubuntu_vm_full_upgrade_effective_operation == 'apply' and (inventory_hostname == (node | default(''))) }}"
 
 - name: Determine whether this host participates in this run
   ansible.builtin.set_fact:
-    ubuntu_vm_full_upgrade_participates: "{{ (dry_run | bool) or ubuntu_vm_full_upgrade_is_apply_target }}"
+    ubuntu_vm_full_upgrade_participates: "{{ ubuntu_vm_full_upgrade_effective_operation == 'inspect' or ubuntu_vm_full_upgrade_is_apply_target }}"
 
 # Confirmation string is a safety device against accidental apply, not a
 # Status pre-declaration (requirement §4). It must match `node` exactly —
@@ -153,22 +166,22 @@
       ansible.builtin.set_fact:
         ubuntu_vm_full_upgrade_sim: "{{ ubuntu_vm_full_upgrade_sim_raw.stdout | from_json }}"
 
-    # Non-apt checks are intentionally limited to the monthly dry-run path.
+    # Non-apt checks are intentionally limited to the monthly inspect path.
     # The manual apply path stays apt-only, and every collector is best-effort
     # read-only HTTP GET (requirement 035). Initializing on every participating
     # host keeps report/notification rendering schema-stable when a host has no
-    # registry entries or when dry_run=false.
+    # registry entries or when operation=apply.
     - name: Initialize non-apt product results
       ansible.builtin.set_fact:
         ubuntu_vm_full_upgrade_nonapt_results: []
 
-    - name: Collect registered non-apt product versions (monthly dry-run only)
+    - name: Collect registered non-apt product versions (monthly inspect only)
       ansible.builtin.include_tasks: collect_nonapt_product.yml
       loop: "{{ ubuntu_vm_full_upgrade_nonapt_per_node[inventory_hostname] | default([]) }}"
       loop_control:
         loop_var: ubuntu_vm_full_upgrade_nonapt_product
         label: "{{ ubuntu_vm_full_upgrade_nonapt_product.name }}"
-      when: dry_run | bool
+      when: ubuntu_vm_full_upgrade_effective_operation == 'inspect'
 
     - name: Classify packages and determine Status
       ansible.builtin.include_tasks: classify.yml
@@ -337,7 +350,7 @@
           ok
           {%- endif -%}
         slack_title: >-
-          [ubuntu_vm_full_upgrade] {{ 'dry-run (monthly)' if (dry_run | bool) else 'apply target' }} - {{ inventory_hostname }}: {{ ubuntu_vm_full_upgrade_status }}
+          [ubuntu_vm_full_upgrade] {{ ubuntu_vm_full_upgrade_effective_operation }} - {{ inventory_hostname }}: {{ ubuntu_vm_full_upgrade_status }}
         slack_message: |
           {{ ubuntu_vm_full_upgrade_product_impact_block }}
           {{ ubuntu_vm_full_upgrade_status_reason }}

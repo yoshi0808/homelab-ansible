@@ -7,18 +7,18 @@
 # otherwise. Apply is never automatic — always a deliberate manual run.
 #
 # Monthly judgement (all 4 nodes, read-only, from Semaphore/quory):
-#   ansible-playbook playbooks/ubuntu_vm_full_upgrade.yml -e dry_run=true
+#   ansible-playbook playbooks/ubuntu_vm_full_upgrade.yml -e ubuntu_vm_full_upgrade_operation=inspect
 #
 # Manual apply (single node, destructive — requires typing the node name
 # twice as a safety device, not a Status pre-declaration):
 #   ansible-playbook playbooks/ubuntu_vm_full_upgrade.yml \
-#     -e dry_run=false -e node=authy -e ubuntu_vm_full_upgrade_confirm=authy
+#     -e ubuntu_vm_full_upgrade_operation=apply -e node=authy -e ubuntu_vm_full_upgrade_confirm=authy
 #
 # Validate the apply path without changing anything (--check skips the
 # actual full-upgrade/reboot; everything else, including the
 # BLOCKED/MAJOR_UPGRADE_DETECTED rejection check, still runs for real):
 #   ansible-playbook playbooks/ubuntu_vm_full_upgrade.yml --check \
-#     -e dry_run=false -e node=authy -e ubuntu_vm_full_upgrade_confirm=authy
+#     -e ubuntu_vm_full_upgrade_operation=apply -e node=authy -e ubuntu_vm_full_upgrade_confirm=authy
 #
 # Notes:
 # - BLOCKED / MAJOR_UPGRADE_DETECTED can never be applied, confirmation or not.
@@ -52,7 +52,7 @@
 #   `apt list --upgradable` (the monnie 23-vs-25 mismatch fix). With zero
 #   candidates but phased pending, the NO_UPDATES reason reads
 #   適用候補なし(phasing保留あり).
-# - During dry_run=true only, each host's registered non-apt products are
+# - During operation=inspect only, each host's registered non-apt products are
 #   checked by read-only HTTP GET and rendered as `apt外:` lines. The first
 #   registry entry is monnie's manually installed Prometheus: current from
 #   localhost:9090 buildinfo, latest stable from GitHub Releases API. A
@@ -75,7 +75,7 @@
 #   (latest implement: 2026-07-17_036_implement.md).
 #
 # tester-gate: check-mode-native — the common judgement path (healthcheck,
-# apt-get update/check/-s full-upgrade simulation, dry-run-only read-only
+# apt-get update/check/-s full-upgrade simulation, inspect-only read-only
 # non-apt version GETs, important-component/remove classification, Status
 # determination, notification) never mutates installed packages (apt-get
 # update/check/-s full-upgrade only touch the package index cache and print
@@ -85,19 +85,43 @@
 # tasks/main.yml sets check_mode: false at that block). The only genuinely
 # destructive step — actual `apt-get full-upgrade` + reboot — is a separate
 # include (tasks/apply.yml) gated on `not ansible_check_mode`, so --check
-# with -e dry_run=false exercises the full apply-mode validation path
+# with operation=apply exercises the full apply-mode validation path
 # (confirmation string, healthcheck abort, Status re-determination,
 # BLOCKED/MAJOR_UPGRADE_DETECTED rejection) and stops there, sending a
 # "would apply" notification instead of touching packages. See
 # docs/ai/reviews/ubuntu_vm_full_upgrade/2026-07-11_002_implement.md for the
-# full design rationale, including why --check does not simply force
-# dry_run=true wholesale (it still validates apply-mode argument handling,
-# which a blanket dry_run override would skip).
+# full design rationale, including why --check does not force the inspect
+# operation wholesale (it still validates apply-mode argument handling).
 
 - name: Ubuntu VM full-upgrade judgement / manual apply (ansy, monnie, authy, quory)
   hosts: dev_nodes:control_nodes:radius_servers:monitoring_servers
-  gather_facts: true
+  gather_facts: false
   become: true
+  pre_tasks:
+    - name: Reject the retired ubuntu_vm_full_upgrade dry_run input
+      ansible.builtin.assert:
+        that: dry_run is not defined
+        fail_msg: >-
+          dry_run is retired. Use ubuntu_vm_full_upgrade_operation=inspect
+          or =apply; use --check independently for native check mode.
+        quiet: true
+      tags: [always]
+
+    - name: Require a valid Ubuntu VM full-upgrade operation
+      ansible.builtin.assert:
+        that:
+          - ubuntu_vm_full_upgrade_operation is defined
+          - ubuntu_vm_full_upgrade_operation in ['inspect', 'apply']
+        fail_msg: >-
+          ubuntu_vm_full_upgrade_operation must be explicitly set to inspect
+          or apply. Got {{ ubuntu_vm_full_upgrade_operation | default('undefined') }}.
+        quiet: true
+      tags: [always]
+
+    - name: Gather facts after operation validation
+      ansible.builtin.setup:
+      tags: [always]
+
   tasks:
     - name: Run ubuntu_vm_full_upgrade role
       ansible.builtin.import_role:

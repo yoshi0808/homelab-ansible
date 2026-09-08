@@ -19,7 +19,7 @@
 1. 対象nodeと直近のmonthly判定結果を確認する。
 2. single nodeの対象入力と、同じnodeを示すconfirmation入力を明示する。
 3. healthcheckとsimulationを再実行し、Status gateを通過することを確認する。
-4. `dry_run=false`のapt apply経路でnon-apt checkが実行されないことを維持する。
+4. `ubuntu_vm_full_upgrade_operation=apply`のapt apply経路でnon-apt checkが実行されないことを維持する。
 5. apply中のservice restart影響を考慮し、対象となる自律復旧muteが設定されたことを確認する。
 6. apply、reboot要否、起動完了、post-check、通知、reportを確認する。
 

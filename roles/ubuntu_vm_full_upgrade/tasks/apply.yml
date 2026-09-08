@@ -199,7 +199,7 @@
       {{ inventory_hostname }} (rc={{ ubuntu_vm_full_upgrade_apply_result.rc }}).
   when: ubuntu_vm_full_upgrade_apply_result.rc not in [0, 124, 137]
 
-- name: Check reboot-required flag (post-apply, authoritative — dry-run's reboot_expected was only a prediction)
+- name: Check reboot-required flag (post-apply, authoritative — inspect prediction is non-authoritative)
   ansible.builtin.stat:
     path: /var/run/reboot-required
   register: ubuntu_vm_full_upgrade_reboot_flag

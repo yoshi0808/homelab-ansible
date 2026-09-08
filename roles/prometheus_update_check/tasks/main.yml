@@ -1,7 +1,6 @@
 ---
-# prometheus_update_check always collects current/latest versions. dry_run is
-# the primary mode selector; ansible_check_mode remains a second destructive
-# gate.
+# prometheus_update_check always collects current/latest versions. operation is
+# the primary mode selector; ansible_check_mode remains a second destructive gate.
 #
 # 2026-07-31 retraction (R4, docs/ai/reviews/check_mode_semantics/
 # 2026-07-31_001_requirement.md): "Slack is an explicit check-mode
@@ -14,14 +13,30 @@
 # docs/ai/reviews/prometheus_update_check/2026-07-19_015_implement.md; that
 # record is now superseded on this one point.
 
-- name: Require an explicit Prometheus dry-run mode
+- name: Reject legacy Prometheus mode variables
   ansible.builtin.assert:
-    that: dry_run is defined
+    that:
+      - dry_run is not defined
+      - rollback is not defined
     fail_msg: >-
-      dry_run must be specified explicitly: -e dry_run=true for inspection,
-      or -e dry_run=false for a deliberate upgrade/rollback apply. Omitting
-      it is fail-closed to prevent an unintended automatic upgrade.
+      Legacy dry_run/rollback variables are rejected; use
+      prometheus_update_check_operation=inspect|update|rollback.
     quiet: true
+  tags: [always]
+
+- name: Require an explicit Prometheus operation
+  ansible.builtin.assert:
+    that:
+      - prometheus_update_check_operation is defined
+      - prometheus_update_check_operation in ['inspect', 'update', 'rollback']
+    fail_msg: prometheus_update_check_operation must be inspect, update, or rollback.
+    quiet: true
+  tags: [always]
+
+- name: Normalize Prometheus operation once
+  ansible.builtin.set_fact:
+    prometheus_update_check_effective_operation: "{{ prometheus_update_check_operation }}"
+  tags: [always]
 
 - name: Validate Prometheus update-check inputs
   ansible.builtin.assert:
@@ -30,8 +45,8 @@
       - prometheus_update_check_rollback_to | length == 0 or prometheus_update_check_rollback_to is match('^[0-9]+[.][0-9]+[.][0-9]+$')
       - prometheus_update_check_track | length == 0 or prometheus_update_check_track is match('^[0-9]+[.][0-9]+$')
       - prometheus_update_check_track | length == 0 or prometheus_update_check_target_version | length == 0 or (prometheus_update_check_target_version | regex_replace(prometheus_update_check_major_minor_pattern, prometheus_update_check_major_minor_replacement)) == prometheus_update_check_track
-      - (dry_run | string | lower) in ['true', 'false']
-      - prometheus_update_check_rollback | bool or prometheus_update_check_rollback_to | length == 0
+      - prometheus_update_check_effective_operation in ['inspect', 'update', 'rollback']
+      - prometheus_update_check_effective_operation == 'rollback' or prometheus_update_check_rollback_to | length == 0
       - prometheus_update_check_arch == 'linux-amd64'
       - prometheus_update_check_install_dir is match('^/opt/[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$')
       - prometheus_update_check_binary == prometheus_update_check_install_dir + '/prometheus'
@@ -195,7 +210,7 @@
   check_mode: false
   when:
     - prometheus_update_check_track | length > 0
-    - not (prometheus_update_check_rollback | bool)
+    - prometheus_update_check_effective_operation != 'rollback'
 
 - name: Judge Prometheus track release collection status
   ansible.builtin.set_fact:
@@ -350,7 +365,7 @@
          else 'update_available' if (prometheus_update_check_upgrade_wanted | bool)
          else 'up_to_date' }}
     prometheus_update_check_result_version: "{{ prometheus_update_check_current_version }}"
-  when: not (prometheus_update_check_rollback | bool)
+  when: prometheus_update_check_effective_operation != 'rollback'
 
 - name: Record the reason for a non-mutating Prometheus track anomaly
   ansible.builtin.set_fact:
@@ -367,7 +382,7 @@
          if (prometheus_update_check_status == 'track_not_found')
          else prometheus_update_check_error }}
   when:
-    - not (prometheus_update_check_rollback | bool)
+    - prometheus_update_check_effective_operation != 'rollback'
     - prometheus_update_check_status in ['track_installed_mismatch', 'track_not_found']
 
 # ---------------------------------------------------------------------------
@@ -377,16 +392,16 @@
 - name: Discover and select Prometheus rollback backup
   ansible.builtin.include_tasks: discover_backups.yml
   when:
-    - prometheus_update_check_rollback | bool
+    - prometheus_update_check_effective_operation == 'rollback'
     - (prometheus_update_check_current_raw.rc | default(1) | int) == 0
     - prometheus_update_check_current_version is match('^[0-9]+[.][0-9]+[.][0-9]+$')
 
-- name: Record Prometheus rollback target for explicit dry-run mode
+- name: Record Prometheus rollback target for native check mode
   ansible.builtin.set_fact:
     prometheus_update_check_status: rollback_available
   when:
-    - prometheus_update_check_rollback | bool
-    - dry_run | bool
+    - prometheus_update_check_effective_operation == 'rollback'
+    - ansible_check_mode
     - prometheus_update_check_selected_backup.path | default('') | length > 0
 
 - name: Reject manual rollback when current Prometheus version is unavailable
@@ -398,28 +413,26 @@
       recovery from an unreadable current binary is outside this role's scope.
     prometheus_update_check_result_version: "{{ prometheus_update_check_current_version | default('') }}"
   when:
-    - prometheus_update_check_rollback | bool
+    - prometheus_update_check_effective_operation == 'rollback'
     - (prometheus_update_check_current_raw.rc | default(1) | int) != 0
       or not (prometheus_update_check_current_version is match('^[0-9]+[.][0-9]+[.][0-9]+$'))
 
 - name: Show selected rollback target
   ansible.builtin.debug:
     msg: >-
-      Prometheus rollback target{{ ' (not executed in dry-run mode)' if
-      ((dry_run | bool) or ansible_check_mode) else '' }}:
+      Prometheus rollback target{{ ' (not executed in check mode)' if ansible_check_mode else '' }}:
       {{ prometheus_update_check_current_version | default('?', true) }} ->
       {{ prometheus_update_check_selected_backup.version | default('?') }}
       ({{ prometheus_update_check_selected_backup.path | default('backup unavailable') }})
-  when: prometheus_update_check_rollback | bool
+  when: prometheus_update_check_effective_operation == 'rollback'
 
 # ---------------------------------------------------------------------------
-# Phase U: real upgrade. dry_run is the primary gate and --check is the
+# Phase U: real upgrade. operation=update is the primary gate and --check is the
 # independent secondary safety gate.
 # ---------------------------------------------------------------------------
 - name: Upgrade Prometheus with automatic rollback
   when:
-    - not (prometheus_update_check_rollback | bool)
-    - not (dry_run | bool)
+    - prometheus_update_check_effective_operation == 'update'
     - not ansible_check_mode
     - prometheus_update_check_upgrade_wanted | bool
   tags: [destructive]
@@ -428,13 +441,12 @@
       ansible.builtin.include_tasks: upgrade.yml
 
 # ---------------------------------------------------------------------------
-# Phase R: manual rollback. Discovery remains active in both dry-run layers;
-# restore/restart require dry_run=false and native check mode off.
+# Phase R: manual rollback. Discovery remains active in inspect and native check;
+# restore/restart require operation=rollback and native check mode off.
 # ---------------------------------------------------------------------------
 - name: Roll back Prometheus from a selected backup
   when:
-    - prometheus_update_check_rollback | bool
-    - not (dry_run | bool)
+    - prometheus_update_check_effective_operation == 'rollback'
     - not ansible_check_mode
     - prometheus_update_check_selected_backup.path | default('') | length > 0
   tags: [destructive]
@@ -446,7 +458,7 @@
   ansible.builtin.debug:
     msg:
       host: "{{ inventory_hostname }}"
-      dry_run: "{{ dry_run | bool }}"
+      operation: "{{ prometheus_update_check_effective_operation }}"
       status: "{{ prometheus_update_check_status }}"
       current: "{{ prometheus_update_check_current_version | default('') }}"
       target: "{{ prometheus_update_check_effective_target_version | default('') }}"

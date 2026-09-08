@@ -109,7 +109,7 @@
           else (prometheus_update_check_backup_candidates |
                 sort(attribute='mtime', reverse=true) | first | default({}))) }}
 
-- name: Record rollback dry-run or unavailable-backup status
+- name: Record rollback check or unavailable-backup status
   ansible.builtin.set_fact:
     prometheus_update_check_status: >-
       {{ 'rollback_failed'

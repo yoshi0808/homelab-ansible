@@ -42,7 +42,7 @@ playbook の入口を置く。処理本体は原則として `roles/` に実装�
 | [`alloy_setup.yml`](alloy_setup.yml) | `monitoring_servers` | Grafana Alloy、rsyslog受信振り分け、Loki転送経路の構築・更新 | `check-mode-native` | `alloy` |
 | [`grafana_provisioning.yml`](grafana_provisioning.yml) | `monnie` | Grafanaダッシュボード/アラートのrepo正本化(provisioning as code)。dashboard JSONの複製、dashboard provider定義、alert ruleのprovisioning配備 | `check-mode-native` | `grafana_provisioning` |
 | [`monitoring_healthcheck.yml`](monitoring_healthcheck.yml) | `monitoring_servers` | Prometheus、Grafana、Loki等の監視基盤healthcheck | `safe-readonly` | `monitoring_healthcheck` |
-| [`prometheus_update_check.yml`](prometheus_update_check.yml) | `monnie` | 手動導入Prometheusの更新確認と承認された更新処理 | `check-mode-native` | `prometheus_update_check` |
+| [`prometheus_update_check.yml`](prometheus_update_check.yml) | `monnie` | `prometheus_update_check_operation` による inspect/update/rollback | `check-mode-native` | `prometheus_update_check` |
 | [`semaphore_update_check.yml`](semaphore_update_check.yml) | `ansy` / `quory` | Semaphoreの新版検知(通知のみ。適用は手動手順) | `role-guarded` | `semaphore_update_check` |
 | [`semaphore_upgrade.yml`](semaphore_upgrade.yml) | `ansy` / `quory`（`-l`で1台を必須、`serial: 1`） | Semaphoreの版上げ・明示rollback。Semaphore UIのDry Run / CLIの`--check`は実データのread-only診断と予定動作の表示を行う。通常実行の再起動後は切り離したtransient unitが検証・自動rollback・通知する | `check-mode-native` | `semaphore_upgrade` |
 | [`rsyslog_forward_to_monnie.yml`](rsyslog_forward_to_monnie.yml) | `ansy:quory:authy` | Ubuntu系ノードのjournald/syslogをmonnieへ転送 | `check-mode-native` | `rsyslog_forward_to_monnie` |
@@ -120,7 +120,7 @@ Semaphoreのロールバックは復旧をdpkgの状態に依存させないた�
 | [`time_sync_check.yml`](time_sync_check.yml) | `quory:pve1:pve2:ansy:monnie:authy:sophos`（localhostからSophos / CloudKeyへ接続） | 各ホストのNTP同期状態を確認 | `safe-readonly` | `time_sync_check` |
 | [`time_sync_ntp_reference.yml`](time_sync_ntp_reference.yml) | `pve1:pve2:ansy:monnie:authy` | quoryを追加NTP参照先として設定 | `check-mode-native` | `time_sync_ntp_reference` |
 | [`ubuntu_nightly.yml`](ubuntu_nightly.yml) | `radius_servers`, `monitoring_servers` | reboot-required判定、条件付き再起動、サービス確認 | `check-mode-native` | playbook内tasks、`monitoring_healthcheck` tasks |
-| [`ubuntu_vm_full_upgrade.yml`](ubuntu_vm_full_upgrade.yml) | `dev_nodes:control_nodes:radius_servers:monitoring_servers` | Ubuntu VMの更新判定と手動full-upgrade | `check-mode-native` | `ubuntu_vm_full_upgrade` |
+| [`ubuntu_vm_full_upgrade.yml`](ubuntu_vm_full_upgrade.yml) | `dev_nodes:control_nodes:radius_servers:monitoring_servers` | `ubuntu_vm_full_upgrade_operation` による inspect/apply | `check-mode-native` | `ubuntu_vm_full_upgrade` |
 
 ## 自動化基盤・バックアップ・開発補助
 

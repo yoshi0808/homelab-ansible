@@ -25,7 +25,6 @@ prometheus_update_check_service: prometheus
 prometheus_update_check_install_dir: /opt/prometheus
 prometheus_update_check_health_url: http://localhost:9090/-/healthy
 prometheus_update_check_lock_dir: /run/lock/prometheus_update_check.lock
-prometheus_update_check_rollback: "{{ rollback | default(false) | bool }}"
 prometheus_update_check_rollback_to: "{{ rollback_to | default('') }}"
 
 # Single canonical (pattern, replacement) pair used everywhere this role
