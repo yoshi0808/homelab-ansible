@@ -11,15 +11,7 @@
 
 ## Now(進行中)
 
-**Codex 更新後に Coordinator の monitor 起動を確認する(2026-09-06)** — Coordinator の Codex 移行と、`homelab` / `homelab-ops` 両teamの identity統一は完了した。残るのは更新後の新規セッションでの起動確認である。
-
-現セッションで Codex monitor wrapper は、app-server がlisten portを返さなかったためplain Codexへfallbackした。`delivery.sh status codex <project>` では `homelab/coordinator` と `homelab-ops/coordinator` の両方が `has no session recorded`、`homelab/implementer` は stale pidfile と表示された。Yoshinobuが本セッションを終了し、Codexを更新してから再起動する。
-
-1. `./new-session.sh --reset` で起動する。スクリプトは書き換え済み(pane 0 が Codex、boot prompt の宛先は `coordinator`、`agent-messaging.md` §10 の掃除と seat 張り直しを実装)だが、**更新後の起動は未実測**。壊れていたら `new-session.sh.bak-pre-codex-coordinator-20260906-143522` を戻す
-2. Codex Coordinator が本ファイルを自分で読み、`delivery.sh status` で `homelab/coordinator` と `homelab-ops/coordinator` の2つの seat および bridge を確認する。seat が2つ要る理由と掃除・張り直しの契約は `agent-messaging.md` §10が正本
-3. local teamと`homelab-ops`の両方でagmsgの往復配送を確認する。cross-teamへ送る文面は従来どおりYoshinobuの同意を得る
-4. `codex execpolicy check` で `git reset --hard` と `rm` が `prompt` になることを確認する。**対象ファイルを実際に削除・resetして試さない**
-5. `homelab/implementer` を次に使うときは、`agent-messaging.md` §4 / §10に従って `--fresh` で起動し、stale pidfileの解消と配送を確認する
+**Codex Implementerのmonitor初回確認** — Coordinatorのmonitor復元は解決済み(`docs/ai/memory/incidents/2026-09-07_agmsg-codex-monitor-bypassed-after-reset.md`)。`homelab/implementer`を次に使うときは、`--fresh`起動後に依頼の自動配送と可視threadの一致を確認する。
 
 **auto-memory 110件の仕分けは保留**(Yoshinobu、2026-09-06)。**Codex は auto-memory を読まないため、移行後この知識は使われない。** Coordinator が Claude Code へ戻る機会があれば再開する。案件記録は `docs/ai/reviews/coordinator_platform_migration/`。
 

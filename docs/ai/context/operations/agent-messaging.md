@@ -22,7 +22,7 @@ Tester と Auditor は必要になった時点で join する。**`claude` は C
 
 **成果物をagmsgのメッセージだけに残さない。** 監査証跡は `docs/ai/reviews/<target>/` 配下のファイルであるという `docs/ai/core.md` の定めは、依頼先がcodexでも変わらない。メッセージDBはリポジトリ外にあり、`git log` からも案件記録からも辿れない。
 
-## 2. codex 側へ配送が届く条件
+## 2. codex の monitor 配送が届く条件
 
 **次の4つが全部揃って初めて届く。1つでも欠けると、エラーを出さずに配送だけが成立しない。**
 
@@ -34,6 +34,10 @@ Tester と Auditor は必要になった時点で join する。**`claude` は C
 2 が欠けると `spawn.sh` は `type.conf` の `cli=codex` を PATH で解決して素の codex を起動する。**spawnは成功を返し、ペインは開き、codexは正常に動く。** boot promptで渡した仕事はこなすので、「後から送ったメッセージだけが届かない」という形で現れる。
 
 4 の信頼は hooks ファイルの**内容**に対して与えられる。`.codex/hooks.json` が変われば再び聞かれる。
+
+ansyのCoordinatorも`monitor`を使う。2026-09-08に`turn`を実測したところ、Stop hookによる取得自体は成立したが、返信時点で待機中のCoordinatorを起こせず、次のturn終了とcooldownまで表示されなかった。Reviewer / Tester / Auditorとの協調には即時配送が要るため、Yoshinobuが従来の`monitor`へ戻すと判断した。
+
+Codex native remote-controlのmanaged app-serverとagmsg monitorのapp-serverは同じcontrol socketを同時には所有できない。このためansyのlauncherはmanaged daemonを停止してからmonitorを起動する。**これは「monitorではスマホアプリを使えない」ことを意味しない。** 2026-09-08、monitorのapp-serverだけを動かした状態で、スマホアプリから同じCoordinator threadと会話できることを実測した。2つのapp-serverプロセスを同時に立てることを共存条件にしない。
 
 ## 3. `alive` は配送の成立を保証しない
 
@@ -170,7 +174,9 @@ remote.sh status homelab-ops                       # engine と「最後に成�
 
 **戻らない場合に見る順序** — Docker が boot で上がっているか(`systemctl is-enabled docker`)→ compose の `restart:` が効いているか → nginx。**上流の `compose.yaml` には `restart:` が無く、この repo のテンプレートで足している**(R15)。復旧のたびに手で `up -d` しているなら、それは成立していない。
 
-## 10. 起動スクリプトが満たすこと(両ホスト共通)
+## 10. 起動スクリプトが満たすこと
+
+### codex monitor
 
 **codex を `monitor` で使うホストでは、起動スクリプトが seat の面倒を見る。** 見ないと、**人が見ているスレッドと配送先が、起動のたびにズレる。**
 
@@ -181,7 +187,7 @@ seat の実体は `run/role-session.<team>__<agent>` の1ファイル(中身は 
 1. **起動の前に掃除する** — seat、残存 bridge の pid(`run/codex-bridge.<team>.<agent>.pid`)、そのプロジェクトの app-server。**app-server は窓が消えたスレッドも loaded のまま抱える**ため、残っていると 2 の特定が曖昧になり、**黙って失敗する**
 2. **起動の後に seat を張り直す**
 
-**spawn で立てる役は `spawn.sh --fresh` が両方を担う(§4)。pane 0 だけは spawn を使えない** — そこは人が直接使っているセッションそのものだからで、`new-session.sh` が自前で行う。**quory はもとからこの形であり、Coordinator が codex になった ansy も同じ形になる。**
+**spawn で立てる役は `spawn.sh --fresh` が両方を担う(§4)。pane 0だけは spawn を使えない** — そこは人が直接使っているセッションそのものだからで、各ホストの起動スクリプトが自前で行う。
 
 **`--fresh` を省かない。** 検める側の役では、`resume` すると**計画を査読した体と差分をレビューする体が同一になる**(`docs/ai/roles/coordinator.md`「委任するときの独立性」)。**この破れ方はエラーを出さない。**
 
@@ -199,7 +205,22 @@ codex-record-session.sh homelab-ops operator <project>   # 2. 張り直し(数�
 
 **この掃除を欠いたまま運用すると、人が見ていないスレッドが `operator` を名乗って応答しうる** — 2026-08-16 に実際に起きた(`docs/ai/memory/incidents/2026-08-16_headless-codex-thread-replied-as-operator.md`)。
 
-**`turn`(Stop フックで引く)へ落とせば bridge ごと不要になるが、採らない**(2026-08-16、Yoshinobu 決定)。即時性そのものは要件ではないが、**両ホストの配送方式を分岐させない**ほうを取った。したがって安全性は「bridge を使わないこと」ではなく、**上の2つを起動スクリプトが必ず行うこと**に依存する。
+quoryは`turn`へ落とさない(2026-08-16、Yoshinobu決定)。Operatorへの即時配送と可視スレッドの一致は、**上の2つを起動スクリプトが必ず行うこと**に依存する。
+
+### ansy: Coordinatorのmonitor起動
+
+ansyもReviewer / Tester / Auditorとの即時配送を優先し、Codex Coordinatorを`monitor`で使う(2026-09-08、Yoshinobu決定)。gitignoredの`new-session.sh`はfresh create時に次をこの順で行う。
+
+```
+delivery.sh set off codex <project>     # 旧bridgeとagmsg app-serverを停止
+codex remote-control stop --json        # managed daemonがあれば停止
+delivery.sh set monitor codex <project> # SessionStart / SessionEnd hookを導入
+codex-monitor.sh ... resume <thread>    # tmux pane 0でseat済みthreadを再開
+```
+
+`new-session.sh`は`homelab/coordinator`と`homelab-ops/coordinator`のseatが同じthreadを指すことを確認し、不在または不一致なら曖昧な配送先を推測せず停止する。pane 0ではshell functionやPATH順序に依存せず、`codex-monitor.sh`を明示的に呼ぶ。非対話shellで実Codexへ解決され、plain Codexが起動して配送だけ失われたIncidentは`docs/ai/memory/incidents/2026-09-07_agmsg-codex-monitor-bypassed-after-reset.md`。
+
+ansyのtmux pane 0はCoordinator TUIを保持する。これによりSSHが切れても`tmux attach -t homelab`で同じ端末へ戻れる。2026-09-08、同じmonitor app-server経路でスマホアプリからCoordinatorと会話できることも実測した。tmuxは常駐するClaude CodeのReviewer / Tester / Auditorも保持する。
 
 なお**起動スクリプト自体は両ホストとも `.gitignore` 済みで、この repo は持たない**(AI 実行環境のローカルスクリプトを入れない線)。**したがって、この節が要件の正本である。** スクリプトを書き直すときはここへ突き合わせる。
 
