@@ -13,16 +13,6 @@
 
 **auto-memory 110件の仕分けは保留**(Yoshinobu、2026-09-06)。**Codex は auto-memory を読まないため、移行後この知識は使われない。** Coordinator が Claude Code へ戻る機会があれば再開する。案件記録は `docs/ai/reviews/coordinator_platform_migration/`。
 
-**観測待ち: sandbox が自分でパッチを当てて再起動すること(2026-09-05 配備、案件 `docs/ai/reviews/sandbox_auto_patch/`)** — sandbox は `-security` しか当たらず、`/var/run/reboot-required` が2026-08-22から立ったままだった。原因は本番の `-updates` と再起動を担う月次 `ubuntu_vm_full_upgrade` レーンに `sandbox_nodes` が入っていないこと。**quory は sandbox の鍵を持たないためレーンへ足せない**(`id_sandbox` は ansy 専用)ので、箱自身の unattended-upgrades へ drop-in で `-updates` と `Automatic-Reboot`(04:00、ログイン中でも)を足した。Semaphore には登録していない — 配ったあと動かすのは sandbox 自身の apt timer である。
-
-**再起動の側は証明済み、インストールの側は未観測。** 実効値が `Automatic-Reboot "true"` / `04:00` / `WithUsers "true"` になっていることと、AC9(効いていなければ playbook が失敗する)は実機で確認した。**まだ確かめていないのは、日次実行が実際に `-updates` を入れるところである** — 2026-09-05 の `dpkg.log` は0行で、`-updates` を許可した状態での日次実行はまだ一度も起きていない。`apt.systemd.daily` は前回実行のスタンプが間隔より新しいと飛ばすため、**9/6 の発火(06:16)は現スタンプ(9/5 06:41)より早く、もう1回飛ぶ可能性がある。9/6 と 9/7 の両方を見る。**
-
-**drop-in が `99` でなければならない理由を消さないこと。** `52` にすると **cloud-init 由来の `/etc/apt/apt.conf.d/52unattended-upgrades-local`**(`Automatic-Reboot "false"` のみ)に名前順で負け、再起動設定が黙って無効化される。**これは実機でしか出ず、Implementer と Reviewer の fixture では通っていた。** 同ファイルは `ansy` にもあり、本番ではそれで正しい(再起動は月次playbookと03:30の条件付きrebootが担う)。**cloud-init の user-data は触らない** — 変えると今後作る全VMに効く。sandbox の cloud-init は seed が外れており再実行されない(2026-09-05実測)。
-
-**sandbox は本番より先へ進む。** `-updates` を随時取り込むため、月次でしか上がらない本番との間に「進んでいる側」の乖離が生まれる。**承知のうえで受け入れた**(requirement §8)。
-
-
-
 **Operator が起動時にこの repo を読む。`operator.md` は本番エージェントの起動時契約である(2026-09-03 クローズ、`42b639b`)** — Yoshinobu が quory 側で設定した。OPREQ で繰り返しトラブったことへの対応である。**編集は「文書の更新」ではなく「本番の挙動を変える変更」として扱う** — push すれば `worktree_sync` の timer で quory へ入り、次の起動から効く。
 
 | | |
@@ -47,20 +37,6 @@
 - **Operator は apt のログを読めない**(`root:adm 0640`、`ann` では拒否)。本番で apt が止まったとき、運用側から中身を確かめる手段が無い
 - **`NEEDRESTART_MODE=l` は再起動しないため、更新したパッケージのうち動いているプロセスが旧版のままのものがある。** authy は `libpam` 系が入ったが `freeradius` は旧ライブラリのまま動いている(再起動不要と出ており、急がない)
 
-**観測待ち: syslog週次ダイジェストの初回実行(2026-09-04 実装、commit `2eeb51c`)** — `SAFE: Syslog weekly digest`、**毎週月曜 09:00**。閾値を持たないダイジェストであって検知ではない(`level`を発火条件にしない)。**登録は済んでおり、あとは発火を待つだけである** — template 56 / schedule 23(`0 9 * * 1`、`active: true`)。**実行回数は0回で、初回は2026-09-08(月)09:00**。
-
-**独立レビュー6巡でApprove、Testerが実測でAC2〜AC6を検証した。AC1(実Slack送信)とAC7(実monnie上の無変化)は到達手段が無く未検証である** — ansyからmonnieへの鍵は2026-08-19に削除済みで、使えるのは`monnie-investigate`の24h窓だけ。**本実装が使う168hは配備前には原理的に確かめられない。**
-
-**初回実行で見るもの(観測計画の正本は `docs/ai/reviews/syslog_weekly_digest/2026-09-01_004_test_result.md` §4)。**
-
-- 実Lokiが168hのqueryと`limit=300`を受理するか
-- **実Slackで本文が6,000字に収まり省略表示が出るか** — Slackのattachment textの実上限はrepoのどこにも記録が無く、誰も測っていない。6,000は保守的に置いた値である
-- Semaphoreのジョブ出力にマスク前の生データが出ていないこと
-- **`error_total`と`error_entries`が食い違う頻度** — 食い違うと原因が何であれ「取得失敗」として届く設計にした(`core.md`「判定できないときは止める」に従った受容)。頻発するなら許容幅を設けるかを判断する
-- series件数と`MAX_SERIES=500`の余裕
-
-**承知の上の残存リスク**: 秘匿の保証は機械的に検出できるIPv4に限る。error全文を出す以上、IPv4以外のcredential/tokenが`#info`へ出る可能性は残る(**安全境界の緩和としてYoshinobuが判断した**、EXEC-030、requirement §5)。**Testerが実データで確認済み** — 実ログ行の`::ffff:`付きIPv4は伏せられ、`user=admin@pve`は伏せられない。
-
 **一次調査の先読みは成立した(2026-09-03 観測、案件クローズ)** — ジョブ #938 の失敗で一次調査が自然に動き、`notes` に `Permission denied` は現れず、`observations` が Semaphore のエラー本文(`rc=-9`)まで引用した。2026-08-25 の traverse ACL 付与(`bbf2afa`)が効いている。記録は `docs/ai/reviews/incident_prefetch_traverse/2026-09-03_006_observed.md`。**同じ通知で Slack uri 移行の AC3 も充足した**(色バー無し=プレーンテキスト。`docs/ai/reviews/slack_notify_uri_migration/2026-09-03_008_ac3_observed.md`)。
 
 **この2件から残った弱点は3つで、いずれも案件を起こしていない。**
@@ -68,20 +44,6 @@
 - **`workspace` の本番現物を開発側から観測する手段が無い。** `acl-status` の表に arm が無く、repo 側の定義までしか言えない
 - **`acl-status semaphore-db` は恒久的に `Permission denied`。** `dev-investigate` が traverse を失ったためで異常ではないが、**ACLが付け直されていないかを開発側から観測する手段は失われた**
 - **先読みが空でも「調査したがわからなかった」と同じ見た目で通知が出る。** 通知が運ぶのは verdict / confidence / known_condition で `notes` は運ばない。2026-08-22 の #802 では `EACCES` が成果物の中にしか無く、Slack には「特定不能」としか出なかった
-
-**Implementer と Reviewer を入れ替えた(2026-09-04)** — **ImplementerはCodex native subagentとして案件ごとに委任し、Reviewer / Tester / Auditorはagmsg経由のClaude Codeペインとして起動する。** `new-session.sh`が常駐させるのはCoordinatorと検める3Roleで、Implementerのtmuxペインやagmsg identityは使わない。正本は`docs/ai/roles/coordinator.md`「起動できるRoleと、その実現方式」。**片側だけを動かす選択肢は無い** — 実装がCodexならCodex Reviewerは自己レビューになり、別CLIによる独立性が失われる。
-
-狙いは利用量の平準化(Claude側が上限に当たり、Codex側に余裕があった)と、両モデルの得意・苦手を実地で知ること。**次の1〜2案件で判断する。1案件では決めない。**
-
-**測るもの**(新しい台帳は作らない。案件記録の implement / review ファイルに載る範囲で見る)。
-
-- **codexの過剰実装** — requirementに無い実装が入っていないか。2026-09-02にYoshinobuが実装をcodexへ回さない理由として挙げた傾向であり、今回はそれを承知で試している。歯止めは依頼文でのファイル列挙と、Reviewerへ渡す明示の観点(`coordinator.md`「委任するときの独立性」)
-- **Claude Reviewerの検出力** — 直前まではcodex Reviewerが2案件連続で正しかった。その優位を手放した影響が出るか
-- 実装の往復回数と差分規模
-
-**1案件目は `docs/ai/reviews/loki_window_embedded_newline/`(2026-09-04、配備まで完了)。**codex Implementerは**過剰実装なし・往復0回**、Claude Reviewerは**findings 0でApprove**。ただし対象は同一ファイル内に雛形のある1行修正で、**検出力の比較材料にはなっていない**。**この回で欠陥が出たのは記録側で、拾ったのはAuditorだった** — Reviewerが自分の検証カバレッジを過小に書き(11種回して「10種」、実際に回した文字種を「未検証」と記載)、Coordinatorがそれを現物で確かめずに引き継いだ。**2案件目は、検出力が問われるものを当てる。**
-
-**Codex native Implementerの権限はdry_run衝突解消案件でAnsible実装まで確認した。** ファイル編集、Python test、両playbookのsyntax-check、localhost / decoy検証が追加昇格なしで通った。権限の正本は`~/.codex/rules/default.rules`と`~/.codex/config.toml`であり、agmsg deliveryの成否とは独立している。足りなければCodexは迂回せず昇格を求めて止まるため、危険ではなく手間として現れる。
 
 ## Next(着手候補) — 工程・体制
 
