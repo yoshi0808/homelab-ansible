@@ -4,23 +4,30 @@
 
 ## 位置づけ
 
-本書は、Coordinator を起点とする agmsg の連絡経路を扱う runbook である。禁止・義務はこの経路の手順に閉じる(`docs/ai/context-classification.md`「Operations Context」「Policyとの境界」)。扱うのは2つ — **同一ホスト上の役への依頼**(team `homelab`、local-only、§1〜§6)と、**quory 側 Operator とのすり合わせ**(team `homelab-ops`、remote、§7〜§9)。各Roleの責務・権限・成果物は `docs/ai/roles/<role>.md` が、承認境界は [`docs/ai/policies/execution_boundary_policy.md`](../../policies/execution_boundary_policy.md) が正本であり、競合時はそちらを優先する。IP、認証情報、秘密情報の実値は記載しない。
+本書は、Coordinator を起点とする agmsg の連絡経路を扱う runbook である。禁止・義務はこの経路の手順に閉じる(`docs/ai/context-classification.md`「Operations Context」「Policyとの境界」)。扱うのは2つ — **同一ホスト上のReviewer / Tester / Auditorへの依頼**(team `homelab`、local-only、§1〜§6)と、**quory 側 Operator とのすり合わせ**(team `homelab-ops`、remote、§7〜§9)。ImplementerはCodex native subagentとして委任し、agmsgを使わない。各Roleの責務・権限・成果物は `docs/ai/roles/<role>.md` が、承認境界は [`docs/ai/policies/execution_boundary_policy.md`](../../policies/execution_boundary_policy.md) が正本であり、競合時はそちらを優先する。IP、認証情報、秘密情報の実値は記載しない。
 
 ## 1. 構成
 
 agmsg 本体・team定義・メッセージDBは、いずれも**リポジトリの外**(`~/.agents/skills/agmsg/`)にある。upstream は `github.com/fujibee/agmsg`。**導入版はここへ写さない** — `scripts/version.sh` が持つ。
 
-**識別子は製品名ではなく役の名前にする。** どの製品がどの役を担うかは変わるが、役は変わらない(割り当ての正本は `docs/ai/roles/coordinator.md`)。**この team は local-only であり、remote 化しない** — Implementer の通信をネットワークへ出さないこと、および Operator の通信を Implementer が読めないことを、team の境界で担保している。
+**識別子は製品名ではなく役の名前にする。** どの製品がどの役を担うかは変わるが、役は変わらない(割り当ての正本は `docs/ai/roles/coordinator.md`)。**この team は local-only であり、remote 化しない。** Operatorとの通信は別team `homelab-ops`へ分離する。
 
-| 識別子 | type | project |
+次表は**現行launcherが使うactive identity**であり、`team.sh homelab`が返す登録roster全体ではない。
+teamには過去の独立レビュー用identityと旧`implementer`登録が残るが、登録の存在を現在の起動・配送経路と
+読まない。
+
+| active識別子 | type | project |
 |---|---|---|
-| `claude` | `claude-code` | `/home/yoshi/homelab-ansible` |
-| `implementer` | `codex` | 同上 |
+| `coordinator` | `codex` | `/home/yoshi/homelab-ansible` |
 | `reviewer` | `claude-code` | 同上 |
+| `tester` | `claude-code` | 同上 |
+| `auditor` | `claude-code` | 同上 |
 
-Tester と Auditor は必要になった時点で join する。**`claude` は Coordinator の識別子で、名前が製品名なのは移行前の名残である。** Coordinator を別のCLIへ移す時点で `rename.sh homelab claude coordinator` により `homelab-ops` 側と揃える。**走行中の自分自身を rename しない** — `run/` の actas ロックと watcher は旧名で動いており、`rename.sh` はそこを意図的に触らない。
+Reviewer / Tester / Auditorはlauncherがfresh sessionとして起動する。旧`implementer`（`codex`）登録は
+team rosterに残っているが、launcher・依頼・返信には使わない。ImplementerはCodex native subagentとして
+案件ごとに起動する。登録の整理は本runbookの機能要件ではない。
 
-**成果物をagmsgのメッセージだけに残さない。** 監査証跡は `docs/ai/reviews/<target>/` 配下のファイルであるという `docs/ai/core.md` の定めは、依頼先がcodexでも変わらない。メッセージDBはリポジトリ外にあり、`git log` からも案件記録からも辿れない。
+**成果物をagmsgのメッセージだけに残さない。** 監査証跡は `docs/ai/reviews/<target>/` 配下のファイルであるという `docs/ai/core.md` の定めは、依頼先がどのCLIでも変わらない。メッセージDBはリポジトリ外にあり、`git log` からも案件記録からも辿れない。
 
 ## 2. codex の monitor 配送が届く条件
 
@@ -31,7 +38,10 @@ Tester と Auditor は必要になった時点で join する。**`claude` は C
 3. `~/.agents/bin` が PATH にある。**`~/.bashrc` の非対話ガードより上に置くこと** — 末尾へ追記しても非対話シェルは冒頭で `return` するため無言で効かない
 4. codex の「Hooks need review」プロンプトで hook を信頼済みである。未信頼だと hook が走らず、bridge があっても配送はセッションへ入らない
 
-2 が欠けると `spawn.sh` は `type.conf` の `cli=codex` を PATH で解決して素の codex を起動する。**spawnは成功を返し、ペインは開き、codexは正常に動く。** boot promptで渡した仕事はこなすので、「後から送ったメッセージだけが届かない」という形で現れる。
+2 が欠けた状態でagmsgからCodex roleをspawnすると、`spawn.sh` は `type.conf` の `cli=codex` を
+PATHで解決して素のCodexを起動する。**spawnは成功を返し、ペインは開き、Codexは正常に動く。**
+後から送ったメッセージだけが届かない形で現れる。現行ansy構成でmonitorを使うCodex roleは
+Coordinatorであり、native Implementerはこの条件の対象外である。
 
 4 の信頼は hooks ファイルの**内容**に対して与えられる。`.codex/hooks.json` が変われば再び聞かれる。
 
@@ -55,15 +65,13 @@ Codex native remote-controlのmanaged app-serverとagmsg monitorのapp-serverは
 ## 4. spawn と despawn
 
 ```bash
-spawn.sh codex <name> --team <team> --split h --fresh --model <Roleのmodel> --boot-prompt "<起動指示>"
-despawn.sh <team> <from> <name> [--force]
+spawn.sh claude-code <checking-role> --team homelab --split h --fresh --model <Roleのmodel> --boot-prompt "<起動指示>"
+despawn.sh homelab coordinator <checking-role> [--force]
 ```
 
 - **`--model`を省略しない。** 現在値とeffortの例外条件は`docs/ai/roles/coordinator.md`「モデル・effort配分」を参照する
 - **`--boot-prompt` に依頼文を載せない**(§6)。置くのは「agmsg で依頼が届くまで待て」という起動指示だけである
 - **`--fresh` を省くと、記録済みスレッドを `resume` する。** 古い transcript を再生した状態でプロンプトに止まり、新しい boot prompt は実行されない
-- codex には spawn の readiness handshake が無く、`--no-wait` が常に暗黙に効く
-- **codex のペインは都度畳まない**(Yoshinobu、2026-09-02)。次の依頼はそのまま `send.sh` で送る。畳むのは作り直しが要るときだけであり、`despawn` → 再 `spawn` は配送が成立しなくなることがある(§10)
 - `--force` で畳むと transcript は残らない。**後から原因を調べる必要があるものは、畳む前に `tmux capture-pane` で控える**
 
 ## 5. 権限の層
@@ -98,7 +106,7 @@ codex 側には2つの層がある。**一方は repo で追跡され、もう�
 
 | 識別子 | ホスト | 位置づけ |
 |---|---|---|
-| `coordinator` | ansy | 人が直接使っているセッション。team `homelab` では移行が済むまで `claude` を名乗る(**team ごとに識別子は別である**) |
+| `coordinator` | ansy | 人が直接使っているセッション。team `homelab` / `homelab-ops`の両方で同じ識別子を使い、同じvisible threadへseatする |
 | `operator` | quory | watcher は Operator セッションの一部。**セッションと共に消える**(sync engine は別、§9) |
 
 - **サーバは ansy 上にある**(Docker + nginx の TLS 終端)。配備の正本は `roles/agmsg_server/` と `playbooks/agmsg_server_setup.yml`、設計と実測は `docs/ai/reviews/agmsg_remote_ops_channel/`。ポート・パス・到達許可の値をここへ写さない。

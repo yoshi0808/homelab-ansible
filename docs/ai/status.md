@@ -11,8 +11,6 @@
 
 ## Now(進行中)
 
-**Codex Implementerのmonitor初回確認** — Coordinatorのmonitor復元は解決済み(`docs/ai/memory/incidents/2026-09-07_agmsg-codex-monitor-bypassed-after-reset.md`)。`homelab/implementer`を次に使うときは、`--fresh`起動後に依頼の自動配送と可視threadの一致を確認する。
-
 **auto-memory 110件の仕分けは保留**(Yoshinobu、2026-09-06)。**Codex は auto-memory を読まないため、移行後この知識は使われない。** Coordinator が Claude Code へ戻る機会があれば再開する。案件記録は `docs/ai/reviews/coordinator_platform_migration/`。
 
 **観測待ち: sandbox が自分でパッチを当てて再起動すること(2026-09-05 配備、案件 `docs/ai/reviews/sandbox_auto_patch/`)** — sandbox は `-security` しか当たらず、`/var/run/reboot-required` が2026-08-22から立ったままだった。原因は本番の `-updates` と再起動を担う月次 `ubuntu_vm_full_upgrade` レーンに `sandbox_nodes` が入っていないこと。**quory は sandbox の鍵を持たないためレーンへ足せない**(`id_sandbox` は ansy 専用)ので、箱自身の unattended-upgrades へ drop-in で `-updates` と `Automatic-Reboot`(04:00、ログイン中でも)を足した。Semaphore には登録していない — 配ったあと動かすのは sandbox 自身の apt timer である。
@@ -71,7 +69,7 @@
 - **`acl-status semaphore-db` は恒久的に `Permission denied`。** `dev-investigate` が traverse を失ったためで異常ではないが、**ACLが付け直されていないかを開発側から観測する手段は失われた**
 - **先読みが空でも「調査したがわからなかった」と同じ見た目で通知が出る。** 通知が運ぶのは verdict / confidence / known_condition で `notes` は運ばない。2026-08-22 の #802 では `EACCES` が成果物の中にしか無く、Slack には「特定不能」としか出なかった
 
-**Implementer と Reviewer を入れ替えた(2026-09-04)** — **Implementer は agmsg 経由の codex(tmux右ペイン、`new-session.sh` が起動時に立てる)、Reviewer は Claude Code subagent** になった。正本は `docs/ai/roles/coordinator.md`「起動できるRoleと、その実現方式」、経路は `docs/ai/context/operations/agent-messaging.md`。**片側だけを動かす選択肢は無い** — 実装が codex なら codex Reviewer は自己レビューになり、別モデルであることによる独立性が失われる。
+**Implementer と Reviewer を入れ替えた(2026-09-04)** — **ImplementerはCodex native subagentとして案件ごとに委任し、Reviewer / Tester / Auditorはagmsg経由のClaude Codeペインとして起動する。** `new-session.sh`が常駐させるのはCoordinatorと検める3Roleで、Implementerのtmuxペインやagmsg identityは使わない。正本は`docs/ai/roles/coordinator.md`「起動できるRoleと、その実現方式」。**片側だけを動かす選択肢は無い** — 実装がCodexならCodex Reviewerは自己レビューになり、別CLIによる独立性が失われる。
 
 狙いは利用量の平準化(Claude側が上限に当たり、Codex側に余裕があった)と、両モデルの得意・苦手を実地で知ること。**次の1〜2案件で判断する。1案件では決めない。**
 
@@ -83,7 +81,7 @@
 
 **1案件目は `docs/ai/reviews/loki_window_embedded_newline/`(2026-09-04、配備まで完了)。**codex Implementerは**過剰実装なし・往復0回**、Claude Reviewerは**findings 0でApprove**。ただし対象は同一ファイル内に雛形のある1行修正で、**検出力の比較材料にはなっていない**。**この回で欠陥が出たのは記録側で、拾ったのはAuditorだった** — Reviewerが自分の検証カバレッジを過小に書き(11種回して「10種」、実際に回した文字種を「未検証」と記載)、Coordinatorがそれを現物で確かめずに引き継いだ。**2案件目は、検出力が問われるものを当てる。**
 
-**`~/.codex/rules/default.rules` の実装時の許可は、1案件目では問題にならなかった** — ファイル編集・`python3`・`git diff` の範囲では昇格を求めて止まることは無かった。**Ansibleの実行を伴う実装ではまだ通していない。** Reviewerで通る範囲しか実績が無い。足りなければcodexは迂回せず昇格を求めて止まる(`agent-messaging.md` §5 と同じ形)ので、危険ではなく手間として現れる。
+**Codex native Implementerの権限はdry_run衝突解消案件でAnsible実装まで確認した。** ファイル編集、Python test、両playbookのsyntax-check、localhost / decoy検証が追加昇格なしで通った。権限の正本は`~/.codex/rules/default.rules`と`~/.codex/config.toml`であり、agmsg deliveryの成否とは独立している。足りなければCodexは迂回せず昇格を求めて止まるため、危険ではなく手間として現れる。
 
 ## Next(着手候補) — 工程・体制
 

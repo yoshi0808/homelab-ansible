@@ -24,7 +24,7 @@ Yoshinobuとの対話窓口として要求と判断材料を整え、自ら実�
 | Role | 側 | 起動 |
 |---|---|---|
 | Coordinator | 作る側 | 人が直接使うセッション。tmux pane 0 |
-| Implementer | 作る側 | **agmsg経由で `implementer` として起動する**(経路は `docs/ai/context/operations/agent-messaging.md`) |
+| Implementer | 作る側 | **Codex native subagentとして案件ごとに起動する。agmsg配送やtmux常駐ペインは使わない** |
 | Reviewer | 検める側 | **agmsg経由で起動する。** 計画の査読も担う。**計画を査読した体と、差分をレビューする体は別体とする** |
 | Tester | 検める側 | agmsg経由で起動する。**subagentのうち、実ホストへ到達してよい唯一のRoleである**(到達してよい範囲は `docs/ai/policies/execution_boundary_policy.md` が定め、ansyが認証情報を持たないホストへは届かない) |
 | Auditor | 検める側 | **案件クローズ時に1回だけ**起動する。入力はrepoの成果物のみで、Coordinatorの説明を受け取らない |
@@ -40,14 +40,16 @@ Yoshinobuとの対話窓口として要求と判断材料を整え、自ら実�
 値の出どころは起動のしかたで違う。
 
 - **Coordinator** — 自分が載っているCLIの設定(現在はCodexの `~/.codex/config.toml`)
-- **agmsg経由で起動する役** — `spawn.sh --model` と、型ごとの `spawn_options.yaml`
+- **Codex native subagentのImplementer** — 委任時のmodel / effort指定
+- **agmsg経由で起動するReviewer / Tester / Auditor** — `spawn.sh --model` と、型ごとの `spawn_options.yaml`
 - **Claude Code subagentとして起動する場合** — 下表の値を `subagent_type` の指定で効かせる(**subagentは指定しなければ親のモデルを継承する**)
 
-現在のagmsg配分では次を既定とする。**modelを省略せず、`spawn.sh --model`へこの表の値を渡す。**
+現在の配分では次を既定とする。**Implementerはnative subagentの委任時、Reviewer / Tester /
+Auditorは`spawn.sh --model`でmodelを省略せず、この表の値を渡す。**
 
 | Role | 現在のCLI | 起動時指定 | 既定段 |
 |---|---|---|---|
-| Implementer | Codex | `gpt-5.6-luna` | medium |
+| Implementer | Codex（native subagent） | `gpt-5.6-luna` | medium |
 | Reviewer | Claude Code | `sonnet` | medium |
 | Tester | Claude Code | `sonnet` | medium |
 | Auditor | Claude Code | `sonnet` | medium |

@@ -6,7 +6,7 @@
 
 ADR-011は、CoordinatorとImplementerを作る側、Reviewer・Tester・Auditorを検める側として別CLIへ分けた。この割り当ては維持する。
 
-一方、同ADRが決定時点の値として記録したImplementer=`gpt-5.6-sol` / lowは、直近運用の`gpt-5.6-luna` / mediumと一致しない。また、Coordinator Roleのmodel表はClaude Code subagent経路だけを対象とし、現在使うagmsg経路の値が一覧できなかった。
+一方、同ADRが決定時点の値として記録したImplementer=`gpt-5.6-sol` / lowは、直近運用の`gpt-5.6-luna` / mediumと一致しない。また、Coordinator Roleのmodel表はClaude Code subagent経路だけを対象とし、現在使う各起動経路の値が一覧できなかった。
 
 Yoshinobuは2026-09-07、Reviewer / AuditorをSonnet medium、TesterはSonnet low程度、Implementerは指定がなければ`gpt-5.6-luna` mediumまたはhighとする案を提示した。Testerは実ホストへ到達できる唯一のsubagentであり、check modeの成立性と結果の意味を判断するため、通常既定をlowへ落とすかが論点となった。
 
@@ -20,7 +20,7 @@ Yoshinobuは2026-09-07、Reviewer / AuditorをSonnet medium、TesterはSonnet lo
 
 ## Decision
 
-Yoshinobuの合意(2026-09-07)により、現在のagmsg配分に対する既定値を次とする。
+Yoshinobuの合意(2026-09-07)により、現在のRole配分に対する既定値を次とする。
 
 | Role | CLI | model | 既定effort |
 |---|---|---|---|
@@ -31,7 +31,8 @@ Yoshinobuの合意(2026-09-07)により、現在のagmsg配分に対する既定
 
 - Implementerは、複数role、複雑なcheck mode、rollback、shell / Pythonを含む場合にhighへ引き上げる。
 - Testerをlowにできるのは、実ホストへ到達せず、期待値と手順が完全に固定されたローカル検査で、起動時に明示指定した場合だけとする。
-- agmsgで起動するときはmodelを省略せず、Roleの現在値を`spawn.sh --model`へ渡す。
+- ImplementerはCodex native subagentの委任時にmodel / effortを省略しない。
+- Reviewer / Tester / Auditorはagmsgで起動し、Roleの現在値を`spawn.sh --model`へ渡す。
 - Coordinator自身のmodelは本ADRで固定しない。
 
 本ADRはADR-011の「現在の値」だけをsupersedeする。ADR-011の作る側 / 検める側のCLI分離と、Coordinatorを最低effortへ置かない決定は維持する。
@@ -42,11 +43,13 @@ Tester mediumを維持することで、実ホストの終了コード、部分�
 
 Implementerは別CLIのReviewerとTesterに検められるため常時highとはせず、mediumを起点にする。Ansibleの状態遷移やrollbackを含む実装は、局所的なコード生成より前提の保持が重要になるためhighへ上げる。
 
-agmsgのspawn optionsはCLI種別単位である。現在はCodexがImplementer、Claude Codeが検める3Roleを担うため、両CLIをmedium既定にするだけで通常値を実現できる。Role別effort機能の追加は不要である。
+ImplementerはCodex native subagentとして都度委任するため、agmsgのdelivery modeやspawn optionsに
+依存しない。検める3RoleはClaude Codeのagmsg spawn optionsをmedium既定にすることで通常値を
+実現する。Role別effort機能の追加は不要である。
 
 ## Consequences
 
-- Codex spawnのrepo外設定をlowからmediumへ変更する。
-- 各subagentのmodelは起動時に明示する。
+- Codex native Implementerのmodel / effortは委任時に明示する。
+- agmsg経由の各checking Roleのmodelは起動時に明示する。
 - CLI割り当てを将来入れ替える場合は、現在値表とspawn optionsを同時に見直す。
 - 品質またはコストの実測で既定値を変える場合は、新しいADRで本決定を更新する。
