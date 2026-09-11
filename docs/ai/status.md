@@ -11,7 +11,7 @@
 
 ## Now(進行中)
 
-**Proxmoxストレージ月次点検: ローカル実装・独立検証完了、本番検証待ち**(2026-09-11)。正本は `docs/ai/reviews/proxmox_storage_monthly/2026-09-10_001_requirement.md`、実装006、独立再レビュー010=Approve、再テスト011=PASS。日本語/C.UTF-8で15テストとD1〜D8を確認。工程管理表照合済み、catalogは未適用・schedule無効。次はcommit/push承認、Integration準備、quoryでの初回実行と保存/Notion/Slack/schedule readback。実pve出力との一致は未検証、案件全体のcloseoutはまだ行わない。既存scrub/cronは変更しない。主目的のLuna限定調査による省トークン効果は未測定。
+**Proxmoxストレージ月次点検: 初回本番検証完了、schedule有効化反映待ち**(2026-09-11)。#1056で両pve収集・JSON/Markdown保存・Notion公開をOperatorが確認し、YoshinobuがSlack通知とリンクの到達を確認。有効化承認を受けcatalogを変更済み。次はcommit/push、Semaphore templates setupの適用とactive=trueのreadback、その後closeout/Auditor。既存scrub/cronは変更しない。案件正本は `docs/ai/reviews/proxmox_storage_monthly/2026-09-10_001_requirement.md`、本番観測と残事項は013。省トークン効果の定量評価は未了。
 
 **auto-memory 110件の仕分けは保留**(Yoshinobu、2026-09-06)。**Codex は auto-memory を読まないため、移行後この知識は使われない。** Coordinator が Claude Code へ戻る機会があれば再開する。案件記録は `docs/ai/reviews/coordinator_platform_migration/`。
 

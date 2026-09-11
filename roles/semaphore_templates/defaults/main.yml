@@ -851,11 +851,11 @@ semaphore_schedules_catalog:
     task_params:
       environment: "{}"
 
-  # 2026-09-10 工程管理表と照合。初回readback完了まで有効化しない。
+  # 2026-09-11 初回readbackとSlack到達確認後、Yoshinobuが有効化を承認。
   - name: "SEMI-SAFE: Proxmox storage monthly"
     template: "SEMI-SAFE: Proxmox storage monthly"
     cron: "0 8 15 * *"
-    active: false
+    active: true
     task_params:
       environment: "{}"
 

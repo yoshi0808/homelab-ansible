@@ -1,11 +1,11 @@
 # Proxmoxストレージ月次点検
 
-状態: 独立ローカル検証完了・本番未配備。案件正本は `docs/ai/reviews/proxmox_storage_monthly/2026-09-10_001_requirement.md`。
+状態: 本番初回実行確認済み・定期実行の有効化反映待ち。案件正本は `docs/ai/reviews/proxmox_storage_monthly/2026-09-10_001_requirement.md`、本番観測は013。
 
 ## 入口
 
 `playbooks/proxmox_storage_monthly.yml`。既存cronのscrubは変更しない。収集はZFS状態と実vdevのNVMe healthのみで、self-test・修復を開始しない。
-実行はquoryのSemaphoreから。2026-09-10にユーザー提示の工程管理表と照合し、掲載された処理と開始時刻が重ならない毎月15日08:00 JSTをcatalogへ登録した。長時間ジョブの終了時刻までは表から確認できない。scheduleは初回readback完了までactive=false。本番reconcile・有効化は未実施。
+実行はquoryのSemaphoreから。2026-09-10にユーザー提示の工程管理表と照合し、掲載された処理と開始時刻が重ならない毎月15日08:00 JSTをcatalogへ登録した。長時間ジョブの終了時刻までは表から確認できない。#1052で無効状態のscheduleを登録し、#1056の初回実行とSlack到達確認後に有効化が承認された。catalogはactive=trueへ変更済み、本番反映は未確認。
 
 変数の既定値とNotion親ページは `roles/proxmox_storage_monthly/defaults/main.yml`。操作は `proxmox_storage_monthly_operation=collect` または `replay`。再送は `proxmox_storage_monthly_report_id` に保存済report IDを指定する（ファイルパスは受け付けない）。replayでは対象hostへ収集しない。
 
@@ -34,4 +34,4 @@ native `--check` は観測・判定のみで、保存・Notion通信を行わな
 
 ## 未完了
 
-独立差分レビュー010=Approve、Tester再検証011=PASS。Integration準備、実pve出力一致確認、quory初回実行とJSON/Notion/Slack/schedule readbackは未完了。配備済みとは扱わない。
+独立差分レビュー010=Approve、Tester再検証011=PASS。初回の実データ解析・保存・Notion公開・Slack到達は013に記録。残りはschedule有効化の本番readbackと案件closeout。
