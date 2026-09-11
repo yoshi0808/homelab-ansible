@@ -186,7 +186,7 @@ class ReportTests(unittest.TestCase):
                 'proxmox_storage_monthly_report_id': reports[0].stem})],
                 cwd=ROOT.parents[1], capture_output=True, text=True, timeout=60)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-            self.assertIn('Publication=suppressed', result.stdout)
+            self.assertIn('レポート公開=suppressed', result.stdout)
 
     def test_archive_freezes_same_month_baseline(self):
         class Clock(datetime):
@@ -228,6 +228,45 @@ class ReportTests(unittest.TestCase):
         self.assertEqual(report(239, baseline)['hosts']['fixture-node']['devices'][0]['delta']['num_err_log_entries'], 0)
         self.assertEqual(report(240, baseline)['health'], 'WARNING')
         self.assertEqual(report(10, baseline)['hosts']['fixture-node']['devices'][0]['comparison'], 'reset_suspected')
+
+    def test_human_readable_normal_report(self):
+        result = report()
+        body = logic.markdown(result)
+        self.assertIn('異常は見つかりませんでした', body)
+        self.assertIn('初回点検のため前回比較はありません', body)
+        self.assertIn('最終scrub: 2026-09-13 00:25 JST（2日前）', body)
+        self.assertIn('温度: 49.85 °C', body)
+        self.assertIn('エラーログ累積: 239件', body)
+        self.assertIn('初回基準値として記録', body)
+        self.assertNotIn('"values": {', body)
+
+    def test_human_readable_warning_report_and_summary(self):
+        baseline = report()
+        result = report(240, baseline)
+        body = logic.markdown(result)
+        summary = logic.short_summary(result)
+        self.assertIn('確認が必要です（要確認）', summary)
+        self.assertIn('NVMe error-logの累積数が増加しました', summary)
+        self.assertIn('error-log +1', body)
+        self.assertIn('fixture-node', body)
+
+    def test_human_summary_prioritizes_unknown_and_critical(self):
+        result = report()
+        result['health'] = 'UNKNOWN'
+        result['issues'] = [
+            ['WARNING', 'warning one'],
+            ['WARNING', 'warning two'],
+            ['WARNING', 'warning three'],
+            ['CRITICAL', 'ZFS data errors reported'],
+            ['UNKNOWN', 'history corrupt; comparison unavailable'],
+        ]
+        summary = logic.short_summary(result)
+        body = logic.markdown(result)
+        self.assertIn('判定不能：保存履歴が壊れているため前回比較できません', summary)
+        self.assertIn('異常：ZFSがデータエラーを報告しています', summary)
+        self.assertNotIn('warning three', summary)
+        self.assertLess(body.index('[判定不能]'), body.index('[異常]'))
+        self.assertLess(body.index('[異常]'), body.index('[要確認]'))
 
     def test_missing_and_corruption(self):
         result = logic.build_report({'fixture-node': {}}, 'x', '2026-09-15T08:00:00+09:00')

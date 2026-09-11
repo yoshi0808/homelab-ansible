@@ -7,7 +7,7 @@ from datetime import datetime
 
 from ansible.module_utils.basic import AnsibleModule
 from ansible.module_utils.storage_files import locked, read_json, save_json, atomic, REPORT_ID, report_path
-from ansible.module_utils.storage_monthly import JST, build_report, markdown
+from ansible.module_utils.storage_monthly import JST, build_report, markdown, short_summary
 
 
 def freeze_devices(baseline, reports):
@@ -113,13 +113,13 @@ def main():
             report = read_json(report_path(root, module.params['report_id']))
             if report['schema_version'] != 1 or report['report_id'] != module.params['report_id']:
                 raise ValueError('invalid replay schema')
-            module.exit_json(changed=False, report=report, body=markdown(report))
+            module.exit_json(changed=False, report=report, body=markdown(report), summary=short_summary(report))
         if module.check_mode:
             report = build_report(module.params["observations"], "check-preview", datetime.now(JST).isoformat(),
                                   **module.params["thresholds"])
-            module.exit_json(changed=False, report=report, body=markdown(report))
+            module.exit_json(changed=False, report=report, body=markdown(report), summary=short_summary(report))
         report, body = archive(module.params["directory"], module.params["observations"], module.params["thresholds"])
-        module.exit_json(changed=True, report=report, body=body)
+        module.exit_json(changed=True, report=report, body=body, summary=short_summary(report))
     except (OSError, ValueError, KeyError, TypeError):
         module.fail_json(msg="Storage report archive failed; inspect local storage and schema")
 

@@ -155,18 +155,149 @@ def build_report(observations, report_id, collected_at, baseline=None, stale_day
             "history_error": history_error}
 
 
+HEALTH_LABELS = {
+    "OK": "問題なし",
+    "WARNING": "要確認",
+    "CRITICAL": "異常",
+    "UNKNOWN": "判定不能",
+}
+
+ISSUE_LABELS = {
+    "pool/vdev state or IO errors": "ZFSプールまたは構成デバイスの状態・I/Oエラーを確認してください",
+    "ZFS data errors reported": "ZFSがデータエラーを報告しています",
+    "scrub errors": "scrubでエラーが報告されています",
+    "scrub repaired data": "scrubでデータ修復が行われました",
+    "scrub result stale": "前回scrubから日数が経過しています",
+    "scrub completion unavailable or scan in progress": "scrub完了履歴がないか、現在処理中です",
+    "counter reset suspected": "カウンターが減少しました（リセットまたは交換の可能性）",
+    "error log count increased": "NVMe error-logの累積数が増加しました",
+    "device replacement/addition": "前回にないデバイスです（交換または追加の可能性）",
+    "NVMe health warning/media errors/spare": "NVMeの警告、media error、予備領域を確認してください",
+    "endurance used threshold": "NVMe消耗率が基準値以上です",
+    "empty target list": "点検対象hostがありません",
+    "history corrupt; comparison unavailable": "保存履歴が壊れているため前回比較できません",
+}
+
+
+def display_time(value):
+    """Render a stored offset-aware time for a human reader."""
+    if not value:
+        return "記録なし"
+    return datetime.fromisoformat(value).astimezone(JST).strftime("%Y-%m-%d %H:%M JST")
+
+
+def issue_text(reason):
+    """Translate known machine-facing issue codes while retaining identity prefixes."""
+    for code, label in ISSUE_LABELS.items():
+        if reason == code:
+            return label
+        suffix = ": " + code
+        if reason.endswith(suffix):
+            return reason[:-len(suffix)] + ": " + label
+    if "collection incomplete:" in reason:
+        prefix, detail = reason.split("collection incomplete:", 1)
+        return prefix + "収集データが不完全です（" + detail.strip() + "）"
+    return reason
+
+
+def sorted_issues(report):
+    """Put uncertainty and failures before warnings without changing stored JSON."""
+    priority = {"UNKNOWN": 0, "CRITICAL": 1, "WARNING": 2, "OK": 3}
+    return sorted(report.get("issues", []), key=lambda item: priority.get(item[0], 0))
+
+
+def comparison_text(device):
+    state = device["comparison"]
+    if state == "baseline":
+        return "初回基準値として記録"
+    if state == "history_corrupt":
+        return "履歴破損のため比較不能"
+    if state == "replacement_or_added":
+        return "前回にないデバイス（交換または追加の可能性）"
+    delta = device.get("delta", {})
+    detail = "media error {:+d} / error-log {:+d}".format(
+        delta.get("media_errors", 0), delta.get("num_err_log_entries", 0))
+    if state == "reset_suspected":
+        return "カウンター減少（リセットまたは交換の可能性）: " + detail
+    return "前回比: " + detail
+
+
+def short_summary(report):
+    """Return a compact Japanese summary suitable for Slack."""
+    health = HEALTH_LABELS.get(report.get("health"), "判定不能")
+    if report.get("collection") != "ok":
+        lead = "収集または比較が完了していません（" + health + "）"
+    elif report.get("health") == "OK":
+        lead = "異常は見つかりませんでした"
+    else:
+        lead = "確認が必要です（" + health + "）"
+    issues = [HEALTH_LABELS.get(level, level) + "：" + issue_text(reason)
+              for level, reason in sorted_issues(report)]
+    if not issues:
+        return lead
+    shown = issues[:3]
+    if len(issues) > 3:
+        shown.append("ほか" + str(len(issues) - 3) + "件")
+    return lead + " / " + " / ".join(shown)
+
+
 def markdown(report):
-    lines = ["# ストレージ月次点検 " + report["month"], "",
-             "Report: " + report["report_id"], "観測: " + report["collected_at"],
-             "健康状態: " + report["health"] + " / 収集: " + report["collection"],
-             "比較元: " + json.dumps(report["comparison_source"], ensure_ascii=False), "", "## 対応・未確認事項"]
-    lines += ["- " + level + ": " + reason for level, reason in report["issues"]] or ["- なし"]
+    healthy_hosts = sum(data["collection"] == "ok" for data in report["hosts"].values())
+    lines = ["# ストレージ月次点検 " + report["month"], "", "## 結論",
+             "**" + short_summary(report).split(" / ", 1)[0] + "**",
+             "- 総合判定: " + HEALTH_LABELS.get(report["health"], "判定不能") +
+             "（" + report["health"] + "）",
+             "- 収集結果: " + str(healthy_hosts) + "/" + str(len(report["hosts"])) + "台で成功",
+             "- 観測日時: " + display_time(report["collected_at"]), "", "## 対応・未確認事項"]
+    lines += ["- [" + HEALTH_LABELS.get(level, level) + "] " + issue_text(reason)
+              for level, reason in sorted_issues(report)] or ["- 対応はありません"]
+    lines += ["", "## 前回比較"]
+    if report["history_error"]:
+        lines.append("保存履歴が壊れているため比較できません。今回値を正常値として扱わないでください。")
+    elif report["comparison_source"]:
+        lines.append("比較元: " + display_time(report["comparison_source"]["collected_at"]))
+    else:
+        lines.append("初回点検のため前回比較はありません。今回値を今後の基準として記録しました。")
     for host, data in report["hosts"].items():
-        lines += ["", "## " + host, "収集: " + data["collection"]]
+        lines += ["", "## " + host,
+                  "収集: " + ("成功" if data["collection"] == "ok" else "失敗・判定不能")]
         for pool in data["pools"]:
-            lines += ["### Pool " + pool["name"], "状態: " + pool["state"],
-                      "Scrub: " + json.dumps(pool["scrub"], ensure_ascii=False),
-                      "Vdev: " + json.dumps(pool["vdevs"], ensure_ascii=False)]
+            scrub = pool["scrub"]
+            pool_state = "正常（ONLINE）" if pool["state"] == "ONLINE" else "異常（" + pool["state"] + "）"
+            lines += ["", "### ZFS " + pool["name"], "- プール状態: " + pool_state]
+            if scrub.get("completed_at"):
+                age = (datetime.fromisoformat(report["collected_at"]) -
+                       datetime.fromisoformat(scrub["completed_at"])).days
+                lines += ["- 最終scrub: " + display_time(scrub["completed_at"]) +
+                          "（" + str(age) + "日前）",
+                          "- scrub結果: 修復 " + str(scrub.get("repaired", "不明")) +
+                          " / エラー " + str(scrub.get("errors", "不明")) + "件"]
+            else:
+                lines.append("- scrub結果: 完了日時を確認できません（" + scrub["raw"] + "）")
+            lines.append("- 構成デバイス:")
+            for vdev in pool["vdevs"]:
+                vdev_state = "正常" if vdev["state"] == "ONLINE" else "異常（" + vdev["state"] + "）"
+                lines.append("  - " + vdev["name"] + ": " + vdev_state +
+                             " / 読み取りエラー " + str(vdev["read"]) +
+                             " / 書き込みエラー " + str(vdev["write"]) +
+                             " / チェックサムエラー " + str(vdev["cksum"]))
+        for number, device in enumerate(data["devices"], 1):
+            values = device["values"]
+            lines += ["", "### NVMe " + str(number) + "（" + device["model"] + "）",
+                      "- 温度: " + str(device["temperature_c"]) + " °C",
+                      "- 消耗率: " + str(values["percent_used"]) + "%",
+                      "- 予備領域: " + str(values["avail_spare"]) +
+                      "%（警告基準 " + str(values["spare_thresh"]) + "%）",
+                      "- 重大警告: " + ("なし" if values["critical_warning"] == 0 else
+                                      "あり（" + str(values["critical_warning"]) + "）"),
+                      "- メディアエラー累積: " + str(values["media_errors"]) + "件",
+                      "- エラーログ累積: " + str(values["num_err_log_entries"]) + "件",
+                      "- 比較: " + comparison_text(device)]
+    lines += ["", "## 詳細情報", "- Report ID: " + report["report_id"]]
+    if report["comparison_source"]:
+        lines.append("- 比較元Report ID: " + str(report["comparison_source"]["report_id"]))
+    for host, data in report["hosts"].items():
         for device in data["devices"]:
-            lines += ["### NVMe " + device["serial"], json.dumps(device, ensure_ascii=False, indent=2)]
+            lines.append("- " + host + " / " + device["model"] + ": serial " + device["serial"] +
+                         " / vdev " + device["vdev"] + " / device " + device["namespace"])
     return "\n".join(lines) + "\n"

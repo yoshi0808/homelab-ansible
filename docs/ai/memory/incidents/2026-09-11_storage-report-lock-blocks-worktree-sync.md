@@ -1,7 +1,7 @@
 # Incident: 月次ストレージ実行状態がworktree同期を停止
 
 日付: 2026-09-11
-状態: 調査中
+状態: 解決済み
 対象: proxmox_storage_monthly / worktree_sync
 種別: 動作不具合
 原因分類: #製造ミス #テスト不足 #運用考慮ミス
@@ -20,6 +20,6 @@ quoryの22:18/23:18のSlack通知でdirty worktreeによりpull未実施。Yoshi
 
 ## 確認方法
 
-修正後git check-ignoreで.lock/JSON/Markdownが専用ディレクトリ規則に一致することを確認。配下の追跡済みファイルはゼロ。git diff --check実施。本番復旧は未了。
+修正後git check-ignoreで.lock/JSON/Markdownが専用ディレクトリ規則に一致することを確認。配下の追跡済みファイルはゼロ。git diff --check実施。
 
-同期はdirty guardで止まるため、pushだけでは修正を自動取得できない。quory管理者が当該ディレクトリのみを.git/info/excludeへ追加して記録を保全し、clean確認後に通常同期で修正を取得する。復旧確認後に本記録を完成させる。
+同期はdirty guardで止まるため、quory管理者が当該ディレクトリのみを.git/info/excludeへ追加して記録を保全し、worktree-sync.serviceを起動。quoryでHEAD/origin/mainが修正commitに一致、git status出力なし、Result=success、ExecMainStatus=0を確認した。レポートは削除していない。

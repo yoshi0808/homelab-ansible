@@ -11,7 +11,7 @@
 
 ## Now(進行中)
 
-**月次ストレージ実行状態によるquory worktree同期停止の復旧待ち**。専用runtimeディレクトリのGit除外漏れを修正中。レポートは削除しない。根拠と復旧手順は `docs/ai/memory/incidents/2026-09-11_storage-report-lock-blocks-worktree-sync.md`。
+**ストレージ月次点検レポートの可読性改善: 配備・実表示確認待ち**。日本語の結論、重大度順の対応事項、ラベル付きZFS/NVMe値、簡潔なSlack短報へ変更。独立Reviewer=Approve、Tester=PASS。次はcommit/push後、保存済みreportのreplayでNotion/Slack表示を確認する。案件正本は `docs/ai/reviews/proxmox_storage_report_readability/2026-09-12_001_requirement.md`。
 
 **Proxmoxストレージ月次点検: 次回定期実行の観測待ち**。配備案件はクローズ。次回の自然実行・比較結果を確認する。Survey任意欄の反復差分有無と省トークン効果は未評価。根拠・残存事項は `docs/ai/reviews/proxmox_storage_monthly/2026-09-11_014_closeout.md`。
 

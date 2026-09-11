@@ -65,12 +65,9 @@
         slack_status: "{{ 'error' if _storage_pipeline_error else ((_storage_report | default({})).health | default('UNKNOWN') | lower) }}"
         slack_title: ストレージ月次点検
         slack_message: >-
-          Report={{ (_storage_report | default({})).report_id | default('保存未完了') }}
-          Health={{ (_storage_report | default({})).health | default('UNKNOWN') }}
-          Collection={{ (_storage_report | default({})).collection | default('error') }}
-          Publication={{ _storage_publication.publication | default('incomplete') }}
+          {{ (_storage_archive | default({})).summary | default('点検処理が完了していません') }}
+          レポート公開={{ _storage_publication.publication | default('incomplete') }}
           {{ _storage_publication.url | default('') }}
-          Issues={{ (_storage_report | default({})).issues | default([]) | to_json }}
 
 - name: Fail incomplete pipeline after preserving available evidence
   ansible.builtin.assert:
