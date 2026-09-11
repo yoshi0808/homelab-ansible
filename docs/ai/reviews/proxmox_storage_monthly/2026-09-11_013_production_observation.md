@@ -1,6 +1,6 @@
 # 初回本番観測とスケジュール有効化準備
 
-状態: 初回実行確認済み。有効化カタログは変更済み、本番反映待ち。案件全体のcloseoutではない。
+状態: 初回実行・schedule有効化確認済み。案件全体のcloseoutは014を参照。
 
 ## 証拠
 
@@ -13,8 +13,12 @@
 
 ## 有効化
 
-初回観測後、Yoshinobuが毎月15日08:00の有効化を承認。catalogの当該scheduleだけactive=trueへ変更する。Git確定とSemaphore templates setupのapply、schedule readbackはこれからであり、現時点で本番のactive=trueを確認したとは扱わない。
+初回観測後、Yoshinobuが毎月15日08:00の有効化を承認。catalogを変更し、`f87f4e9`をcommit/pushした。Yoshinobuが#1058を通常実行し、2026-09-11 17:41:36〜17:42:04 JSTに成功した。
+
+Coordinatorがforced commandの`semaphore-query task-time 1058`、`task-output 1058`、`report-show semaphore-templates latest.json`、`report-show semaphore-schedules latest.json`で確認。両reportの生成日時は同ジョブ時間内。schedule ID24/template ID59の変更はactive=false→trueのみ、cronは`0 8 15 * *`、timezoneはAsia/Tokyo。書込後のVerify成功、非管理field変更のguardは発火せず。他schedule22件は無変更。
+
+予想したschedule1件だけでなく、template ID59の任意Replay report ID欄へ`required=false`と`default_value=""`を補う差分も報告された。新規templateはなく、他55件は無変更。この差分は明記してYoshinobuへ報告済み。APIが空値を省略することによる反復差分かどうかは未確認であり、冪等性確認済みとは扱わない。
 
 ## 残り
 
-schedule有効化readback、案件closeout/Auditor。次回定期実行による前回比較は経過観察。Luna省トークンのベンチマークは最終利用枠が未提示のため定量評価未了。
+案件closeout/Auditor。次回定期実行による前回比較は経過観察。Luna省トークンのベンチマークは最終利用枠が未提示のため定量評価未了。
