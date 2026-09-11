@@ -11,6 +11,8 @@
 
 ## Now(進行中)
 
+**Proxmoxストレージ月次点検: ローカル実装・独立検証完了、本番検証待ち**(2026-09-11)。正本は `docs/ai/reviews/proxmox_storage_monthly/2026-09-10_001_requirement.md`、実装006、独立再レビュー010=Approve、再テスト011=PASS。日本語/C.UTF-8で15テストとD1〜D8を確認。工程管理表照合済み、catalogは未適用・schedule無効。次はcommit/push承認、Integration準備、quoryでの初回実行と保存/Notion/Slack/schedule readback。実pve出力との一致は未検証、案件全体のcloseoutはまだ行わない。既存scrub/cronは変更しない。主目的のLuna限定調査による省トークン効果は未測定。
+
 **auto-memory 110件の仕分けは保留**(Yoshinobu、2026-09-06)。**Codex は auto-memory を読まないため、移行後この知識は使われない。** Coordinator が Claude Code へ戻る機会があれば再開する。案件記録は `docs/ai/reviews/coordinator_platform_migration/`。
 
 **Operator が起動時にこの repo を読む。`operator.md` は本番エージェントの起動時契約である(2026-09-03 クローズ、`42b639b`)** — Yoshinobu が quory 側で設定した。OPREQ で繰り返しトラブったことへの対応である。**編集は「文書の更新」ではなく「本番の挙動を変える変更」として扱う** — push すれば `worktree_sync` の timer で quory へ入り、次の起動から効く。

@@ -70,6 +70,7 @@ Semaphoreのロールバックは復旧をdpkgの状態に依存させないた�
 | [`proxmox_evacuate_node.yml`](proxmox_evacuate_node.yml) | `localhost`, 移動先、`target_node` | 対象ノードからVMを退避 | `check-mode-native` | `proxmox_evacuate_node`, `proxmox_healthcheck` |
 | [`proxmox_healthcheck.yml`](proxmox_healthcheck.yml) | `proxmox` | クラスタ・ノード・VMのhealthcheck | `safe-readonly` | `proxmox_healthcheck` |
 | [`proxmox_hw_check.yml`](proxmox_hw_check.yml) | `proxmox` | ハードウェア状態の収集・判定 | `safe-readonly` | `proxmox_hw_check` |
+| [`proxmox_storage_monthly.yml`](proxmox_storage_monthly.yml) | `localhost`, `storage_monthly_targets`, `localhost` | inventoryのproxmoxを対象に月次ZFS/NVMe点検、履歴比較、Notion正式レポート（ローカル検証済み・未配備） | `check-mode-native` | `proxmox_storage_monthly` |
 | [`proxmox_patch_apply_node.yml`](proxmox_patch_apply_node.yml) | `target_node` | Proxmox単一ノードへのパッチ適用 | `check-mode-native` | `proxmox_patch_apply_node` |
 | [`proxmox_patch_dryrun.yml`](proxmox_patch_dryrun.yml) | `proxmox` | パッチ候補の収集・シミュレーション | `safe-readonly` | `proxmox_patch_dryrun`, `proxmox_healthcheck` |
 | [`proxmox_patch_weekly_full.yml`](proxmox_patch_weekly_full.yml) | `proxmox`, `localhost` | 退避、パッチ、healthcheck、配置復元を含む週次オーケストレーション | `check-mode-native` | 関連Proxmox playbookを順次import |

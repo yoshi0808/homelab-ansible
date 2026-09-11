@@ -88,6 +88,23 @@ semaphore_templates_catalog:
     class: SAFE
     legacy_name: "SAFE: Proxmox hardware check"
 
+  - playbook: playbooks/proxmox_storage_monthly.yml
+    class: SEMI-SAFE
+    title: "Proxmox storage monthly"
+    survey_vars:
+      - name: proxmox_storage_monthly_operation
+        title: operation
+        type: enum
+        required: true
+        default_value: collect
+        values:
+          - {name: collect, value: collect}
+          - {name: replay, value: replay}
+      - name: proxmox_storage_monthly_report_id
+        title: "Replay report ID (collectでは空欄)"
+        required: false
+        default_value: ""
+
   - playbook: playbooks/ubuntu_nightly.yml
     class: SEMI-SAFE
     legacy_name: "SEMI-SAFE: Ubuntu nightly reboot if required"
@@ -831,6 +848,14 @@ semaphore_schedules_catalog:
     template: "SAFE: Proxmox hw check"
     cron: "45 5 * * *"
     active: true
+    task_params:
+      environment: "{}"
+
+  # 2026-09-10 工程管理表と照合。初回readback完了まで有効化しない。
+  - name: "SEMI-SAFE: Proxmox storage monthly"
+    template: "SEMI-SAFE: Proxmox storage monthly"
+    cron: "0 8 15 * *"
+    active: false
     task_params:
       environment: "{}"
 

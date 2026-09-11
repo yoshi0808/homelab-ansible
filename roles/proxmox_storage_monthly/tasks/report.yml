@@ -1,0 +1,81 @@
+---
+- name: Validate request again in independent controller play
+  ansible.builtin.assert:
+    that:
+      - proxmox_storage_monthly_operation in ['collect', 'replay']
+      - groups['proxmox'] | default([]) | length > 0
+      - >-
+        proxmox_storage_monthly_operation != 'replay' or
+        proxmox_storage_monthly_report_id is match('^[0-9]{8}T[0-9]{12}\+0900-[0-9a-f]{32}$')
+    fail_msg: Invalid storage operation or report ID
+
+- name: Initialize observation map
+  ansible.builtin.set_fact:
+    _storage_observations: {}
+    _storage_pipeline_error: false
+    _storage_publication: {publication: suppressed, url: ''}
+
+- name: Include every inventory target, even unreachable nodes
+  ansible.builtin.set_fact:
+    _storage_observations: "{{ _storage_observations | combine({item: hostvars[item].storage_monthly_observation | default({'error': 'unavailable'})}) }}"
+  loop: "{{ groups['proxmox'] | default([]) }}"
+
+- name: Save or preview formal report
+  block:
+    - name: Archive monthly observation with frozen comparison
+      storage_archive:
+        directory: "{{ proxmox_storage_monthly_report_dir }}"
+        observations: "{{ _storage_observations }}"
+        operation: "{{ proxmox_storage_monthly_operation }}"
+        report_id: "{{ proxmox_storage_monthly_report_id }}"
+        thresholds:
+          stale_days: "{{ proxmox_storage_monthly_scrub_stale_days | int }}"
+          wear_warning: "{{ proxmox_storage_monthly_wear_warning | int }}"
+          wear_critical: "{{ proxmox_storage_monthly_wear_critical | int }}"
+      register: _storage_archive
+
+    - name: Select saved report
+      ansible.builtin.set_fact:
+        _storage_report: "{{ _storage_archive.report }}"
+
+    - name: Publish archived monthly report unless notifications are suppressed
+      storage_notion:
+        directory: "{{ proxmox_storage_monthly_report_dir }}"
+        report_id: "{{ _storage_report.report_id }}"
+        parent: "{{ proxmox_storage_monthly_notion_parent }}"
+        token_file: "{{ proxmox_storage_monthly_notion_token_file }}"
+        suppress: >-
+          {{ ansible_check_mode or (skip_notifications | default(false) | bool)
+             or ((lookup('env', 'CLAUDECODE') | trim | length > 0)
+                 and not (proxmox_storage_monthly_notion_force_send | bool)) }}
+      register: _storage_publication
+      tags: [destructive]
+      # Module has an independent check/suppress gate before token and HTTP IO.
+  rescue:
+    - name: Keep pipeline failure observable through final notification
+      ansible.builtin.set_fact:
+        _storage_pipeline_error: true
+  always:
+    - name: Send short summary using existing suppression contract
+      ansible.builtin.include_role:
+        name: common_slack
+        tasks_from: notify
+      vars:
+        slack_channel: info
+        slack_status: "{{ 'error' if _storage_pipeline_error else ((_storage_report | default({})).health | default('UNKNOWN') | lower) }}"
+        slack_title: ストレージ月次点検
+        slack_message: >-
+          Report={{ (_storage_report | default({})).report_id | default('保存未完了') }}
+          Health={{ (_storage_report | default({})).health | default('UNKNOWN') }}
+          Collection={{ (_storage_report | default({})).collection | default('error') }}
+          Publication={{ _storage_publication.publication | default('incomplete') }}
+          {{ _storage_publication.url | default('') }}
+          Issues={{ (_storage_report | default({})).issues | default([]) | to_json }}
+
+- name: Fail incomplete pipeline after preserving available evidence
+  ansible.builtin.assert:
+    that:
+      - not _storage_pipeline_error
+      - (_storage_report | default({})).collection | default('error') == 'ok'
+      - not ((_storage_report | default({})).history_error | default(true))
+    fail_msg: ストレージ月次点検の収集・保存・比較・公開に未完了があります。

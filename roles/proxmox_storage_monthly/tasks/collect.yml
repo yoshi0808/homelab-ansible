@@ -1,0 +1,22 @@
+---
+- name: Observe storage without installation or device changes
+  ansible.builtin.command:
+    argv: [python3, '-']
+    stdin: "{{ lookup('file', role_path ~ '/files/storage_collect.py') }}"
+  become: true
+  register: _storage_raw
+  changed_when: false
+  failed_when: false
+  ignore_unreachable: true
+  check_mode: false
+
+- name: Retain collection outcome even when observation failed
+  block:
+    - name: Decode storage observation
+      ansible.builtin.set_fact:
+        storage_monthly_observation: "{{ _storage_raw.stdout | from_json }}"
+      when: not (_storage_raw.unreachable | default(false)) and (_storage_raw.rc | default(-1)) == 0
+  rescue:
+    - name: Retain invalid collection as unknown
+      ansible.builtin.set_fact:
+        storage_monthly_observation: {error: invalid_collection_json}

@@ -1,0 +1,10 @@
+---
+proxmox_storage_monthly_operation: collect
+proxmox_storage_monthly_report_id: ""
+proxmox_storage_monthly_report_dir: "{{ reports_base_dir }}/proxmox-storage-monthly"
+proxmox_storage_monthly_scrub_stale_days: 35
+proxmox_storage_monthly_wear_warning: 80
+proxmox_storage_monthly_wear_critical: 100
+proxmox_storage_monthly_notion_parent: "3d722f45-f1b0-80e1-996f-f110baae4cf4"
+proxmox_storage_monthly_notion_token_file: /etc/homelab/notion-storage.token
+proxmox_storage_monthly_notion_force_send: false

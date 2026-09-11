@@ -1,0 +1,43 @@
+---
+# tester-gate: check-mode-native
+# --check observes only; no archive, token read, Notion, Slack or retention writes.
+- name: Validate monthly storage request before resolving remote hosts
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars_files:
+    - ../roles/proxmox_storage_monthly/defaults/main.yml
+  tasks:
+    - name: Validate operation and inventory
+      ansible.builtin.assert:
+        that:
+          - proxmox_storage_monthly_operation in ['collect', 'replay']
+          - groups['proxmox'] | default([]) | length > 0
+          - >-
+            proxmox_storage_monthly_operation != 'replay' or
+            proxmox_storage_monthly_report_id is match('^[0-9]{8}T[0-9]{12}\+0900-[0-9a-f]{32}$')
+    - name: Open collection only for a validated collect operation
+      ansible.builtin.add_host:
+        name: "{{ item }}"
+        groups: storage_monthly_targets
+      loop: "{{ groups['proxmox'] }}"
+      when: proxmox_storage_monthly_operation == 'collect'
+
+- name: Collect read-only observations from intended storage nodes
+  hosts: storage_monthly_targets
+  gather_facts: false
+  tasks:
+    - name: Collect storage observations
+      ansible.builtin.include_role:
+        name: proxmox_storage_monthly
+        tasks_from: collect
+
+- name: Preserve and publish report independently of remote host survival
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Build formal storage report
+      ansible.builtin.include_role:
+        name: proxmox_storage_monthly
+        tasks_from: report
