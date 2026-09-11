@@ -11,7 +11,9 @@
 
 ## Now(進行中)
 
-**ストレージ月次点検レポートの可読性改善: 配備・実表示確認待ち**。日本語の結論、重大度順の対応事項、ラベル付きZFS/NVMe値、簡潔なSlack短報へ変更。独立Reviewer=Approve、Tester=PASS。次はcommit/push後、保存済みreportのreplayでNotion/Slack表示を確認する。案件正本は `docs/ai/reviews/proxmox_storage_report_readability/2026-09-12_001_requirement.md`。
+**ストレージ月次点検レポートの可読性改善: 本番表示確認済み・closeout待ち**。日本語の結論、重大度順の対応事項、ラベル付きZFS/NVMe値、簡潔なSlack短報へ変更。独立Reviewer=Approve、Tester=PASS。Semaphore #1062でcollectが成功し、Yoshinobuが改善後の内容を確認した。案件正本は `docs/ai/reviews/proxmox_storage_report_readability/2026-09-12_001_requirement.md`。
+
+**Proxmoxストレージ月次点検のPolicy補完: 完了**。既存`proxmox_operations_policy.md`へsemi-safe入口とSB-096〜SB-099を追加。独立規範レビュー=Approve。実装・schedule変更なし。案件正本は `docs/ai/reviews/proxmox_storage_monthly_policy/2026-09-12_001_requirement.md`。
 
 **Proxmoxストレージ月次点検: 次回定期実行の観測待ち**。配備案件はクローズ。次回の自然実行・比較結果を確認する。Survey任意欄の反復差分有無と省トークン効果は未評価。根拠・残存事項は `docs/ai/reviews/proxmox_storage_monthly/2026-09-11_014_closeout.md`。
 

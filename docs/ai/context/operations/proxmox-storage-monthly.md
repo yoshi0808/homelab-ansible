@@ -5,6 +5,7 @@
 ## 入口
 
 `playbooks/proxmox_storage_monthly.yml`。既存cronのscrubは変更しない。収集はZFS状態と実vdevのNVMe healthのみで、self-test・修復を開始しない。
+許可・禁止・停止条件の正本は `docs/ai/policies/proxmox_operations_policy.md` のSB-020、SB-096〜SB-099。本書は実行方法、保存形式、配備状態を記録するOperations Contextであり、実行境界を上書きしない。
 実行はquoryのSemaphoreから。2026-09-10にユーザー提示の工程管理表と照合し、掲載された処理と開始時刻が重ならない毎月15日08:00 JSTをcatalogへ登録した。長時間ジョブの終了時刻までは表から確認できない。#1052で無効状態のscheduleを登録し、#1056の初回実行とSlack到達確認後に有効化が承認された。#1058でactive=trueの反映と書込後検証成功を確認した。
 
 変数の既定値とNotion親ページは `roles/proxmox_storage_monthly/defaults/main.yml`。操作は `proxmox_storage_monthly_operation=collect` または `replay`。再送は `proxmox_storage_monthly_report_id` に保存済report IDを指定する（ファイルパスは受け付けない）。replayでは対象hostへ収集しない。

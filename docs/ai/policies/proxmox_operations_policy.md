@@ -86,6 +86,7 @@ reboot影響を受けないcluster外control nodeからだけ、pve2、pve1、VM
 | 安全度 | Playbook / 作業 | 許可範囲 |
 |---|---|---|
 | safe | `proxmox_healthcheck.yml`、`proxmox_hw_check.yml`、`proxmox_snapshot_check.yml` | read-only状態収集。自動可 |
+| semi-safe | `proxmox_storage_monthly.yml` | ZFS/NVMeのread-only収集、ローカル記録、Notion参照コピー、Slack短報、限定した履歴整理。host/device変更なし。自動可(SB-096〜SB-099) |
 | semi-safe | `proxmox_patch_dryrun.yml` | package metadata更新、simulation、分類。実patchなし。自動可 |
 | controlled apply | `proxmox_evacuate_node.yml`、`proxmox_restore_vm_placement.yml` | guest配置変更。条件付き可 |
 | controlled apply | `proxmox_backup_restore_verify.yml` | backup restore検証。許可、禁止、停止条件の詳細は[proxmox_backup_restore_verify_policy.md](proxmox_backup_restore_verify_policy.md)が正本(本表は自動実行tierの索引のみ)。条件付き可 |
@@ -104,6 +105,20 @@ dry-runは到達可能かつhealthcheckがOKのnodeが1node以上あれば開始
 
 <!-- SB-095 -->
 read-only点検(`proxmox_healthcheck.yml`、`proxmox_hw_check.yml`)は、到達可能なnodeが1node以上あれば実行し、到達不能なnodeを対象から除外して継続する。除外したnodeはSemaphore summaryへ明示し、点検できた範囲を読み取れる状態にする。全nodeが到達不能な場合は明確なエラーで停止する(空reportやサイレント成功にしない)。到達不能による除外は点検結果の`OK`を保証しない — 除外されたnodeの状態は未確認である。到達できたnodeのOKは、そのnode自身に対するapplyの前提(SB-027、SB-028、SB-032)を満たし得るが、除外されたnodeについては到達性・健全性いずれも未確認のままであり、本項がそのnodeへのapplyの前提を満たしたことにはしない。
+
+#### 3.2.1 ストレージ月次点検
+
+<!-- SB-096 -->
+`proxmox_storage_monthly.yml`はZFSのpool/vdev/scrub履歴と、実vdevに対応するNVMe healthのread-only観測だけをhost上で許可する。scrub/trim/self-testの開始・停止、resilver操作、修復、counter clear、pool/vdev/device設定変更を行わない。観測結果の保存・公開・保持整理はcontrol node上に限る。
+
+<!-- SB-097 -->
+月次点検は対象となる全nodeをreportへ含める。1nodeでも到達不能、収集不正、履歴破損、ローカル保存失敗、Notion公開失敗なら、得られた証拠を可能な範囲で保存・短報へ示したうえで非0終了とし、到達できたnodeだけを根拠に全体を`OK`としない。ZFS/NVMeの健康異常はreportの`WARNING` / `CRITICAL`として通知し、収集・保存・比較・公開が完了していれば処理自体はrc0とする。健康状態と処理成否を同じ値へ畳まない。
+
+<!-- SB-098 -->
+`collect`は実hostを観測して新しいJSON正本と人向け本文を保存し、Notionの同月参照ページとSlack短報を更新する。`replay`は明示された保存済みreport IDだけを読み、実hostへの収集や新しい観測reportの作成を行わず、同じ月次ページと短報を再生成する。新しい公開済みreportより古いreportで同月ページを巻き戻さず、対象が一意に確認できないときは新規ページを重複作成せず停止する。
+
+<!-- SB-099 -->
+ローカルJSONを観測の正本とし、Notionを人向け参照コピー、Slackを短報と参照導線とする。外部公開の成功をローカル保存の前提にしない。履歴整理は保持期間を超えた公開済みreportに限定し、比較基準が参照するreport、未公開report、破損・型不明・symlinkを削除しない。認証情報をreport、通知、実行ログ、Gitへ出さない。native check modeまたは明示的な通知抑止ではNotionとSlackへ送信せず、check modeでは保存・保持整理も行わない。
 
 <!-- SB-025 -->
 dry-runは次の順でStatusを決める。
@@ -409,6 +424,7 @@ Sophos Firewall VMのHA relocateはstop → migrate → startであり、VM再�
 
 | 日付 | 変更 |
 |---|---|
+| 2026-09-12 | 本番稼働済みの`proxmox_storage_monthly.yml`がSB-020に無く、デバイス非変更、部分失敗、JSON正本、collect/replay、保持・外部公開の規範がrequirement/Contextに留まっていたため、semi-safe入口として追加しSB-096〜SB-099を新設。新しい機能や許可範囲は追加せず、現行契約をPolicyへ正本化した |
 | 2026-08-25 | SB-011・SB-038が条件句を持たない無条件規定のまま残り、§1・SB-028・SB-032が定める単一node適用(pve2利用不能時)と矛盾していた(2026-08-01の追随改訂で挙がった条項に含まれず改訂漏れ)。両者へ「両nodeが利用可能なときの順序制約である」旨の条件句を追加した。文言は§1・2026-08-01変更履歴の既存表現と揃えた。許可・禁止・停止条件の実質は変更していない |
 | 2026-08-02 | 本文に埋め込まれていた改訂注記・実測日付・撤回の経緯説明を除去し、規則本文と括弧内のPolicy ID(SB-nnn)だけを残す整理を行った(`docs/ai/reviews/norm_docs_rationale_removal_round3/`)。許可・禁止・停止条件、SB番号はいずれも変更していない。既存の退番記録(SB-023、SB-049 / SB-083 / SB-084 / SB-086)は本表のとおりで変更なし。SB番号の新設・退番はない |
 | 2026-08-01 | Semaphoreジョブ#507(weekly full patchがpve1到達不能で`exit 4`)を受け、自動適用範囲を拡大し単一node適用を許可した(`docs/ai/reviews/proxmox_auto_apply_widening/2026-08-01_001_requirement.md`)。「重要コンポーネント更新を自動適用しない」という必須目的を撤回し、`MAINTENANCE_REQUIRED`のうちremoveを伴わないものを自動適用する(SB-001、SB-003、SB-004、SB-027、SB-039)。removeを伴う`MAINTENANCE_REQUIRED`と`MAJOR_UPGRADE_DETECTED`は引き続き自動適用しないが、`MAJOR_UPGRADE_DETECTED`は手動apply mode+一致する確認文字列での適用を新たに許可した(SB-027、SB-031、SB-041、SB-059)。apply側の「利用する反対nodeのhealthcheck」要求と、weekly full側の「両nodeのhealthcheck OK」「fixed pair dry-run」要求を撤回し、到達可能かつ健全なnodeが1つ以上あればそのnodeに適用する(SB-028、SB-032、SB-094、SB-095)。pve2を先行検証nodeとする順序(SB-001)は両node利用可能時の制約として維持し、pve2が利用不能な場合はpve2の先行実績なしにpve1へ適用する。`BLOCKED`と到達可能node 0件は引き続き非0終了とし、緑にしない。付随して、SB-007の表・SB-035・SB-046・SB-058・§5.1標準flowの記述を同じ区分(remove_countの有無)に合わせて更新した(直接の改訂対象11件には含まれないが、放置すると本書内で矛盾する記述になるため)。**同日の追補として**、(1)control node分離preflightの問い合わせ先をpve1固定から到達可能な任意nodeへ変更(`roles/proxmox_exec_node`を再利用。実装のみでPolicy本文に固定nodeの記載はなかったため本Policyの改訂は不要)、(2)単一node適用は反対nodeという退避先が無いため、対象nodeにrunning guestが残っている場合は退避を試みず適用を見送る(緑終了+通知)というB案をSB-012・SB-088へ明記した(Yoshinobu判断 — guestを無人で停止して適用を強行する案は不採用)。SB番号の新設・退番はない |
