@@ -11,6 +11,8 @@
 
 ## Now(進行中)
 
+**月次ストレージ実行状態によるquory worktree同期停止の復旧待ち**。専用runtimeディレクトリのGit除外漏れを修正中。レポートは削除しない。根拠と復旧手順は `docs/ai/memory/incidents/2026-09-11_storage-report-lock-blocks-worktree-sync.md`。
+
 **Proxmoxストレージ月次点検: 次回定期実行の観測待ち**。配備案件はクローズ。次回の自然実行・比較結果を確認する。Survey任意欄の反復差分有無と省トークン効果は未評価。根拠・残存事項は `docs/ai/reviews/proxmox_storage_monthly/2026-09-11_014_closeout.md`。
 
 **auto-memory 110件の仕分けは保留**(Yoshinobu、2026-09-06)。**Codex は auto-memory を読まないため、移行後この知識は使われない。** Coordinator が Claude Code へ戻る機会があれば再開する。案件記録は `docs/ai/reviews/coordinator_platform_migration/`。

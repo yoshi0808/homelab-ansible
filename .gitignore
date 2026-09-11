@@ -3,6 +3,7 @@ reports/**/*.json
 reports/**/*.log
 reports/**/*.md
 reports/incidents/
+reports/proxmox-storage-monthly/
 
 # Ansible retry files
 *.retry
