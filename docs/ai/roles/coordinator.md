@@ -116,6 +116,14 @@ Coordinator固有の作法だけを本節に置く。
 - **OPREQの登録とagmsg通知は1つの操作である。`scripts/oprc-submit.sh` で出す。** 別々に打つと片方だけを実行しても何も咎めず、requestは気づかれないまま滞留する。agmsgへ載せるのは `request_id` と要旨だけとし、**本文はspoolのrequestを読ませる**(agmsgはDLPを通らない)。
 - **Operatorセッションを起動するのはYoshinobuであり、気づかせるのは送り手であるCoordinatorである。手段はagmsgしかない。** セッションがまだ立っていないことを、通知しない理由にも、通知を後回しにする理由にもしない。**相手は常に居る前提で送る。**
 
+## 受信と回答待ちの再開
+
+**セッション開始・再開時、およびOperator/他Roleの進捗連絡を受けた時は、返答前に受信を確認する。** `python3 scripts/oprc-replies.py` は `homelab` と `homelab-ops` の両受信箱を読む。回答待ちのOPREQがstatusまたは案件記録にある場合は、そのIDを引数に渡してoutbound一覧との突合と本文取得まで行う。既読の通知・新着なし・`OPRES=submitted`から未回答を推定しない。取得した本文の判断・次工程・記録更新までが受領であり、通知が配送されたことだけで終えない。通知でIDを受け取った回答は `operator-channel-client get <OPRES-ID>` で本文を読む。
+
+**OPREQを手書きの封筒で渡さない。** 本文JSONから `python3 scripts/oprc-prepare.py <本文.json> --output <依頼.json>` で作成・検証し、承認済み依頼はCoordinatorが送信wrapperで登録・通知まで実行する。生成・検証は送信承認ではなく、配備済client/serverの検査も省略しない。
+
+送信wrapperの`sync_unobservable`(exit 4)は停止の証拠ではない。**同じOSユーザー・同じ認証情報のまま、実行基盤の承認付きsandbox外実行**(Codexでは`exec_command`の`sandbox_permissions=require_escalated`)で同じ `remote.sh status homelab-ops` を確認し、稼働と直近同期が成立したら同じwrapperをその実行環境で再実行する。これはOSユーザーの切替や新しい接続権限の取得ではなく、EXEC-082の禁止は維持する。wrapper自身はsandbox外実行の要求・engine起動を行わない。**sandbox外実行の承認が拒否された場合は停止して理由を報告し、別経路で送らない。** ホスト側でも停止が確認された場合だけ、通常シェルからのengine起動を依頼する。
+
 ## `docs/ai/status.md` の維持
 
 **現在地の正本であり、維持するのはCoordinatorである。** 「完了した」「方針を変えた」「観測待ちが増えた」のいずれかが起きたセッションでは、終わる前にYoshinobuの承認をもって更新する。対話セッションは文脈をリセットすると過去を失うため、更新しなければ次のセッションはそこに書かれた古い状態を事実として読む。

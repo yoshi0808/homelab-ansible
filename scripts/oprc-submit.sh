@@ -50,8 +50,7 @@ notice_body="$(cat "$notice")"
 [ -n "$(printf '%s' "$notice_body" | tr -d '[:space:]')" ] || \
   die "要旨が空である。通知できない依頼を登録しない"
 
-python3 -c 'import json,sys; json.load(open(sys.argv[1]))' "$payload" 2>/dev/null || \
-  die "payload が JSON として読めない: $payload"
+python3 "$repo_root/scripts/oprc-prepare.py" "$payload" || exit 2
 
 send_sh="$AGMSG_SCRIPTS_DIR/send.sh"
 team_sh="$AGMSG_SCRIPTS_DIR/team.sh"
@@ -76,20 +75,11 @@ done
 # 5日間止まっており、その間の通知は1通も出ていなかった)。engine の生死と
 # 「最後に成功した同期」の両方を見る — 前者だけでは足りないことは
 # `docs/ai/context/operations/agent-messaging.md` §9 が定めている。
-sync_status="$("$remote_sh" status "$TEAM" 2>/dev/null)" || \
-  die "agmsg の同期状態を取得できない(通知が出るか確かめられない状態で登録しない)"
-printf '%s\n' "$sync_status" | grep -q 'engine running' || \
-  die "agmsg の sync engine が動いていない。通知はローカルへ溜まるだけでサーバへ出ない。通常のシェルから 'remote.sh sync start $TEAM' で起動すること(エージェントのツール実行から起動しない)"
-printf '%s\n' "$sync_status" | python3 -c "
-import re, sys, datetime
-text = sys.stdin.read()
-m = re.search(r'last successful sync ([0-9T:.\\-]+Z)', text)
-if not m:
-    sys.exit(1)
-last = datetime.datetime.strptime(m.group(1)[:19], '%Y-%m-%dT%H:%M:%S').replace(tzinfo=datetime.timezone.utc)
-age = (datetime.datetime.now(datetime.timezone.utc) - last).total_seconds()
-sys.exit(0 if age <= ${SYNC_MAX_AGE_SECONDS:-1800} else 2)
-" || die "agmsg の同期が最近成功していない(engine は起動しているが運べていない)。通知が相手へ出ない状態で登録しない"
+if ! sync_status="$("$remote_sh" status "$TEAM" 2>/dev/null)"; then
+  echo "sync_unobservable: 同期状態を取得できません。停止とは断定せず、同じstatusを正規のsandbox外実行で確認してください。登録していません。" >&2
+  exit 4
+fi
+printf '%s\n' "$sync_status" | python3 "$repo_root/scripts/oprc-sync-check.py"
 
 # id の検証に使うライブラリを、登録より前に読めることを確かめる。読めない
 # まま登録すると、返ってきた id を検証できず fail-closed にしかできない。

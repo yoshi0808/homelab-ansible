@@ -132,6 +132,7 @@ codex 側には2つの層がある。**一方は repo で追跡され、もう�
 
 **Node は system trust store を見ない。** サーバは私設 CA の証明書を提示するため、sync engine(Node)は既定では `UNABLE_TO_GET_ISSUER_CERT_LOCALLY` で落ちる。`remote.sh` に `CURL_CA_BUNDLE` を渡すと、`remote-sync.sh` がそれを Node へ `NODE_EXTRA_CA_CERTS` として引き継ぐ。curl 側は system store で通るため、**症状は「curl は通るのに engine だけ起動しない」**という形で出る。
 
+- `scripts/oprc-submit.sh` は `scripts/oprc-sync-check.py` で同期状態を分類する。稼働確認不能/stale/同期時刻不明は `sync_unobservable`(exit 4)、停止または同期期限超過はexit 2となり、いずれも登録前に停止する。正規のsandbox外確認と再実行の手順はCoordinator Role「受信と回答待ちの再開」が正本。
 - **エージェントの sandbox 内で得たプロセスの否定結果を、ホスト上での不在と読まない。** sandbox からはホスト側の PID や `/proc` の情報が見えず、実際には動いている engine に対して `remote.sh status` が `engine stale — ... dead or foreign process`、`ps` が該当なしを返すことがある。エージェント側で `stale` が出た場合は停止と断定せず、**同じホストの通常シェルから** `remote.sh status <team>` を実行する。そこで `engine running` と直近の `last successful sync` の両方が出ることを成立の根拠とする。通常シェルと sandbox の結果が食い違う場合は、通常シェル側をプロセス状態の観測結果として採る。
 - ansy 側は `~/.bashrc` に `export CURL_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt` を置いてある(**非対話ガードより上**)。
 - **再起動後の復帰は `session-start.sh` が接続済み team の engine を自動起動する**が、これは対話セッションを起動したシェルの環境を引き継ぐ。`.bashrc` を読まない経路から起動すると、engine は上記の理由で立たない。**この自動起動がリブートを跨いで成立することは 2026-08-17 に ansy で実測した**(下記「リブート後」)。

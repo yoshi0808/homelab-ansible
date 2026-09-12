@@ -65,7 +65,7 @@ export STUB_LOG="$work/log"
 export STUB_BODY="$work/body"
 
 good_payload="$work/payload.json"
-printf '{"type":"OPREQ","purpose":"x"}' > "$good_payload"
+printf '{"schema_version":1,"type":"OPREQ","purpose":"x"}' > "$good_payload"
 good_notice="$work/notice.txt"
 printf 'monnie の unpoller の設定を読んで確定してほしい。read-only のみ。\n' > "$good_notice"
 
@@ -115,8 +115,10 @@ ROSTER='  operator (remote — no local registration)' run "$good_payload" "$goo
 # engine がサーバへ運ぶまでが送信であり、engine が死んでいてもエラーは出ない。
 for mode in stale old nosync fail; do
   SYNC_MODE="$mode" run "$good_payload" "$good_notice"
-  [ "$rc" = "2" ] && ! grep -q submit "$STUB_LOG"
-  check "sync が成立していない($mode): submit せず exit 2" $?
+  expected_rc=4
+  [ "$mode" = old ] && expected_rc=2
+  [ "$rc" = "$expected_rc" ] && ! grep -q submit "$STUB_LOG"
+  check "sync が成立していない($mode): submit せず exit $expected_rc" $?
 done
 
 # --- submit 後の失敗を黙って成功にしないこと ------------------------------
@@ -172,4 +174,5 @@ check "正常系: 登録と通知が成立し、両方を報告する" $?
 
 echo "---"
 echo "pass=$pass fail=$fail"
-[ "$fail" = "0" ]
+[ "$fail" = "0" ] || exit 1
+python3 -m unittest discover -s "$repo_root/scripts/tests/oprc_submit" -p "test_*.py" -v

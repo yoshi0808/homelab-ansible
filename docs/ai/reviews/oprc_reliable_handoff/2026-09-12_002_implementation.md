@@ -1,0 +1,15 @@
+# 実装とローカル検証
+
+Coordinatorが001の3点を実装。oprc-prepare.pyは作成時のみ封筒既定を補い、validateは既存schema/DLPを使用する。出力先は新規のみ。sync-checkは観測不能をexit4、停止/古い同期をexit2へ分ける。wrapperは検査失敗で登録しない。自動昇格・engine起動機能は追加していない。
+
+oprc-replies.pyは両teamのinboxを確認し、指定OPREQ IDがあれば配備済clientの一覧を全ページ走査、対応本文をgetする。既読・submittedをフィルタしない。途中失敗やexcluded_count非0はエラーで返す。本文取得を再開の必読手順へ接続した。
+
+自己検証: 既存shellスタブ19件PASS、新規unittest6件PASS、doc-consistency3チェックPASS、diff --check成功。本番submitは実行していない。sandbox外稼働確認を自動で許可する設定変更はない。独立レビュー・Tester待ち。
+
+## 003への対応
+
+「権限昇格」をOS identity変更と混同させる表現と認めて是正。同じOSユーザー・同じ認証情報で実行基盤の承認付きsandbox外実行を用いることをRoleへ明記した。実測ではexec_commandのsandbox_permissions=require_escalatedを使用し、ユーザー切替・sudo・鍵取得は行っていない。
+
+新着なしの両teamから既存OPREQ IDを指定し、既読OPRES本文を取得するヘルパーを実測した。sandbox内client listは失敗、同じヘルパーの承認付きsandbox外実行でrc0と本文取得を確認。テストOPREQは送信していない。
+
+run-tests.shにPythonテスト6件を接続、shellの同期判定も正確なexit2/4をassertする。DLP拒否は専用例外で安全なrule_idとpointerだけを出し、本文は出さない。
