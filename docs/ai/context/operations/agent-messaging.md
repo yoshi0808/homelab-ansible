@@ -4,7 +4,7 @@
 
 ## 位置づけ
 
-本書は、Coordinator を起点とする agmsg の連絡経路を扱う runbook である。禁止・義務はこの経路の手順に閉じる(`docs/ai/context-classification.md`「Operations Context」「Policyとの境界」)。扱うのは2つ — **同一ホスト上のReviewer / Tester / Auditorへの依頼**(team `homelab`、local-only、§1〜§6)と、**quory 側 Operator とのすり合わせ**(team `homelab-ops`、remote、§7〜§9)。ImplementerはCodex native subagentとして委任し、agmsgを使わない。各Roleの責務・権限・成果物は `docs/ai/roles/<role>.md` が、承認境界は [`docs/ai/policies/execution_boundary_policy.md`](../../policies/execution_boundary_policy.md) が正本であり、競合時はそちらを優先する。IP、認証情報、秘密情報の実値は記載しない。
+本書は、Coordinator を起点とする agmsg の連絡経路を扱う runbook である。禁止・義務はこの経路の手順に閉じる(`docs/ai/context-classification.md`「Operations Context」「Policyとの境界」)。扱うのは2つ — **同一ホスト上のClaude Code Implementer・計画Reviewer・Auditorへの依頼**(team `homelab`、local-only、§1〜§6)と、**quory 側 Operator とのすり合わせ**(team `homelab-ops`、remote、§7〜§9)。Codexの差分ReviewerとTesterはnative subagentとして委任し、agmsgを使わない。各Roleの責務・権限・成果物は `docs/ai/roles/<role>.md` が、承認境界は [`docs/ai/policies/execution_boundary_policy.md`](../../policies/execution_boundary_policy.md) が正本であり、競合時はそちらを優先する。IP、認証情報、秘密情報の実値は記載しない。
 
 ## 1. 構成
 
@@ -19,13 +19,11 @@ teamには過去の独立レビュー用identityと旧`implementer`登録が残�
 | active識別子 | type | project |
 |---|---|---|
 | `coordinator` | `codex` | `/home/yoshi/homelab-ansible` |
+| `implementer` | `claude-code` | 同上 |
 | `reviewer` | `claude-code` | 同上 |
-| `tester` | `claude-code` | 同上 |
 | `auditor` | `claude-code` | 同上 |
 
-Reviewer / Tester / Auditorはlauncherがfresh sessionとして起動する。旧`implementer`（`codex`）登録は
-team rosterに残っているが、launcher・依頼・返信には使わない。ImplementerはCodex native subagentとして
-案件ごとに起動する。登録の整理は本runbookの機能要件ではない。
+Implementer / 計画Reviewer / Auditorはlauncherがfresh sessionとして起動する。`reviewer`は計画査読にだけ使い、実装差分のレビューはCodex native subagentへ委任する。旧Codex `implementer`やClaude Code `tester`などの登録はteam rosterに残り得るが、登録の存在を現行経路と読まない。登録の整理は本runbookの機能要件ではない。
 
 **成果物をagmsgのメッセージだけに残さない。** 監査証跡は `docs/ai/reviews/<target>/` 配下のファイルであるという `docs/ai/core.md` の定めは、依頼先がどのCLIでも変わらない。メッセージDBはリポジトリ外にあり、`git log` からも案件記録からも辿れない。
 
@@ -41,11 +39,11 @@ team rosterに残っているが、launcher・依頼・返信には使わない�
 2 が欠けた状態でagmsgからCodex roleをspawnすると、`spawn.sh` は `type.conf` の `cli=codex` を
 PATHで解決して素のCodexを起動する。**spawnは成功を返し、ペインは開き、Codexは正常に動く。**
 後から送ったメッセージだけが届かない形で現れる。現行ansy構成でmonitorを使うCodex roleは
-Coordinatorであり、native Implementerはこの条件の対象外である。
+Coordinatorであり、native差分Reviewer / Testerはこの条件の対象外である。
 
 4 の信頼は hooks ファイルの**内容**に対して与えられる。`.codex/hooks.json` が変われば再び聞かれる。
 
-ansyのCoordinatorも`monitor`を使う。2026-09-08に`turn`を実測したところ、Stop hookによる取得自体は成立したが、返信時点で待機中のCoordinatorを起こせず、次のturn終了とcooldownまで表示されなかった。Reviewer / Tester / Auditorとの協調には即時配送が要るため、Yoshinobuが従来の`monitor`へ戻すと判断した。
+ansyのCoordinatorも`monitor`を使う。2026-09-08に`turn`を実測したところ、Stop hookによる取得自体は成立したが、返信時点で待機中のCoordinatorを起こせず、次のturn終了とcooldownまで表示されなかった。Implementer / 計画Reviewer / Auditorとの協調には即時配送が要るため、Yoshinobuが従来の`monitor`へ戻すと判断した。
 
 Codex native remote-controlのmanaged app-serverとagmsg monitorのapp-serverは同じcontrol socketを同時には所有できない。このためansyのlauncherはmanaged daemonを停止してからmonitorを起動する。**これは「monitorではスマホアプリを使えない」ことを意味しない。** 2026-09-08、monitorのapp-serverだけを動かした状態で、スマホアプリから同じCoordinator threadと会話できることを実測した。2つのapp-serverプロセスを同時に立てることを共存条件にしない。
 
@@ -65,8 +63,8 @@ Codex native remote-controlのmanaged app-serverとagmsg monitorのapp-serverは
 ## 4. spawn と despawn
 
 ```bash
-spawn.sh claude-code <checking-role> --team homelab --split h --fresh --model <Roleのmodel> --boot-prompt "<起動指示>"
-despawn.sh homelab coordinator <checking-role> [--force]
+spawn.sh claude-code <claude-role> --team homelab --split h --fresh --model <Roleのmodel> --boot-prompt "<起動指示>"
+despawn.sh homelab coordinator <claude-role> [--force]
 ```
 
 - **`--model`を省略しない。** 現在値とeffortの例外条件は`docs/ai/roles/coordinator.md`「モデル・effort配分」を参照する
@@ -198,7 +196,7 @@ seat の実体は `run/role-session.<team>__<agent>` の1ファイル(中身は 
 
 **spawn で立てる役は `spawn.sh --fresh` が両方を担う(§4)。pane 0だけは spawn を使えない** — そこは人が直接使っているセッションそのものだからで、各ホストの起動スクリプトが自前で行う。
 
-**`--fresh` を省かない。** 検める側の役では、`resume` すると**計画を査読した体と差分をレビューする体が同一になる**(`docs/ai/roles/coordinator.md`「委任するときの独立性」)。**この破れ方はエラーを出さない。**
+**`--fresh` を省かない。** Implementer / 計画Reviewer / Auditorへ以前の案件の因果や判断を持ち越さない。計画ReviewerとImplementerには別identityを使う。
 
 ```
 rm -f <run>/role-session.homelab-ops__operator     # 1. 掃除
@@ -218,7 +216,7 @@ quoryは`turn`へ落とさない(2026-08-16、Yoshinobu決定)。Operatorへの�
 
 ### ansy: Coordinatorのmonitor起動
 
-ansyもReviewer / Tester / Auditorとの即時配送を優先し、Codex Coordinatorを`monitor`で使う(2026-09-08、Yoshinobu決定)。gitignoredの`new-session.sh`はfresh createまたは`--reset`時に次をこの順で行う。
+ansyもImplementer / 計画Reviewer / Auditorとの即時配送を優先し、Codex Coordinatorを`monitor`で使う(2026-09-08、Yoshinobu決定)。gitignoredの`new-session.sh`はfresh createまたは`--reset`時に次をこの順で行う。
 
 ```
 delivery.sh set off codex <project>     # 旧bridgeとagmsg app-serverを停止
@@ -238,7 +236,7 @@ app-serverを停止しない。Codexのrule変更やversion更新を反映して
 
 `new-session.sh`は`homelab/coordinator`と`homelab-ops/coordinator`のseatが同じthreadを指すことを確認し、不在または不一致なら曖昧な配送先を推測せず停止する。pane 0ではshell functionやPATH順序に依存せず、`codex-monitor.sh`を明示的に呼ぶ。非対話shellで実Codexへ解決され、plain Codexが起動して配送だけ失われたIncidentは`docs/ai/memory/incidents/2026-09-07_agmsg-codex-monitor-bypassed-after-reset.md`。
 
-ansyのtmux pane 0はCoordinator TUIを保持する。これによりSSHが切れても`tmux attach -t homelab`で同じ端末へ戻れる。2026-09-08、同じmonitor app-server経路でスマホアプリからCoordinatorと会話できることも実測した。tmuxは常駐するClaude CodeのReviewer / Tester / Auditorも保持する。
+ansyのtmux pane 0はCoordinator TUIを保持する。これによりSSHが切れても`tmux attach -t homelab`で同じ端末へ戻れる。2026-09-08、同じmonitor app-server経路でスマホアプリからCoordinatorと会話できることも実測した。tmuxは常駐するClaude CodeのImplementer / 計画Reviewer / Auditorも保持する。Codexの差分Reviewer / Testerは案件ごとのnative subagentであり、常駐paneを持たない。
 
 なお**起動スクリプト自体は両ホストとも `.gitignore` 済みで、この repo は持たない**(AI 実行環境のローカルスクリプトを入れない線)。**したがって、この節が要件の正本である。** スクリプトを書き直すときはここへ突き合わせる。
 

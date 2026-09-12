@@ -1,6 +1,6 @@
 # ADR-012: 現在のRole別model / effort既定値
 
-**Status:** Accepted
+**Status:** Superseded experimentally by [`ADR-013`](013-cross-vendor-implementer-reviewer-experiment.md)
 
 ## Context
 

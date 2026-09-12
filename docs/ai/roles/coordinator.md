@@ -10,24 +10,20 @@ Yoshinobuとの対話窓口として要求と判断材料を整え、自ら実�
 
 ## 起動できるRoleと、その実現方式
 
-**このリポジトリは特定のベンダーのAIを前提にしない。** 役の割り当ては製品名ではなく、**作る側と検める側**で決める。
+**このリポジトリは特定のベンダーのAIを恒久的な前提にしない。** 現在はADR-013に基づく3案件の実験として、実装をClaude Codeへ移し、実装差分のReviewerをCodexへ置く。最優先の牽制は、**Implementerと差分Reviewerを別ベンダー・別contextにすること**である。
 
-| 側 | Role | 決まりごと |
-|---|---|---|
-| 作る側 | Coordinator / Implementer | 同一CLIでよい。Coordinatorが自ら実装してもよい |
-| 検める側 | Reviewer / Tester / Auditor | **作る側とは別のCLIで動かす。** 同じにすると自己レビューになる |
+現在の割り当ては次のとおり。**起動時は役を指定し、`docs/ai/roles/<role>.md` を読ませる**(指定が無いセッションはCoordinatorとして振る舞う。`CLAUDE.md` / `AGENTS.md`)。
 
-**Coordinatorが載っているCLIが作る側であり、もう一方が検める側になる。** この線を保つ限り、どちらの製品がどちらへ来ても成立する。**Reviewerは作る側とも検める側とも別、という条件は満たせない** — CLIが2つしか無いためであり、Reviewerを作る側から外すことを優先する。
+| Role / 工程 | 起動 |
+|---|---|
+| Coordinator | Codex。人が直接使うセッション、tmux pane 0 |
+| 計画Reviewer | Claude Code。agmsg経由でfresh起動し、Implementerとは別identityにする |
+| Implementer | **Claude Code。agmsg経由で起動し、調査・実装・自己検証・差し戻し対応を一貫して担う** |
+| 差分Reviewer | **Codex native subagent。実装履歴を継承しないfresh contextで案件ごとに起動する** |
+| Tester | Codex native subagent。Reviewerとは別のfresh contextで案件ごとに起動する。**subagentのうち、実ホストへ到達してよい唯一のRoleである**(到達してよい範囲は `docs/ai/policies/execution_boundary_policy.md` が定め、ansyが認証情報を持たないホストへは届かない) |
+| Auditor | Claude Code。agmsg経由で**案件クローズ時に1回だけ**起動する。入力はrepoの成果物のみで、Coordinatorの説明を受け取らない |
 
-現在の割り当ては次のとおり。Reviewer / Tester / AuditorはCoordinatorが必要と判断したときにその場で起動する。**起動時は役を指定し、`docs/ai/roles/<role>.md` を読ませる**(指定が無いセッションはCoordinatorとして振る舞う。`CLAUDE.md` / `AGENTS.md`)。
-
-| Role | 側 | 起動 |
-|---|---|---|
-| Coordinator | 作る側 | 人が直接使うセッション。tmux pane 0 |
-| Implementer | 作る側 | **Codex native subagentとして案件ごとに起動する。agmsg配送やtmux常駐ペインは使わない** |
-| Reviewer | 検める側 | **agmsg経由で起動する。** 計画の査読も担う。**計画を査読した体と、差分をレビューする体は別体とする** |
-| Tester | 検める側 | agmsg経由で起動する。**subagentのうち、実ホストへ到達してよい唯一のRoleである**(到達してよい範囲は `docs/ai/policies/execution_boundary_policy.md` が定め、ansyが認証情報を持たないホストへは届かない) |
-| Auditor | 検める側 | **案件クローズ時に1回だけ**起動する。入力はrepoの成果物のみで、Coordinatorの説明を受け取らない |
+実験対象の非自明な実装案件ではCoordinator自身が実装ファイルを編集しない。文書だけの軽微変更、緊急対応、実験自体の規範変更はこの制約の対象外とし、適用したかどうかを案件記録へ残す。計画を査読したReviewerと差分Reviewerは別体かつ別CLIとなる。
 
 各Roleの責任・権限・成果物・禁止事項は `docs/ai/roles/<role>.md` が正本であり、ここへ複製しない。
 
@@ -40,21 +36,23 @@ Yoshinobuとの対話窓口として要求と判断材料を整え、自ら実�
 値の出どころは起動のしかたで違う。
 
 - **Coordinator** — 自分が載っているCLIの設定(現在はCodexの `~/.codex/config.toml`)
-- **Codex native subagentのImplementer** — 委任時のmodel / effort指定
-- **agmsg経由で起動するReviewer / Tester / Auditor** — `spawn.sh --model` と、型ごとの `spawn_options.yaml`
+- **Codex native subagentの差分Reviewer / Tester** — 委任時のmodel / effort指定
+- **agmsg経由で起動するImplementer / 計画Reviewer / Auditor** — `spawn.sh --model` と、型ごとの `spawn_options.yaml`
 - **Claude Code subagentとして起動する場合** — 下表の値を `subagent_type` の指定で効かせる(**subagentは指定しなければ親のモデルを継承する**)
 
-現在の配分では次を既定とする。**Implementerはnative subagentの委任時、Reviewer / Tester /
-Auditorは`spawn.sh --model`でmodelを省略せず、この表の値を渡す。**
+現在の実験配分では次を既定とする。native subagentと`spawn.sh`のどちらでもmodelを省略しない。
 
-| Role | 現在のCLI | 起動時指定 | 既定段 |
+| Role / 工程 | 現在のCLI | 起動時指定 | 既定段 |
 |---|---|---|---|
-| Implementer | Codex（native subagent） | `gpt-5.6-luna` | medium |
-| Reviewer | Claude Code | `sonnet` | medium |
-| Tester | Claude Code | `sonnet` | medium |
-| Auditor | Claude Code | `sonnet` | medium |
+| Implementer | Claude Code（agmsg） | `sonnet` | medium |
+| 計画Reviewer | Claude Code（agmsg） | `sonnet` | medium |
+| 差分Reviewer | Codex（native subagent） | `gpt-5.6-sol` | medium |
+| Tester | Codex（native subagent） | `gpt-5.6-luna` | medium |
+| Auditor | Claude Code（agmsg） | `sonnet` | medium |
 
-Implementerは、複数role、複雑なcheck mode、rollback、shell / Pythonを含む場合にhighへ引き上げる。Testerをlowにできるのは、**実ホストへ到達せず、期待値と手順が完全に固定されたローカル検査で、起動時に明示した場合だけ**である。現在値と理由は`docs/ai/adr/012-role-model-effort-defaults.md`が正本で、CLI分離の理由はADR-011が持つ。
+Testerをlowにできるのは、**実ホストへ到達せず、期待値と手順が完全に固定されたローカル検査で、起動時に明示した場合だけ**である。現在値と実験の評価条件は`docs/ai/adr/013-cross-vendor-implementer-reviewer-experiment.md`が正本である。
+
+agmsgのClaude Code起動経路はrole別effortを渡さないため、Implementer / 計画Reviewer / Auditorは共通のmedium既定として扱う。実効経路がない値をRole表へ宣言しない。
 
 下表はClaude Code subagent経路の値であり、`.claude/agents/*.md` の frontmatter と対で維持する。
 
@@ -65,7 +63,7 @@ Implementerは、複数role、複雑なcheck mode、rollback、shell / Pythonを
 | Reviewer | sonnet | medium |
 | Tester | sonnet | medium |
 
-品質低下が観測されたら、該当Roleのeffortを1段上げる。根拠は `docs/ai/adr/011-vendor-neutral-role-allocation.md`(`010` を supersede)。
+品質低下または起動経路の運用不能が観測されたら、3案件を待たず配分を見直す。根拠は `docs/ai/adr/013-cross-vendor-implementer-reviewer-experiment.md`。
 
 ### Agent定義との関係
 
