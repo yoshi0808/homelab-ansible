@@ -13,7 +13,7 @@
 
 **ストレージ月次点検レポートの可読性改善: 本番表示確認済み・closeout待ち**。日本語の結論、重大度順の対応事項、ラベル付きZFS/NVMe値、簡潔なSlack短報へ変更。独立Reviewer=Approve、Tester=PASS。Semaphore #1062でcollectが成功し、Yoshinobuが改善後の内容を確認した。案件正本は `docs/ai/reviews/proxmox_storage_report_readability/2026-09-12_001_requirement.md`。
 
-**Implementer / Reviewerのベンダー分離実験: commit・ローカルreset待ち**。次の非自明な実装案件3件で、Claude Code Implementerとfresh Codex差分Reviewerを組み合わせ、Coordinatorの実装負担とトークン消費を観測する。独立規範レビュー=Approve、Codex Tester=PASS。要求は `docs/ai/reviews/cross_vendor_role_allocation/2026-09-12_001_requirement.md`、判断は `docs/ai/adr/013-cross-vendor-implementer-reviewer-experiment.md`。
+**Implementer / Reviewerのベンダー分離実験: 観測中(0/3件)**。ローカルreset後、Claude Code Implementer / 計画Reviewer / Auditorの常駐起動とREADY、fresh Codex差分Reviewer / Testerを常駐させない構成を実測した。次の非自明な実装案件3件で、Coordinatorの実装負担とトークン消費を観測する。独立規範レビュー=Approve、Codex Tester=PASS。要求は `docs/ai/reviews/cross_vendor_role_allocation/2026-09-12_001_requirement.md`、配備観測は `docs/ai/reviews/cross_vendor_role_allocation/2026-09-12_008_deployment_observation.md`、判断は `docs/ai/adr/013-cross-vendor-implementer-reviewer-experiment.md`。
 
 **Proxmoxストレージ月次点検: 次回定期実行の観測待ち**。配備案件はクローズ。次回の自然実行・比較結果を確認する。Survey任意欄の反復差分有無と省トークン効果は未評価。根拠・残存事項は `docs/ai/reviews/proxmox_storage_monthly/2026-09-11_014_closeout.md`。
 
