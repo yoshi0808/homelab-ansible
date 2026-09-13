@@ -105,6 +105,25 @@ semaphore_templates_catalog:
         required: false
         default_value: ""
 
+  # 2026-09-13新設(quory_health_monthly)。scheduleは未確定(Notion親ページ、
+  # NVMe取得ツールの実機readback待ち)のためschedulesへは追加しない。
+  - playbook: playbooks/quory_health_monthly.yml
+    class: SEMI-SAFE
+    title: "Quory health monthly"
+    survey_vars:
+      - name: quory_health_monthly_operation
+        title: operation
+        type: enum
+        required: true
+        default_value: collect
+        values:
+          - {name: collect, value: collect}
+          - {name: replay, value: replay}
+      - name: quory_health_monthly_report_id
+        title: "Replay report ID (collectでは空欄)"
+        required: false
+        default_value: ""
+
   - playbook: playbooks/ubuntu_nightly.yml
     class: SEMI-SAFE
     legacy_name: "SEMI-SAFE: Ubuntu nightly reboot if required"

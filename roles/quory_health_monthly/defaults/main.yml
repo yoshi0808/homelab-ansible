@@ -1,0 +1,25 @@
+---
+quory_health_monthly_operation: collect
+quory_health_monthly_report_id: ""
+quory_health_monthly_report_dir: "{{ reports_base_dir }}/quory-health-monthly"
+quory_health_monthly_fs_usage_warning: 80
+quory_health_monthly_fs_usage_critical: 90
+quory_health_monthly_mem_available_warning_percent: 15
+quory_health_monthly_mem_available_critical_percent: 5
+quory_health_monthly_wear_warning: 80
+quory_health_monthly_wear_critical: 100
+# 前回比較で「悪化」をissue化するための閾値(2026-09-13差分レビュー005 Major#2対応)。
+# 絶対使用率がwarning/criticalへ達していなくても、前回からの伸びが大きければ
+# 対応要否として表示する。
+quory_health_monthly_fs_growth_warning_points: 10
+quory_health_monthly_mem_available_drop_warning_points: 10
+quory_health_monthly_swap_growth_warning_bytes: 104857600
+# Notion親ページは配備前readbackで確定するまで未確定(ADR-014、requirement
+# オープンクエスチョン)。空のまま collect を通常実行すると quory_health_notion
+# の parent必須検証で publication は incomplete になる — 値が入るまで本番投稿は
+# 意図的に成立しない。
+quory_health_monthly_notion_parent: ""
+# 既存 homelab-report Integration と Proxmoxストレージ月次点検が使う、quory上の
+# 権限制限付きtokenファイルを再利用する(ADR-014)。新しいtokenは作らない。
+quory_health_monthly_notion_token_file: /etc/homelab/notion-storage.token
+quory_health_monthly_notion_force_send: false

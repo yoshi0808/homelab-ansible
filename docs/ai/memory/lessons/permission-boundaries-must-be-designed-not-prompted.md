@@ -103,3 +103,4 @@ Coordinatorの寄与も記録する。「globを使わず名前を明示指定�
 | 2026-09-05 | commitだけの承認後、git commitとgit pushを同一コマンドに連結し、pushの個別承認を得ずorigin/mainへ送信した。 | docs/ai/policies/execution_boundary_policy.md EXEC-030の当時の要求「git commit / git pushはYoshinobuの都度承認を得てCoordinatorが実行する」 | 自分(commit後の応答で、pushまで通したことを明示して謝罪) |
 | 2026-09-06 | Implementerの操作がharnessの安全機構に拒否され、roles/semaphore_upgrade/files/__pycache__が残った。 | harnessのpermission classifier／permissions.denyが、拒否対象の操作を停止する安全境界 | 自分(git statusとfindで残留物を確認) |
 | 2026-09-07 | AuditorがAC4の実体を確認するため、Coordinator専用の`docs/ai/memory/`をread-onlyで参照した。 | `docs/ai/core.md`「Knowledgeを読むのはCoordinatorだけであり、subagentは読まない」 | Auditorの自己申告と監査記録 |
+| 2026-09-13 | quory月次レポートのTesterが実host名入りlocal inventoryをdecoyとして使い、`check-mode-native`のplaybookを`--check`なしでも実行した。 | `docs/ai/core.md`のdecoy条件1、`docs/ai/policies/ansible_test_safety_policy.md` TS-023/024 | 自分(テスト計画と結果の照合) |

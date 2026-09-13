@@ -1,0 +1,42 @@
+---
+# tester-gate: check-mode-native
+# --check observes only; no archive, token read, Notion, Slack or retention writes.
+- name: Validate monthly quory health request before resolving remote hosts
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars_files:
+    - ../roles/quory_health_monthly/defaults/main.yml
+  tasks:
+    - name: Validate operation and inventory
+      ansible.builtin.assert:
+        that:
+          - quory_health_monthly_operation in ['collect', 'replay']
+          - groups['control_nodes'] | default([]) == ['quory']
+          - >-
+            quory_health_monthly_operation != 'replay' or
+            quory_health_monthly_report_id is match('^[0-9]{8}T[0-9]{12}\+0900-[0-9a-f]{32}$')
+    - name: Open collection only for a validated collect operation
+      ansible.builtin.add_host:
+        name: quory
+        groups: quory_health_monthly_targets
+      when: quory_health_monthly_operation == 'collect'
+
+- name: Collect read-only observations from quory
+  hosts: quory_health_monthly_targets
+  gather_facts: false
+  tasks:
+    - name: Collect quory health observations
+      ansible.builtin.include_role:
+        name: quory_health_monthly
+        tasks_from: collect
+
+- name: Preserve and publish report independently of remote host survival
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Build formal quory health report
+      ansible.builtin.include_role:
+        name: quory_health_monthly
+        tasks_from: report

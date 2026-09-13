@@ -1,0 +1,88 @@
+---
+- name: Validate request again in independent controller play
+  ansible.builtin.assert:
+    that:
+      - quory_health_monthly_operation in ['collect', 'replay']
+      - >-
+        quory_health_monthly_operation != 'replay' or
+        quory_health_monthly_report_id is match('^[0-9]{8}T[0-9]{12}\+0900-[0-9a-f]{32}$')
+    fail_msg: Invalid quory health operation or report ID
+
+- name: Initialize observation map
+  ansible.builtin.set_fact:
+    _quory_health_observations: {}
+    _quory_health_pipeline_error: false
+    _quory_health_publication: {publication: suppressed, url: ''}
+
+- name: Include the quory observation when this run collected it
+  ansible.builtin.set_fact:
+    _quory_health_observations: >-
+      {{ {'quory': hostvars['quory'].quory_health_monthly_observation | default({'error': 'unavailable'})} }}
+  when: quory_health_monthly_operation == 'collect'
+
+- name: Save or preview formal report
+  block:
+    - name: Archive monthly observation with frozen comparison
+      quory_health_archive:
+        directory: "{{ quory_health_monthly_report_dir }}"
+        observations: "{{ _quory_health_observations }}"
+        operation: "{{ quory_health_monthly_operation }}"
+        report_id: "{{ quory_health_monthly_report_id }}"
+        thresholds:
+          fs_warning: "{{ quory_health_monthly_fs_usage_warning | int }}"
+          fs_critical: "{{ quory_health_monthly_fs_usage_critical | int }}"
+          mem_warning: "{{ quory_health_monthly_mem_available_warning_percent | int }}"
+          mem_critical: "{{ quory_health_monthly_mem_available_critical_percent | int }}"
+          wear_warning: "{{ quory_health_monthly_wear_warning | int }}"
+          wear_critical: "{{ quory_health_monthly_wear_critical | int }}"
+          fs_growth_warning_points: "{{ quory_health_monthly_fs_growth_warning_points | int }}"
+          mem_drop_warning_points: "{{ quory_health_monthly_mem_available_drop_warning_points | int }}"
+          swap_growth_warning_bytes: "{{ quory_health_monthly_swap_growth_warning_bytes | int }}"
+      register: _quory_health_archive
+
+    - name: Select saved report
+      ansible.builtin.set_fact:
+        _quory_health_report: "{{ _quory_health_archive.report }}"
+
+    - name: Publish archived monthly report unless notifications are suppressed
+      quory_health_notion:
+        directory: "{{ quory_health_monthly_report_dir }}"
+        report_id: "{{ _quory_health_report.report_id }}"
+        parent: "{{ quory_health_monthly_notion_parent }}"
+        token_file: "{{ quory_health_monthly_notion_token_file }}"
+        suppress: >-
+          {{ ansible_check_mode or (skip_notifications | default(false) | bool)
+             or ((lookup('env', 'CLAUDECODE') | trim | length > 0)
+                 and not (quory_health_monthly_notion_force_send | bool)) }}
+      register: _quory_health_publication
+      tags: [destructive]
+      # Module has an independent check/suppress gate before parent, token and HTTP IO.
+  rescue:
+    - name: Keep pipeline failure observable through final notification
+      ansible.builtin.set_fact:
+        _quory_health_pipeline_error: true
+  always:
+    - name: Send short summary using existing suppression contract
+      ansible.builtin.include_role:
+        name: common_slack
+        tasks_from: notify
+      vars:
+        slack_channel: info
+        slack_status: "{{ 'error' if _quory_health_pipeline_error else ((_quory_health_report | default({})).health | default('UNKNOWN') | lower) }}"
+        slack_title: quoryヘルス月次点検
+        slack_message: >-
+          {{ (_quory_health_archive | default({})).summary | default('点検処理が完了していません') }}
+          レポート公開={{ _quory_health_publication.publication | default('incomplete') }}
+          {{ _quory_health_publication.url | default('') }}
+
+- name: Fail incomplete pipeline after preserving available evidence
+  ansible.builtin.assert:
+    that:
+      - not _quory_health_pipeline_error
+      - (_quory_health_report | default({})).collection | default('error') == 'ok'
+      - not ((_quory_health_report | default({})).history_error | default(true))
+      # QHM-031: 取得不能(UNKNOWN)はWARNING/CRITICALと別軸で非0終了させる。
+      # 容量・メモリ・NVMeいずれかの指標が取得・解釈できなかった場合、
+      # 収集・保存・公開自体は完走していてもジョブを失敗として扱う。
+      - (_quory_health_report | default({})).health | default('UNKNOWN') != 'UNKNOWN'
+    fail_msg: quoryヘルス月次点検の収集・保存・比較・公開、または容量・メモリ・NVMe指標の取得に未完了があります。

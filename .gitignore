@@ -4,6 +4,7 @@ reports/**/*.log
 reports/**/*.md
 reports/incidents/
 reports/proxmox-storage-monthly/
+reports/quory-health-monthly/
 
 # Ansible retry files
 *.retry

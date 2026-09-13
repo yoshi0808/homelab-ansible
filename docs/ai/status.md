@@ -11,7 +11,7 @@
 
 ## Now(進行中)
 
-**quory月次ヘルスチェックレポート: Operatorのread-only実測依頼前**。ディスク健全性・容量とメモリの余裕を、既存のProxmoxストレージ月次点検と同様に見えるようにする。死活監視は対象外。OPREQ本文と通知要旨を `/tmp/quory-health-opreq-body.json`・`/tmp/quory-health-opreq-notice.txt` に準備し、schema/DLP検査は通過済み。初回の `oprc-submit.sh` は `sync_unobservable` で停止し、登録・agmsg通知は未実施。Codexの送信・同期確認・OPREQ経路を `.codex/rules/default.rules` に追加したが、現セッションには未反映。**次はcommit後にCodexを再起動し、同期状態を確認してOPREQを登録・通知する。** OPRES取得後に要求を確定する。実ホスト調査・実装はまだ行っていない。
+**quory月次ヘルスチェックレポート: 初期実装・独立レビュー済み、配備前検証待ち**。ディスク健全性・容量とメモリの余裕を月次で記録する。死活監視は対象外。要求・計画・実装・レビュー・テストは `docs/ai/reviews/quory_health_monthly/`、方式案はADR-014、規範案は`docs/ai/policies/quory_health_monthly_policy.md`。009差分レビューはApprove、011で53件のfixture/unitとsyntaxはPASS。ただしTesterの実ホスト名入りinventoryと非check実行は境界違反で無効と訂正し、full-playbook結合はNot Run、AC5はPartial。実quory/Notion/Slack/Semaphoreのreadback、NVMeツール・権限、Notion親ページ、schedule時刻は未確定。実ホスト変更・commit/pushは未実施。
 
 **ストレージ月次点検レポートの可読性改善: 本番表示確認済み・closeout待ち**。日本語の結論、重大度順の対応事項、ラベル付きZFS/NVMe値、簡潔なSlack短報へ変更。独立Reviewer=Approve、Tester=PASS。Semaphore #1062でcollectが成功し、Yoshinobuが改善後の内容を確認した。案件正本は `docs/ai/reviews/proxmox_storage_report_readability/2026-09-12_001_requirement.md`。
 
