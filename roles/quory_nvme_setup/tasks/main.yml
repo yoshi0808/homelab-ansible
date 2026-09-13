@@ -1,0 +1,36 @@
+---
+# The tester-gate classification and rationale live in the calling playbook
+# header (playbooks/quory_nvme_setup.yml; TS-036).
+- name: Check whether the NVMe CLI package is already installed
+  ansible.builtin.package_facts:
+    manager: apt
+  # Read-only query, identical under --check; used only to decide whether an
+  # apt cache refresh is warranted below (never depends on any elapsed-time
+  # threshold, so a re-run's idempotency does not depend on cache_valid_time
+  # or on when the machine last ran apt update).
+
+- name: Ensure the NVMe CLI package is installed (idempotent; --check previews without applying) - {{ quory_nvme_setup_package }}
+  ansible.builtin.apt:
+    name: "{{ quory_nvme_setup_package }}"
+    state: present
+    # Refresh the apt cache only when this package is not already present.
+    # A re-run against a host where it's already installed therefore never
+    # touches the cache at all — no cache_updated, no changed, regardless of
+    # how much time has passed since the last apt update.
+    update_cache: "{{ quory_nvme_setup_package not in ansible_facts.packages }}"
+  become: true
+  register: quory_nvme_setup_install
+
+- name: Confirm the nvme CLI is present and executable after a real install
+  when: not ansible_check_mode
+  tags: [destructive]
+  block:
+    - name: Run nvme version to confirm the CLI is executable
+      ansible.builtin.command:
+        argv: [nvme, version]
+      become: true
+      register: quory_nvme_setup_readback
+      changed_when: false
+      # No failed_when override: the command module's default rc!=0 failure
+      # is exactly the fail-closed behavior AC-S2 requires — a package that
+      # reports installed but leaves an unusable CLI must not be success.

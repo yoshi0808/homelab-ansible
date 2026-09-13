@@ -462,6 +462,13 @@ semaphore_templates_catalog:
   - playbook: playbooks/worktree_sync_setup.yml
     class: SEMI-SAFE
 
+  # 2026-09-13新設(quory_health_monthly案件のNVMe取得ツール配備追補、
+  # requirement 012/plan 013)。quory限定でnvme-cliを冪等導入するsetup。
+  # 上のR7の9本と同じ理由でSEMI-SAFE・引数なし・対象はplaybookのhosts:委ね。
+  # scheduleは追加しない(未確定のためrequirement P0で明示的に対象外)。
+  - playbook: playbooks/quory_nvme_setup.yml
+    class: SEMI-SAFE
+
   # --- nonsemaphore_job_capture案件(2026-08-05、requirement R8。この案件の
   # R8は上のclass_reason用R8とは無関係の別ファイルの別番号) -------------------
   # quory自身のsystemd timer/serviceユニットを配備しenable+startする

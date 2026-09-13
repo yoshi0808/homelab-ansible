@@ -1,0 +1,80 @@
+---
+# Install nvme-cli on quory so the monthly quory health job's NVMe collector
+# (roles/quory_health_monthly) can read SMART/NVMe health instead of
+# reporting tool_unavailable. Observed 2026-09-13: Semaphore #1083 native
+# --check on the health job recorded /dev/nvme0n1 as tool_unavailable (rc=2);
+# OPRES req-20260913T103425+0900-66100285a5cf808c also reported nvme-cli
+# absent from the Operator's execution environment.
+#
+# Requirement: docs/ai/reviews/quory_health_monthly/2026-09-13_012_nvme_setup_requirement.md
+# Plan:        docs/ai/reviews/quory_health_monthly/2026-09-13_013_nvme_setup_plan.md
+# Policy:      docs/ai/policies/quory_health_monthly_policy.md (QHM-011/QHM-020:
+#              package installation stays out of the observation playbook
+#              itself; this is that separate, quory-limited setup entry).
+#
+# This playbook does not modify playbooks/quory_health_monthly.yml or
+# roles/quory_health_monthly/, and does not touch Notion, the monthly
+# schedule, or any other host.
+#
+# tester-gate: check-mode-native — package installation
+# (ansible.builtin.apt) natively previews under --check without applying,
+# so no packages change and no notification/report is produced under
+# --check (this role never writes report files). The CLI-usability readback
+# (an actual command execution, not just a package-manager query) is
+# explicitly gated with `when: not ansible_check_mode` + `tags: [destructive]`
+# (roles/quory_nvme_setup/tasks/main.yml), per TS-014's block-vs-diagnostic
+# split for check-mode-native playbooks. The localhost preflight/postflight
+# plays below are read-only assertions and always run regardless of --check.
+
+- name: Validate quory is actually present before targeting it
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Refuse an empty successful run when quory is missing from inventory
+      ansible.builtin.assert:
+        that:
+          - "'quory' in hostvars"
+        fail_msg: >-
+          quory is not present in inventory. `hosts: quory` on an inventory
+          missing that host matches zero hosts and would otherwise exit
+          rc=0 with nothing done — an empty success. Refusing instead of
+          silently skipping the install/readback.
+
+- name: Install nvme-cli on quory for NVMe health observation
+  hosts: quory
+  gather_facts: false
+  tasks:
+    - name: Run quory_nvme_setup role
+      ansible.builtin.import_role:
+        name: quory_nvme_setup
+
+    - name: Record that this play actually ran against quory
+      ansible.builtin.set_fact:
+        quory_nvme_setup_play_ran: true
+      # Fact set on the host this play targeted; visible to hostvars in the
+      # following play regardless of what got this play zero hosts (an
+      # inventory alias that doesn't resolve to quory, a mismatched --limit,
+      # a tag filter). Presence in inventory (checked above) is necessary but
+      # not sufficient — this task only runs if the setup play actually
+      # matched and executed against quory.
+
+- name: Confirm the setup play actually targeted quory
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Refuse success if the setup play matched zero hosts
+      ansible.builtin.assert:
+        that:
+          - hostvars['quory'].quory_nvme_setup_play_ran | default(false)
+        fail_msg: >-
+          The setup play above did not actually run against quory (matched
+          zero hosts — e.g. from --limit, -l, or a tag filter excluding it).
+          quory being present in inventory (checked in the first play) does
+          not guarantee the install play targeted it; this closes that gap.
+          Limitation: this only detects "the play matched zero hosts". It
+          cannot detect a host reachable under a different inventory alias
+          that is not literally named quory, or a partial run where quory
+          itself failed mid-task (that failure already exits non-zero on its
+          own via the setup role's tasks).

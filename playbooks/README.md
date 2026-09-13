@@ -118,6 +118,7 @@ Semaphoreのロールバックは復旧をdpkgの状態に依存させないた�
 | [`sandbox_auto_patch.yml`](sandbox_auto_patch.yml) | `sandbox_nodes` | sandbox自身のunattended-upgradesへupdates pocketと必要時04:00自動再起動を追加 | `check-mode-native` | `sandbox_auto_patch` |
 | [`serial_getty_mask.yml`](serial_getty_mask.yml) | `ansy:monnie:quory:authy` | 未使用`serial-getty@ttyS0`の停止・mask | `check-mode-native` | playbook内tasks |
 | [`quory_health_monthly.yml`](quory_health_monthly.yml) | `localhost`, `quory_health_monthly_targets`（`quory`）, `localhost` | quoryの容量・メモリ・swap・NVMe健康情報の月次収集、履歴比較、Notion正式レポート | `check-mode-native` | `quory_health_monthly` |
+| [`quory_nvme_setup.yml`](quory_nvme_setup.yml) | `localhost`, `quory`, `localhost` | `quory_health_monthly`のNVMe収集用に`nvme-cli`を冪等導入し、導入後のCLI実行可否をreadback | `check-mode-native` | `quory_nvme_setup` |
 | [`sophos_trim.yml`](sophos_trim.yml) | `sophos` | Sophos Firewall SSDのtrim | `dry-run-aware` | `sophos_trim` |
 | [`time_sync_check.yml`](time_sync_check.yml) | `quory:pve1:pve2:ansy:monnie:authy:sophos`（localhostからSophos / CloudKeyへ接続） | 各ホストのNTP同期状態を確認 | `safe-readonly` | `time_sync_check` |
 | [`time_sync_ntp_reference.yml`](time_sync_ntp_reference.yml) | `pve1:pve2:ansy:monnie:authy` | quoryを追加NTP参照先として設定 | `check-mode-native` | `time_sync_ntp_reference` |

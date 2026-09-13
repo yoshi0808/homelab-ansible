@@ -4,7 +4,7 @@
 
 ## 入口
 
-`playbooks/quory_health_monthly.yml`。観測対象は`control_nodes`グループの`quory`単体で、他ホストへは触れない。NVMe取得ツールが実行コンテキストに無ければ観測は導入せず取得不能として報告する — 導入は別のquory限定setup入口に分離する(未着手)。
+`playbooks/quory_health_monthly.yml`。観測対象は`control_nodes`グループの`quory`単体で、他ホストへは触れない。NVMe取得ツールが実行コンテキストに無ければ観測は導入せず取得不能として報告する — 導入は別のquory限定setup入口`playbooks/quory_nvme_setup.yml`に分離している（実装済み・実ホスト配備は未着手。詳細は下の「NVMe取得ツールの配備」節）。
 許可・禁止・停止条件の正本は `docs/ai/policies/quory_health_monthly_policy.md`。本書は実行方法、保存形式、配備状態を記録するOperations Contextであり、実行境界を上書きしない。
 
 変数の既定値は `roles/quory_health_monthly/defaults/main.yml`。操作は `quory_health_monthly_operation=collect` または `replay`。再送は `quory_health_monthly_report_id` に保存済report IDを指定する（ファイルパスは受け付けない）。replayでは対象hostへ収集しない。
@@ -28,12 +28,19 @@ Notion親ページIDは`quory_health_monthly_notion_parent`が既定空文字列
 native `--check` は観測・判定のみで、保存・token読取・Notion・Slack・host変更を行わない。`skip_notifications=true` は通常実行でもNotionとSlackを止める（ローカル保存は行う）。Notion専用forceはAI環境検出だけを解除し、check/skipは解除できない。
 ローカルfixture: `python3 -m unittest discover -s tests -p test_quory_health_monthly.py -v`。
 
+## NVMe取得ツールの配備（別入口）
+
+Semaphore #1083のnative `--check`が`/dev/nvme0n1`を`tool_unavailable`・rc=2で記録し、OPRES `req-20260913T103425+0900-66100285a5cf808c`も`nvme-cli`不在を確認した。要求追補012・計画追補013に基づき、`playbooks/quory_nvme_setup.yml`（role: `roles/quory_nvme_setup`）を新設した。`quory_health_monthly.yml`本体・`roles/quory_health_monthly/`は変更していない（QHM-011/QHM-020: 観測入口はパッケージ導入をしない）。
+
+package_factsで導入状態を読み、未導入のときだけAPT cacheを更新して`nvme-cli`を導入するrole。native `--check`はapt moduleのcheck_modeでパッケージ変更なしにプレビューし、導入後のCLI実行可否確認（`nvme version`）は`when: not ansible_check_mode` + `tags: [destructive]`のblockに閉じているため`--check`では実行されない。playbookの前後には対象不在・対象0件の空成功を検出するlocalhostのguardがある。Semaphore templateは引数なし・専用1件のみを追加し、scheduleは追加していない（P0で明示的に対象外）。
+
+配備順序（計画013）: commit/push→Yoshinobuがtemplate setupのcheck→apply→readback→専用setupのcheck→apply→readback（`nvme version`の出力で実行可否を確認）→月次ヘルスジョブの`--check`を再実行し`tool_unavailable`が消えたかを確認。取得が続けば権限・デバイス・CLI出力形式を別途調べ、通常のcollect実行には進まない。
+
 ## 未確定・今回スコープ外
 
-- quory実ホストのNVMe取得コマンド・パッケージ・実行権限（Semaphore実行コンテキストでの有無は未確認）。
+- quory実ホストでの実際の導入結果・`nvme id-ctrl`/`nvme smart-log`の成功可否（要求012 オープンクエスチョン、実機readback待ち）。
 - Notion親ページIDとIntegration権限。
-- 月次schedule（Semaphore・quory自身の定期処理との重複照合が未実施のため`roles/semaphore_templates/defaults/main.yml`の`schedules`へは今回追加していない。templateのみ追加済み）。
-- NVMe取得ツール導入用のquory限定setup playbook/role（今回スコープ外、別入口として計画）。
+- 月次schedule（Semaphore・quory自身の定期処理との重複照合が未実施のため`roles/semaphore_templates/defaults/main.yml`の`schedules`へは今回追加していない。templateのみ追加済み）。NVMe setup用のscheduleも同様に追加していない（自動導入は今回の対象外）。
 
 ## 経過観察
 

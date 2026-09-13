@@ -11,7 +11,7 @@
 
 ## Now(進行中)
 
-**quory月次ヘルスチェックレポート: 初期実装・独立レビュー済み、配備前検証待ち**。ディスク健全性・容量とメモリの余裕を月次で記録する。死活監視は対象外。要求・計画・実装・レビュー・テストは `docs/ai/reviews/quory_health_monthly/`、方式案はADR-014、規範案は`docs/ai/policies/quory_health_monthly_policy.md`。009差分レビューはApprove、011で53件のfixture/unitとsyntaxはPASS。ただしTesterの実ホスト名入りinventoryと非check実行は境界違反で無効と訂正し、full-playbook結合はNot Run、AC5はPartial。実quory/Notion/Slack/Semaphoreのreadback、NVMeツール・権限、Notion親ページ、schedule時刻は未確定。実ホスト変更・commit/pushは未実施。
+**quory月次ヘルスチェックレポート: NVMe CLI setupの配備待ち**。月次観測の初期実装は`c0e2d2e`でcommit/push済み。テンプレート登録後のSemaphore #1083 native `--check`はquoryのNVMeで`tool_unavailable`を示しrc=2（取得不能を正常扱いしない設計どおり）。観測playbook本体は変更せず、別入口`playbooks/quory_nvme_setup.yml`を追加した。要求追補012・計画013・最終差分レビュー018 Approve・Tester結果020（ローカルPASS、実機Not Run）は `docs/ai/reviews/quory_health_monthly/`。setup追加分は未commit/push、実quoryへのパッケージ導入は未実施。次はcommit/push承認後、Semaphore template setupのcheck→apply→readback、専用setupのcheck→apply→readback、月次観測の`--check`再実行。Notion親ページ・権限、月次scheduleは別途未確定で、有効化しない。
 
 **ストレージ月次点検レポートの可読性改善: 本番表示確認済み・closeout待ち**。日本語の結論、重大度順の対応事項、ラベル付きZFS/NVMe値、簡潔なSlack短報へ変更。独立Reviewer=Approve、Tester=PASS。Semaphore #1062でcollectが成功し、Yoshinobuが改善後の内容を確認した。案件正本は `docs/ai/reviews/proxmox_storage_report_readability/2026-09-12_001_requirement.md`。
 
