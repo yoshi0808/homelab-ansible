@@ -1,10 +1,10 @@
 # quory月次ヘルスレポート
 
-状態: 初期実装完了・実ホスト未配備。案件正本は `docs/ai/reviews/quory_health_monthly/2026-09-13_001_requirement.md`、計画は002、方式選択はADR-014、業務規範は `docs/ai/policies/quory_health_monthly_policy.md`。
+状態: 実quoryでnative `--check`の収集成功を確認済み・初回公開前。案件正本は `docs/ai/reviews/quory_health_monthly/2026-09-13_001_requirement.md`、計画は002、方式選択はADR-014、業務規範は `docs/ai/policies/quory_health_monthly_policy.md`。
 
 ## 入口
 
-`playbooks/quory_health_monthly.yml`。観測対象は`control_nodes`グループの`quory`単体で、他ホストへは触れない。NVMe取得ツールが実行コンテキストに無ければ観測は導入せず取得不能として報告する — 導入は別のquory限定setup入口`playbooks/quory_nvme_setup.yml`に分離している（実装済み・実ホスト配備は未着手。詳細は下の「NVMe取得ツールの配備」節）。
+`playbooks/quory_health_monthly.yml`。観測対象は`control_nodes`グループの`quory`単体で、他ホストへは触れない。NVMe取得ツールが実行コンテキストに無ければ観測は導入せず取得不能として報告する。Yoshinobuがquoryへ手動で`nvme-cli`を導入し、Semaphore #1093のnative `--check`で収集成功・判定OKを確認した（詳細は下の「NVMe取得ツールの手動導入」節）。
 許可・禁止・停止条件の正本は `docs/ai/policies/quory_health_monthly_policy.md`。本書は実行方法、保存形式、配備状態を記録するOperations Contextであり、実行境界を上書きしない。
 
 変数の既定値は `roles/quory_health_monthly/defaults/main.yml`。操作は `quory_health_monthly_operation=collect` または `replay`。再送は `quory_health_monthly_report_id` に保存済report IDを指定する（ファイルパスは受け付けない）。replayでは対象hostへ収集しない。
@@ -18,9 +18,9 @@
 healthと処理結果は別軸である。ファイルシステム/メモリ/NVMeのWARNING・CRITICALがあっても収集・保存・公開が完了すればジョブはrc0。**ただしNVMe/SMART指標や必須値が取得・解釈できずhealth=UNKNOWNになった場合は、収集・保存・公開自体が完走していてもジョブをrc非0にする**（QHM-031、requirement AC2）。この判定は`roles/quory_health_monthly/tasks/report.yml`最終assertが`health != 'UNKNOWN'`を明示的に見て行う — `proxmox_storage_monthly`はNVMeコマンド失敗を`collection: error`に畳んでいたが、本roleはfilesystem/memoryが収集できていればNVMe取得不能だけでcollectionをerrorにせず、health軸で失敗を表す（容量が正常でも「ディスク健全」と誤読ませないための分離）。
 Slackは既存common_slackのbest-effort通知。ジョブrc0だけからSlack到達を判断しない。
 
-## Notionの配備前提（未確定）
+## Notionの配備前提
 
-Notion親ページIDは`quory_health_monthly_notion_parent`が既定空文字列であり、**readbackで確定するまで公開は成立しない**（`quory_health_notion`モジュールが`parent_unconfirmed`で失敗する）。既存の`homelab-report` IntegrationとProxmoxストレージ月次点検が使うquory上の権限制限付きtokenファイル（既定 `/etc/homelab/notion-storage.token`）を再利用し、新しいtokenは作らない。新ページへのIntegration権限は別途readbackする。tokenをチャット、Git、extra-vars、コマンド引数に貼らない。
+Yoshinobuが「quory 月次ヘルス」ページを作成し、Notion上でページID `3da22f45-f1b0-802b-b069-e4d6da7c3311` と `homelab運用` 配下であることを確認した。`quory_health_monthly_notion_parent`の既定値はこの専用ページとする。既存の`homelab-report` IntegrationとProxmoxストレージ月次点検が使うquory上の権限制限付きtokenファイル（既定 `/etc/homelab/notion-storage.token`）を再利用し、新しいtokenは作らない。Yoshinobuは新ページの「接続」に`homelab-report`が表示されることを確認した。API側の実効権限と投稿結果は初回公開時のreadbackで確認する。tokenをチャット、Git、extra-vars、コマンド引数に貼らない。
 投稿APIはapi.notion.com固定、TLS検証有効。作成の応答消失時にはcreating予約を残し、再送で親ページ配下のtitle+管理markerを照合する。一意に確認できなければ停止する。
 
 ## 検証と抑止
@@ -28,20 +28,18 @@ Notion親ページIDは`quory_health_monthly_notion_parent`が既定空文字列
 native `--check` は観測・判定のみで、保存・token読取・Notion・Slack・host変更を行わない。`skip_notifications=true` は通常実行でもNotionとSlackを止める（ローカル保存は行う）。Notion専用forceはAI環境検出だけを解除し、check/skipは解除できない。
 ローカルfixture: `python3 -m unittest discover -s tests -p test_quory_health_monthly.py -v`。
 
-## NVMe取得ツールの配備（別入口）
+## NVMe取得ツールの手動導入
 
-Semaphore #1083のnative `--check`が`/dev/nvme0n1`を`tool_unavailable`・rc=2で記録し、OPRES `req-20260913T103425+0900-66100285a5cf808c`も`nvme-cli`不在を確認した。要求追補012・計画追補013に基づき、`playbooks/quory_nvme_setup.yml`（role: `roles/quory_nvme_setup`）を新設した。`quory_health_monthly.yml`本体・`roles/quory_health_monthly/`は変更していない（QHM-011/QHM-020: 観測入口はパッケージ導入をしない）。
+Semaphore #1083のnative `--check`が`/dev/nvme0n1`を`tool_unavailable`・rc=2で記録し、OPRES `req-20260913T103425+0900-66100285a5cf808c`も`nvme-cli`不在を確認した。当初は専用setup playbook/roleを作成したが、template setupのDry Run #1092で新規setupテンプレート1件に加えて既存の別テンプレート2件のSurvey metadata差分が見つかったため適用を見送った。
 
-package_factsで導入状態を読み、未導入のときだけAPT cacheを更新して`nvme-cli`を導入するrole。native `--check`はapt moduleのcheck_modeでパッケージ変更なしにプレビューし、導入後のCLI実行可否確認（`nvme version`）は`when: not ansible_check_mode` + `tags: [destructive]`のblockに閉じているため`--check`では実行されない。playbookの前後には対象不在・対象0件の空成功を検出するlocalhostのguardがある。Semaphore templateは引数なし・専用1件のみを追加し、scheduleは追加していない（P0で明示的に対象外）。
-
-配備順序（計画013）: commit/push→Yoshinobuがtemplate setupのcheck→apply→readback→専用setupのcheck→apply→readback（`nvme version`の出力で実行可否を確認）→月次ヘルスジョブの`--check`を再実行し`tool_unavailable`が消えたかを確認。取得が続けば権限・デバイス・CLI出力形式を別途調べ、通常のcollect実行には進まない。
+Yoshinobuがquoryで`sudo apt update`、`sudo apt install --no-install-recommends nvme-cli`を手動実行し、`sudo nvme version`が2.16を返すことを確認した。#1093の月次観測Dry Runはrc=0・判定OKで、当初の`tool_unavailable`失敗は解消した。この一度きりの導入のために作った専用playbook/role/catalog項目は未配備のまま削除し、月次観測入口にパッケージ導入を混ぜない境界（QHM-011/QHM-020）は維持した。既存2件のSurvey差分は別件として扱う。
 
 ## 未確定・今回スコープ外
 
-- quory実ホストでの実際の導入結果・`nvme id-ctrl`/`nvme smart-log`の成功可否（要求012 オープンクエスチョン、実機readback待ち）。
-- Notion親ページIDとIntegration権限。
-- 月次schedule（Semaphore・quory自身の定期処理との重複照合が未実施のため`roles/semaphore_templates/defaults/main.yml`の`schedules`へは今回追加していない。templateのみ追加済み）。NVMe setup用のscheduleも同様に追加していない（自動導入は今回の対象外）。
+- quoryの`nvme version`と#1093の収集成功は確認済み。`nvme id-ctrl`/`nvme smart-log`個別の出力値はジョブログからは確認していない。
+- Notionページは作成済み。Integration権限の実効readback。
+- 月次schedule（Semaphore・quory自身の定期処理との重複照合が未実施のため`roles/semaphore_templates/defaults/main.yml`の`schedules`へは今回追加していない）。NVMe setup用のtemplate/scheduleも登録していない。
 
 ## 経過観察
 
-初期実装と独立差分レビュー（009 Approve）は完了。Testerのfixture/unit 53件とsyntaxはPASS（011）。ただし実host名入りinventoryと非check実行は境界違反として検証根拠から外し、full-playbook結合はNot Run、AC5はPartialと訂正した。実ホストreadback、Notion/schedule配備は未着手。
+初期実装と独立差分レビュー（009 Approve）は完了。Testerのfixture/unit 53件とsyntaxはPASS（011）。ただし実host名入りinventoryと非check実行は境界違反として検証根拠から外し、当時のfull-playbook結合はNot Run、AC5はPartialと訂正した。その後、Semaphore #1083はツール不在を検出し、手動導入後の#1093は実quoryでのnative `--check`収集に成功した。正式レポートの保存・Notion投稿・Slack通知とscheduleの配備readbackは未着手。

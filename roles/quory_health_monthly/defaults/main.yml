@@ -14,11 +14,9 @@ quory_health_monthly_wear_critical: 100
 quory_health_monthly_fs_growth_warning_points: 10
 quory_health_monthly_mem_available_drop_warning_points: 10
 quory_health_monthly_swap_growth_warning_bytes: 104857600
-# Notion親ページは配備前readbackで確定するまで未確定(ADR-014、requirement
-# オープンクエスチョン)。空のまま collect を通常実行すると quory_health_notion
-# の parent必須検証で publication は incomplete になる — 値が入るまで本番投稿は
-# 意図的に成立しない。
-quory_health_monthly_notion_parent: ""
+# quory専用ページ(2026-09-14、Yoshinobu作成)。Integrationの実効権限は
+# 初回公開前に別途readbackする(QHM-041/QHM-060)。
+quory_health_monthly_notion_parent: "3da22f45-f1b0-802b-b069-e4d6da7c3311"
 # 既存 homelab-report Integration と Proxmoxストレージ月次点検が使う、quory上の
 # 権限制限付きtokenファイルを再利用する(ADR-014)。新しいtokenは作らない。
 quory_health_monthly_notion_token_file: /etc/homelab/notion-storage.token
