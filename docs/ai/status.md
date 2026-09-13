@@ -11,6 +11,8 @@
 
 ## Now(進行中)
 
+**quory月次ヘルスチェックレポート: Operatorのread-only実測依頼前**。ディスク健全性・容量とメモリの余裕を、既存のProxmoxストレージ月次点検と同様に見えるようにする。死活監視は対象外。OPREQ本文と通知要旨を `/tmp/quory-health-opreq-body.json`・`/tmp/quory-health-opreq-notice.txt` に準備し、schema/DLP検査は通過済み。初回の `oprc-submit.sh` は `sync_unobservable` で停止し、登録・agmsg通知は未実施。Codexの送信・同期確認・OPREQ経路を `.codex/rules/default.rules` に追加したが、現セッションには未反映。**次はcommit後にCodexを再起動し、同期状態を確認してOPREQを登録・通知する。** OPRES取得後に要求を確定する。実ホスト調査・実装はまだ行っていない。
+
 **ストレージ月次点検レポートの可読性改善: 本番表示確認済み・closeout待ち**。日本語の結論、重大度順の対応事項、ラベル付きZFS/NVMe値、簡潔なSlack短報へ変更。独立Reviewer=Approve、Tester=PASS。Semaphore #1062でcollectが成功し、Yoshinobuが改善後の内容を確認した。案件正本は `docs/ai/reviews/proxmox_storage_report_readability/2026-09-12_001_requirement.md`。
 
 **Implementer / Reviewerのベンダー分離実験: 観測中(0/3件)**。ローカルreset後、Claude Code Implementer / 計画Reviewer / Auditorの常駐起動とREADY、fresh Codex差分Reviewer / Testerを常駐させない構成を実測した。次の非自明な実装案件3件で、Coordinatorの実装負担とトークン消費を観測する。独立規範レビュー=Approve、Codex Tester=PASS。要求は `docs/ai/reviews/cross_vendor_role_allocation/2026-09-12_001_requirement.md`、配備観測は `docs/ai/reviews/cross_vendor_role_allocation/2026-09-12_008_deployment_observation.md`、判断は `docs/ai/adr/013-cross-vendor-implementer-reviewer-experiment.md`。
