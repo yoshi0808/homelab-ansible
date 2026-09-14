@@ -15,7 +15,9 @@
 
 **ストレージ月次点検レポートの可読性改善: 本番表示確認済み・closeout待ち**。日本語の結論、重大度順の対応事項、ラベル付きZFS/NVMe値、簡潔なSlack短報へ変更。独立Reviewer=Approve、Tester=PASS。Semaphore #1062でcollectが成功し、Yoshinobuが改善後の内容を確認した。案件正本は `docs/ai/reviews/proxmox_storage_report_readability/2026-09-12_001_requirement.md`。
 
-**Role配分の入れ替え: 規範を新配分へ更新済み・起動の実地確認待ち**。Coordinator=Claude Code(pane 0)、Implementer=Codex(pane 1常駐)、計画Reviewer=Codex(案件ごとfresh)、差分Reviewer / Tester=Claude Code subagent、Auditor=Codex(クローズ時1回)。ADR-013の3案件実験は1件も観測しないまま終了した。`.claude/agents/` からImplementerとAuditorの定義を削除し、Claude Codeでこの2役を起こせない状態にした。**未確認は`./new-session.sh --reset`による実起動** — Codex Implementerのspawnと`--model`指定、計画Reviewer / Auditorのfresh起動はまだ実地で観測していない。判断は `docs/ai/adr/015-claude-coordinator-codex-implementer-allocation.md`、起動要件は `docs/ai/context/operations/agent-messaging.md` §10。
+**Role配分の入れ替え: pane 0 / pane 1は実起動を確認済み・計画Reviewer / Auditorの起動が未観測**。Coordinator=Claude Code(pane 0)、Implementer=Codex(pane 1常駐)、計画Reviewer=Codex(案件ごとfresh)、差分Reviewer / Tester=Claude Code subagent、Auditor=Codex(クローズ時1回)。ADR-013の3案件実験は1件も観測しないまま終了した。`.claude/agents/` からImplementerとAuditorの定義を削除し、Claude Codeでこの2役を起こせない状態にした。2026-09-14の`./new-session.sh --reset`で、pane構成・Codex Implementerのspawnと`--model gpt-5.6-luna`・Coordinator↔Implementerのagmsg疎通を観測した。**未観測は計画ReviewerとAuditorのfresh起動**。判断は `docs/ai/adr/015-claude-coordinator-codex-implementer-allocation.md`、起動要件は `docs/ai/context/operations/agent-messaging.md` §10。
+
+**agmsgの`coordinator` identityはteam `homelab-ops`でcodexとclaude-codeの両方に登録されたままである**。ADR-013期の登録で、registration単位の削除手段が無く、`leave.sh`はagent丸ごとの退会イベントをquoryへ同期されるrosterへ書く。quory側rosterを開発側から観測する手段が無いため作り直していない。常駐Codexは`actas implementer`排他、計画Reviewer / Auditorも別identityのため、いまcoordinatorを名乗る主体は無い。team `homelab`側は2026-09-14にclaude-code単独へ寄せた。
 
 **Proxmoxストレージ月次点検: 次回定期実行の観測待ち**。配備案件はクローズ。次回の自然実行・比較結果を確認する。Survey任意欄の反復差分有無と省トークン効果は未評価。根拠・残存事項は `docs/ai/reviews/proxmox_storage_monthly/2026-09-11_014_closeout.md`。
 

@@ -228,6 +228,7 @@ spawn.sh codex implementer --team homelab --project <project> --split h --fresh 
 
 - **pane 1は`spawn.sh --fresh`で立てるため、seatの掃除と張り直しはspawn.shが担う**(本節冒頭)。起動スクリプトが自前で面倒を見るのはpane 0側だけであり、Claude Code側のseatは`.claude/settings.local.json`のSessionStart / SessionEnd hookが扱う
 - **`delivery.sh set monitor codex`をspawnより前に置く。** 逆順だとペインは開きCodexも動くのに、送ったメッセージだけが届かない(§2)
+- **`coordinator` identityを、Coordinatorが載っているCLIの型で、`homelab`と`homelab-ops`の両teamに登録しておく。** `watch.sh`は`(project, 型)`で解決したidentityしか購読しないため、型がずれていると**ペインもbridgeも正常なのにcoordinator宛だけが届かない**(2026-09-14、ADR-013期のcodex登録が残り、Implementerの起動報告が未読のまま滞留した)。確認は`identities.sh <project> <型>`、登録は`join.sh <team> coordinator <型> <project>`。**`leave.sh`はagent単位でしか外せず、registration単位の削除手段は無い** — 型を移すときはleaveしてから正しい型でjoinする。id付きteam(`homelab-ops`)ではleaveがrosterへ退会イベントを書き、それが同期先へ渡る
 - **Implementerの起動はfail-openにする。** agmsgが欠けていても、半端に復元されていても、Coordinatorのpaneは必ず上がること。pane 0の表示は`exec claude`で消えるため、失敗はログファイルへ残す
 - **計画ReviewerとAuditorは常駐させない。** 案件ごとにCoordinatorが`spawn.sh codex`でfresh起動し、終わったら`despawn.sh`で畳む(§4)
 - 通常のSSH再接続では起動スクリプトを使わず、`tmux attach -d -t homelab`で既存sessionへ戻る。引数なしの`new-session.sh`も同じくattachし、稼働中のペインを畳まない。Codexのrule変更やversion更新をImplementerへ反映するときは`./new-session.sh --reset`を使う
