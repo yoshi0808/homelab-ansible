@@ -1,6 +1,6 @@
 # ADR-013: Implementerと差分Reviewerを別ベンダーへ分離する実験
 
-**Status:** Accepted (experimental; next three non-trivial implementation cases)
+**Status:** Superseded by [`ADR-015`](015-claude-coordinator-codex-implementer-allocation.md)(2026-09-14。実験対象の3案件は1件も観測しないまま終了した)
 
 ## Context
 

@@ -4,7 +4,7 @@
 
 ## 位置づけ
 
-本書は、Coordinator を起点とする agmsg の連絡経路を扱う runbook である。禁止・義務はこの経路の手順に閉じる(`docs/ai/context-classification.md`「Operations Context」「Policyとの境界」)。扱うのは2つ — **同一ホスト上のClaude Code Implementer・計画Reviewer・Auditorへの依頼**(team `homelab`、local-only、§1〜§6)と、**quory 側 Operator とのすり合わせ**(team `homelab-ops`、remote、§7〜§9)。Codexの差分ReviewerとTesterはnative subagentとして委任し、agmsgを使わない。各Roleの責務・権限・成果物は `docs/ai/roles/<role>.md` が、承認境界は [`docs/ai/policies/execution_boundary_policy.md`](../../policies/execution_boundary_policy.md) が正本であり、競合時はそちらを優先する。IP、認証情報、秘密情報の実値は記載しない。
+本書は、Coordinator を起点とする agmsg の連絡経路を扱う runbook である。禁止・義務はこの経路の手順に閉じる(`docs/ai/context-classification.md`「Operations Context」「Policyとの境界」)。扱うのは2つ — **同一ホスト上のCodex Implementer・計画Reviewer・Auditorへの依頼**(team `homelab`、local-only、§1〜§6)と、**quory 側 Operator とのすり合わせ**(team `homelab-ops`、remote、§7〜§9)。Claude Codeの差分ReviewerとTesterはCoordinatorのsubagentとして委任し、agmsgを使わない。各Roleの責務・権限・成果物は `docs/ai/roles/<role>.md` が、承認境界は [`docs/ai/policies/execution_boundary_policy.md`](../../policies/execution_boundary_policy.md) が正本であり、競合時はそちらを優先する。IP、認証情報、秘密情報の実値は記載しない。
 
 ## 1. 構成
 
@@ -18,12 +18,12 @@ teamには過去の独立レビュー用identityと旧`implementer`登録が残�
 
 | active識別子 | type | project |
 |---|---|---|
-| `coordinator` | `codex` | `/home/yoshi/homelab-ansible` |
-| `implementer` | `claude-code` | 同上 |
-| `reviewer` | `claude-code` | 同上 |
-| `auditor` | `claude-code` | 同上 |
+| `coordinator` | `claude-code` | `/home/yoshi/homelab-ansible` |
+| `implementer` | `codex` | 同上 |
+| `reviewer` | `codex` | 同上(計画査読だけに使う) |
+| `auditor` | `codex` | 同上 |
 
-Implementer / 計画Reviewer / Auditorはlauncherがfresh sessionとして起動する。`reviewer`は計画査読にだけ使い、実装差分のレビューはCodex native subagentへ委任する。旧Codex `implementer`やClaude Code `tester`などの登録はteam rosterに残り得るが、登録の存在を現行経路と読まない。登録の整理は本runbookの機能要件ではない。
+Implementerはlauncherが常駐paneとして、計画ReviewerとAuditorはCoordinatorが案件ごとに、いずれもfresh sessionとして起動する。`reviewer`は計画査読にだけ使い、実装差分のレビューはClaude Code subagentへ委任する。同じ名前の別typeの登録(`implementer`のclaude-codeなど)や過去の独立レビュー用identityはteam rosterに残り得るが、登録の存在を現行経路と読まない。登録の整理は本runbookの機能要件ではない。
 
 **成果物をagmsgのメッセージだけに残さない。** 監査証跡は `docs/ai/reviews/<target>/` 配下のファイルであるという `docs/ai/core.md` の定めは、依頼先がどのCLIでも変わらない。メッセージDBはリポジトリ外にあり、`git log` からも案件記録からも辿れない。
 
@@ -39,13 +39,13 @@ Implementer / 計画Reviewer / Auditorはlauncherがfresh sessionとして起動
 2 が欠けた状態でagmsgからCodex roleをspawnすると、`spawn.sh` は `type.conf` の `cli=codex` を
 PATHで解決して素のCodexを起動する。**spawnは成功を返し、ペインは開き、Codexは正常に動く。**
 後から送ったメッセージだけが届かない形で現れる。現行ansy構成でmonitorを使うCodex roleは
-Coordinatorであり、native差分Reviewer / Testerはこの条件の対象外である。
+Implementer / 計画Reviewer / Auditorであり、Claude Codeの差分Reviewer / Testerはこの条件の対象外である。
 
 4 の信頼は hooks ファイルの**内容**に対して与えられる。`.codex/hooks.json` が変われば再び聞かれる。
 
-ansyのCoordinatorも`monitor`を使う。2026-09-08に`turn`を実測したところ、Stop hookによる取得自体は成立したが、返信時点で待機中のCoordinatorを起こせず、次のturn終了とcooldownまで表示されなかった。Implementer / 計画Reviewer / Auditorとの協調には即時配送が要るため、Yoshinobuが従来の`monitor`へ戻すと判断した。
+ansyのCodex roleは`monitor`を使う。2026-09-08にCodex Coordinatorで`turn`を実測したところ、Stop hookによる取得自体は成立したが、返信時点で待機中のセッションを起こせず、次のturn終了とcooldownまで表示されなかった。Coordinatorとの協調には即時配送が要るため、Yoshinobuが従来の`monitor`へ戻すと判断した。
 
-Codex native remote-controlのmanaged app-serverとagmsg monitorのapp-serverは同じcontrol socketを同時には所有できない。このためansyのlauncherはmanaged daemonを停止してからmonitorを起動する。**これは「monitorではスマホアプリを使えない」ことを意味しない。** 2026-09-08、monitorのapp-serverだけを動かした状態で、スマホアプリから同じCoordinator threadと会話できることを実測した。2つのapp-serverプロセスを同時に立てることを共存条件にしない。
+Codex native remote-controlのmanaged app-serverとagmsg monitorのapp-serverは同じcontrol socketを同時には所有できない。managed daemonが動いている状態でmonitorのapp-serverを立てない。**これは「monitorではスマホアプリを使えない」ことを意味しない。** 2026-09-08、monitorのapp-serverだけを動かした状態で、スマホアプリから同じCodex threadと会話できることを実測した。2つのapp-serverプロセスを同時に立てることを共存条件にしない。
 
 ## 3. `alive` は配送の成立を保証しない
 
@@ -63,8 +63,8 @@ Codex native remote-controlのmanaged app-serverとagmsg monitorのapp-serverは
 ## 4. spawn と despawn
 
 ```bash
-spawn.sh claude-code <claude-role> --team homelab --split h --fresh --model <Roleのmodel> --boot-prompt "<起動指示>"
-despawn.sh homelab coordinator <claude-role> [--force]
+spawn.sh codex <codex-role> --team homelab --split h --fresh --model <Roleのmodel> --boot-prompt "<起動指示>"
+despawn.sh homelab coordinator <codex-role> [--force]
 ```
 
 - **`--model`を省略しない。** 現在値とeffortの例外条件は`docs/ai/roles/coordinator.md`「モデル・effort配分」を参照する
@@ -104,7 +104,7 @@ codex 側には2つの層がある。**一方は repo で追跡され、もう�
 
 | 識別子 | ホスト | 位置づけ |
 |---|---|---|
-| `coordinator` | ansy | 人が直接使っているセッション。team `homelab` / `homelab-ops`の両方で同じ識別子を使い、同じvisible threadへseatする |
+| `coordinator` | ansy | 人が直接使っているセッション。team `homelab` / `homelab-ops`の両方で同じ識別子を使い、人が見ている同一セッションが両方を受ける |
 | `operator` | quory | watcher は Operator セッションの一部。**セッションと共に消える**(sync engine は別、§9) |
 
 - **サーバは ansy 上にある**(Docker + nginx の TLS 終端)。配備の正本は `roles/agmsg_server/` と `playbooks/agmsg_server_setup.yml`、設計と実測は `docs/ai/reviews/agmsg_remote_ops_channel/`。ポート・パス・到達許可の値をここへ写さない。
@@ -214,33 +214,26 @@ codex-record-session.sh homelab-ops operator <project>   # 2. 張り直し(数�
 
 quoryは`turn`へ落とさない(2026-08-16、Yoshinobu決定)。Operatorへの即時配送と可視スレッドの一致は、**上の2つを起動スクリプトが必ず行うこと**に依存する。
 
-### ansy: Coordinatorのmonitor起動
+### ansy: pane 0のCoordinatorと常駐Implementer
 
-ansyもImplementer / 計画Reviewer / Auditorとの即時配送を優先し、Codex Coordinatorを`monitor`で使う(2026-09-08、Yoshinobu決定)。gitignoredの`new-session.sh`はfresh createまたは`--reset`時に次をこの順で行う。
+ansyのtmux pane 0はClaude CodeのCoordinator TUIを保持し、pane 1にCodex Implementerが常駐する(ADR-015)。これによりSSHが切れても`tmux attach -t homelab`で同じ端末へ戻れる。gitignoredの`new-session.sh`はfresh createまたは`--reset`時に次をこの順で行う。
 
 ```
-delivery.sh set off codex <project>     # 旧bridgeとagmsg app-serverを停止
-codex remote-control stop --json        # app-server daemonを停止
-旧app-serverの終了を待つ               # control socket解放後だけ先へ進む
-tmux kill-session                       # --resetで既存sessionがある場合だけ
-delivery.sh set monitor codex <project> # SessionStart / SessionEnd hookを導入
-codex-monitor.sh ... resume <thread>    # tmux pane 0でseat済みthreadを再開
+tmux kill-session                          # --resetで既存sessionがある場合だけ
+tmux new-session ... pane 0 で claude を起動
+delivery.sh set monitor codex <project>    # 冪等。spawnより前に置く
+spawn.sh codex implementer --team homelab --project <project> --split h --fresh \
+  --model <現在値> --boot-prompt "<起動指示>"
 ```
 
-通常のSSH再接続では起動スクリプトを使わず、`tmux attach -d -t homelab`で既存sessionへ戻る。
-`new-session.sh`を引数なしで実行して既存sessionへ戻る場合も同じく`attach -d`とし、稼働中の
-app-serverを停止しない。Codexのrule変更やversion更新を反映してCoordinatorを再起動するときは
-`./new-session.sh --reset`を使う。resetはapp-serverを先に停止してからtmuxを作り直すため、
-停止途中のCoordinatorへ戻る目的には使わない。`delivery.sh set off`はapp-serverへ終了要求を送る
-だけで直ちにprocess終了を保証しないため、control socketの解放を待たずに次のapp-serverを起動しない。
-
-`new-session.sh`は`homelab/coordinator`と`homelab-ops/coordinator`のseatが同じthreadを指すことを確認し、不在または不一致なら曖昧な配送先を推測せず停止する。pane 0ではshell functionやPATH順序に依存せず、`codex-monitor.sh`を明示的に呼ぶ。非対話shellで実Codexへ解決され、plain Codexが起動して配送だけ失われたIncidentは`docs/ai/memory/incidents/2026-09-07_agmsg-codex-monitor-bypassed-after-reset.md`。
-
-ansyのtmux pane 0はCoordinator TUIを保持する。これによりSSHが切れても`tmux attach -t homelab`で同じ端末へ戻れる。2026-09-08、同じmonitor app-server経路でスマホアプリからCoordinatorと会話できることも実測した。tmuxは常駐するClaude CodeのImplementer / 計画Reviewer / Auditorも保持する。Codexの差分Reviewer / Testerは案件ごとのnative subagentであり、常駐paneを持たない。
+- **pane 1は`spawn.sh --fresh`で立てるため、seatの掃除と張り直しはspawn.shが担う**(本節冒頭)。起動スクリプトが自前で面倒を見るのはpane 0側だけであり、Claude Code側のseatは`.claude/settings.local.json`のSessionStart / SessionEnd hookが扱う
+- **`delivery.sh set monitor codex`をspawnより前に置く。** 逆順だとペインは開きCodexも動くのに、送ったメッセージだけが届かない(§2)
+- **Implementerの起動はfail-openにする。** agmsgが欠けていても、半端に復元されていても、Coordinatorのpaneは必ず上がること。pane 0の表示は`exec claude`で消えるため、失敗はログファイルへ残す
+- **計画ReviewerとAuditorは常駐させない。** 案件ごとにCoordinatorが`spawn.sh codex`でfresh起動し、終わったら`despawn.sh`で畳む(§4)
+- 通常のSSH再接続では起動スクリプトを使わず、`tmux attach -d -t homelab`で既存sessionへ戻る。引数なしの`new-session.sh`も同じくattachし、稼働中のペインを畳まない。Codexのrule変更やversion更新をImplementerへ反映するときは`./new-session.sh --reset`を使う
+- **`--reset`は対象セッションの中からは実行できない。** kill-sessionが自分のシェルごと落とすため、スクリプトが拒否する。先にdetachするか、別の端末から実行する
 
 なお**起動スクリプト自体は両ホストとも `.gitignore` 済みで、この repo は持たない**(AI 実行環境のローカルスクリプトを入れない線)。**したがって、この節が要件の正本である。** スクリプトを書き直すときはここへ突き合わせる。
-
-**検証済み**(2026-08-17)— quory で改訂版を実行し、Coordinator からの1通が `history.sh` を叩かずに**人が見ているペインへ出ることを目視で確認**した。往復は18秒。
 
 ## 11. 参照
 

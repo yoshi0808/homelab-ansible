@@ -1,6 +1,6 @@
 # ADR-011: Role配分をベンダー中立な「作る側 / 検める側」で決める
 
-**Status:** Accepted (Role割当は実験期間中[`ADR-013`](013-cross-vendor-implementer-reviewer-experiment.md)がsupersede。ベンダー中立とCoordinator effortの原則は維持)
+**Status:** Accepted (Role割当は[`ADR-015`](015-claude-coordinator-codex-implementer-allocation.md)がsupersede。ベンダー中立とCoordinator effortの原則は維持)
 
 ## Context
 

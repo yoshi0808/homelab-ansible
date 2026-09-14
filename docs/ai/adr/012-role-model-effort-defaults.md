@@ -1,6 +1,6 @@
 # ADR-012: 現在のRole別model / effort既定値
 
-**Status:** Superseded experimentally by [`ADR-013`](013-cross-vendor-implementer-reviewer-experiment.md)
+**Status:** Superseded by [`ADR-015`](015-claude-coordinator-codex-implementer-allocation.md)(実験期間中は[`ADR-013`](013-cross-vendor-implementer-reviewer-experiment.md)がsupersedeしていた)
 
 ## Context
 
