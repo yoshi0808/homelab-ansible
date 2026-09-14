@@ -23,4 +23,4 @@ R6(「必ず先に`--check`で差分を読んでから適用する」)の順序�
 ## 残っている観測
 
 - **初回発火は2026-09-15 08:15 JST。** 実際に走ったこと、レポートとSlack短報が出ることの確認は未実施。
-- 次回実行時刻そのものは開発側から読めない。dispatchのカタログにschedule照会が無いためで(`semaphore-query`のenumにschedule系が無い)、UIでのみ確認できる。
+- 次回実行時刻そのものは開発側から読めない。**`semaphore-query schedule-list`を足したが(2026-09-14、未配備)、Semaphoreのschedule一覧APIが次回実行時刻を返さない**ため、読めるのは`active`と`cron_format`までである(実測: `docs/ai/reviews/dispatch_pkg_and_schedule_vocabulary/2026-09-14_004_test_result.md`)。次回実行時刻はUIでのみ確認できる。

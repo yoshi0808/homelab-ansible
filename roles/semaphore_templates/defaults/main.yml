@@ -805,8 +805,11 @@ semaphore_schedules_catalog:
   # `debug_level`は冗長度を指す。二軸を混同しないこと。
   #
   # 値の出所: ansy(quoryのSemaphoreをRestoreした複製)のAPIから2026-08-10に取得。
-  # quory自身のscheduleを読む手段は現在無い(dispatchのカタログにschedule照会が
-  # 無いため)。**転記が違っていればquoryの`--check`が差分として見せる**ので、
+  # quory自身のscheduleを読む手段は、2026-09-14に`semaphore-query schedule-list`を
+  # 語彙へ足すまで無かった(配備前はdispatchの現物にまだ無い)。**読めるのは
+  # `active`と`cron_format`までで、`task_params`と次回実行時刻はAPIの一覧応答に
+  # 含まれない**(実測: docs/ai/reviews/dispatch_pkg_and_schedule_vocabulary/
+  # 2026-09-14_004_test_result.md)。**転記が違っていればquoryの`--check`が差分として見せる**ので、
   # 適用前に必ず差分を読むこと。第1バッチの3件はこの方法で一致を確認済み。
   - name: "SEMI-SAFE:Cert_renew (only on Quory)"
     template: "SEMI-SAFE: Cert renew"

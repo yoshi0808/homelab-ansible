@@ -47,6 +47,20 @@ deny_invalid() {
   exit 1
 }
 
+PKG_PATTERN_RE='^[A-Za-z0-9._+*-]{1,64}$'
+
+pkg_list() {
+  local pattern="$1" rc
+  if [[ -z "$pattern" ]]; then
+    dpkg-query -W -f='${binary:Package}\t${Version}\t${db:Status-Abbrev}\n'
+  else
+    dpkg-query -W -f='${binary:Package}\t${Version}\t${db:Status-Abbrev}\n' -- "$pattern" || {
+      rc=$?
+      [[ "$rc" -eq 1 ]] || return "$rc"
+    }
+  fi
+}
+
 valid_vmid() {
   [[ "$1" =~ ^[1-9][0-9]{2,8}$ ]]
 }
@@ -227,6 +241,13 @@ case "$check" in
       *) deny_invalid window ;;
     esac
     sudo -n /usr/bin/journalctl -u ssh.service -u ssh.socket --since "$since_value" -n 300 --no-pager
+    ;;
+  pkg-list)
+    [[ -z "$p2" ]] || deny_count
+    if [[ -n "$p1" ]]; then
+      [[ "$p1" =~ $PKG_PATTERN_RE ]] || deny_invalid pattern
+    fi
+    pkg_list "$p1"
     ;;
   # --- Deployed artifact / unit introspection (Phase 3 catalog §3, P1/P2) ---
   deployed-hash)

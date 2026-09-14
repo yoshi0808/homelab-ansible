@@ -11,9 +11,9 @@
 # common system (8), Q8-Q12 quory-specific) plus §6 (D6, 4 checks: X1
 # acl-status is Q-only; X2/X3/X4 users/unit-files/forced-command-keys are
 # shared with classes G/P) plus §7 (D7, 1 check: journal-ssh) — 25 total.
-# §8 (D8) changed journal-unit's operands but added no check, so the total
-# is unchanged. Do not add checks beyond those tables without Yoshinobu's
-# approval.
+# §8 (D8) changed journal-unit's operands but added no check. §10 adds
+# pkg-list and schedule-list under the requirement below. Do not add checks
+# beyond those tables without Yoshinobu's approval.
 #
 # Operator Request Channel MVP (2026-08-08) added 4 more checks — contract:
 # docs/ai/reviews/operator_request_channel/2026-08-08_001_requirement.md §5.2,
@@ -24,7 +24,7 @@
 # roles/operator_request_channel, not this role) — this dispatcher never
 # reads or writes the channel's spool itself, and channel-specific
 # processing (DLP, schema, request storage) lives entirely in oprc-receive
-# and the oprc/ library it imports, not here. Total is now 29. None of the
+# and the oprc/ library it imports, not here. Total is now 31. None of the
 # original 25 arms, their arity checks, or their denial text changed by one
 # character to make room for these.
 #
@@ -81,6 +81,7 @@ NAME_RE='^[a-zA-Z0-9_-]+$'
 # names (20260803_053711+0900.json); '.' is deliberately NOT added so ".."
 # stays structurally unspellable.
 FILE_RE='^[a-zA-Z0-9_+-]+\.json$'
+PKG_PATTERN_RE='^[A-Za-z0-9._+*-]{1,64}$'
 # Operator Request Channel request_id / cursor (plan §2.5/§2.6). Kept
 # identical to oprc/ids.py's REQUEST_ID_RE, which re-validates
 # independently (same multilayer discipline as BUNDLE_ID_RE above). "." and
@@ -196,7 +197,7 @@ case "$check" in
     esac
     ;;
 
-  # --- Q-C: common system checks (8) — verbatim from
+  # --- Q-C: common system checks (9) — verbatim from
   # recovery-investigate-dispatch.sh.j2, unchanged content (R11: same
   # vocabulary across classes). Only the operand-count guard differs, since
   # this dispatch parses all commands through one fixed-arity `read` (I-4)
@@ -242,6 +243,18 @@ case "$check" in
     # sudo, no CAP_SYSLOG needed) — same rationale as
     # recovery-investigate-dispatch.sh.j2's dmesg arm.
     journalctl -k -n 50 --no-pager
+    ;;
+  pkg-list)
+    [[ -z "$p2" && -z "$p3" ]] || deny_count
+    if [[ -z "$p1" ]]; then
+      dpkg-query -W -f='${binary:Package}\t${Version}\t${db:Status-Abbrev}\n'
+    else
+      [[ "$p1" =~ $PKG_PATTERN_RE ]] || deny_invalid pattern
+      dpkg-query -W -f='${binary:Package}\t${Version}\t${db:Status-Abbrev}\n' -- "$p1" || {
+        rc=$?
+        [[ "$rc" -eq 1 ]] || exit "$rc"
+      }
+    fi
     ;;
 
   # --- Q-D: quory-specific (5) ---
@@ -322,7 +335,7 @@ case "$check" in
   semaphore-query)
     [[ -n "$p1" && -n "$p2" && -z "$p3" ]] || deny_count
     case "$p1" in
-      recent-failed|running|task-errors|task-hosts|task-output|task-time|template-list) ;;
+      recent-failed|running|task-errors|task-hosts|task-output|task-time|template-list|schedule-list) ;;
       *) deny_invalid query ;;
     esac
     [[ "$p2" =~ ^[0-9]+$ ]] || deny_invalid n

@@ -373,3 +373,32 @@ requirement: `docs/ai/reviews/loki_investigate_vocabulary/2026-09-01_001_require
 ### 9.1 §4/§6.3/§7.5 の総数表との関係
 
 §4/§6.3/§7.5 の class G 総数表(現行値: `+6`)は変更しない。**それらの表はD5〜D8それぞれの承認時点で閉じた記録であり、以後のカタログ改訂のたびに合計を追随させる仕組みではない**(次にD番号の付く承認が無い限り、この総数表自体を書き換える契機がない)。L1(`loki-count`)/L2(`loki-window`)は今回チェックとして新設したものではなく、既に2026-07-29に露出済みだったものの記載漏れである — 遡って合算すると、2026-07-29分を今回の追加であるかのように見せてしまう。L3(`loki-errors`)は今回新しく露出したチェック名そのものであり、上表の数え方に従うなら`+7`に相当するが、**総数表が閉じた記録である以上、本節では改めない。** 新設チェックの実在と検証条件はL1〜L3の表(本節)を正本とし、§4/§6.3/§7.5の数値はD5〜D8時点のスナップショットとして読む。L1/L2の挙動そのものは変更していない(requirement 制約)。
+
+---
+
+## 10. 追加 — パッケージ一覧・Semaphore schedule一覧のread-only語彙(2026-09-14)
+
+requirement: `docs/ai/reviews/dispatch_pkg_and_schedule_vocabulary/2026-09-14_001_requirement.md`
+
+§0の不変条件I-1〜I-7をそのまま適用する。配備入口は、class Qが`playbooks/dev_investigate_setup.yml`→`roles/dev_investigate/tasks/main.yml`のdispatch copy、class P/Gのdispatchが`playbooks/recovery_exec_setup.yml`→`roles/recovery_exec/tasks/target_setup.yml`、helperが同playbook→`roles/recovery_exec/tasks/main.yml`のcopyである。**いずれもImplementerは配備しない。**
+
+| # | check | class | operand と検証 | 実行内容 |
+|---|---|---|---|---|
+| V1 | `pkg-list [pattern]` | Q / G / P | `pattern`(省略可): `^[A-Za-z0-9._+*-]{1,64}$`。余計な引数は拒否。 | `dpkg-query -W -f '${binary:Package}\t${Version}\t${db:Status-Abbrev}\n'`。pattern指定時はdpkg-queryのglobとして渡す。 |
+| V2 | `semaphore-query schedule-list <n>` | Q | `n`: 既存と同じ`1..200`の整数。範囲外・非数は拒否。 | `GET /project/<id>/schedules`の各オブジェクトを`id`昇順・先頭n件、1行1 JSONでそのまま出す。実測フィールドは`active` / `cron_format` / `delete_after_run` / `id` / `name` / `project_id` / `repository_id` / `template_id` / `tpl_name` / `type`。`task_params`と次回実行時刻相当のフィールドは返らない。 |
+
+`pkg-list`は一致0件をdpkg-queryのrc=1から成功(rc=0・空stdout)へ正規化する。入力検証に失敗した場合はdpkg-queryを起動しない。`apt list --installed`、aptログ、pip/collection一覧は扱わない。
+
+`schedule-list`は`template-list`と同型のAPI応答検証・JSON出力を使うが、endpointは`/schedules`である。`id`による並べ替えに必要な型だけを検証し、それ以外のAPIフィールドは推測で組み替えない。APIが次回実行時刻を返さない場合、それを合成しない。
+
+### 10.1 総数の更新
+
+§4/§6.3/§7.5の承認時点スナップショットは変更せず、今回追加後の現行値をここに記録する。
+
+| class | D系列の現行 | §10追加 | D系列の今回追加後 | D系列外の加算 | dispatch実数 |
+|---|---:|---:|---:|---:|---:|
+| Q(quory) | 25 | +2(V1/V2) | **27** | +4(OPRC) | **31** |
+| G(authy / monnie) | +6 | +1(V1) | **+7** | — | **+7** |
+| P(pve1 / pve2) | +6 | +1(V1) | **+7** | — | **+7** |
+
+Qの`27`はD番号系列（§1〜§3/§6/§7と今回§10）の値であり、dispatchが実際に受け付けるcheck数は、D系列27にOperator Request Channelの4語彙を加えた**31**である。G/PにはOPRC語彙を加えない。この2つの母集団を混同しないこと。V1/V2はいずれも状態を変えない。配備後の実host・Semaphore API応答・sha256突合・日次drift検査は本実装記録の自己検証対象外であり、Tester/配備工程で確認する。

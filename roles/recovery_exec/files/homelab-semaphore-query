@@ -99,6 +99,7 @@ QUERIES = (
     "task-output",
     "task-time",
     "template-list",
+    "schedule-list",
 )
 
 # R9: placed and ACL-granted by Ansible (root:root base + named-user ACL
@@ -114,7 +115,7 @@ PROJECT_NAME = "homelab-ansible"
 
 API_TIMEOUT_S = 20
 
-QUERY_RANGE_QUERIES = ("recent-failed", "running", "template-list")
+QUERY_RANGE_QUERIES = ("recent-failed", "running", "template-list", "schedule-list")
 N_MIN, N_MAX = 1, 200
 
 UINT_RE = re.compile(r"^[0-9]+$")
@@ -171,7 +172,7 @@ def usage():
     print(
         "usage: homelab-semaphore-query <recent-failed <n>|running <n>|"
         "task-errors <id>|task-hosts <id>|task-output <id>|task-time <id>|"
-        "template-list <n>>",
+        "template-list <n>|schedule-list <n>>",
         file=sys.stderr,
     )
     sys.exit(1)
@@ -425,6 +426,20 @@ def cmd_template_list(base, token, proj_id, n):
         print(json.dumps(r, sort_keys=True, ensure_ascii=False))
 
 
+def cmd_schedule_list(base, token, proj_id, n):
+    path = f"/project/{proj_id}/schedules"
+    rows = require_array(api_get(base, token, path), path)
+    for r in rows:
+        if not isinstance(r, dict):
+            die(f"semaphore api returned a non-object schedule entry from {path}")
+        require_int(r.get("id"), "schedule id")
+    rows = sorted(rows, key=lambda r: r["id"])
+    for r in rows[:n]:
+        # Preserve the API object as returned: the endpoint's fields are the
+        # contract, so do not guess or synthesize a reduced schedule shape.
+        print(json.dumps(r, sort_keys=True, ensure_ascii=False))
+
+
 def main():
     query = sys.argv[1] if len(sys.argv) > 1 else ""
     param = sys.argv[2] if len(sys.argv) > 2 else ""
@@ -457,6 +472,8 @@ def main():
         cmd_task_hosts(base, token, proj_id, n)
     elif query == "template-list":
         cmd_template_list(base, token, proj_id, n)
+    elif query == "schedule-list":
+        cmd_schedule_list(base, token, proj_id, n)
 
 
 if __name__ == "__main__":
