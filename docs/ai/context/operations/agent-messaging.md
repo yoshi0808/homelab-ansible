@@ -33,7 +33,7 @@ Implementerはlauncherが常駐paneとして、計画ReviewerとAuditorはCoordi
 
 1. delivery mode が `monitor`(`delivery.sh set monitor codex <project>`)
 2. シムが存在する(`drivers/types/codex/codex-shim-install.sh install` → `~/.agents/bin/codex`)
-3. `~/.agents/bin` が PATH にある。**`~/.bashrc` の非対話ガードより上に置くこと** — 末尾へ追記しても非対話シェルは冒頭で `return` するため無言で効かない
+3. `~/.agents/bin` が PATH にあり、**実バイナリより前に来ること。** 2つの落とし穴がある。**`~/.bashrc` の非対話ガードより上に置くこと** — 末尾へ追記しても非対話シェルは冒頭で `return` するため無言で効かない。**`.bashrc` で前置するだけでも足りない** — login shellでは `~/.profile` の `~/.local/bin` ブロックが後から前置し直すため、そこに実バイナリがあると負ける(2026-09-12にCodex standaloneのインストーラが `~/.local/bin/codex` を張り、tmuxサーバを起動し直した2026-09-14に発現した)。**ペインの環境はtmuxサーバから来る**ので、サーバを起動したshellでの解決結果が効く。確認は `bash -lic 'type codex'`
 4. codex の「Hooks need review」プロンプトで hook を信頼済みである。未信頼だと hook が走らず、bridge があっても配送はセッションへ入らない
 
 2 が欠けた状態でagmsgからCodex roleをspawnすると、`spawn.sh` は `type.conf` の `cli=codex` を
