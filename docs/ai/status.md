@@ -11,7 +11,9 @@
 
 ## Now(進行中)
 
-**quory月次ヘルスチェックレポート: schedule配備済み・初回発火(2026-09-15 08:15 JST)の観測待ち**。#1093のnative `--check`は収集成功、#1094の通常collectはrc0で、quory上の同一report IDのJSON/Markdown/公開記録(0600)、専用Notionページ、Slack短報をreadbackした。時刻は**毎月15日08:15 JST**(Proxmoxストレージ月次08:00の15分後、Yoshinobu承認)で`semaphore_schedules_catalog`へ入り、差分Reviewer=Approve。Notion「バッチ処理工程管理表」へも追記済み(同表に漏れていたProxmoxストレージ月次の行も同時に補った)。**適用は#1097(check)→#1098(apply)で完了し、作成1件・既存23件無変更・round-trip検証okを観測した(`2026-09-14_024_schedule_deployment_observation.md`)。残るのは初回発火の観測だけである。**`semaphore-query schedule-list`を語彙へ足したが(2026-09-14、配備待ち)、Semaphoreの一覧APIは次回実行時刻を返さないため、読めるのは`active`と`cron_format`までで、次回実行時刻はUIでしか見られない。** 案件正本は`docs/ai/reviews/quory_health_monthly/`、運用の現在値は`docs/ai/context/operations/quory-health-monthly.md`。
+**quory月次ヘルスチェックレポート: schedule配備済み・初回発火(2026-09-15 08:15 JST)の観測待ち**。#1093のnative `--check`は収集成功、#1094の通常collectはrc0で、quory上の同一report IDのJSON/Markdown/公開記録(0600)、専用Notionページ、Slack短報をreadbackした。時刻は**毎月15日08:15 JST**(Proxmoxストレージ月次08:00の15分後、Yoshinobu承認)で`semaphore_schedules_catalog`へ入り、差分Reviewer=Approve。Notion「バッチ処理工程管理表」へも追記済み(同表に漏れていたProxmoxストレージ月次の行も同時に補った)。**適用は#1097(check)→#1098(apply)で完了し、作成1件・既存23件無変更・round-trip検証okを観測した(`2026-09-14_024_schedule_deployment_observation.md`)。**2026-09-14に配備した`semaphore-query schedule-list`で、本番のscheduleが`active: true` / cron `15 8 15 * *`(id=25)で入っていることを読み返した。** 残るのは初回発火の観測だけである。Semaphoreの一覧APIは次回実行時刻を返さないため、それはUIでしか見られない。 案件正本は`docs/ai/reviews/quory_health_monthly/`、運用の現在値は`docs/ai/context/operations/quory-health-monthly.md`。
+
+**dispatch語彙 `pkg-list` / `schedule-list`: 配備済み・翌日のドリフト検査だけ観測待ち**。read-onlyの2語彙をclass Q / P / Gとhelperへ追加し、#1101 / #1102 で配備、`deployed-hash`とrepo現物のsha256一致と本番での初実行を確認した。**残るのは2026-09-15 00:40の日次ドリフト検査に差分が出ないことの確認だけ。** class P / Gのdispatchは`deployed-hash`の対応表に無く、開発側から照合できない。案件正本は`docs/ai/reviews/dispatch_pkg_and_schedule_vocabulary/`。
 
 **ストレージ月次点検レポートの可読性改善: 本番表示確認済み・closeout待ち**。日本語の結論、重大度順の対応事項、ラベル付きZFS/NVMe値、簡潔なSlack短報へ変更。独立Reviewer=Approve、Tester=PASS。Semaphore #1062でcollectが成功し、Yoshinobuが改善後の内容を確認した。案件正本は `docs/ai/reviews/proxmox_storage_report_readability/2026-09-12_001_requirement.md`。
 
