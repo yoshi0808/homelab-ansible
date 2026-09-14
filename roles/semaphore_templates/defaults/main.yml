@@ -105,8 +105,8 @@ semaphore_templates_catalog:
         required: false
         default_value: ""
 
-  # 2026-09-13新設(quory_health_monthly)。scheduleは未確定(Notion親ページ、
-  # NVMe取得ツールの実機readback待ち)のためschedulesへは追加しない。
+  # 2026-09-13新設(quory_health_monthly)。Notion親ページとNVMe取得ツールの
+  # 実機readback、および初回通常実行を確認済み。scheduleは下記へ登録する。
   - playbook: playbooks/quory_health_monthly.yml
     class: SEMI-SAFE
     title: "Quory health monthly"
@@ -874,6 +874,19 @@ semaphore_schedules_catalog:
   - name: "SEMI-SAFE: Proxmox storage monthly"
     template: "SEMI-SAFE: Proxmox storage monthly"
     cron: "0 8 15 * *"
+    active: true
+    task_params:
+      environment: "{}"
+
+  # 2026-09-14 初回通常実行の成功とNotion/NVMeのreadback確認後、Yoshinobuが
+  # 毎月15日08:15 JSTでの登録を承認。Proxmox storage monthly(08:00)の15分後で、
+  # 実績の所要時間(31秒 / 13〜28秒)でも重ならない。Notion「バッチ処理工程管理表」
+  # との突合でも08時台の他の窓と重ならないことをCoordinatorが確認済み。
+  # **この行自身が毎月15日08:15の枠を占有する**ため、次に同じ枠または前後を
+  # 検討する者は、この行がいる前提で同じ表を改めて確認すること。
+  - name: "SEMI-SAFE: Quory health monthly"
+    template: "SEMI-SAFE: Quory health monthly"
+    cron: "15 8 15 * *"
     active: true
     task_params:
       environment: "{}"

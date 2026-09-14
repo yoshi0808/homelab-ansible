@@ -11,7 +11,7 @@
 
 ## Now(進行中)
 
-**quory月次ヘルスチェックレポート: 初回本番公開済み・月次schedule未登録**。#1093のnative `--check`は収集成功、#1094の通常collectはrc0で、quory上の同一report IDのJSON/Markdown/公開記録(0600)、専用Notionページ、Slack短報をreadbackした。YoshinobuはProxmox月次レポートの次のジョブを希望。具体的な時刻は未確定で、schedule定義・配備・実Semaphore readbackは未実施。案件正本は`docs/ai/reviews/quory_health_monthly/`、運用の現在値は`docs/ai/context/operations/quory-health-monthly.md`。
+**quory月次ヘルスチェックレポート: scheduleをカタログへ登録済み・quoryへの適用待ち**。#1093のnative `--check`は収集成功、#1094の通常collectはrc0で、quory上の同一report IDのJSON/Markdown/公開記録(0600)、専用Notionページ、Slack短報をreadbackした。時刻は**毎月15日08:15 JST**(Proxmoxストレージ月次08:00の15分後、Yoshinobu承認)で`semaphore_schedules_catalog`へ入り、差分Reviewer=Approve。Notion「バッチ処理工程管理表」へも追記済み(同表に漏れていたProxmoxストレージ月次の行も同時に補った)。**未実施はquoryのSemaphoreでの適用と、適用後のactive・次回実行時刻のreadback。** 案件正本は`docs/ai/reviews/quory_health_monthly/`、運用の現在値は`docs/ai/context/operations/quory-health-monthly.md`。
 
 **ストレージ月次点検レポートの可読性改善: 本番表示確認済み・closeout待ち**。日本語の結論、重大度順の対応事項、ラベル付きZFS/NVMe値、簡潔なSlack短報へ変更。独立Reviewer=Approve、Tester=PASS。Semaphore #1062でcollectが成功し、Yoshinobuが改善後の内容を確認した。案件正本は `docs/ai/reviews/proxmox_storage_report_readability/2026-09-12_001_requirement.md`。
 
