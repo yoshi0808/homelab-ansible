@@ -1,6 +1,6 @@
 # quory月次ヘルスレポート
 
-状態: 実quoryでnative `--check`の収集成功を確認済み・初回公開前。案件正本は `docs/ai/reviews/quory_health_monthly/2026-09-13_001_requirement.md`、計画は002、方式選択はADR-014、業務規範は `docs/ai/policies/quory_health_monthly_policy.md`。
+状態: native `--check`と初回通常collectが成功し、保存・Notion・Slackを照合済み。月次scheduleの時刻照合・登録待ち。案件正本は `docs/ai/reviews/quory_health_monthly/2026-09-13_001_requirement.md`、計画は002、方式選択はADR-014、業務規範は `docs/ai/policies/quory_health_monthly_policy.md`。
 
 ## 入口
 
@@ -20,7 +20,7 @@ Slackは既存common_slackのbest-effort通知。ジョブrc0だけからSlack�
 
 ## Notionの配備前提
 
-Yoshinobuが「quory 月次ヘルス」ページを作成し、Notion上でページID `3da22f45-f1b0-802b-b069-e4d6da7c3311` と `homelab運用` 配下であることを確認した。`quory_health_monthly_notion_parent`の既定値はこの専用ページとする。既存の`homelab-report` IntegrationとProxmoxストレージ月次点検が使うquory上の権限制限付きtokenファイル（既定 `/etc/homelab/notion-storage.token`）を再利用し、新しいtokenは作らない。Yoshinobuは新ページの「接続」に`homelab-report`が表示されることを確認した。API側の実効権限と投稿結果は初回公開時のreadbackで確認する。tokenをチャット、Git、extra-vars、コマンド引数に貼らない。
+Yoshinobuが「quory 月次ヘルス」ページを作成し、Notion上でページID `3da22f45-f1b0-802b-b069-e4d6da7c3311` と `homelab運用` 配下であることを確認した。`quory_health_monthly_notion_parent`の既定値はこの専用ページとする。既存の`homelab-report` IntegrationとProxmoxストレージ月次点検が使うquory上の権限制限付きtokenファイル（既定 `/etc/homelab/notion-storage.token`）を再利用し、新しいtokenは作らない。Yoshinobuは新ページの「接続」に`homelab-report`が表示されることを確認した。API側の実効権限と投稿結果は#1094の初回公開で確認した。tokenをチャット、Git、extra-vars、コマンド引数に貼らない。
 投稿APIはapi.notion.com固定、TLS検証有効。作成の応答消失時にはcreating予約を残し、再送で親ページ配下のtitle+管理markerを照合する。一意に確認できなければ停止する。
 
 ## 検証と抑止
@@ -37,9 +37,8 @@ Yoshinobuがquoryで`sudo apt update`、`sudo apt install --no-install-recommend
 ## 未確定・今回スコープ外
 
 - quoryの`nvme version`と#1093の収集成功は確認済み。`nvme id-ctrl`/`nvme smart-log`個別の出力値はジョブログからは確認していない。
-- Notionページは作成済み。Integration権限の実効readback。
-- 月次schedule（Semaphore・quory自身の定期処理との重複照合が未実施のため`roles/semaphore_templates/defaults/main.yml`の`schedules`へは今回追加していない）。NVMe setup用のtemplate/scheduleも登録していない。
+- 月次scheduleはSemaphore・quory自身の定期処理との重複照合と、実Semaphoreへの登録・readbackが未了。NVMe setup用のtemplate/scheduleは登録していない。
 
 ## 経過観察
 
-初期実装と独立差分レビュー（009 Approve）は完了。Testerのfixture/unit 53件とsyntaxはPASS（011）。ただし実host名入りinventoryと非check実行は境界違反として検証根拠から外し、当時のfull-playbook結合はNot Run、AC5はPartialと訂正した。その後、Semaphore #1083はツール不在を検出し、手動導入後の#1093は実quoryでのnative `--check`収集に成功した。正式レポートの保存・Notion投稿・Slack通知とscheduleの配備readbackは未着手。
+初期実装と独立差分レビュー（009 Approve）は完了。Testerのfixture/unit 53件とsyntaxはPASS（011）。ただし実host名入りinventoryと非check実行は境界違反として検証根拠から外し、当時のfull-playbook結合はNot Run、AC5はPartialと訂正した。その後、Semaphore #1083はツール不在を検出し、手動導入後の#1093は実quoryでのnative `--check`収集に成功した。初回通常collect #1094はrc0。Yoshinobuが同一report IDのJSON/Markdown/公開記録がquory上に0600で存在することを確認した。Notion専用親ページ配下に当月ページが作成され、Slack #infoの短報も同一IDで確認した。健康判定はOK。scheduleの配備readbackは未着手。
