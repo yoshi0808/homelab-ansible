@@ -88,6 +88,10 @@ semaphore_templates_catalog:
     class: SAFE
     legacy_name: "SAFE: Proxmox hardware check"
 
+  # **falsyなsurvey fieldは書かない。** Semaphore APIはsurvey varの
+  # `required: false` と `default_value: ""` を保存しないため、明示すると
+  # readbackが`name`/`title`だけの実物と一致せず、毎回DRIFTになる。
+  # 省略時の意味(任意入力・空の既定値)はSemaphore側の既定どおりである。
   - playbook: playbooks/proxmox_storage_monthly.yml
     class: SEMI-SAFE
     title: "Proxmox storage monthly"
@@ -102,8 +106,6 @@ semaphore_templates_catalog:
           - {name: replay, value: replay}
       - name: proxmox_storage_monthly_report_id
         title: "Replay report ID (collectでは空欄)"
-        required: false
-        default_value: ""
 
   # 2026-09-13新設(quory_health_monthly)。Notion親ページとNVMe取得ツールの
   # 実機readback、および初回通常実行を確認済み。scheduleは下記へ登録する。
@@ -121,8 +123,6 @@ semaphore_templates_catalog:
           - {name: replay, value: replay}
       - name: quory_health_monthly_report_id
         title: "Replay report ID (collectでは空欄)"
-        required: false
-        default_value: ""
 
   - playbook: playbooks/ubuntu_nightly.yml
     class: SEMI-SAFE
