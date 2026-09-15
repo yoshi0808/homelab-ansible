@@ -1,0 +1,31 @@
+---
+# Read only the schedule collection before any template writes. The later
+# schedule reconciliation still resolves template names against the fresh
+# template collection fetched after template apply (R10).
+- name: GET schedules before either resource type can be written
+  ansible.builtin.uri:
+    url: "{{ semaphore_templates_api_base_url }}/project/{{ semaphore_templates_project_id }}/schedules"
+    method: GET
+    headers:
+      Authorization: "Bearer {{ semaphore_templates_token }}"
+    status_code: [200]
+    validate_certs: "{{ semaphore_templates_api_validate_certs }}"
+  register: _semaphore_schedules_api_list_early
+  no_log: true
+  check_mode: false
+
+- name: Reject a malformed early schedules response
+  ansible.builtin.assert:
+    that:
+      - _semaphore_schedules_api_list_early.json is defined
+      - _semaphore_schedules_api_list_early.json is sequence
+      - _semaphore_schedules_api_list_early.json is not string
+      - _semaphore_schedules_api_list_early.json is not mapping
+    fail_msg: >-
+      GET schedules の早期応答がJSON配列ではありません。両資源への書き込み前に停止します。
+    quiet: true
+
+- name: Keep the validated schedule collection for later reconciliation
+  ansible.builtin.set_fact:
+    semaphore_schedules_observed: "{{ _semaphore_schedules_api_list_early.json }}"
+    semaphore_schedules_preflight_ids: "{{ _semaphore_schedules_api_list_early.json | map(attribute='id') | list }}"

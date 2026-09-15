@@ -386,6 +386,25 @@ def scenario_f(scratch):
         os.chmod(unwritable_tmp_parent, stat.S_IRWXU)  # restore so cleanup can remove it
 
 
+def scenario_g(scratch):
+    """Prove schedule read-set failure occurs before a real local template-write marker."""
+    report_dir = os.path.join(scratch, "reports_g")
+    os.makedirs(report_dir, exist_ok=True)
+    marker = os.path.join(report_dir, "template-write-marker")
+    rc, output = run_playbook(
+        report_dir,
+        extra_args=["-e", '{"fixture_early_schedule_preflight_fail": true, "fixture_track_template_write": true}'],
+    )
+    problems = []
+    if rc == 0:
+        problems.append("scenario G: expected non-zero rc for schedule preflight failure")
+    if "schedule read-set preflight failed before writes" not in output:
+        problems.append("scenario G: schedule preflight failure was not observed")
+    if os.path.exists(marker):
+        problems.append("scenario G: template write marker exists despite schedule preflight failure")
+    return problems
+
+
 def main():
     scratch = tempfile.mkdtemp(prefix="semaphore_templates_task_flow_")
     try:
@@ -396,6 +415,7 @@ def main():
         problems += scenario_d(scratch)
         problems += scenario_e(scratch)
         problems += scenario_f(scratch)
+        problems += scenario_g(scratch)
 
         if problems:
             print("FAILED:")
@@ -403,12 +423,12 @@ def main():
                 print(" -", p)
             return 1
         print(
-            "OK: all six scenarios passed (no post-rescue sentinel leak; report-save failure did "
+            "OK: all seven scenarios passed (no post-rescue sentinel leak; report-save failure did "
             "not replace the original failure; native-false extra-var override did not suppress "
             "the re-raise; UNREACHABLE report-save did not erase the original failure; the "
             "reserved-name guard rejects pre-defined internal-state names before they can be "
             "exploited; and the guard's own judgment cannot be neutralized via its former "
-            "helper-variable names either)"
+            "helper-variable names either; and schedule preflight failure issued no template write)"
         )
         return 0
     finally:

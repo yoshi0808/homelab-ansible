@@ -40,11 +40,32 @@
     - name: Resolve project_id / inventory_id / repository_id by name (R12)
       ansible.builtin.import_tasks: resolve.yml
 
+    # This guard must run before schedules_read_list.yml registers or sets any
+    # semaphore_schedules_* internal state. Its reserved-name allowlist stays
+    # unchanged, so externally supplied internal names are still rejected.
+    - name: Validate schedule configuration before any schedule internal state is initialized
+      ansible.builtin.import_tasks: schedules_validate_config.yml
+
     - name: Read the current templates from the Semaphore API (read-only — OQ1)
       ansible.builtin.import_tasks: read.yml
 
+    - name: Read schedules and preflight both read-sets before any writes
+      ansible.builtin.import_tasks: schedules_read_list.yml
+
+    - name: Validate all pre-write read-sets and the combined create cap
+      ansible.builtin.import_tasks: readset_preflight.yml
+
     - name: Compute the diff between the catalog and the observed state (R3/R11)
       ansible.builtin.import_tasks: reconcile.yml
+
+    - name: Recheck the template create cap against the computed diff
+      ansible.builtin.assert:
+        that:
+          - semaphore_templates_diff.new | length <= semaphore_reconcile_max_creates | int
+        fail_msg: >-
+          template新規作成 {{ semaphore_templates_diff.new | length }} 件が
+          上限 {{ semaphore_reconcile_max_creates }} 件を超えました。両資源の書き込み前に停止します。
+        quiet: true
 
     - name: Report the diff (always runs, even under --check — R6/AC2)
       ansible.builtin.import_tasks: report.yml
@@ -120,9 +141,6 @@
     # `fail`する — 元の失敗が後発の失敗に上書きされない。
     - name: Read, preflight, diff, and (optionally) apply schedules — capture (not swallow) any failure
       block:
-        - name: Validate semaphore_schedules_closed_world is an unambiguous boolean (R17)
-          ansible.builtin.import_tasks: schedules_validate_config.yml
-
         - name: Read the current Semaphore schedules and a fresh template list (R10, read-only)
           ansible.builtin.import_tasks: schedules_read.yml
 

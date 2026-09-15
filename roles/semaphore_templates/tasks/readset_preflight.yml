@@ -1,0 +1,24 @@
+---
+# All checks here run before template apply. Template-name resolution is not
+# included: schedules_read.yml performs it later against the post-apply list.
+- name: Validate both pre-write read-sets and compute bounded create count
+  ansible.builtin.set_fact:
+    semaphore_reconcile_early_preflight_errors: >-
+      {{ semaphore_templates_catalog | semaphore_templates_preflight(
+           semaphore_templates_observed, semaphore_reconcile_max_creates | int)
+         + semaphore_schedules_catalog | semaphore_schedules_readset_preflight(
+           semaphore_schedules_observed, semaphore_reconcile_max_creates | int) }}
+    semaphore_reconcile_early_create_count: >-
+      {{ semaphore_templates_catalog | semaphore_templates_create_count(semaphore_templates_observed)
+         + semaphore_schedules_catalog | semaphore_schedules_create_count(semaphore_schedules_observed) }}
+
+- name: Fail before either resource type is written if any early preflight fails
+  ansible.builtin.assert:
+    that:
+      - semaphore_reconcile_early_preflight_errors | length == 0
+      - semaphore_reconcile_early_create_count <= semaphore_reconcile_max_creates | int
+    fail_msg: >-
+      Semaphore pre-write read-set preflight failed; no template or schedule writes were issued.
+      {{ semaphore_reconcile_early_preflight_errors | join(' / ') }}
+      作成予定={{ semaphore_reconcile_early_create_count }}、上限={{ semaphore_reconcile_max_creates }}。
+    quiet: true

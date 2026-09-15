@@ -102,6 +102,8 @@
                    'fixture_report_dir',
                    'fixture_bad_remote_tmp',
                    'fixture_should_fail',
+                   'fixture_early_schedule_preflight_fail',
+                   'fixture_track_template_write',
                  ])
                | list | sort
              ) | join(', ') }}
@@ -113,9 +115,34 @@
               'fixture_report_dir',
               'fixture_bad_remote_tmp',
               'fixture_should_fail',
+              'fixture_early_schedule_preflight_fail',
+              'fixture_track_template_write',
             ])
           | list | length
         ) > 0
+
+    # Internal read results are created only after the guard has rejected
+    # any externally supplied reserved names. The guard must not be rerun
+    # after these legitimate internal values exist.
+    - name: Simulate internally registered schedule read-set state
+      ansible.builtin.set_fact:
+        fixture_schedule_readset_loaded: true
+
+    # Mirrors the production ordering: the schedule collection's structural
+    # preflight must pass before the simulated template write can run.
+    - name: Simulate schedule read-set preflight failure when requested
+      ansible.builtin.assert:
+        that:
+          - not (fixture_early_schedule_preflight_fail | default(false) | bool)
+        fail_msg: "schedule read-set preflight failed before writes"
+        quiet: true
+
+    - name: Simulate the first template write after all early preflights pass
+      ansible.builtin.copy:
+        content: "template-write-issued\n"
+        dest: "{{ fixture_report_dir }}/template-write-marker"
+        mode: "0600"
+      when: fixture_track_template_write | default(false) | bool
 
     - name: Simulate the schedule block (fails unless fixture_should_fail is explicitly false)
       block:

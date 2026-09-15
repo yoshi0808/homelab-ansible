@@ -1114,3 +1114,7 @@ semaphore_schedules_report_dir: >-
     'quory': reports_base_dir ~ '/semaphore-schedules',
     'ansy': '/home/ann/homelab-reports/semaphore-schedules',
   }[semaphore_target | default('quory')] }}
+
+# Automatic reconcile is intentionally capped; a human may explicitly raise
+# this value for a reviewed bulk addition with -e.
+semaphore_reconcile_max_creates: 2

@@ -11,6 +11,8 @@
 
 ## Now(進行中)
 
+**Semaphore reconcile Phase 1: 実装完了・quoryでの初回checkが観測待ち**。異常なread-setで書かずに止まるpreflightと、フィールド別の正規化を入れた(計画査読→実装→差分レビュー→テスト、差し戻し4回)。差分Reviewer=Approve、Tester=AC1〜AC8/AC1a/AC5aすべてPASS(ansyのSemaphoreで実書き込み・冪等性・SIGKILL中断後の再実行まで実測)。**quoryでは一度も走らせていない** — orphan `id=37` が実在するため、次の`semaphore_templates_setup`のcheck実行でAC1aが本番でも成立することを確かめる。**Phase 2(日次apply・`active`の分離・金曜の停止一覧・通知・生存確認)は未着手で、requirementを再度計画査読へ回してから着手する。** 案件正本は`docs/ai/reviews/semaphore_reconcile_daily_sync/`。
+
 **templateドリフトのループ: 修正済み・次の適用と翌日の検査が観測待ち**。日次ドリフト検査が2026-09-14/15と2日連続で`semaphore_template` 2件(id=59 Proxmox storage monthly / id=60 Quory health monthly)を報告した。**原因はSemaphore APIがsurvey varのfalsyフィールド(`required: false` / `default_value: ""`)を保存しないことで、カタログが明示していたため実物と永久に一致しなかった。** カタログから2キーを削除済み。**観測待ちは①`semaphore_templates_setup`のcheckでid=59/60が`~`として挙がらないこと ②翌日の日次検査で`semaphore_template`の2件が出ないこと。** 記録は`docs/ai/memory/incidents/2026-09-15_semaphore-template-drift-loop-falsy-survey-fields.md`。
 
 **ストレージ月次点検レポートの可読性改善: 本番表示確認済み・closeout待ち**。日本語の結論、重大度順の対応事項、ラベル付きZFS/NVMe値、簡潔なSlack短報へ変更。独立Reviewer=Approve、Tester=PASS。Semaphore #1062でcollectが成功し、Yoshinobuが改善後の内容を確認した。案件正本は `docs/ai/reviews/proxmox_storage_report_readability/2026-09-12_001_requirement.md`。

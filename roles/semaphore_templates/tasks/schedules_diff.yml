@@ -56,6 +56,16 @@
            semaphore_schedules_detail_by_id,
            semaphore_schedules_preflight_result.template_ids) }}
 
+- name: Stop if automatic schedule creates exceed the configured safety cap
+  ansible.builtin.assert:
+    that:
+      - (semaphore_schedules_diff_result.new | length) <= (semaphore_reconcile_max_creates | int)
+    fail_msg: >-
+      schedule新規作成 {{ semaphore_schedules_diff_result.new | length }} 件が
+      自動実行上限 {{ semaphore_reconcile_max_creates }} 件を超えました。
+      人が明示的に semaphore_reconcile_max_creates を指定して再実行してください。
+    quiet: true
+
 # Apply-outcome accumulators: stay empty under --check (schedules_apply.yml
 # is `when: not ansible_check_mode` and never runs), populated under a
 # real apply. Set here (unconditionally) so schedules_report.yml can

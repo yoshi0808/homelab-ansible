@@ -124,14 +124,131 @@ def _parse_marker(description):
     return playbook, (variant or None)
 
 
+def semaphore_templates_preflight(catalog, observed, max_creates):
+    """Validate the complete template read-set and bound its create set."""
+    errors = []
+    if catalog and not observed:
+        errors.append("template一覧が空だがカタログは非空")
+    identities = set()
+    for index, row in enumerate(observed):
+        label = row.get('name') if isinstance(row, dict) else None
+        prefix = "template {!r} (API行{})".format(label, index + 1)
+        if not isinstance(row, dict):
+            errors.append("{}: row がmappingでない".format(prefix))
+            continue
+        if isinstance(row.get('id'), bool) or not isinstance(row.get('id'), int):
+            errors.append("{}: id が整数でない".format(prefix))
+        description = row.get('description')
+        if description is not None and not isinstance(description, str):
+            errors.append("{}: description の型が不正".format(prefix))
+        elif isinstance(description, str) and description.startswith(_MARKER_PREFIX):
+            marker = _parse_marker(description)
+            if marker is None:
+                errors.append("{}: description marker が不正".format(prefix))
+            else:
+                key = marker[0], marker[1] or '-'
+                if key in identities:
+                    errors.append("{}: identity {!r} が重複".format(prefix, key))
+                identities.add(key)
+        elif isinstance(row.get('name'), str):
+            # A markerless row that collides with a rendered catalog name is
+            # ambiguous: it may be an unmanaged duplicate or a managed row
+            # whose marker was lost in a partial response. Never create over it.
+            for entry in catalog:
+                if not isinstance(entry, dict) or not isinstance(entry.get('class'), str) or not isinstance(entry.get('playbook'), str):
+                    continue
+                if semaphore_templates_render_name(entry) == row['name'] and entry.get('legacy_name') != row['name']:
+                    errors.append("{}: markerless name collides with catalog target; lost marker/duplicate is ambiguous".format(prefix))
+                    break
+        for field, types in (('name', (str,)), ('playbook', (str,)),
+                             ('arguments', (str, list, bool, type(None))),
+                             ('survey_vars', (str, list, bool, type(None))),
+                             ('description', (str, type(None)) )):
+            if field in row and not isinstance(row[field], types):
+                errors.append("{}: {} の型が不正".format(prefix, field))
+        for field in ('arguments', 'survey_vars'):
+            if row.get(field) is True:
+                errors.append("{}: {} の true は正規化表で未定義".format(prefix, field))
+    creates = semaphore_templates_create_count(catalog, observed)
+    if creates > max_creates:
+        errors.append("template新規作成 {} 件が上限 {} 件を超過".format(creates, max_creates))
+    return errors
+
+
+def semaphore_templates_create_count(catalog, observed):
+    creates = 0
+    for entry in catalog:
+        if not isinstance(entry, dict):
+            continue
+        marker_match = any(_parse_marker(r.get('description')) ==
+                           (entry.get('playbook'), entry.get('variant') or None)
+                           for r in observed if isinstance(r, dict))
+        legacy_match = bool(entry.get('legacy_name')) and any(
+            isinstance(r, dict) and r.get('name') == entry.get('legacy_name')
+            and _parse_marker(r.get('description')) is None for r in observed)
+        if not marker_match and not legacy_match:
+            creates += 1
+    return creates
+
+
+def _json_or_native(value, path, label, allowed_native):
+    if isinstance(value, str):
+        import json
+        try:
+            value = json.loads(value) if value else []
+        except (ValueError, TypeError) as exc:
+            raise ValueError("{} {}: JSON不正 ({})".format(label, path, exc))
+    if not isinstance(value, allowed_native):
+        raise ValueError("{} {}: 型が不正 ({})".format(label, path, type(value).__name__))
+    return value
+
+
 def _target_fields(entry):
+    label = semaphore_templates_render_name(entry)
+    arguments = entry.get('arguments', [])
+    survey = entry.get('survey_vars', [])
+    if arguments is None or arguments is False:
+        arguments = []
+    if survey is None or survey is False:
+        survey = []
+    if not isinstance(arguments, list) or not isinstance(survey, list):
+        raise ValueError("{} arguments / survey_vars: 型が不正".format(label))
     return {
-        'name': semaphore_templates_render_name(entry),
+        'name': label,
         'playbook': entry['playbook'],
-        'arguments': entry.get('arguments') or [],
-        'survey_vars': entry.get('survey_vars') or [],
+        'arguments': arguments,
+        'survey_vars': _normalize_survey(survey, label),
         'description': semaphore_templates_build_marker(entry['playbook'], entry.get('variant')),
     }
+
+
+def _normalize_survey(value, label):
+    if not isinstance(value, list):
+        raise ValueError("{} survey_vars: listでない".format(label))
+    out = []
+    for i, item in enumerate(value):
+        path = "survey_vars[{}]".format(i)
+        if not isinstance(item, dict):
+            raise ValueError("{} {}: mappingでない".format(label, path))
+        normalized = dict(item)
+        for field in ('name', 'title', 'type', 'description'):
+            if field in normalized and not isinstance(normalized[field], str):
+                raise ValueError("{} {}.{}: stringでない".format(label, path, field))
+        if 'values' in normalized:
+            if not isinstance(normalized['values'], list) or any(not isinstance(v, dict) for v in normalized['values']):
+                raise ValueError("{} {}.values: mappingのlistでない".format(label, path))
+        if 'required' in normalized:
+            if not isinstance(normalized['required'], bool):
+                raise ValueError("{} {}.required: boolでない".format(label, path))
+            if normalized['required'] is False:
+                normalized.pop('required')
+        if 'default_value' in normalized:
+            if not isinstance(normalized['default_value'], str):
+                raise ValueError("{} {}.default_value: stringでない".format(label, path))
+            if normalized['default_value'] == '':
+                normalized.pop('default_value')
+        out.append(normalized)
+    return out
 
 
 def _observed_fields(observed_row):
@@ -143,9 +260,13 @@ def _observed_fields(observed_row):
     return {
         'name': observed_row.get('name'),
         'playbook': observed_row.get('playbook'),
-        'arguments': observed_row.get('arguments') or [],
-        'survey_vars': observed_row.get('survey_vars') or [],
-        'description': observed_row.get('description') or '',
+        'arguments': ([] if observed_row.get('arguments') is False or observed_row.get('arguments') is None
+                      else _json_or_native(observed_row.get('arguments', []), 'arguments', observed_row.get('name'), (list,))),
+        'survey_vars': _normalize_survey(
+            [] if observed_row.get('survey_vars') is False or observed_row.get('survey_vars') is None
+            else _json_or_native(observed_row.get('survey_vars', []), 'survey_vars', observed_row.get('name'), (list,)),
+            observed_row.get('name')),
+        'description': observed_row.get('description', ''),
     }
 
 
@@ -274,4 +395,6 @@ class FilterModule(object):
             'semaphore_templates_reconcile': semaphore_templates_reconcile,
             'semaphore_templates_build_marker': semaphore_templates_build_marker,
             'semaphore_templates_button_names': semaphore_templates_button_names,
+            'semaphore_templates_preflight': semaphore_templates_preflight,
+            'semaphore_templates_create_count': semaphore_templates_create_count,
         }

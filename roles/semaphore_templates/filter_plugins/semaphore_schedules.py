@@ -442,6 +442,37 @@ def semaphore_schedules_preflight(catalog, observed_schedules, observed_template
     """
     errors = []
 
+    if catalog and not observed_schedules:
+        errors.append("schedule一覧が空だがカタログは非空")
+    seen_schedule_ids = set()
+    for idx, row in enumerate(observed_schedules):
+        label = row.get('name') if isinstance(row, dict) else None
+        if not isinstance(row, dict):
+            errors.append("API schedule行{}: row がmappingでない".format(idx + 1))
+            continue
+        sid = row.get('id')
+        if isinstance(sid, bool) or not isinstance(sid, int):
+            errors.append("schedule {!r}: id が整数でない".format(label))
+        elif sid in seen_schedule_ids:
+            errors.append("schedule {!r}: id {} が重複".format(label, sid))
+        seen_schedule_ids.add(sid)
+        if not isinstance(label, str) or not label:
+            errors.append("API schedule行{}: name が文字列でない".format(idx + 1))
+    seen_template_ids = set()
+    for idx, row in enumerate(observed_templates):
+        label = row.get('name') if isinstance(row, dict) else None
+        if not isinstance(row, dict):
+            errors.append("API template行{}: row がmappingでない".format(idx + 1))
+            continue
+        tid = row.get('id')
+        if isinstance(tid, bool) or not isinstance(tid, int):
+            errors.append("template {!r}: id が整数でない".format(label))
+        elif tid in seen_template_ids:
+            errors.append("template {!r}: id {} が重複".format(label, tid))
+        seen_template_ids.add(tid)
+        if not isinstance(label, str) or not label:
+            errors.append("API template行{}: name が文字列でない".format(idx + 1))
+
     # ⑤ 型と必須項目 -- catalog only (observed_* are trusted API responses).
     for idx, entry in enumerate(catalog):
         label = _catalog_entry_label(entry, idx)
@@ -553,6 +584,73 @@ def semaphore_schedules_preflight(catalog, observed_schedules, observed_template
     }
 
 
+def semaphore_schedules_readset_preflight(catalog, observed_schedules, max_creates):
+    """Validate only the schedule list response, before template writes.
+
+    Template resolution is deliberately excluded: R10 resolves against a
+    fresh template list after template apply. This early gate validates the
+    schedule API read-set identity/schema and bounds name-based creates.
+    """
+    errors = []
+    catalog_names = []
+    for idx, entry in enumerate(catalog):
+        if not isinstance(entry, dict):
+            errors.append("カタログschedule{}: mappingでない".format(idx + 1))
+            continue
+        name = entry.get('name')
+        if not isinstance(name, str) or not name:
+            errors.append("カタログschedule{}: name が空/非文字列".format(idx + 1))
+        else:
+            catalog_names.append(name)
+        for field, expected in (('template', str), ('cron', str), ('active', bool), ('task_params', dict)):
+            if field not in entry or not isinstance(entry.get(field), expected):
+                errors.append("schedule {!r}: catalog {} が欠落または型不正".format(name, field))
+        if isinstance(entry.get('cron'), str) and not _cron_is_valid(entry['cron']):
+            errors.append("schedule {!r}: catalog cron が不正".format(name))
+        if isinstance(entry.get('task_params'), dict):
+            for problem in _task_params_public_problems(entry['task_params']):
+                errors.append("schedule {!r}: task_params {}".format(name, problem))
+    if len(catalog_names) != len(set(catalog_names)):
+        errors.append("カタログschedule name が重複")
+    if catalog and not observed_schedules:
+        errors.append("schedule一覧が空だがカタログは非空")
+    seen_ids = set()
+    seen_names = set()
+    for idx, row in enumerate(observed_schedules):
+        if not isinstance(row, dict):
+            errors.append("API schedule行{}: row がmappingでない".format(idx + 1))
+            continue
+        name = row.get('name')
+        label = "schedule {!r}".format(name)
+        sid = row.get('id')
+        if isinstance(sid, bool) or not isinstance(sid, int):
+            errors.append("{}: id が整数でない".format(label))
+        elif sid in seen_ids:
+            errors.append("{}: id {} が重複".format(label, sid))
+        seen_ids.add(sid)
+        if not isinstance(name, str) or not name:
+            errors.append("API schedule行{}: name が空/非文字列".format(idx + 1))
+        elif name in seen_names:
+            errors.append("{}: name が重複".format(label))
+        seen_names.add(name)
+        for field, expected in (('active', bool), ('cron_format', str)):
+            if field not in row or not isinstance(row.get(field), expected):
+                errors.append("{}: {} が欠落または型不正".format(label, field))
+        tid = row.get('template_id')
+        if isinstance(tid, bool) or not isinstance(tid, int):
+            errors.append("{}: template_id が整数でない".format(label))
+    creates = semaphore_schedules_create_count(catalog, observed_schedules)
+    if creates > max_creates:
+        errors.append("schedule新規作成 {} 件が上限 {} 件を超過".format(creates, max_creates))
+    return errors
+
+
+def semaphore_schedules_create_count(catalog, observed_schedules):
+    known_names = {r.get('name') for r in observed_schedules if isinstance(r, dict)}
+    return sum(1 for item in catalog if isinstance(item, dict)
+               and isinstance(item.get('name'), str) and item.get('name') not in known_names)
+
+
 def semaphore_schedules_desired(entry, template_id):
     """R8-2: the effective desired state for the 5 managed fields.
 
@@ -610,7 +708,9 @@ def semaphore_schedules_diff(catalog, observed_by_name, detail_by_id, template_i
             continue
 
         sched_id = observed_row.get('id')
-        detail = detail_by_id.get(sched_id) or {}
+        detail = detail_by_id.get(sched_id)
+        if not isinstance(detail, dict):
+            raise ValueError("schedule {!r} detail: mappingでない".format(name))
         desired = semaphore_schedules_desired(entry, template_id)
         before = _management_fields_from_raw(detail)
         changed_fields = [
@@ -820,6 +920,8 @@ class FilterModule(object):
     def filters(self):
         return {
             'semaphore_schedules_preflight': semaphore_schedules_preflight,
+            'semaphore_schedules_readset_preflight': semaphore_schedules_readset_preflight,
+            'semaphore_schedules_create_count': semaphore_schedules_create_count,
             'semaphore_schedules_diff': semaphore_schedules_diff,
             'semaphore_schedules_desired': semaphore_schedules_desired,
             'semaphore_schedules_payload': semaphore_schedules_payload,

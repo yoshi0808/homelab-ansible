@@ -11,36 +11,6 @@
 # check_mode: falseが要る(skills/ansible-implementation-style/SKILL.md
 # 「check_modeの実装上の落とし穴」1)。
 
-- name: GET the current Semaphore schedules for the resolved project
-  ansible.builtin.uri:
-    url: "{{ semaphore_templates_api_base_url }}/project/{{ semaphore_templates_project_id }}/schedules"
-    method: GET
-    headers:
-      Authorization: "Bearer {{ semaphore_templates_token }}"
-    status_code: [200]
-    validate_certs: "{{ semaphore_templates_api_validate_certs }}"
-  register: _semaphore_schedules_api_list
-  no_log: true
-  check_mode: false
-
-- name: Fail closed if the schedules response does not look like a list
-  ansible.builtin.assert:
-    that:
-      - _semaphore_schedules_api_list.json is defined
-      - _semaphore_schedules_api_list.json is sequence
-      - _semaphore_schedules_api_list.json is not string
-      - _semaphore_schedules_api_list.json is not mapping
-    fail_msg: >-
-      GET {{ semaphore_templates_api_base_url }}/project/{{ semaphore_templates_project_id }}/schedules
-      の応答がscheduleのJSON配列として読めません。推測して書き込みへ進まず、
-      ここで停止します。
-    quiet: true
-
-- name: Set the observed schedules fact and snapshot their ids (R16 preflight-time snapshot)
-  ansible.builtin.set_fact:
-    semaphore_schedules_observed: "{{ _semaphore_schedules_api_list.json }}"
-    semaphore_schedules_preflight_ids: "{{ _semaphore_schedules_api_list.json | map(attribute='id') | list }}"
-
 # R10: fresh GET of templates, taken *after* the template-side apply.yml has
 # already run (or been skipped under --check). This is intentionally a
 # second GET distinct from read.yml's semaphore_templates_observed (which

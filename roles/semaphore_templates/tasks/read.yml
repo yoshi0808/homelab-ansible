@@ -57,17 +57,4 @@
 
 - name: Normalize the observed templates (id / name / playbook / arguments / survey_vars / description)
   ansible.builtin.set_fact:
-    semaphore_templates_observed: >-
-      {%- set out = [] -%}
-      {%- for t in _semaphore_templates_api_list.json -%}
-        {%- set raw_args = t.arguments | default([]) -%}
-        {%- set args = (raw_args | from_json) if (raw_args is string and (raw_args | length) > 0)
-                        else ([] if raw_args is string else raw_args) -%}
-        {%- set raw_survey = t.survey_vars | default([]) -%}
-        {%- set survey = (raw_survey | from_json) if (raw_survey is string and (raw_survey | length) > 0)
-                          else ([] if raw_survey is string else raw_survey) -%}
-        {%- set _ = out.append({'id': t.id, 'name': t.name, 'playbook': t.playbook,
-                                'arguments': args, 'survey_vars': survey,
-                                'description': t.description | default('', true)}) -%}
-      {%- endfor -%}
-      {{ out }}
+    semaphore_templates_observed: "{{ _semaphore_templates_api_list.json }}"
