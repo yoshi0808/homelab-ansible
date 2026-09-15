@@ -30,9 +30,15 @@
 - **lost-marker 判定は `name` だけを見る。** `name` も壊れた応答は捕まらない(他に手がかりが無いための限界)。また、**カタログの命名規則にたまたま一致する手作りtemplate**を置くと恒久的に止まる — うるさく止まる方向なので実害は小さい。
 - 検査ロジックが `semaphore_templates_preflight` / `semaphore_schedules_preflight` / `readset_preflight` の3箇所に分散している(レビュー Suggestion 1)。**直さない判断** — 今回の差し戻し4回はいずれもこの分散が原因ではなく、統合すると変更範囲が広がる。
 
-## 本番での未確認
+## 本番での確認(2026-09-15、ジョブ #1115)
 
-**quoryでは一度も走らせていない。** ansyのSemaphoreでの実測(実書き込み・冪等性・中断後の再実行を含む)までが今回の範囲である。**quoryには orphan `id=37` が実在するため、AC1aが本番でも成立することは、次の `semaphore_templates_setup` の check 実行で確かめる。**
+**quoryのcheck実行で成立を確認した。** 懸念していた「orphan `id=37` により本番で恒久的に fail-closed になる」は起きていない。
+
+- `Fail before either resource type is written if any early preflight fails` は **ok**(停止せず通過)
+- `id=37` は従来どおり「定義に無い既存 1件(削除しない — R5)」として報告のみ
+- template 新規0 / 変更0 / **無変更57**、schedule 新規0 / 更新0 / **無変更24**、recap `failed=0`
+
+ansyでの実測(実書き込み・冪等性・SIGKILL中断後の再実行)と合わせ、Phase 1 は本番でも成立している。**applyは未実行**だが、checkが書き込み経路の手前まで通ることは確認できた。
 
 ## Phase 2
 
