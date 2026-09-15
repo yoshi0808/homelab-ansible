@@ -11,7 +11,7 @@
 
 ## Now(進行中)
 
-**agmsgのメッセージがCodexへ届かない事象: 原因未特定・次セッションで調査**。2026-09-15に5回発生(Implementer 3 / Reviewer 2)。メッセージは既読になるのにペインが反応しない。**`wakeup N` の増加だけが取り込みの証拠で、`started turn`(bridgeログが書くCodexスレッドの応答1回。配送モードの`turn`とは無関係)は前の応答の行が残るため判定に使えない。** 回避策(ペインへ`history.sh`を読ませる)は5回とも成立。**未測定の候補はCoordinator自身の`watch.sh`との既読の取り合い。** 記録は`docs/ai/memory/incidents/2026-09-15_agmsg-message-consumed-but-not-delivered-to-codex.md`。調査はansy上で完結し、実ホストにも本番にも触らない。
+**agmsgのメッセージがCodexへ届かない事象: 原因特定・恒久対処は未実施**。原因は**Coordinator自身の`watch.sh`がCodexの役宛のメッセージを先に既読にしていた**ことである。rosterで`homelab/implementer`と`homelab/reviewer`がclaude-codeにも登録されており、`actas`の排他ロックが1つも無かったため、active nameなしで起動したwatcherが全17ペアを購読していた。既読カーソルは(team, agent)に1つしかなく、先に取った側が行を持ち去る。**Coordinatorのwatcherを`actas coordinator`で起動する形にして止めた**が、**SessionStartのhookが渡すコマンドはactive nameを持たないため、セッションごとに取り直しが要る**。恒久対処(rosterから不要な登録を落とす)は未実施で、`leave.sh`は登録単位で落とせない。実測4条件の表と反対方向の危険は`docs/ai/memory/incidents/2026-09-15_agmsg-message-consumed-but-not-delivered-to-codex.md`。
 
 **Semaphore reconcile Phase 1: 完了(本番check確認済み)・Phase 2 は計画査読中**。異常なread-setで書かずに止まるpreflightと、フィールド別の正規化を入れた(計画査読→実装→差分レビュー→テスト、差し戻し4回)。差分Reviewer=Approve、Tester=AC1〜AC8/AC1a/AC5aすべてPASS(ansyのSemaphoreで実書き込み・冪等性・SIGKILL中断後の再実行まで実測)。**quoryの#1115(check)で本番でも成立を確認**(orphan `id=37` を正常に素通りし、template無変更57 / schedule無変更24 / failed=0)。**Phase 2 は計画査読を2回通し、requirementを改訂済み。着手前に残っているのは、Coordinatorが決める7点だけである** — ①更新上限の実効値 ②run report / latest-success / 通知evidenceの失敗時の状態表 ③鮮度閾値(04:00と00:40の位相差に合わせる) ④ドリフト検査から外す/残すprobe識別子の名指し ⑤04:00 scheduleの5フィールド ⑥orphan baselineのkey定義と重複時の扱い ⑦`active`契約変更に伴うSystem Contextの整合。**査読で妥当と認められた判断が2つある** — 更新上限は「人の書き間違い」ではなく「機械が壊れてwrite-setが人の手の大きさを超える場合」を守るもので、1件の誤りはcommitのレビューだけが防ぐ(残存リスクとして明記済み)。生存監視はreconcileのschedule単独故障だけを検出し、Semaphore/quory全体の停止は対象外(既存の日次ジョブすべてに等しくかかる既存条件)。 案件正本は`docs/ai/reviews/semaphore_reconcile_daily_sync/`。
 
@@ -21,7 +21,7 @@
 
 **Role配分の入れ替え: pane 0 / pane 1は実起動を確認済み・計画Reviewer / Auditorの起動が未観測**。Coordinator=Claude Code(pane 0)、Implementer=Codex(pane 1常駐)、計画Reviewer=Codex(案件ごとfresh)、差分Reviewer / Tester=Claude Code subagent、Auditor=Codex(クローズ時1回)。ADR-013の3案件実験は1件も観測しないまま終了した。`.claude/agents/` からImplementerとAuditorの定義を削除し、Claude Codeでこの2役を起こせない状態にした。2026-09-14の`./new-session.sh --reset`で、pane構成・Codex Implementerのspawnと`--model gpt-5.6-luna`・Coordinator↔Implementerのagmsg疎通を観測した。**未観測は計画ReviewerとAuditorのfresh起動**。判断は `docs/ai/adr/015-claude-coordinator-codex-implementer-allocation.md`、起動要件は `docs/ai/context/operations/agent-messaging.md` §10。
 
-**agmsgの`coordinator` identityはteam `homelab-ops`でcodexとclaude-codeの両方に登録されたままである**。ADR-013期の登録で、registration単位の削除手段が無く、`leave.sh`はagent丸ごとの退会イベントをquoryへ同期されるrosterへ書く。quory側rosterを開発側から観測する手段が無いため作り直していない。常駐Codexは`actas implementer`排他、計画Reviewer / Auditorも別identityのため、いまcoordinatorを名乗る主体は無い。team `homelab`側は2026-09-14にclaude-code単独へ寄せた。
+**agmsgの`coordinator` identityはteam `homelab-ops`でcodexとclaude-codeの両方に登録されたままで、codexのbridgeが生きてarmされている**。Operatorの返信(OPRES)はこのペアへ届くため、**Codexのスレッドが先に取る経路が実在する**(`wakeup`は0で、発火した証拠はない)。従来ここに書いていた「いまcoordinatorを名乗る主体は無い」は誤りだった。registration単位の削除手段が無く、`leave.sh`はagent丸ごとの退会イベントをquoryへ同期されるrosterへ書く。quory側rosterを開発側から観測する手段が無いため作り直していない。team `homelab`の`coordinator`は2026-09-14にclaude-code単独へ寄せたが、`homelab/implementer`と`homelab/reviewer`は両方に登録されたままである。
 
 **Proxmoxストレージ月次点検: 次回定期実行の観測待ち**。配備案件はクローズ。次回の自然実行・比較結果を確認する。Survey任意欄の反復差分有無と省トークン効果は未評価。根拠・残存事項は `docs/ai/reviews/proxmox_storage_monthly/2026-09-11_014_closeout.md`。
 
