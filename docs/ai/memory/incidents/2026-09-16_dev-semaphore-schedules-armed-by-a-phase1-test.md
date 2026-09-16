@@ -70,8 +70,10 @@ email_alert = True
 
 **この日の受入検証は、Semaphoreのタスクとして走らせず `ansible-playbook` をansy上で直接起動する形で行った** — 上限超過や書き込み拒否を意図的に起こす検証だったため。タスクが作られないので組み込みアラートも発生しない(検証前後で `GET /project/3/tasks` の max id が 28 のまま変わらないことを確認済み)。**これは回避策であって、修正ではない。**
 
-## 残っている弱点
+**組み込みアラートは停止した(2026-09-16 10:21 JST、Yoshinobuが実行)。** `/etc/semaphore/config.json` の `slack_alert` を `false` にして semaphore を再起動した(backup: 同ディレクトリの `config.json.bak-20260916`)。**`slack_url` は残してあるので、戻すときは値を `true` にするだけである。** 確認は設定の再読み込みと `systemctl is-active` / API HTTP 200。
 
-- **ansyのSemaphoreの組み込みSlackアラートは有効なままである。** 止めるには `/etc/semaphore/config.json` の `slack_alert` を `false` にしてsemaphoreを再起動する。**未実施。**
+**`email_alert` は `true` のまま残した** — 送信元とSMTPホストの設定は入っているが、**この環境ではメールは動かない**(Yoshinobu、2026-09-16)。
+
+## 残っている弱点
 - **Slackの通知は、どのSemaphoreインスタンスが出したのかを本文に持たない。** 今回はexecution番号の桁で見分けた。**本番と開発が同じチャンネルへ出せる状態は続いている。**
 - **ansyのSemaphoreが「静かである」ことを継続的に確かめる手段は無い。** 今回の停止は状態であって機構ではなく、次にテストが書けば同じ状態へ戻りうる(P0-15が入るまで)。
