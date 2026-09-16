@@ -45,7 +45,7 @@ Yoshinobuとの対話窓口として要求と判断材料を整え、自ら実�
 
 | Role / 工程 | 現在のCLI | 起動時指定 | 既定段 |
 |---|---|---|---|
-| Implementer | Codex（agmsg） | `gpt-5.6-luna` | medium |
+| Implementer | Codex（agmsg） | `gpt-5.6-terra` | medium |
 | 計画Reviewer | Codex（agmsg） | `gpt-5.6-sol` | medium |
 | 差分Reviewer | Claude Code（subagent） | `sonnet` | medium |
 | Tester | Claude Code（subagent） | `sonnet` | medium |

@@ -39,6 +39,24 @@
   ignore_unreachable: true
   vars_files:
     - ../inventories/vars/slack.yml
+  pre_tasks:
+    - name: Load semaphore_templates defaults for the collection-play P0-13 probe
+      ansible.builtin.include_role:
+        name: semaphore_templates
+        tasks_from: noop
+        public: true
+        apply:
+          tags: [p0_13_scope_contract]
+      tags: [p0_13_scope_contract]
+
+    - name: Assert the reconcile marker path is available in the collection play
+      ansible.builtin.assert:
+        that:
+          - semaphore_templates_report_dir is defined
+          - semaphore_templates_report_dir | length > 0
+        fail_msg: "semaphore_templates_report_dir must be provided by the shared semaphore_templates role defaults"
+        quiet: true
+      tags: [p0_13_scope_contract]
   tasks:
     - name: Load the drift check catalog and expected values
       ansible.builtin.include_role:

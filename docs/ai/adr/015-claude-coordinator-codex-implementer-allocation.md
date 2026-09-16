@@ -28,7 +28,7 @@ Yoshinobuの承認(2026-09-14)により、次の配分とする。
 | Role / 工程 | CLI | 起動経路 | model | effort |
 |---|---|---|---|---|
 | Coordinator | Claude Code | 人が直接使うセッション、tmux pane 0 | 当該CLIの設定 | 最低段へ置かない |
-| Implementer | Codex | agmsg。tmux pane 1へ常駐し、セッションごとにfresh | `gpt-5.6-luna` | medium |
+| Implementer | Codex | agmsg。tmux pane 1へ常駐し、セッションごとにfresh | `gpt-5.6-terra` | medium |
 | 計画Reviewer | Codex | agmsg。案件ごとにfresh、Implementerとは別identity | `gpt-5.6-sol` | medium |
 | 差分Reviewer | Claude Code | native subagent。実装履歴を継承しないfresh context | `sonnet` | medium |
 | Tester | Claude Code | native subagent。Reviewerとは別のfresh context | `sonnet` | medium |

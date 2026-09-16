@@ -140,6 +140,7 @@ REPO_ROOT = os.path.abspath(os.path.join(HERE, "..", "..", "..", ".."))
 FIXTURE_PLAYBOOK = os.path.join(HERE, "fixture_pattern.yml")
 CANONICAL_GUARD_PLAYBOOK = os.path.join(HERE, "canonical_override_guard.yml")
 FINAL_UPDATE_CAP_PLAYBOOK = os.path.join(HERE, "final_update_cap.yml")
+DRIFT_CHECK_PLAYBOOK = os.path.join(REPO_ROOT, "playbooks", "deployment_drift_check.yml")
 
 
 def run_playbook(report_dir, extra_args=None):
@@ -174,6 +175,22 @@ def run_final_update_cap():
         ["ansible-playbook", FINAL_UPDATE_CAP_PLAYBOOK],
         cwd=REPO_ROOT,
         env=env,
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, timeout=60,
+    )
+    return proc.returncode, proc.stdout
+
+
+def run_drift_check_scope_contract():
+    proc = subprocess.run(
+        [
+            "ansible-playbook", DRIFT_CHECK_PLAYBOOK,
+            "-i", "localhost,",
+            "--limit", "localhost",
+            "--tags", "p0_13_scope_contract",
+            "-e", "deployment_drift_check_hosts=localhost",
+            "-e", "reports_base_dir=/tmp/deployment-drift-scope-test",
+        ],
+        cwd=REPO_ROOT,
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, timeout=60,
     )
     return proc.returncode, proc.stdout
@@ -461,6 +478,17 @@ def scenario_i():
     return problems
 
 
+def scenario_j():
+    """Run the actual drift-check playbook's first-play variable-scope contract locally."""
+    rc, output = run_drift_check_scope_contract()
+    problems = []
+    if rc != 0:
+        problems.append("scenario J: deployment_drift_check.yml P0-13 scope contract failed")
+    if "Assert the reconcile marker path is available in the collection play" not in output:
+        problems.append("scenario J: playbook did not execute its play-one report-dir assertion")
+    return problems
+
+
 def main():
     scratch = tempfile.mkdtemp(prefix="semaphore_templates_task_flow_")
     try:
@@ -474,6 +502,7 @@ def main():
         problems += scenario_g(scratch)
         problems += scenario_h()
         problems += scenario_i()
+        problems += scenario_j()
 
         if problems:
             print("FAILED:")
@@ -481,14 +510,15 @@ def main():
                 print(" -", p)
             return 1
         print(
-            "OK: all nine scenarios passed (no post-rescue sentinel leak; report-save failure did "
+            "OK: all ten scenarios passed (no post-rescue sentinel leak; report-save failure did "
             "not replace the original failure; native-false extra-var override did not suppress "
             "the re-raise; UNREACHABLE report-save did not erase the original failure; the "
             "reserved-name guard rejects pre-defined internal-state names before they can be "
             "exploited; and the guard's own judgment cannot be neutralized via its former "
             "helper-variable names either; schedule preflight failure issued no template write; "
             "the retired canonical URL extra-var is rejected while normal config passes; and a "
-            "five-update final diff is blocked after an at-cap pre-write plan)"
+            "five-update final diff is blocked after an at-cap pre-write plan; and the actual "
+            "deployment_drift_check.yml play-one scope assertion passed on isolated localhost)"
         )
         return 0
     finally:
