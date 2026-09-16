@@ -53,11 +53,12 @@ import unittest
 import _path_setup  # noqa: F401
 
 from semaphore_schedules import (
+    _is_canonical_api_base_url,
     semaphore_schedules_url_matches_canonical,
     semaphore_schedules_would_newly_activate,
 )
 
-_CANONICAL = 'https://quory.example.internal:3000/api'
+_CANONICAL = 'https://quory.internal:3000/api'
 
 
 class WouldNewlyActivateTests(unittest.TestCase):
@@ -162,43 +163,42 @@ class WouldNewlyActivateNonBoolFailsClosedTests(unittest.TestCase):
 
 
 class UrlMatchesCanonicalTests(unittest.TestCase):
+    def test_missing_connection_url_is_noncanonical(self):
+        self.assertFalse(_is_canonical_api_base_url(None))
+
     def test_exact_match(self):
-        self.assertTrue(semaphore_schedules_url_matches_canonical(_CANONICAL, _CANONICAL))
+        self.assertTrue(semaphore_schedules_url_matches_canonical(_CANONICAL))
 
     def test_trailing_slash_notation_difference_still_matches(self):
         self.assertTrue(
-            semaphore_schedules_url_matches_canonical(_CANONICAL + '/', _CANONICAL)
+            semaphore_schedules_url_matches_canonical(_CANONICAL + '/')
         )
 
     def test_scheme_and_host_case_difference_still_matches(self):
-        upper = 'HTTPS://Quory.Example.Internal:3000/api'
-        self.assertTrue(semaphore_schedules_url_matches_canonical(upper, _CANONICAL))
+        upper = 'HTTPS://Quory.Internal:3000/api'
+        self.assertTrue(semaphore_schedules_url_matches_canonical(upper))
 
     def test_alias_hostname_for_the_same_server_does_not_match(self):
         """旧R15と同じ判断: allowlist型であり、別名DNSは吸収しない。"""
-        alias = 'https://quory-alias.example.internal:3000/api'
-        self.assertFalse(semaphore_schedules_url_matches_canonical(alias, _CANONICAL))
+        alias = 'https://quory-alias.internal:3000/api'
+        self.assertFalse(semaphore_schedules_url_matches_canonical(alias))
 
     def test_different_port_does_not_match(self):
         self.assertFalse(
-            semaphore_schedules_url_matches_canonical(
-                'https://quory.example.internal:3001/api', _CANONICAL,
-            )
+            semaphore_schedules_url_matches_canonical('https://quory.internal:3001/api')
         )
 
     def test_unrelated_url_does_not_match(self):
         self.assertFalse(
-            semaphore_schedules_url_matches_canonical(
-                'https://ansy.example.internal:3000/api', _CANONICAL,
-            )
+            semaphore_schedules_url_matches_canonical('https://ansy.internal:3000/api')
         )
 
     def test_empty_canonical_never_matches(self):
         """canonical側が空/未設定なら、どんなURLでも一致しない(fail-closed
         側へ倒す -- 「一致するときだけ許可」の裏返し)。
         """
-        self.assertFalse(semaphore_schedules_url_matches_canonical(_CANONICAL, ''))
-        self.assertFalse(semaphore_schedules_url_matches_canonical(_CANONICAL, None))
+        self.assertFalse(semaphore_schedules_url_matches_canonical(''))
+        self.assertFalse(semaphore_schedules_url_matches_canonical(None))
 
 
 if __name__ == "__main__":

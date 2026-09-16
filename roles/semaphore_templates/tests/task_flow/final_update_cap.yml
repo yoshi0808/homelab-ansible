@@ -1,0 +1,26 @@
+---
+- name: Exercise final update-cap enforcement with localhost fixtures only
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    semaphore_reconcile_max_updates: 4
+  tasks:
+    - name: Model a pre-template plan at the configured cap
+      ansible.builtin.set_fact:
+        semaphore_reconcile_update_plan_result: "{{ 0 | semaphore_reconcile_update_plan(4, 4) }}"
+
+    - name: Confirm the pre-template plan was within the cap
+      ansible.builtin.assert:
+        that:
+          - semaphore_reconcile_update_plan_result.allowed
+
+    - name: Model a final schedule diff that grew to five updates after template apply
+      ansible.builtin.set_fact:
+        semaphore_templates_diff:
+          changed: []
+        semaphore_schedules_diff_result:
+          changed: [one, two, three, four, five]
+
+    - name: Run the same final cap task used by schedules_diff.yml
+      ansible.builtin.import_tasks: ../../tasks/schedules_update_cap_final.yml

@@ -1,0 +1,96 @@
+---
+# Build schedule write-set counts before template writes. Missing template ids
+# for templates planned in this same run are represented only in this plan;
+# schedules_read.yml resolves their real ids after template POSTs.
+- name: Add planned template creations to the planning-only resolution set
+  ansible.builtin.set_fact:
+    semaphore_schedules_plan_templates: >-
+      {%- set out = semaphore_templates_observed | list -%}
+      {%- for planned in semaphore_templates_diff.new -%}
+        {%- set _ = out.append({'id': -(loop.index), 'name': planned.target.name}) -%}
+      {%- endfor -%}
+      {{ out }}
+
+- name: Preflight schedule write-set planning against observed and planned templates
+  ansible.builtin.set_fact:
+    semaphore_schedules_plan_preflight: >-
+      {{ semaphore_schedules_catalog | semaphore_schedules_preflight(
+           semaphore_schedules_observed,
+           semaphore_schedules_plan_templates,
+           semaphore_schedules_closed_world_bool) }}
+
+- name: Fail closed when a schedule plan cannot resolve its template reference
+  ansible.builtin.fail:
+    msg: >-
+      schedule計画を確定できません。書き込み前に停止します。
+      {{ semaphore_schedules_plan_preflight.errors | join(' / ') }}
+  when: semaphore_schedules_plan_preflight.errors | length > 0
+
+- name: Build existing schedule list for planned detail reads
+  ansible.builtin.set_fact:
+    semaphore_schedules_plan_existing: >-
+      {%- set out = [] -%}
+      {%- for entry in semaphore_schedules_catalog -%}
+        {%- if entry.name in semaphore_schedules_plan_preflight.observed_by_name -%}
+          {%- set _ = out.append({'name': entry.name,
+                                  'id': semaphore_schedules_plan_preflight.observed_by_name[entry.name].id}) -%}
+        {%- endif -%}
+      {%- endfor -%}
+      {{ out }}
+
+- name: Read schedule details for write-set planning
+  ansible.builtin.uri:
+    url: "{{ semaphore_templates_api_base_url }}/project/{{ semaphore_templates_project_id }}/schedules/{{ item.id }}"
+    method: GET
+    headers:
+      Authorization: "Bearer {{ semaphore_templates_token }}"
+    status_code: [200]
+    validate_certs: "{{ semaphore_templates_api_validate_certs }}"
+  register: _semaphore_schedules_plan_detail_raw
+  loop: "{{ semaphore_schedules_plan_existing }}"
+  loop_control:
+    label: "{{ item.name }}"
+  no_log: true
+  check_mode: false
+
+- name: Build schedule detail map for the write-set plan
+  ansible.builtin.set_fact:
+    semaphore_schedules_plan_detail_by_id: >-
+      {%- set m = {} -%}
+      {%- for r in (_semaphore_schedules_plan_detail_raw.results | default([])) -%}
+        {%- set _ = m.update({r.item.id: r.json}) -%}
+      {%- endfor -%}
+      {{ m }}
+
+- name: Compute planned schedule creates and updates before either resource is written (P0-7)
+  ansible.builtin.set_fact:
+    semaphore_schedules_plan_diff: >-
+      {{ semaphore_schedules_catalog | semaphore_schedules_diff(
+           semaphore_schedules_plan_preflight.observed_by_name,
+           semaphore_schedules_plan_detail_by_id,
+           semaphore_schedules_plan_preflight.template_ids,
+           semaphore_templates_api_base_url) }}
+
+- name: Freeze combined update plan for both resource types (P0-7)
+  ansible.builtin.set_fact:
+    semaphore_reconcile_update_plan_result: >-
+      {{ semaphore_templates_diff.changed | length
+         | semaphore_reconcile_update_plan(
+             semaphore_schedules_plan_diff.changed | length,
+             semaphore_reconcile_max_updates | int) }}
+
+- name: Enforce the combined template and schedule update cap before template apply (P0-7)
+  ansible.builtin.assert:
+    that:
+      - semaphore_reconcile_update_plan_result.allowed
+    fail_msg: >-
+      template/schedule更新合算 {{ semaphore_reconcile_update_plan_result.total }} 件が
+      上限 {{ semaphore_reconcile_max_updates }} 件を超えました。両資源の書き込み前に停止します。
+      一括変更を意図した場合のみ semaphore_reconcile_max_updates を明示してください。
+    quiet: true
+
+- name: Preserve planned schedule write-set counts for the immutable run report (P0-7/P0-8)
+  ansible.builtin.set_fact:
+    semaphore_reconcile_schedule_planned:
+      creates: "{{ semaphore_schedules_plan_diff.new | length | string | from_yaml }}"
+      updates: "{{ semaphore_schedules_plan_diff.changed | length | string | from_yaml }}"

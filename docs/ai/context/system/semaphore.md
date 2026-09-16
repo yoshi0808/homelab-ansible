@@ -16,6 +16,7 @@ SemaphoreはAnsible playbookをGUIから手動またはschedule実行し、job�
 
 - Semaphore jobは、Gitから取得したplaybook、inventory、role、実行環境の名前解決、必要なsecret、対象ホストへの到達性に依存する。**UI上の inventory / repository / environment オブジェクトと、登録済みの key・user の現在状態はGitだけでは完結しない。**
 - **template と schedule の正本は `roles/semaphore_templates/defaults/main.yml` のカタログにある**(template=2026-08-04、schedule=2026-08-10 の `semaphore_schedules_as_code` 案件)。templateの同定は各templateの `description` に書いたマーカー、scheduleの同定は schedule 自身の name で行う。実物の一覧は `semaphore-query template-list` で読める(下記)。**「いつ押されるか」は `semaphore_schedules_catalog` が持ち、実行パラメータ(`task_params`)も同じエントリが持つ。**
+- 日次reconcileは毎日04:00 JSTにtemplateとscheduleを同期する。既存scheduleの`active`はcanonical接続先で現状値を保持し、非canonical接続先では常に`false`へ倒す。新規scheduleもcanonical接続先ではカタログ値、非canonical接続先では`false`で作る。最新成功印は`<semaphore_templates_report_dir>/reconcile/latest-success.json`であり、資源別`latest.json`は生存確認の正本ではない。
 - **カタログが管理しないもの** — inventory / repository / environment のオブジェクト定義そのもの(カタログはこれらを名前で参照するだけ)、users、access key の実体、task の実行履歴。**これらは `semaphore.db` の中にしか無い。**
 - 定期実行の窓はSemaphoreの外にも広がっており、管理元が別々で、横断して見えるのはYoshinobuが維持する「バッチ処理工程管理表」だけである(このリポジトリの外にあり、所在はCoordinatorが持つ。公開リポジトリのためここへは書かない)。**時刻・scheduleを決める・変えるときの義務は `roles/semaphore_templates/defaults/main.yml` の `semaphore_schedules_catalog` ヘッダコメントが正本である。**
 - `roles/systemd_timers/defaults/main.yml`では、RADIUS・Proxmox・monitoringのhealthcheck、Proxmox patch dry-run等がSemaphore UI scheduleへ移行済みとしてコメント化されている。ただし、UI上で現在有効かどうかと正確な時刻はSemaphore UIで確認する。
@@ -29,6 +30,7 @@ SemaphoreはAnsible playbookをGUIから手動またはschedule実行し、job�
 
 - 接続は `https://ansy.internal:3000`。**HTTPS である**(httpで叩くと400が返る)。証明書は `homelab_cert_renew` が配っている。
 - **2026-08-04 に SSH 鍵を2本(サーバ群向け / github)削除した。** 残るのは `type=none` の1本のみで、inventory と repository はそれを指す。**したがってこのインスタンスは、どのホストへも到達できず、リポジトリを clone することもできない。**
+- **EXEC-052の「ansyからホストへ到達できない」という根拠から、「Semaphore scheduleが発火しない」とは導けない。** schedulerは鍵の有無と独立してscheduleを起動し、taskは実行開始後にSSH接続で失敗しうる。2026-09-16にはactiveなansy scheduleが実際に発火し、ホストへ到達しないまま本番Slackへ通知したIncidentがある。ansyのscheduleを試験でactiveのまま残さない。
 - この「鍵が無いことによる無害さ」は、**API の実挙動を本番へ触れずに確かめられる**という価値を持つ。実際、2026-08-04 に id の固定値・`arguments` の型・API と DB スキーマの差という3つの誤った前提が、本番へ入る前にここで判明した。
 - 鍵を再登録しない義務の正本は `docs/ai/policies/execution_boundary_policy.md`(EXEC-052)。
 

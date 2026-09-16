@@ -1,0 +1,5 @@
+---
+- name: Freeze the Friday inactive-schedule list from the observed schedule collection (P0-6)
+  ansible.builtin.set_fact:
+    semaphore_schedules_friday_paused: >-
+      {{ semaphore_schedules_observed | semaphore_schedules_friday_paused }}

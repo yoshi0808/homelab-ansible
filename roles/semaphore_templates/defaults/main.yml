@@ -770,6 +770,8 @@ semaphore_templates_report_dir: >-
 # **次に窓を選ぶ者がその枠を空いていると読む。** この反映はリポジトリの外で行われる
 # ため、gitの履歴からは追えない。**2026-08-24、Yoshinobuの決定でCoordinatorが都度
 # 確認なく反映する。**
+# Phase 2以降、canonical接続先では既存scheduleのactiveは人の判断として保持し、
+# 新規scheduleはこのカタログ値で作る。非canonical接続先ではactiveを常にfalseにする。
 semaphore_schedules_catalog:
   - name: "SAFE: Time sync check"
     template: "SAFE: Time sync check"
@@ -1059,45 +1061,25 @@ semaphore_schedules_catalog:
     task_params:
       environment: "{}"
 
+  # Bootstrap daily reconcile. The canonical URL is rendered from the
+  # filter-plugin constant so the catalog does not duplicate its source.
+  - name: "SEMI-SAFE: Semaphore reconcile daily"
+    template: "SEMI-SAFE: Semaphore templates setup"
+    cron: "0 4 * * *"
+    active: true
+    task_params:
+      environment: "{{ '' | semaphore_schedules_canonical_environment }}"
+
 # --- R17: closed-worldフェーズへの移行フラグ ----------------------------------
 # 単調で明示的なフラグ。**人がコミットで立て、実装はいかなる条件でも降ろさない。**
 # エントリ数などから推測して自動判定しない(将来正規に20件目を追加した時点で
 # 検査が解除されてしまうため、R17本文)。既定false(移行期間)。
 semaphore_schedules_closed_world: true
 
-# --- R2: allowlist型のcanonical本番URL(2026-08-24、独立レビュー Finding 1
-# を受けてrequirement改訂・復元) -----------------------------------------------
-# **2026-08-24、有効化ゲート撤去の一次実装でこの変数ごと撤去したが、独立
-# レビューが差し戻した。** 実装者は「唯一の消費箇所がゲートだった」ことを
-# 根拠に「目的も消えた」としたが、それは誤り ―― 消費箇所の有無と、守って
-# いる境界の有無は別の話である。旧R15の目的は「API base URLを`-e`で
-# 切り替えられる設計の下で、Restore複製のansyのようなcanonicalでない接続先
-# へ`active: true`を書かないこと」であり、**ゲート(実行ごとの明示的な許可)
-# を撤去してカタログのactiveを直接反映するようになった分、誤ったインスタンス
-# へ書き込む危険はむしろ増えている。**
-#
-# **したがって、この変数と、それを使う接続先検査は残す。** ただし旧設計の
-# 「実行ごとの明示的な許可・closed-world・管理外0件・schedule集合の非変化」
-# という他の4条件とは束ねない ―― それらはR1で撤去されたままである
-# (Yoshinobu承認済み、2026-08-24)。ここで検査するのは接続先の一致だけ
-# (`semaphore_schedules_url_matches_canonical`、filter_plugins/
-# semaphore_schedules.py)。
-#
-# **判定は各schedule書き込みの直前に取得したfresh値で行う。**
-# `schedules_canonical_check.yml`はこの変数と接続先URLの一致(静的な文字
-# 列比較)だけを一度計算し、実際に「このwriteは有効化か」の判定は
-# `semaphore_schedules_would_newly_activate` を使って
-# `schedules_apply_item.yml` / `schedules_apply_new_item.yml` が個別に
-# 行う(2026-08-24再追補、独立レビュー`2026-08-24_004_review.md` High 1
-# — diff時点のスナップショットで判定すると、diffと実際の書き込みの間に
-# UIでactiveが変えられた場合に見逃す競合が実測された)。
-#
-# **他の変数(semaphore_target等)からは導出しない** ―― 導出すると
-# 「ansyでなければ許可」という否定判定(denylist型)に近づき、別名・
-# 別表記のDNS名で同じサーバへ到達したときfail-openする(旧R15本文、
-# 独立レビューが今回も支持した判断)。値はquoryの現在のcanonical URLへの
-# リテラル。
-semaphore_schedules_canonical_api_base_url: "https://quory.internal:3000/api"
+# --- P0-15: canonical接続先の正本 --------------------------------------------
+# canonical production URLの正本はfilter_plugins/semaphore_schedules.pyの
+# モジュール定数である。Ansible変数にすると`-e`で安全境界を外せるため定義しない。
+# 廃止したsemaphore_schedules_canonical_api_base_urlを`-e`で渡すとreserved-name guardが拒否する。
 
 # --- R11: cronを解釈するtimezoneの前提値 --------------------------------------
 # GET /api/info の schedule_timezone。**ansy(2026-08-09)とquory(2026-08-10、
@@ -1115,6 +1097,12 @@ semaphore_schedules_report_dir: >-
     'ansy': '/home/ann/homelab-reports/semaphore-schedules',
   }[semaphore_target | default('quory')] }}
 
-# Automatic reconcile is intentionally capped; a human may explicitly raise
-# this value for a reviewed bulk addition with -e.
+# Automatic reconcile is intentionally capped; explicit -e overrides are
+# available for a reviewed batch. Update cap is combined across templates+schedules.
 semaphore_reconcile_max_creates: 2
+semaphore_reconcile_max_updates: 4
+# Reviewed, stable identity baseline for unmanaged Semaphore templates. The
+# daily reconcile compares the full normalized sorted list and never learns it.
+semaphore_templates_orphan_baseline:
+  - name: "SEMI-SAFE: Semaphore templates setup"
+    playbook: "playbooks/semaphore_templates_setup.yml"

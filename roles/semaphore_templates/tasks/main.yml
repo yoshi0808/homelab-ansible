@@ -32,11 +32,25 @@
 # を踏まえ、**万一含まれていても表示前に確実に取り除く**ため、rescue内で
 # 表示するメッセージは必ずtoken文字列を`regex_replace`で置換してから出す。
 
-- name: Load the Semaphore API token (fails closed if missing/unreadable — R4/AC6)
-  ansible.builtin.import_tasks: token.yml
+- name: Freeze the reconcile run id and JST start timestamp (P0-8)
+  ansible.builtin.set_fact:
+    _semaphore_reconcile_start_parts: >-
+      {{ lookup('pipe', "TZ='Asia/Tokyo' date '+%Y-%m-%dT%H:%M:%S.%3N+09:00 %Y%m%d_%H%M%S%3N'").split() }}
+    _semaphore_reconcile_run_suffix: >-
+      {{ (lookup('env', 'SEMAPHORE_TASK_ID') | trim)
+         if (lookup('env', 'SEMAPHORE_TASK_ID') | trim is match('^[0-9]+$'))
+         else 'manual-' ~ lookup('pipe', 'printf %s "$$"') }}
+
+- name: Build the unique reconcile run id (P0-8)
+  ansible.builtin.set_fact:
+    _semaphore_reconcile_started_at: "{{ _semaphore_reconcile_start_parts[0] }}"
+    _semaphore_reconcile_run_id: "{{ _semaphore_reconcile_start_parts[1] }}-{{ _semaphore_reconcile_run_suffix }}"
 
 - name: Resolve, read, reconcile, report, and (optionally) apply
   block:
+    - name: Load the Semaphore API token (fails closed if missing/unreadable — R4/AC6)
+      ansible.builtin.import_tasks: token.yml
+
     - name: Resolve project_id / inventory_id / repository_id by name (R12)
       ansible.builtin.import_tasks: resolve.yml
 
@@ -57,6 +71,22 @@
 
     - name: Compute the diff between the catalog and the observed state (R3/R11)
       ansible.builtin.import_tasks: reconcile.yml
+
+    - name: Compare orphan identities with the reviewed baseline (P0-11)
+      ansible.builtin.set_fact:
+        semaphore_templates_orphan_diff: >-
+          {{ semaphore_templates_diff.orphans
+             | semaphore_templates_orphan_baseline_diff(semaphore_templates_orphan_baseline) }}
+
+    - name: Fail closed if the orphan baseline or observed orphan identities are invalid (P0-11)
+      ansible.builtin.assert:
+        that:
+          - semaphore_templates_orphan_diff.errors | length == 0
+        fail_msg: "orphan baseline比較を完了できません: {{ semaphore_templates_orphan_diff.errors | join(' / ') }}"
+        quiet: true
+
+    - name: Plan the schedule write-set and enforce the combined update cap before template apply (P0-7)
+      ansible.builtin.import_tasks: schedules_plan.yml
 
     - name: Recheck the template create cap against the computed diff
       ansible.builtin.assert:
@@ -150,6 +180,9 @@
         - name: Preflight the schedules catalog; stop before any write on error (R9)
           ansible.builtin.import_tasks: schedules_preflight.yml
 
+        - name: Freeze the Friday list of observed inactive schedules (P0-6)
+          ansible.builtin.import_tasks: schedules_friday.yml
+
         - name: Compute the schedules diff (R8/R8-2)
           ansible.builtin.import_tasks: schedules_diff.yml
 
@@ -218,31 +251,10 @@
     - name: Re-raise the original schedule failure and/or the report-save failure (both scrubbed, neither absorbed into success — R8/R18/AC22)
       ansible.builtin.fail:
         msg: >-
-          {{
-            (
-              'semaphore_schedules task失敗(task: ' ~ (semaphore_schedules_run_failed_task | default('不明')) ~ '): '
-              ~ (semaphore_schedules_run_failed_msg | default('(詳細不明)'))
-              ~ ' 既に発行済みの書き込みは取り消しません。'
-            ) if (semaphore_schedules_run_failed | default(false)) else ''
-          }}
-          {{
-            ('/ さらにレポート保存も失敗しました: ' ~ (semaphore_schedules_report_save_failed_msg | default('(詳細不明)')))
-            if (semaphore_schedules_report_save_failed | default(false)) else
-            ('/ レポートは保存できました(semaphore_schedules_report_dir/latest.json)。'
-             if (semaphore_schedules_run_failed | default(false)) else '')
-          }}
-          {{
-            (
-              '/ schedule処理でエラーが検出されましたが、詳細を保持するfactが空です'
-              ~ '(semaphore_schedules_run_failed等の内部変数が外部の-eで上書きされて'
-              ~ 'いる可能性があります)。ansible_failed_taskとレポート'
-              ~ '(semaphore_schedules_report_dir)を直接確認してください。'
-            ) if (
-              (not (semaphore_schedules_run_failed | default(false)))
-              and (not (semaphore_schedules_report_save_failed | default(false)))
-              and (ansible_failed_result is defined)
-            ) else ''
-          }}
+          semaphore_schedules処理またはそのrun report保存に失敗しました。
+          scrubbed failure detail={{ semaphore_schedules_run_failed_msg | default(semaphore_schedules_report_save_failed_msg | default('(取得できず)')) }}。
+          task={{ semaphore_schedules_run_failed_task | default('不明') }}。
+          既に適用済みの変更は取り消されません。
       when: >-
         (semaphore_schedules_run_failed | default(false))
         or (semaphore_schedules_report_save_failed | default(false))
@@ -257,6 +269,11 @@
              if (semaphore_templates_token | default('') | length) > 0
              else (ansible_failed_result.msg | default('(取得できず)')) }}
       no_log: true
+
+    - name: Mark the reconcile run as failed without retaining raw API failure text (P0-10)
+      ansible.builtin.set_fact:
+        _semaphore_reconcile_failed: true
+        _semaphore_reconcile_failed_task: "{{ ansible_failed_task.name | default('不明') }}"
 
     - name: Detect a TLS certificate verification failure and explain it (does not weaken validate_certs)
       ansible.builtin.fail:
@@ -284,15 +301,18 @@
           無効化できるが、既定値(true)は変更していない — 判断根拠は
           docs/ai/reviews/semaphore_templates_as_code/2026-08-04_003_implement.md
           の追補を参照。
-          元のエラー(task: {{ ansible_failed_task.name | default('不明') }}):
-          {{ _semaphore_templates_scrubbed_failure }}
+          task: {{ ansible_failed_task.name | default('不明') }}。
+          API failure detailはconsole/report/notificationへ出しません。
       when: >-
         'certificate verify failed' in _semaphore_templates_scrubbed_failure
         or 'CERTIFICATE_VERIFY_FAILED' in _semaphore_templates_scrubbed_failure
 
-    - name: Re-raise the original failure unchanged (not a TLS verification failure)
+    - name: Re-raise a scrub-safe failure summary (P0-10)
       ansible.builtin.fail:
         msg: >-
-          semaphore_templates task失敗
-          (task: {{ ansible_failed_task.name | default('不明') }}):
-          {{ _semaphore_templates_scrubbed_failure }}
+          Semaphore reconcileに失敗しました(task: {{ ansible_failed_task.name | default('不明') }}).
+          scrubbed failure detail={{ _semaphore_templates_scrubbed_failure | default('(取得できず)') }}。
+
+  always:
+    - name: Publish run report and latest-success marker (P0-8)
+      ansible.builtin.import_tasks: reconcile_finalize.yml

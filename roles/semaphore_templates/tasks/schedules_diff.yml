@@ -54,7 +54,14 @@
       {{ semaphore_schedules_catalog | semaphore_schedules_diff(
            semaphore_schedules_preflight_result.observed_by_name,
            semaphore_schedules_detail_by_id,
-           semaphore_schedules_preflight_result.template_ids) }}
+           semaphore_schedules_preflight_result.template_ids,
+           semaphore_templates_api_base_url) }}
+
+# Re-check the exact final diff used by schedules_apply.yml. The earlier
+# combined plan is a separate snapshot from before template apply and cannot
+# bound UI changes observed by this fresh read.
+- name: Revalidate the combined update cap against the final schedule diff (P0-7)
+  ansible.builtin.import_tasks: schedules_update_cap_final.yml
 
 - name: Stop if automatic schedule creates exceed the configured safety cap
   ansible.builtin.assert:
@@ -76,3 +83,5 @@
     semaphore_schedules_created: []
     semaphore_schedules_updated: []
     semaphore_schedules_update_skipped: []
+    semaphore_schedules_create_requests: []
+    semaphore_schedules_update_requests: []

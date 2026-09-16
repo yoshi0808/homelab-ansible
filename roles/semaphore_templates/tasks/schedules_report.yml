@@ -74,13 +74,10 @@
       - "管理外(削除しない)   : {{ (semaphore_schedules_preflight_result | default({})).unmanaged | default([]) | length }} 件"
       - >-
           canonical接続先一致(R2) : {{ semaphore_schedules_canonical_url_ok | default('(未評価)') }}
-          (canonical={{ semaphore_schedules_canonical_api_base_url | default('(未設定)') }}、
+          (canonical={{ semaphore_templates_api_base_url | semaphore_schedules_canonical_api_base_url }}、
           api_base_url={{ semaphore_templates_api_base_url }})
-          -- 有効化を伴う書き込みが実際に非canonical接続先へブロック
-          された場合は、上のfailed/failed_msgに個別のschedule名で出る
-          (2026-08-24再追補: 判定はwrite直前のfresh値で行うため、diff
-          時点の静的な「有効化対象」一覧はもう保持しない。独立レビュー
-          `2026-08-24_004_review.md` High 1参照)
+          -- 非canonical接続先では新規・更新ともactive:falseをpayloadにし、
+          更新は書き込み直前に実payloadのfalseをassertする(P0-15)
 
 - name: Show unmanaged schedules (defined nowhere in the catalog — R18, report only)
   ansible.builtin.debug:
@@ -138,7 +135,7 @@
       mode: "{{ 'check' if ansible_check_mode else 'apply' }}"
       failed: "{{ semaphore_schedules_run_failed | default(false) }}"
       failed_task: "{{ semaphore_schedules_run_failed_task | default('') }}"
-      failed_msg: "{{ semaphore_schedules_run_failed_msg | default('') }}"
+      failed_msg: "{{ semaphore_schedules_run_failed_msg | default('') if (semaphore_schedules_run_failed | default(false)) else '' }}"
       phase: "{{ 'closed-world' if (semaphore_schedules_closed_world_bool | default(false)) else '移行期間' }}"
       api_base_url: "{{ semaphore_templates_api_base_url }}"
       timezone:
@@ -159,16 +156,10 @@
       # `url_matches`が`null`のまま保存されるのは、schedule処理そのものが
       # canonical_check.ymlへ到達する前に失敗した場合のみ(default(none))。
       #
-      # **2026-08-24再追補(独立レビュー`2026-08-24_004_review.md` High
-      # 1): `activation_targets`キーは削除した。** diff時点のスナップ
-      # ショットから静的に列挙する設計だったが、diffと実際の書き込みの
-      # 間の競合を見逃す(このファイルのヘッダコメント参照)。有効化判定は
-      # 今はwrite直前のfresh値で個別に行われ(`schedules_apply_item.yml`
-      # / `schedules_apply_new_item.yml`)、ブロックされた場合は下の
-      # `failed`/`failed_msg`(このJSONの上部)に対象のschedule名入りで
-      # 記録される -- 別の場所へ二重に持たない。
+      # Non-canonical active policy is applied in the actual write payload;
+      # there is no diff-time activation target list.
       canonical_check:
-        canonical_url: "{{ semaphore_schedules_canonical_api_base_url | default('') }}"
+        canonical_url: "{{ semaphore_templates_api_base_url | semaphore_schedules_canonical_api_base_url }}"
         url_matches: "{{ semaphore_schedules_canonical_url_ok | default(none) }}"
   become: false
   check_mode: false

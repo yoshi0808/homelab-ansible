@@ -1,0 +1,8 @@
+---
+- name: Exercise the actual reserved-name guard without a Semaphore API
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Run only the schedule configuration guard and normalization
+      ansible.builtin.import_tasks: ../../tasks/schedules_validate_config.yml

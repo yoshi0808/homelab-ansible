@@ -89,9 +89,8 @@
 # **同日、独立レビュー(`2026-08-24_003_review.md` Finding 1)を受けて
 # requirementをR2として改訂し、`semaphore_schedules_canonical_api_base_
 # url`は role defaults へ復元した。** allowlistへ戻す ―― この変数は
-# ユーザーが`-e`で正当に上書きしてよい設定値であり(ansy検証時など、
-# `schedules_canonical_check.yml`参照)、内部状態ではないため
-# reject対象に含めない。
+# 廃止されたcanonical URL変数はallowlistに含めない。旧名が`-e`で
+# 定義されるとreserved-name guardが拒否する。
 - name: "Fail closed if any (_)semaphore_schedules_* internal-state name is already defined before this role's own tasks set it"
   ansible.builtin.fail:
     msg: >-
@@ -102,7 +101,6 @@
            | reject('in', [
                'semaphore_schedules_catalog',
                'semaphore_schedules_closed_world',
-               'semaphore_schedules_canonical_api_base_url',
                'semaphore_schedules_expected_timezone',
                'semaphore_schedules_report_dir',
              ])
@@ -113,16 +111,14 @@
       許可しません(査読r5 Critical #1 — 判定の中間結果を名前付き変数へ
       一切保存しないため、この判定式自体を外部から上書きする経路が無い)。
       許可される外部設定は semaphore_schedules_catalog /
-      semaphore_schedules_closed_world / semaphore_schedules_canonical_api_base_url /
-      semaphore_schedules_expected_timezone / semaphore_schedules_report_dir
-      の5つだけです。名前を変えて再実行してください。
+      semaphore_schedules_closed_world / semaphore_schedules_expected_timezone /
+      semaphore_schedules_report_dir の4つだけです。名前を変えて再実行してください。
   when: >-
     (
       lookup('varnames', '^_?semaphore_schedules_.*', wantlist=True)
       | reject('in', [
           'semaphore_schedules_catalog',
           'semaphore_schedules_closed_world',
-          'semaphore_schedules_canonical_api_base_url',
           'semaphore_schedules_expected_timezone',
           'semaphore_schedules_report_dir',
         ])

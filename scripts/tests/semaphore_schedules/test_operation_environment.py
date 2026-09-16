@@ -111,6 +111,7 @@ class OperationEnvironmentTests(unittest.TestCase):
         }
         diff = semaphore_schedules_diff(
             catalog, preflight['observed_by_name'], details, preflight['template_ids'],
+            'https://quory.internal:3000/api',
         )
         self.assertEqual(diff['new'], [])
         self.assertEqual(diff['unchanged'], [])

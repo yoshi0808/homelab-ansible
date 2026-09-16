@@ -149,7 +149,9 @@ class DiffChangedAcceptsEquivalentWrapperTypesTests(unittest.TestCase):
         detail_by_id = {21: _plain_raw()}
         template_ids = {'SAFE: Time sync check': 10}
 
-        result = semaphore_schedules_diff(catalog, observed_by_name, detail_by_id, template_ids)
+        result = semaphore_schedules_diff(
+            catalog, observed_by_name, detail_by_id, template_ids,
+            'https://quory.internal:3000/api')
 
         self.assertEqual(result['changed'], [])
         self.assertEqual(result['unchanged'], ['SAFE: Time sync check'])
@@ -170,7 +172,9 @@ class DiffChangedAcceptsEquivalentWrapperTypesTests(unittest.TestCase):
         detail_by_id = {21: _plain_raw()}
         template_ids = {'SAFE: Time sync check': 10}
 
-        result = semaphore_schedules_diff(catalog, observed_by_name, detail_by_id, template_ids)
+        result = semaphore_schedules_diff(
+            catalog, observed_by_name, detail_by_id, template_ids,
+            'https://quory.internal:3000/api')
 
         self.assertEqual(len(result['changed']), 1)
         self.assertEqual(result['changed'][0]['fields'], ['cron_format'])

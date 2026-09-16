@@ -65,7 +65,11 @@ from __future__ import annotations
 import collections.abc
 import json
 import re
+from datetime import datetime
+from zoneinfo import ZoneInfo
 from urllib.parse import urlsplit, urlunsplit
+
+CANONICAL_SEMAPHORE_API_BASE_URL = 'https://quory.internal:3000/api'
 
 # ---------------------------------------------------------------------------
 # R8-2: the 5 managed fields as they appear on the API side (schedule GET/
@@ -297,7 +301,12 @@ _ENVIRONMENT_OPERATION_VALUES = {
     'prometheus_update_check_operation': frozenset({'inspect', 'update', 'rollback'}),
 }
 _ENVIRONMENT_ALLOWED_KEYS = frozenset(
-    _PRIMITIVE_ALLOWED_KEYS | _ENVIRONMENT_OPERATION_VALUES.keys()
+    _PRIMITIVE_ALLOWED_KEYS
+    | _ENVIRONMENT_OPERATION_VALUES.keys()
+    | {
+        'semaphore_templates_api_base_url',
+        'semaphore_templates_api_validate_certs',
+    }
 )
 
 # `params` is a native dict on the raw object (not JSON-string-encoded) --
@@ -319,6 +328,13 @@ _ENVIRONMENT_BOOL_STRINGS = frozenset({'true', 'false'})
 
 
 def _environment_value_is_allowed(key, value):
+    if key == 'semaphore_templates_api_base_url':
+        return (
+            isinstance(value, str)
+            and value == CANONICAL_SEMAPHORE_API_BASE_URL
+        )
+    if key == 'semaphore_templates_api_validate_certs':
+        return isinstance(value, str) and value == 'true'
     if key in _ENVIRONMENT_OPERATION_VALUES:
         return isinstance(value, str) and value in _ENVIRONMENT_OPERATION_VALUES[key]
     if isinstance(value, _PARAMS_ALLOWED_VALUE_TYPES):
@@ -651,47 +667,82 @@ def semaphore_schedules_create_count(catalog, observed_schedules):
                and isinstance(item.get('name'), str) and item.get('name') not in known_names)
 
 
-def semaphore_schedules_desired(entry, template_id):
-    """R8-2: the effective desired state for the 5 managed fields.
+def semaphore_schedules_friday_paused(observed_schedules, now_iso=None):
+    """List schedules observed inactive on Friday in Asia/Tokyo."""
+    now = datetime.fromisoformat(now_iso) if now_iso else datetime.now(ZoneInfo('Asia/Tokyo'))
+    if now.tzinfo is None:
+        raise ValueError('now must include timezone')
+    if now.astimezone(ZoneInfo('Asia/Tokyo')).weekday() != 4:
+        return []
+    paused = []
+    for row in observed_schedules:
+        if not isinstance(row, dict) or not isinstance(row.get('active'), bool):
+            raise ValueError('schedule active must be bool for Friday report')
+        if row['active'] is False:
+            paused.append({'name': row.get('name', '(name unavailable)'),
+                           'cron_format': row.get('cron_format', '')})
+    return sorted(paused, key=lambda item: item['name'])
+
+
+def semaphore_reconcile_update_plan(template_updates, schedule_updates, max_updates):
+    """Validate a combined pre-write update cap across both resource types."""
+    for label, value in (('template updates', template_updates), ('schedule updates', schedule_updates)):
+        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+            raise ValueError('{} must be a non-negative integer'.format(label))
+    if isinstance(max_updates, bool) or not isinstance(max_updates, int) or max_updates < 0:
+        raise ValueError('max_updates must be a non-negative integer')
+    total = template_updates + schedule_updates
+    return {
+        'template_updates': template_updates,
+        'schedule_updates': schedule_updates,
+        'total': total,
+        'max_updates': max_updates,
+        'allowed': total <= max_updates,
+    }
+
+
+def semaphore_schedules_desired(entry, template_id, canonical=True):
+    """Build effective desired fields, including endpoint-sensitive active.
 
     `entry` is a catalog row (R1's 5 logical fields). `template_id` is the
     id already resolved by semaphore_schedules_preflight (R3: never taken
     from the catalog).
 
-    2026-08-24 (semaphore_activation_gate_removal案件 R1): `desired['active']`
-    is the catalog's own `active` value, unconditionally -- reflected
-    directly whether the schedule is brand-new or already exists. Before
-    this removal, a stage argument and an `observed_detail` argument
-    together decided a *different* active value than the catalog's own
-    (a new schedule was always forced to False; an existing one only ever
-    moved true->false immediately, never false->true, without a separate,
-    explicitly-gated second write). That indirection existed only to serve
-    the activation gate this function no longer needs to cooperate with --
-    removing the gate removes the reason for the indirection, not just the
-    gate's own check.
+    New schedules use the catalog value at the canonical endpoint and
+    false elsewhere. Existing schedules are adjusted by the diff function:
+    canonical runs retain observed `active`, while non-canonical runs force
+    false.
     """
     return {
         'name': entry['name'],
         'cron_format': entry['cron'],
         'template_id': template_id,
         'task_params': entry['task_params'],
-        'active': bool(entry['active']),
+        'active': bool(entry['active']) if canonical else False,
     }
 
 
-def semaphore_schedules_diff(catalog, observed_by_name, detail_by_id, template_ids):
+def semaphore_schedules_existing_write_desired(desired, fresh_active, canonical):
+    """Freeze existing-schedule active from fresh GET or force it inactive."""
+    if not isinstance(desired, dict):
+        raise ValueError('desired schedule fields must be a mapping')
+    if canonical and not isinstance(fresh_active, bool):
+        raise ValueError('fresh schedule active must be bool on canonical endpoint')
+    result = dict(desired)
+    result['active'] = fresh_active if canonical else False
+    return result
+
+
+def semaphore_schedules_diff(catalog, observed_by_name, detail_by_id, template_ids, api_base_url=None):
     """R8-2: the reconcile diff. `observed_by_name` and `template_ids` are
     the same-named outputs of semaphore_schedules_preflight. `detail_by_id`
     maps a schedule id to its single-GET raw object (R8: the *only*
     legitimate merge source for a write; this function only reads it for
     comparison, it does not write).
 
-    2026-08-24 (semaphore_activation_gate_removal案件 R1): there is no
-    longer a separate activation step or a `pending_activation` report --
-    `changed` membership is exactly "any of the 5 managed fields (`active`
-    included) differs from the catalog's desired state", computed in one
-    pass. A catalog entry whose `active` alone differs from the observed
-    schedule lands in `changed` the same way a cron-only change would.
+    P0-5/P0-15: existing production `active` is operator-owned and is
+    excluded from ordinary diff; non-canonical connections force false and
+    count true-to-false as a normal update.
     """
     new_items = []
     changed_items = []
@@ -703,7 +754,7 @@ def semaphore_schedules_diff(catalog, observed_by_name, detail_by_id, template_i
         observed_row = observed_by_name.get(name)
 
         if observed_row is None:
-            desired = semaphore_schedules_desired(entry, template_id)
+            desired = semaphore_schedules_desired(entry, template_id, _is_canonical_api_base_url(api_base_url))
             new_items.append({'name': name, 'desired': desired})
             continue
 
@@ -711,8 +762,14 @@ def semaphore_schedules_diff(catalog, observed_by_name, detail_by_id, template_i
         detail = detail_by_id.get(sched_id)
         if not isinstance(detail, dict):
             raise ValueError("schedule {!r} detail: mappingでない".format(name))
-        desired = semaphore_schedules_desired(entry, template_id)
         before = _management_fields_from_raw(detail)
+        canonical = _is_canonical_api_base_url(api_base_url)
+        desired = semaphore_schedules_desired(entry, template_id, canonical)
+        if canonical:
+            # P0-5: existing production schedule active is an operator-owned
+            # state; its diff-time value is retained here, then refreshed again
+            # immediately before PUT by schedules_apply_item.yml.
+            desired['active'] = before['active']
         changed_fields = [
             field for field in _MANAGED_FIELD_ORDER
             if not _strict_equal(before.get(field), desired.get(field))
@@ -897,11 +954,18 @@ def _normalize_api_base_url(url):
     return urlunsplit((scheme, netloc, path, '', ''))
 
 
-def semaphore_schedules_url_matches_canonical(api_base_url, canonical_url):
+def _is_canonical_api_base_url(api_base_url):
+    if not isinstance(api_base_url, str) or not api_base_url:
+        return False
+    return _normalize_api_base_url(api_base_url) == _normalize_api_base_url(
+        CANONICAL_SEMAPHORE_API_BASE_URL)
+
+
+def semaphore_schedules_url_matches_canonical(api_base_url):
     """R2 (2026-08-24追補、独立レビュー Finding 1で復元): whether the
     connection this run actually writes through normalizes to the same
     value as the catalog's canonical production URL
-    (`semaphore_schedules_canonical_api_base_url`).
+    (`CANONICAL_SEMAPHORE_API_BASE_URL`).
 
     Deliberately an allowlist, not a denylist (旧R15と同じ判断、独立
     レビューが指摘したとおり判断そのものは今回も有効): a mismatch is the
@@ -912,8 +976,16 @@ def semaphore_schedules_url_matches_canonical(api_base_url, canonical_url):
     resolution.
     """
     normalized_used = _normalize_api_base_url(api_base_url)
-    normalized_canonical = _normalize_api_base_url(canonical_url)
+    normalized_canonical = _normalize_api_base_url(CANONICAL_SEMAPHORE_API_BASE_URL)
     return bool(normalized_canonical) and normalized_used == normalized_canonical
+
+
+def semaphore_schedules_canonical_environment(_unused=None):
+    """Render the bootstrap schedule's environment from canonical source."""
+    return json.dumps({
+        'semaphore_templates_api_base_url': CANONICAL_SEMAPHORE_API_BASE_URL,
+        'semaphore_templates_api_validate_certs': 'true',
+    }, separators=(',', ':'))
 
 
 class FilterModule(object):
@@ -922,12 +994,17 @@ class FilterModule(object):
             'semaphore_schedules_preflight': semaphore_schedules_preflight,
             'semaphore_schedules_readset_preflight': semaphore_schedules_readset_preflight,
             'semaphore_schedules_create_count': semaphore_schedules_create_count,
+            'semaphore_schedules_friday_paused': semaphore_schedules_friday_paused,
+            'semaphore_reconcile_update_plan': semaphore_reconcile_update_plan,
             'semaphore_schedules_diff': semaphore_schedules_diff,
             'semaphore_schedules_desired': semaphore_schedules_desired,
+            'semaphore_schedules_existing_write_desired': semaphore_schedules_existing_write_desired,
             'semaphore_schedules_payload': semaphore_schedules_payload,
             'semaphore_schedules_create_payload': semaphore_schedules_create_payload,
             'semaphore_schedules_verify': semaphore_schedules_verify,
             'semaphore_schedules_nonmanaged_diff': semaphore_schedules_nonmanaged_diff,
             'semaphore_schedules_would_newly_activate': semaphore_schedules_would_newly_activate,
             'semaphore_schedules_url_matches_canonical': semaphore_schedules_url_matches_canonical,
+            'semaphore_schedules_canonical_api_base_url': lambda _unused: CANONICAL_SEMAPHORE_API_BASE_URL,
+            'semaphore_schedules_canonical_environment': semaphore_schedules_canonical_environment,
         }

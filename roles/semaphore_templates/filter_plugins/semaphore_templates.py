@@ -30,6 +30,10 @@ there no longer is a second place for it to live.
 """
 from __future__ import annotations
 
+import re
+import json
+from datetime import datetime, timezone
+
 # The exact, and only, content this role ever writes to `description`. No
 # human-authored text is expected to coexist here — R1 does not define
 # `description` as a catalog field, and after the 2026-08-04 addendum R11
@@ -388,11 +392,103 @@ def semaphore_templates_reconcile(catalog, observed):
     }
 
 
+def semaphore_templates_orphan_baseline_diff(orphans, baseline):
+    """Validate and compare normalized orphan identities as a sorted list."""
+    errors = []
+
+    def normalize(name, playbook, label):
+        if not isinstance(name, str) or not isinstance(playbook, str):
+            errors.append("{}: name/playbook が文字列でない".format(label))
+            return None
+        clean_name = re.sub(r'\s+', ' ', name.strip())
+        clean_playbook = playbook[2:] if playbook.startswith('./') else playbook
+        if not clean_name or not clean_playbook:
+            errors.append("{}: 正規化後のname/playbookが空".format(label))
+            return None
+        return {'name': clean_name, 'playbook': clean_playbook}
+
+    if not isinstance(baseline, list):
+        errors.append("orphan baseline がlistでない")
+        baseline = []
+    normalized_baseline = []
+    for idx, item in enumerate(baseline):
+        if not isinstance(item, dict) or 'name' not in item or 'playbook' not in item:
+            errors.append("orphan baseline[{}] にname/playbookが無い".format(idx))
+            continue
+        value = normalize(item['name'], item['playbook'], "orphan baseline[{}]".format(idx))
+        if value is not None:
+            normalized_baseline.append(value)
+
+    normalized_orphans = []
+    if not isinstance(orphans, list):
+        errors.append("observed orphans がlistでない")
+        orphans = []
+    for idx, item in enumerate(orphans):
+        if not isinstance(item, dict) or 'name' not in item or 'playbook' not in item:
+            errors.append("orphan[{}] にname/playbookが無い".format(idx))
+            continue
+        value = normalize(item['name'], item['playbook'], "orphan[{}]".format(idx))
+        if value is not None:
+            normalized_orphans.append(value)
+
+    key = lambda item: (item['name'], item['playbook'])
+    actual = sorted(normalized_orphans, key=key)
+    expected = sorted(normalized_baseline, key=key)
+    return {'errors': errors, 'actual': actual, 'expected': expected, 'changed': actual != expected}
+
+
+def semaphore_reconcile_marker_freshness(content, exists, is_regular_file, now_iso=None):
+    """Return stale status for the latest-success marker; malformed is stale."""
+    result = {'stale': True, 'error': None, 'age_seconds': None}
+    if not exists:
+        result['error'] = 'markerが欠落'
+        return result
+    if not is_regular_file:
+        result['error'] = 'markerが通常ファイルでない'
+        return result
+    try:
+        marker = json.loads(content)
+        if not isinstance(marker, dict):
+            raise ValueError('JSON rootがobjectでない')
+        completed_at = marker.get('completed_at')
+        if not isinstance(completed_at, str):
+            raise ValueError('completed_atが文字列でない')
+        completed = datetime.fromisoformat(completed_at)
+        if completed.tzinfo is None:
+            raise ValueError('completed_atにtimezoneが無い')
+        now = datetime.fromisoformat(now_iso) if now_iso else datetime.now(timezone.utc)
+        if now.tzinfo is None:
+            raise ValueError('nowにtimezoneが無い')
+        age = (now.astimezone(timezone.utc) - completed.astimezone(timezone.utc)).total_seconds()
+        result['age_seconds'] = age
+        result['stale'] = age < 0 or age >= 24 * 60 * 60
+        if age < 0:
+            result['error'] = 'completed_atが未来'
+        return result
+    except (TypeError, ValueError, json.JSONDecodeError) as exc:
+        result['error'] = 'JSON/時刻不正: {}'.format(exc)
+        return result
+
+
+def semaphore_reconcile_marker_actual(freshness):
+    """Return useful finding text: elapsed seconds when known, otherwise cause."""
+    if not isinstance(freshness, dict):
+        return '鮮度を判定できません'
+    age = freshness.get('age_seconds')
+    if isinstance(age, (int, float)) and not isinstance(age, bool):
+        return '{:g} seconds'.format(age)
+    error = freshness.get('error')
+    return error if isinstance(error, str) and error else '経過時間を判定できません'
+
+
 class FilterModule(object):
     def filters(self):
         return {
             'semaphore_templates_render_name': semaphore_templates_render_name,
             'semaphore_templates_reconcile': semaphore_templates_reconcile,
+            'semaphore_templates_orphan_baseline_diff': semaphore_templates_orphan_baseline_diff,
+            'semaphore_reconcile_marker_freshness': semaphore_reconcile_marker_freshness,
+            'semaphore_reconcile_marker_actual': semaphore_reconcile_marker_actual,
             'semaphore_templates_build_marker': semaphore_templates_build_marker,
             'semaphore_templates_button_names': semaphore_templates_button_names,
             'semaphore_templates_preflight': semaphore_templates_preflight,

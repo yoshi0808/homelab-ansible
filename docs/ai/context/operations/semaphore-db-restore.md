@@ -39,7 +39,7 @@ objectであり、`templates`と`schedules`がarrayであることを確認し�
 
 新しいSemaphoreへ取り込むときは、対象versionの公式project restore機能を使う。
 restore前には、既存projectへの影響とscheduleのactive状態を確認する。復元直後に
-カタログreconcileを実行すると、管理対象scheduleはカタログの`active`値へ揃う。
+カタログreconcileを実行すると、canonical接続先では既存scheduleの`active`は現在値を保持し、新規scheduleはカタログ値で作成される。非canonical接続先では既存・新規を問わず`active: false`として書かれる。
 
 ## 3. `config.json`
 

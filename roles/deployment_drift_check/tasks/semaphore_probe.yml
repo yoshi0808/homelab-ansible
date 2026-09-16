@@ -43,6 +43,43 @@
       # deployment_drift_check_hosts_file が日次で確認している)、DNS依存では
       # 到達性を失わない。
 
+    - name: Inspect the reconcile latest-success marker (P0-13)
+      ansible.builtin.stat:
+        path: "{{ semaphore_templates_report_dir }}/reconcile/latest-success.json"
+      register: _deployment_drift_reconcile_marker_stat
+      become: false
+      failed_when: false
+
+    - name: Read the reconcile latest-success marker when it is a regular file (P0-13)
+      ansible.builtin.slurp:
+        src: "{{ semaphore_templates_report_dir }}/reconcile/latest-success.json"
+      register: _deployment_drift_reconcile_marker_raw
+      when: (_deployment_drift_reconcile_marker_stat.stat | default({})).isreg | default(false)
+      become: false
+      failed_when: false
+
+    - name: Evaluate the latest-success marker age (24-hour threshold, P0-13)
+      ansible.builtin.set_fact:
+        deployment_drift_check_reconcile_freshness: >-
+          {{ (_deployment_drift_reconcile_marker_raw.content | default('') | b64decode)
+             | semaphore_reconcile_marker_freshness(
+                 (_deployment_drift_reconcile_marker_stat.stat | default({})).exists | default(false),
+                 (_deployment_drift_reconcile_marker_stat.stat | default({})).isreg | default(false)) }}
+
+    - name: Build the reconcile-stale finding when the marker is missing, invalid, future, or 24 hours old (P0-13)
+      ansible.builtin.set_fact:
+        deployment_drift_check_reconcile_stale_findings: >-
+          {{ ([{
+            'category': 'semaphore_reconcile_stale',
+            'item': 'Semaphore daily reconcile',
+            'expected': 'latest-success marker age < 24 hours',
+            'actual': (deployment_drift_check_reconcile_freshness
+                       | semaphore_reconcile_marker_actual),
+            'detail': 'latest-success markerが新鮮ではありません。reconcileの実行とmarker publishを確認してください。',
+            'playbook': '',
+            'run_host': inventory_hostname
+          }] if deployment_drift_check_reconcile_freshness.stale else []) }}
+
     - name: Fold the probe result into this host's findings (R9-a/R9-b)
       ansible.builtin.set_fact:
         deployment_drift_check_findings: "{{ deployment_drift_check_findings + deployment_drift_check_semaphore_findings }}"
@@ -70,9 +107,7 @@
         #     「直し方」行を出さない。report_dirs/hosts_fileカテゴリと同じ
         #     振る舞い)。ブートストラップtemplateを押しても接続不能自体は
         #     直らないため、押させる案内をしない方が正しい。
-        #   - semaphore_template: テンプレートdrift(新規/変更/orphan件数
-        #     不一致)。こちらはブートストラップtemplateを押せば実際に
-        #     直るため、report.ymlのcategory分岐で固定文言(R11-a)を出す。
+        #   - semaphore_reconcile_stale: reconcile success markerが24時間以上古い。
         deployment_drift_check_semaphore_findings: >-
           {%- set out = [] -%}
           {%- if not (semaphore_templates_probe_ok | default(false)) -%}
@@ -83,42 +118,10 @@
                                     'detail': semaphore_templates_probe_error | default('(詳細不明)'),
                                     'playbook': '',
                                     'run_host': inventory_hostname}) -%}
-          {%- else -%}
-            {%- for n in (semaphore_templates_diff.new | default([])) -%}
-              {%- set _ = out.append({'category': 'semaphore_template',
-                                      'item': n.target.name,
-                                      'expected': 'Semaphore上に存在',
-                                      'actual': '存在しない(定義のみ)',
-                                      'detail': ('カタログ(' ~ n.key ~ ')に一致するテンプレートがSemaphore上に無い'
-                                                 ~ ((' — ' ~ n.note) if n.note is defined else '')),
-                                      'playbook': 'playbooks/semaphore_templates_setup.yml',
-                                      'run_host': inventory_hostname}) -%}
-            {%- endfor -%}
-            {%- for c in (semaphore_templates_diff.changed | default([])) -%}
-              {%- set _ = out.append({'category': 'semaphore_template',
-                                      'item': c.after.name,
-                                      'expected': c.after.name,
-                                      'actual': c.before.name,
-                                      'detail': ('Semaphore実物(id=' ~ c.id ~ ')がカタログ定義と食い違っている'
-                                                 ~ '(UIでの手編集、または未反映の可能性)'),
-                                      'playbook': 'playbooks/semaphore_templates_setup.yml',
-                                      'run_host': inventory_hostname}) -%}
-            {%- endfor -%}
-            {%- set _orphans = (semaphore_templates_diff.orphans | default([])) -%}
-            {#- OQ3: 期待値は「件数」で持つ。1件消えて1件増えて件数が
-               変わらないケースは見逃す既知の盲点(実装判断の記録は
-               implement記録を参照)。 -#}
-            {%- if (_orphans | length) != deployment_drift_check_semaphore_expected_orphans -%}
-              {%- set _ = out.append({'category': 'semaphore_template',
-                                      'item': '定義に無いSemaphoreテンプレート',
-                                      'expected': deployment_drift_check_semaphore_expected_orphans | string ~ ' 件',
-                                      'actual': (_orphans | length) | string ~ ' 件',
-                                      'detail': ('削除はしない(R5)。現在の一覧: '
-                                                 ~ (_orphans | map(attribute='name') | join(', '))),
-                                      'playbook': 'playbooks/semaphore_templates_setup.yml',
-                                      'run_host': inventory_hostname}) -%}
-            {%- endif -%}
           {%- endif -%}
+          {%- for stale in (deployment_drift_check_reconcile_stale_findings | default([])) -%}
+            {%- set _ = out.append(stale) -%}
+          {%- endfor -%}
           {{ out }}
 
   rescue:

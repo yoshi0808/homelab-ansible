@@ -138,6 +138,8 @@ RESCUE_MARKER = "Build a token-scrubbed copy of the original failure"
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.abspath(os.path.join(HERE, "..", "..", "..", ".."))
 FIXTURE_PLAYBOOK = os.path.join(HERE, "fixture_pattern.yml")
+CANONICAL_GUARD_PLAYBOOK = os.path.join(HERE, "canonical_override_guard.yml")
+FINAL_UPDATE_CAP_PLAYBOOK = os.path.join(HERE, "final_update_cap.yml")
 
 
 def run_playbook(report_dir, extra_args=None):
@@ -151,6 +153,27 @@ def run_playbook(report_dir, extra_args=None):
     proc = subprocess.run(
         cmd,
         cwd=REPO_ROOT,
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, timeout=60,
+    )
+    return proc.returncode, proc.stdout
+
+
+def run_canonical_guard(extra_vars):
+    proc = subprocess.run(
+        ["ansible-playbook", CANONICAL_GUARD_PLAYBOOK, "-e", json.dumps(extra_vars)],
+        cwd=REPO_ROOT,
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, timeout=60,
+    )
+    return proc.returncode, proc.stdout
+
+
+def run_final_update_cap():
+    env = os.environ.copy()
+    env["ANSIBLE_FILTER_PLUGINS"] = os.path.join(REPO_ROOT, "roles", "semaphore_templates", "filter_plugins")
+    proc = subprocess.run(
+        ["ansible-playbook", FINAL_UPDATE_CAP_PLAYBOOK],
+        cwd=REPO_ROOT,
+        env=env,
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, timeout=60,
     )
     return proc.returncode, proc.stdout
@@ -405,6 +428,39 @@ def scenario_g(scratch):
     return problems
 
 
+def scenario_h():
+    """AC19e: normal run passes and the retired canonical override is rejected."""
+    config = {
+        "semaphore_schedules_catalog": [],
+        "semaphore_schedules_closed_world": True,
+        "semaphore_schedules_expected_timezone": "Asia/Tokyo",
+        "semaphore_schedules_report_dir": "/tmp/semaphore-guard-probe",
+    }
+    normal_rc, normal_output = run_canonical_guard(config)
+    override_config = dict(config)
+    override_config["semaphore_schedules_canonical_api_base_url"] = "https://ansy.internal:3000/api"
+    override_rc, override_output = run_canonical_guard(override_config)
+    problems = []
+    if normal_rc != 0:
+        problems.append("scenario H: ordinary schedule config was rejected without the retired URL variable")
+    if override_rc == 0:
+        problems.append("scenario H: retired canonical URL extra-var was not rejected by the guard")
+    if "semaphore_schedules_canonical_api_base_url" not in override_output:
+        problems.append("scenario H: guard output did not identify the retired canonical URL variable")
+    return problems
+
+
+def scenario_i():
+    """P0-7: plan is at cap, but the post-template-apply final diff exceeds it."""
+    rc, output = run_final_update_cap()
+    problems = []
+    if rc == 0:
+        problems.append("scenario I: final five-update diff passed despite the pre-template plan being at cap")
+    if "最終diffのtemplate/schedule更新合算" not in output:
+        problems.append("scenario I: the shared final-diff update-cap assertion did not stop the run")
+    return problems
+
+
 def main():
     scratch = tempfile.mkdtemp(prefix="semaphore_templates_task_flow_")
     try:
@@ -416,6 +472,8 @@ def main():
         problems += scenario_e(scratch)
         problems += scenario_f(scratch)
         problems += scenario_g(scratch)
+        problems += scenario_h()
+        problems += scenario_i()
 
         if problems:
             print("FAILED:")
@@ -423,12 +481,14 @@ def main():
                 print(" -", p)
             return 1
         print(
-            "OK: all seven scenarios passed (no post-rescue sentinel leak; report-save failure did "
+            "OK: all nine scenarios passed (no post-rescue sentinel leak; report-save failure did "
             "not replace the original failure; native-false extra-var override did not suppress "
             "the re-raise; UNREACHABLE report-save did not erase the original failure; the "
             "reserved-name guard rejects pre-defined internal-state names before they can be "
             "exploited; and the guard's own judgment cannot be neutralized via its former "
-            "helper-variable names either; and schedule preflight failure issued no template write)"
+            "helper-variable names either; schedule preflight failure issued no template write; "
+            "the retired canonical URL extra-var is rejected while normal config passes; and a "
+            "five-update final diff is blocked after an at-cap pre-write plan)"
         )
         return 0
     finally:

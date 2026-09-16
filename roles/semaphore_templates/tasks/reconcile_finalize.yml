@@ -1,0 +1,216 @@
+---
+- name: Freeze reconcile completion time and actual write counts (P0-8)
+  ansible.builtin.set_fact:
+    _semaphore_reconcile_completed_at: "{{ lookup('pipe', \"TZ='Asia/Tokyo' date '+%Y-%m-%dT%H:%M:%S.%3N+09:00'\") }}"
+    _semaphore_reconcile_template_actual:
+      creates: "{{ _semaphore_templates_created.results | default([]) | selectattr('status', 'defined') | selectattr('status', 'in', [200, 201]) | list | length | string | from_yaml }}"
+      updates: "{{ _semaphore_templates_updated.results | default([]) | selectattr('status', 'defined') | selectattr('status', 'in', [200, 201, 204]) | list | length | string | from_yaml }}"
+    _semaphore_reconcile_schedule_actual:
+      creates: "{{ semaphore_schedules_create_requests | default([]) | length | string | from_yaml }}"
+      updates: "{{ semaphore_schedules_update_requests | default([]) | length | string | from_yaml }}"
+
+- name: Derive final status and notification trigger (P0-8/P0-9)
+  ansible.builtin.set_fact:
+    _semaphore_reconcile_total_actual: >-
+      {{ (_semaphore_reconcile_template_actual.creates | int)
+         + (_semaphore_reconcile_template_actual.updates | int)
+         + (_semaphore_reconcile_schedule_actual.creates | int)
+         + (_semaphore_reconcile_schedule_actual.updates | int) }}
+    _semaphore_reconcile_status: >-
+      {{ 'partial' if (_semaphore_reconcile_failed | default(false)
+                       and ((_semaphore_reconcile_template_actual.creates | int
+                             + _semaphore_reconcile_template_actual.updates | int
+                             + _semaphore_reconcile_schedule_actual.creates | int
+                             + _semaphore_reconcile_schedule_actual.updates | int) > 0))
+         else ('failed' if (_semaphore_reconcile_failed | default(false)) else 'success') }}
+    _semaphore_reconcile_notify_required: >-
+      {{ (_semaphore_reconcile_failed | default(false))
+         or (_semaphore_reconcile_template_actual.creates | int > 0)
+         or (_semaphore_reconcile_template_actual.updates | int > 0)
+         or (_semaphore_reconcile_schedule_actual.creates | int > 0)
+         or (_semaphore_reconcile_schedule_actual.updates | int > 0)
+         or (semaphore_templates_orphan_diff.changed | default(false))
+         or (semaphore_schedules_friday_paused | default([]) | length > 0) }}
+
+- name: Attempt notification for changes, failures, orphan changes, or Friday inactive schedules (P0-9/P0-10)
+  block:
+    - name: Include the existing token-scrubbed Slack notification route
+      block:
+        - ansible.builtin.include_tasks: "{{ playbook_dir }}/../roles/common_slack/tasks/notify.yml"
+          vars:
+            slack_channel: "{{ 'alerts' if (_semaphore_reconcile_failed | default(false)) else 'info' }}"
+            slack_status: "{{ 'error' if (_semaphore_reconcile_failed | default(false)) else 'info' }}"
+            slack_title: "[semaphore_reconcile] {{ _semaphore_reconcile_status }}"
+            slack_message: >-
+              Semaphore reconcile status={{ _semaphore_reconcile_status }}.
+              templates create/update={{ _semaphore_reconcile_template_actual.creates }}/{{ _semaphore_reconcile_template_actual.updates }};
+              schedules create/update={{ _semaphore_reconcile_schedule_actual.creates }}/{{ _semaphore_reconcile_schedule_actual.updates }}.
+              failed_task={{ _semaphore_reconcile_failed_task | default('') }}.
+              {% if semaphore_templates_orphan_diff.changed | default(false) %}
+              orphan identity set changed from the reviewed baseline.
+              {% endif %}
+              {% if semaphore_schedules_friday_paused | default([]) | length > 0 %}
+              Friday inactive schedules: {{ semaphore_schedules_friday_paused | map(attribute='name') | join(', ') }}.
+              {% endif %}
+      rescue:
+        - name: Keep notification failure from changing reconcile result
+          ansible.builtin.set_fact:
+            _semaphore_reconcile_notification_failed: true
+  when: _semaphore_reconcile_notify_required
+
+- name: Record whether the notification include was reached (P0-8/P0-9)
+  ansible.builtin.set_fact:
+    _semaphore_reconcile_notification_include_reached: "{{ _semaphore_reconcile_notify_required }}"
+
+- name: Freeze immutable run report data (P0-8)
+  ansible.builtin.set_fact:
+    _semaphore_reconcile_run_report:
+      run_id: "{{ _semaphore_reconcile_run_id }}"
+      started_at: "{{ _semaphore_reconcile_started_at }}"
+      completed_at: "{{ _semaphore_reconcile_completed_at }}"
+      mode: "{{ 'check' if ansible_check_mode else 'apply' }}"
+      status: "{{ _semaphore_reconcile_status }}"
+      planned:
+        templates:
+          creates: "{{ semaphore_templates_diff.new | default([]) | length | string | from_yaml }}"
+          updates: "{{ semaphore_templates_diff.changed | default([]) | length | string | from_yaml }}"
+        schedules: "{{ semaphore_reconcile_schedule_planned | default({'creates': 0, 'updates': 0}) }}"
+      actual:
+        templates: "{{ _semaphore_reconcile_template_actual }}"
+        schedules: "{{ _semaphore_reconcile_schedule_actual }}"
+      partial_application:
+        writes_applied: "{{ _semaphore_reconcile_total_actual }}"
+        failed_task: "{{ _semaphore_reconcile_failed_task | default('') }}"
+      notification:
+        include_reached: "{{ _semaphore_reconcile_notification_include_reached }}"
+        triggers: >-
+          {%- set values = [] -%}
+          {%- if _semaphore_reconcile_failed | default(false) -%}{%- set _ = values.append('failure') -%}{%- endif -%}
+          {%- if _semaphore_reconcile_total_actual | int > 0 -%}{%- set _ = values.append('writes-applied') -%}{%- endif -%}
+          {%- if semaphore_templates_orphan_diff.changed | default(false) -%}{%- set _ = values.append('orphan-set-changed') -%}{%- endif -%}
+          {%- if semaphore_schedules_friday_paused | default([]) | length > 0 -%}{%- set _ = values.append('friday-inactive-schedules') -%}{%- endif -%}
+          {{ values }}
+
+- name: Save the immutable run report with an atomic rename (P0-8)
+  block:
+    - name: Create the reconcile run report directory
+      ansible.builtin.file:
+        path: "{{ semaphore_templates_report_dir }}/reconcile/runs"
+        state: directory
+        mode: "0755"
+      become: false
+      check_mode: false
+
+    - name: Write run report to a unique temporary file
+      ansible.builtin.copy:
+        content: "{{ _semaphore_reconcile_run_report | to_nice_json }}"
+        dest: "{{ semaphore_templates_report_dir }}/reconcile/runs/.{{ _semaphore_reconcile_run_id }}.json.tmp"
+        mode: "0644"
+      become: false
+      check_mode: false
+
+    - name: Atomically publish the immutable run report
+      ansible.builtin.copy:
+        src: "{{ semaphore_templates_report_dir }}/reconcile/runs/.{{ _semaphore_reconcile_run_id }}.json.tmp"
+        dest: "{{ semaphore_templates_report_dir }}/reconcile/runs/{{ _semaphore_reconcile_run_id }}.json"
+        remote_src: true
+        mode: "0644"
+      become: false
+      check_mode: false
+
+    - name: Remove the published run-report temporary file
+      ansible.builtin.file:
+        path: "{{ semaphore_templates_report_dir }}/reconcile/runs/.{{ _semaphore_reconcile_run_id }}.json.tmp"
+        state: absent
+      failed_when: false
+      become: false
+      check_mode: false
+  rescue:
+    - name: Remove an unpublished run-report temporary file
+      ansible.builtin.file:
+        path: "{{ semaphore_templates_report_dir }}/reconcile/runs/.{{ _semaphore_reconcile_run_id }}.json.tmp"
+        state: absent
+      failed_when: false
+      become: false
+
+    - name: Record that the immutable run report could not be published
+      ansible.builtin.set_fact:
+        _semaphore_reconcile_report_save_failed: true
+
+- name: Publish latest-success only after all apply, verify, and run-report steps succeeded (P0-8)
+  when:
+    - not ansible_check_mode
+    - not (_semaphore_reconcile_failed | default(false))
+    - not (_semaphore_reconcile_report_save_failed | default(false))
+  block:
+    - name: Write latest-success marker to a temporary file
+      ansible.builtin.copy:
+        content: >-
+          {{ {'run_id': _semaphore_reconcile_run_id,
+              'completed_at': _semaphore_reconcile_completed_at,
+              'report_path': semaphore_templates_report_dir ~ '/reconcile/runs/' ~ _semaphore_reconcile_run_id ~ '.json'}
+             | to_nice_json }}
+        dest: "{{ semaphore_templates_report_dir }}/reconcile/.latest-success.{{ _semaphore_reconcile_run_id }}.json.tmp"
+        mode: "0644"
+      become: false
+      check_mode: false
+
+    - name: Atomically publish latest-success marker after its target report exists (P0-8)
+      ansible.builtin.copy:
+        src: "{{ semaphore_templates_report_dir }}/reconcile/.latest-success.{{ _semaphore_reconcile_run_id }}.json.tmp"
+        dest: "{{ semaphore_templates_report_dir }}/reconcile/latest-success.json"
+        remote_src: true
+        mode: "0644"
+      become: false
+      check_mode: false
+
+    - name: Remove the published latest-success temporary file
+      ansible.builtin.file:
+        path: "{{ semaphore_templates_report_dir }}/reconcile/.latest-success.{{ _semaphore_reconcile_run_id }}.json.tmp"
+        state: absent
+      failed_when: false
+      become: false
+      check_mode: false
+  rescue:
+    - name: Remove an unpublished latest-success temporary file
+      ansible.builtin.file:
+        path: "{{ semaphore_templates_report_dir }}/reconcile/.latest-success.{{ _semaphore_reconcile_run_id }}.json.tmp"
+        state: absent
+      failed_when: false
+      become: false
+
+    - name: Record that latest-success was not published
+      ansible.builtin.set_fact:
+        _semaphore_reconcile_marker_publish_failed: true
+
+- name: Notify if run-report or latest-success publishing failed (P0-8a)
+  when: >-
+    (_semaphore_reconcile_report_save_failed | default(false))
+    or (_semaphore_reconcile_marker_publish_failed | default(false))
+  block:
+    - name: Include notification for a reconcile artifact publishing failure
+      block:
+        - ansible.builtin.include_tasks: "{{ playbook_dir }}/../roles/common_slack/tasks/notify.yml"
+          vars:
+            slack_channel: alerts
+            slack_status: error
+            slack_title: "[semaphore_reconcile] artifact publish failed"
+            slack_message: >-
+              Semaphore reconcile completed with an artifact publish failure.
+              run_id={{ _semaphore_reconcile_run_id }};
+              report_save_failed={{ _semaphore_reconcile_report_save_failed | default(false) }};
+              latest_success_publish_failed={{ _semaphore_reconcile_marker_publish_failed | default(false) }}.
+      rescue:
+        - name: Keep artifact notification failure from changing reconcile result
+          ansible.builtin.set_fact:
+            _semaphore_reconcile_artifact_notification_failed: true
+
+- name: Return non-zero when a required reconcile artifact could not be published
+  ansible.builtin.fail:
+    msg: >-
+      Semaphore reconcile artifact publish failed for run {{ _semaphore_reconcile_run_id }}.
+      report_save_failed={{ _semaphore_reconcile_report_save_failed | default(false) }};
+      latest_success_publish_failed={{ _semaphore_reconcile_marker_publish_failed | default(false) }}.
+  when: >-
+    (_semaphore_reconcile_report_save_failed | default(false))
+    or (_semaphore_reconcile_marker_publish_failed | default(false))

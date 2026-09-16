@@ -1,0 +1,12 @@
+---
+- name: Stop if final template and schedule updates exceed the combined safety cap (P0-7)
+  ansible.builtin.assert:
+    that:
+      - (semaphore_templates_diff.changed | length) + (semaphore_schedules_diff_result.changed | length) <= (semaphore_reconcile_max_updates | int)
+    fail_msg: >-
+      最終diffのtemplate/schedule更新合算
+      {{ semaphore_templates_diff.changed | length + semaphore_schedules_diff_result.changed | length }} 件が
+      上限 {{ semaphore_reconcile_max_updates }} 件を超えました。
+      scheduleの書き込み前に停止します。
+      一括変更を意図した場合のみ semaphore_reconcile_max_updates を明示してください。
+    quiet: true

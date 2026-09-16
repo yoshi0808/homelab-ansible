@@ -54,7 +54,24 @@ no such identity: /home/yoshi/.ssh/id_ann: No such file or directory
 - **発火が止まったことの実測**: 直後の06:30 JSTは `SAFE:Recovery monitoring check`(cron `30 6 * * *`)の発火時刻だったが、06:32時点でansyの最新taskは #27 のままで #28 は作られていない。**前夜は同じ経路で7本が連続発火していたため、これは静穏ではなく停止の結果である。**
 - **本番への影響が無いことの確認**: ansyの7本すべてがSSH接続前に失敗(上記)。quory側は同時間帯の7ジョブすべて success。
 
+## 追記(2026-09-16): scheduleを止めても、通知は塞がっていなかった
+
+**同日のPhase 2の実装前観測で、ansyのSemaphore自身がSlackへ通知することが分かった。** Ansibleの通知経路(`common_slack`)ではなく、**Semaphoreの組み込みアラート**である。ansyの設定は次のとおり(値は載せない)。
+
+```
+slack_alert = True
+slack_url   = 設定あり(host = hooks.slack.com)
+email_alert = True
+```
+
+**朝のSlackに並んだ `execution #22〜#27 ERROR` は、この組み込みアラートだった** — 本文の形が `common_slack` のものと違い、本番(#1117〜)と同じチャンネルに出ている。
+
+**つまり schedule を全部止めても、開発機でジョブが失敗するたびに本番チャンネルへERRORが出る。** テストのたび、実装検証のたびである。これは schedule の arming とは別の経路で、**P0-15 では塞がらない。**
+
+**この日の受入検証は、Semaphoreのタスクとして走らせず `ansible-playbook` をansy上で直接起動する形で行った** — 上限超過や書き込み拒否を意図的に起こす検証だったため。タスクが作られないので組み込みアラートも発生しない(検証前後で `GET /project/3/tasks` の max id が 28 のまま変わらないことを確認済み)。**これは回避策であって、修正ではない。**
+
 ## 残っている弱点
 
+- **ansyのSemaphoreの組み込みSlackアラートは有効なままである。** 止めるには `/etc/semaphore/config.json` の `slack_alert` を `false` にしてsemaphoreを再起動する。**未実施。**
 - **Slackの通知は、どのSemaphoreインスタンスが出したのかを本文に持たない。** 今回はexecution番号の桁で見分けた。**本番と開発が同じチャンネルへ出せる状態は続いている。**
 - **ansyのSemaphoreが「静かである」ことを継続的に確かめる手段は無い。** 今回の停止は状態であって機構ではなく、次にテストが書けば同じ状態へ戻りうる(P0-15が入るまで)。

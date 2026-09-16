@@ -155,6 +155,8 @@
           {{ f.detail }}
       {% if f.category == 'semaphore_template' %}
           直し方: Semaphoreで playbooks/semaphore_templates_setup.yml のテンプレートを押す(R11-a。このテンプレートはカタログの管理外にあり、repoから名前を引けない)
+      {% elif f.category == 'semaphore_reconcile_stale' %}
+          直し方: Semaphoreで playbooks/semaphore_templates_setup.yml のテンプレートを押し、reconcile run reportとlatest-success markerを確認する
       {% elif f.playbook %}
       {% set deployment_drift_check_buttons = semaphore_templates_catalog | semaphore_templates_button_names(f.playbook) %}
       {% if deployment_drift_check_buttons | length == 0 %}
