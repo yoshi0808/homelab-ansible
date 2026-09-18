@@ -464,6 +464,11 @@
   become: false
   when: _node_reachability_note | default('', true) | length > 0
 
+# This only forecasts the Saturday apply gate; it must not alter the dry-run
+# classification, its exit status, or the existing notification routing.
+- name: Append Saturday automatic-apply forecast to notification body
+  ansible.builtin.include_tasks: apply_forecast.yml
+
 - name: Set Slack channel and status for dryrun result
   ansible.builtin.set_fact:
     _notify_channel: "{{ 'alerts' if _final_status == 'BLOCKED' else 'patches' }}"

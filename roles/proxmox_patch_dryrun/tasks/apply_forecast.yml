@@ -1,0 +1,66 @@
+---
+# The apply role's default is the sole threshold source. Reading the scalar
+# here prevents the Friday forecast from acquiring an independent value.
+- name: Load apply major-upgrade threshold for Saturday apply forecast
+  ansible.builtin.set_fact:
+    _apply_forecast_major_upgrade_threshold: >-
+      {{ (lookup('file', role_path + '/../proxmox_patch_apply_node/defaults/main.yml') | from_yaml).proxmox_patch_apply_major_upgrade_threshold | int }}
+  run_once: true
+  delegate_to: localhost
+  become: false
+  when: _pre_status == 'NEEDS_CLASSIFICATION'
+
+- name: Determine Saturday automatic-apply forecast warnings
+  ansible.builtin.set_fact:
+    _apply_forecast_cluster_warnings: >-
+      {%- set forecast = namespace(warnings=[]) -%}
+      {%- if _final_status == 'MAJOR_UPGRADE_DETECTED' -%}
+      {%- set _ = forecast.warnings.append('dry-run が MAJOR_UPGRADE_DETECTED と判定したため、自動適用されません。') -%}
+      {%- endif -%}
+      {%- if _has_removes | bool -%}
+      {%- set _ = forecast.warnings.append('remove 候補があるため、自動適用されません。') -%}
+      {%- endif -%}
+      {{ forecast.warnings }}
+    _apply_forecast_node_warnings: >-
+      {%- set forecast = namespace(warnings=[]) -%}
+      {%- for node_name, summary in unified_dryrun.node_summaries.items() -%}
+      {%- if summary.update_count | int > _apply_forecast_major_upgrade_threshold | int -%}
+      {%- set _ = forecast.warnings.append(node_name ~ ': 更新候補 ' ~ (summary.update_count | string) ~ ' 件が apply の閾値 ' ~ (_apply_forecast_major_upgrade_threshold | string) ~ ' を超えています。') -%}
+      {%- endif -%}
+      {%- endfor -%}
+      {{ forecast.warnings }}
+  run_once: true
+  delegate_to: localhost
+  become: false
+  when: _pre_status == 'NEEDS_CLASSIFICATION'
+
+- name: Combine Saturday automatic-apply forecast warnings
+  ansible.builtin.set_fact:
+    _apply_forecast_warnings: "{{ _apply_forecast_cluster_warnings + _apply_forecast_node_warnings }}"
+  run_once: true
+  delegate_to: localhost
+  become: false
+  when: _pre_status == 'NEEDS_CLASSIFICATION'
+
+- name: Append Saturday automatic-apply forecast to notification body
+  ansible.builtin.set_fact:
+    _notify_body: |
+      {{ _notify_body }}
+
+      翌朝の自動適用予告:
+      {% if _apply_forecast_cluster_warnings | length > 0 %}
+      以下の理由で、翌朝のweekly full全体は自動適用されません。
+      {% for warning in _apply_forecast_cluster_warnings %}
+      - {{ warning }}
+      {% endfor %}
+      {% endif %}
+      {% if _apply_forecast_node_warnings | length > 0 %}
+      以下のnodeは、翌朝の再dry-runでも件数超過が維持された場合にapplyが停止する見込みです。weekly fullの適用順と翌朝の再dry-run結果により、他nodeへの影響は異なります。
+      {% for warning in _apply_forecast_node_warnings %}
+      - {{ warning }}
+      {% endfor %}
+      {% endif %}
+  run_once: true
+  delegate_to: localhost
+  become: false
+  when: _apply_forecast_warnings | default([], true) | length > 0
