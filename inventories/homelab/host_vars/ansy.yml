@@ -8,3 +8,14 @@
 # the ansible-core package. See
 # docs/ai/reviews/ubuntu_vm_full_upgrade/2026-07-11_009_test_result.md.
 ubuntu_vm_full_upgrade_ansible_managed_by: apt
+
+# ubuntu_vm_full_upgrade (roles/ubuntu_vm_full_upgrade/defaults/main.yml):
+# expected distribution codename. Filling this arms the codename-drift signal
+# of MAJOR_UPGRADE_DETECTED (tasks/classify.yml, task "Evaluate
+# MAJOR_UPGRADE_DETECTED signals"), which is skipped while the default stays
+# empty. A mismatch refuses manual apply outright (task "Reject manual apply
+# if Status forbids it") — keep this in step with the host's actual release,
+# or the monthly apply stops on a value nobody updated.
+# Measured 2026-09-19 on ansy itself: /etc/os-release VERSION_CODENAME=resolute
+# (Ubuntu 26.04.1 LTS). See docs/ai/reviews/ubuntu_codename_drift/.
+ubuntu_vm_full_upgrade_expected_codename: resolute

@@ -14,6 +14,14 @@
 
 旧Policyはmonthly dry-runを毎月2日に行う運用としていた。現行scheduleの具体値はscheduler設定を正本とする。判定mode、対象、confirmationの正確なCLI契約はplaybook先頭とrole assertionを正本とし、本Contextはcommand例によってPolicy gateを迂回させない。
 
+## Release upgradeを行ったとき
+
+**同じ作業の中で `inventories/homelab/host_vars/<host>.yml` の `ubuntu_vm_full_upgrade_expected_codename` を新しいcodenameへ更新する。**
+
+この値はmonthly判定のcodename drift信号の期待値で、実際のreleaseと食い違うとStatusが `MAJOR_UPGRADE_DETECTED` になり、**そのホストへのmanual applyは確認文字列を渡しても拒否される**。総数・remove数の閾値超過と違い、**次の月になっても自然には解消しない** — 値を直すまで拒否が続く。
+
+repoにrelease upgradeを実行する経路は無く、実施は人の手による。**更新を忘れても、忘れた時点では何も起きない**(次のmonthly判定で初めて出る)。
+
 ## Manual apply
 
 1. 対象nodeと直近のmonthly判定結果を確認する。
