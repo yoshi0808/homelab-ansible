@@ -372,6 +372,8 @@
     _wf_final_report: "{{ hostvars[_status_host]['_final_report'] | default({}) }}"
     _wf_remove_count: "{{ _wf_final_report.remove_count | default(0) | int }}"
     _wf_dryrun_nodes: "{{ _wf_final_report.node_summaries | default({}) | list }}"
+    _wf_apply_gate_defined: "{{ '_apply_forecast_apply_gate' in hostvars[_status_host] }}"
+    _wf_apply_gate: "{{ hostvars[_status_host]['_apply_forecast_apply_gate'] if (_wf_apply_gate_defined | bool) else none }}"
     _wf_proceed: >-
       {{ (_wf_dryrun_nodes | length > 0) and
          ((_status == 'PATCH_READY') or
@@ -399,6 +401,59 @@
                  (_status == 'MAINTENANCE_REQUIRED' and _wf_remove_count > 0))
 
         - name: End this play (normal exit - patching intentionally skipped)
+          ansible.builtin.meta: end_play
+
+    - name: Validate apply forecast gate before proceeding
+      ansible.builtin.assert:
+        that:
+          - _wf_apply_gate_defined | bool
+          - _wf_apply_gate is mapping
+          - _wf_apply_gate.evaluated is defined
+          - _wf_apply_gate.evaluated is sameas true
+          - _wf_apply_gate.threshold is defined
+          - _wf_apply_gate.threshold | type_debug == 'int'
+          - _wf_apply_gate.blocking_nodes is defined
+          - _wf_apply_gate.blocking_nodes | type_debug == 'list'
+        fail_msg: >-
+          _apply_forecast_apply_gate is missing or violates its contract:
+          it must be a dict with evaluated=true (bool), threshold (int), and
+          blocking_nodes (list) on the dry-run status host.
+
+    - name: Validate apply forecast gate blocking-node fields
+      ansible.builtin.assert:
+        that:
+          - _wf_apply_gate.blocking_nodes | select('mapping') | list | length == (_wf_apply_gate.blocking_nodes | length)
+          - _wf_apply_gate.blocking_nodes | selectattr('node', 'defined') | list | length == (_wf_apply_gate.blocking_nodes | length)
+          - _wf_apply_gate.blocking_nodes | selectattr('update_count', 'defined') | list | length == (_wf_apply_gate.blocking_nodes | length)
+        fail_msg: >-
+          _apply_forecast_apply_gate.blocking_nodes has an entry missing node
+          or update_count.
+
+    - name: Cleanly skip when the Saturday apply forecast exceeds its per-node threshold
+      when: _wf_apply_gate.blocking_nodes | length > 0
+      block:
+        - name: Send Slack notification for apply forecast count-gate skip
+          ansible.builtin.include_tasks: "{{ playbook_dir }}/../roles/common_slack/tasks/notify.yml"
+          vars:
+            slack_channel: "patches"
+            slack_status: "{{ 'info' if ansible_check_mode else 'warning' }}"
+            slack_title: "[Proxmox Patch] weekly full適用を見送り - node別更新候補が閾値超過"
+            slack_message: |
+              Proxmox weekly full patch: apply段での件数超過が予告されたため、
+              mute・退避・適用を開始せずに今回の自動実行を見送りました。
+
+              {% for node in _wf_apply_gate.blocking_nodes %}
+              - {{ node.node }}: 更新候補 {{ node.update_count }} 件 (apply閾値 {{ _wf_apply_gate.threshold }})
+              {% endfor %}
+
+              必要に応じて Semaphore の #8 Proxmox patch apply node と #10
+              Proxmox restore VM placement を手動で実行してください。
+
+        - name: Set skip flag for subsequent plays
+          ansible.builtin.set_fact:
+            _weekly_full_skip: true
+
+        - name: End this play (normal exit - apply forecast count gate)
           ansible.builtin.meta: end_play
 
     # From here _wf_proceed is true: PATCH_READY or MAINTENANCE_REQUIRED

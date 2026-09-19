@@ -10,6 +10,21 @@
   become: false
   when: _pre_status == 'NEEDS_CLASSIFICATION'
 
+- name: Determine Saturday automatic-apply forecast gate
+  ansible.builtin.set_fact:
+    _apply_forecast_apply_gate: >-
+      {%- set gate = namespace(blocking_nodes=[]) -%}
+      {%- for node_name, summary in unified_dryrun.node_summaries.items() -%}
+      {%- if summary.update_count | int > _apply_forecast_major_upgrade_threshold | int -%}
+      {%- set _ = gate.blocking_nodes.append({'node': node_name, 'update_count': summary.update_count | int}) -%}
+      {%- endif -%}
+      {%- endfor -%}
+      {{ {'evaluated': true, 'threshold': _apply_forecast_major_upgrade_threshold | int, 'blocking_nodes': gate.blocking_nodes} }}
+  run_once: true
+  delegate_to: localhost
+  become: false
+  when: _pre_status == 'NEEDS_CLASSIFICATION'
+
 - name: Determine Saturday automatic-apply forecast warnings
   ansible.builtin.set_fact:
     _apply_forecast_cluster_warnings: >-
@@ -23,10 +38,12 @@
       {{ forecast.warnings }}
     _apply_forecast_node_warnings: >-
       {%- set forecast = namespace(warnings=[]) -%}
-      {%- for node_name, summary in unified_dryrun.node_summaries.items() -%}
-      {%- if summary.update_count | int > _apply_forecast_major_upgrade_threshold | int -%}
-      {%- set _ = forecast.warnings.append(node_name ~ ': 更新候補 ' ~ (summary.update_count | string) ~ ' 件が apply の閾値 ' ~ (_apply_forecast_major_upgrade_threshold | string) ~ ' を超えています。') -%}
-      {%- endif -%}
+      {%- for node in _apply_forecast_apply_gate.blocking_nodes -%}
+      {%- set warning = node.node ~ ': 更新候補 ' ~ (node.update_count | string)
+                         ~ ' 件が apply の閾値 '
+                         ~ (_apply_forecast_apply_gate.threshold | string)
+                         ~ ' を超えています。' -%}
+      {%- set _ = forecast.warnings.append(warning) -%}
       {%- endfor -%}
       {{ forecast.warnings }}
   run_once: true
@@ -47,15 +64,15 @@
     _notify_body: |
       {{ _notify_body }}
 
-      翌朝の自動適用予告:
+      自動適用の予告:
       {% if _apply_forecast_cluster_warnings | length > 0 %}
-      以下の理由で、翌朝のweekly full全体は自動適用されません。
+      以下の理由で、weekly full全体は自動適用されません。
       {% for warning in _apply_forecast_cluster_warnings %}
       - {{ warning }}
       {% endfor %}
       {% endif %}
       {% if _apply_forecast_node_warnings | length > 0 %}
-      以下のnodeは、翌朝の再dry-runでも件数超過が維持された場合にapplyが停止する見込みです。weekly fullの適用順と翌朝の再dry-run結果により、他nodeへの影響は異なります。
+      以下のnodeは、再dry-runでも件数超過が維持された場合にapplyが停止する見込みです。weekly fullの適用順と再dry-run結果により、他nodeへの影響は異なります。
       {% for warning in _apply_forecast_node_warnings %}
       - {{ warning }}
       {% endfor %}
