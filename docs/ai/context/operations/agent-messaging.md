@@ -23,6 +23,8 @@ teamには過去の独立レビュー用identityと旧`implementer`登録が残�
 | `reviewer` | `codex` | 同上(計画査読だけに使う) |
 | `auditor` | `codex` | 同上 |
 
+**1つのteamの1つの役につき、登録は現に走っているCLI型の1つが正しい形である。** 割り当てが変わったら `leave` → 正しい型で `join` で移す(§10)。**型を増やす方向で足さない** — 登録は「誰が受け取るか」ではなく「どこに居るか」を表すため、古い型が残っていると、**起動直後のagentが返信先を自分で引き当てるときにそちらを選ぶ。** 残存登録の整理そのものは下記のとおり本runbookの機能要件ではないが、**`homelab-ops` については §7 が例外を定める。** 満たしていない登録の現況は `docs/ai/status.md` が持つ。
+
 Implementerはlauncherが常駐paneとして、計画ReviewerとAuditorはCoordinatorが案件ごとに、いずれもfresh sessionとして起動する。`reviewer`は計画査読にだけ使い、実装差分のレビューはClaude Code subagentへ委任する。同じ名前の別typeの登録(`implementer`のclaude-codeなど)や過去の独立レビュー用identityはteam rosterに残り得るが、登録の存在を現行経路と読まない。登録の整理は本runbookの機能要件ではない。
 
 **成果物をagmsgのメッセージだけに残さない。** 監査証跡は `docs/ai/reviews/<target>/` 配下のファイルであるという `docs/ai/core.md` の定めは、依頼先がどのCLIでも変わらない。メッセージDBはリポジトリ外にあり、`git log` からも案件記録からも辿れない。
@@ -106,6 +108,8 @@ codex 側には2つの層がある。**一方は repo で追跡され、もう�
 |---|---|---|
 | `coordinator` | ansy | 人が直接使っているセッション。team `homelab` / `homelab-ops`の両方で同じ識別子を使い、人が見ている同一セッションが両方を受ける |
 | `operator` | quory | watcher は Operator セッションの一部。**セッションと共に消える**(sync engine は別、§9) |
+
+**このteamの開発側の席は `coordinator` だけである。** `homelab` の役(Implementer / 計画Reviewer / Auditor)をここへ登録しない。**起動直後のagentが自分で join して入り込むことがある** — 2026-09-20に実際に起きた。
 
 - **サーバは ansy 上にある**(Docker + nginx の TLS 終端)。配備の正本は `roles/agmsg_server/` と `playbooks/agmsg_server_setup.yml`、設計と実測は `docs/ai/reviews/agmsg_remote_ops_channel/`。ポート・パス・到達許可の値をここへ写さない。
 - **サーバに認証機構は無い。到達できること自体が権限である。** 門は**二層**で、①コンテナが公開する面を loopback に限定し、②外部へ出る面を nginx 1箇所へ集約して ufw で絞る。**Docker が直接公開したポートは通常の INPUT chain を素通りする**ため、片方だけでは門にならない。実装は `roles/agmsg_server/templates/compose.yaml.j2` と `roles/agmsg_server/tasks/firewall.yml`。
@@ -195,6 +199,8 @@ seat の実体は `run/role-session.<team>__<agent>` の1ファイル(中身は 
 2. **起動の後に seat を張り直す**
 
 **spawn で立てる役は `spawn.sh --fresh` が両方を担う(§4)。pane 0だけは spawn を使えない** — そこは人が直接使っているセッションそのものだからで、各ホストの起動スクリプトが自前で行う。
+
+**boot promptは返信先のteamを名指しする。** 「coordinatorへREADY」とだけ書くと、agentは返信先を登録から自分で引き当てる。`coordinator` は `homelab` と `homelab-ops` の両方に居るため、**`homelab-ops` を選んでそこへ join し、登録を1つ増やしたうえでREADYを返す。** 送った依頼は `homelab` 側で未読のまま滞留し、**エラーは出ない。** 検出できるのは §3 の `○` だけである。
 
 **`--fresh` を省かない。** Implementer / 計画Reviewer / Auditorへ以前の案件の因果や判断を持ち越さない。計画ReviewerとImplementerには別identityを使う。
 
