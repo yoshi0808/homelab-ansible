@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """SessionStart hook: /clear・再起動・compactのたびに「現在地」を文脈へ載せる。
 
-規範(どう振る舞うか)は CLAUDE.md → docs/ai/core.md が入口として既に機能している。
+規範(どう振る舞うか)は AGENTS.md → docs/ai/core.md が入口として既に機能している。
 ここで補うのは状態(今どこにいて何を待っているか)であり、その正本は docs/ai/status.md。
 要約せず現物を渡す — 要約した層は必ず本文より古くなる
 (docs/ai/memory/lessons/always-loaded-summaries-are-the-least-current.md)。

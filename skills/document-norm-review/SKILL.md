@@ -1,6 +1,6 @@
 ---
 name: document-norm-review
-description: homelab-ansibleで規範文書(Policy / Context / Role文書 / SKILL.md / prompt / CLAUDE.md)の変更をレビューするときに使う。「Policyを移設した」「正本を差し替えた」「規範を書き換えた」「判定基準を直した」変更のレビュー観点。コード実装のレビュー観点ではなく、規範そのものが壊れる欠陥クラスを対象とする。
+description: homelab-ansibleで規範文書(Policy / Context / Role文書 / SKILL.md / prompt / AGENTS.md)の変更をレビューするときに使う。「Policyを移設した」「正本を差し替えた」「規範を書き換えた」「判定基準を直した」変更のレビュー観点。コード実装のレビュー観点ではなく、規範そのものが壊れる欠陥クラスを対象とする。
 ---
 
 # 規範文書レビュー(欠陥クラス・チェックリスト)
@@ -14,12 +14,12 @@ description: homelab-ansibleで規範文書(Policy / Context / Role文書 / SKIL
 **「直した箇所を数える」のではなく「古い記述が1つも無いことを示す」。** 撤回した文言そのものを検索語にして残存ゼロを確認する。
 
 ```
-grep -rn "<撤回した文言>" docs/ai/ skills/ roles/ playbooks/ inventories/ CLAUDE.md AGENTS.md
+grep -rn "<撤回した文言>" docs/ai/ skills/ roles/ playbooks/ inventories/ AGENTS.md
 ```
 
 目視の掃引は失敗する。2026-07-27の1セッションで、いずれも「直したつもりで目視確認した」状態から3件の残存が出た(`docs/ai/memory/lessons/sweep-all-documents-stating-a-changed-boundary.md` 根拠2)。変更した箇所の周辺だけを見ると必ず漏れる。
 
-**検索対象にはAIが読むファイルを必ず含める**(prompt テンプレート、`skills/*/SKILL.md`、`CLAUDE.md`、`AGENTS.md`、実装コメント)。ここに古い規範が残ると、人間が気づかないまま以後の全Role・全subagentの判断が汚染され続ける。
+**検索対象にはAIが読むファイルを必ず含める**(prompt テンプレート、`skills/*/SKILL.md`、`AGENTS.md`、実装コメント)。ここに古い規範が残ると、人間が気づかないまま以後の全Role・全subagentの判断が汚染され続ける。
 
 ## 欠陥クラス
 

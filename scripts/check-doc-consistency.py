@@ -616,7 +616,7 @@ _SCHEME_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9+.\-]*:")
 # incident that forced this change). An allowlist fails safe instead: a
 # newly-added directory is simply not scanned until someone deliberately
 # adds it here, rather than becoming a surprise false positive.
-_NORMATIVE_EXACT_PATHS = frozenset({"CLAUDE.md", "AGENTS.md", "playbooks/README.md"})
+_NORMATIVE_EXACT_PATHS = frozenset({"AGENTS.md", "playbooks/README.md"})
 _NORMATIVE_PREFIXES = (
     "docs/ai/policies/",
     "docs/ai/context/",

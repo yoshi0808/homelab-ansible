@@ -19,7 +19,7 @@ Yoshinobuからの「その考え方はリポのどこかに記録されてい�
 安全境界・承認フロー・禁止事項を変更する決定を実施したら、着手前に次を機械的に洗い出す。
 
 ```
-grep -rn "<変更した境界のキーワード>" docs/ai/ CLAUDE.md AGENTS.md skills/
+grep -rn "<変更した境界のキーワード>" docs/ai/ AGENTS.md skills/
 ```
 
 対象の典型は次の4層。上位ほど見落とすと影響が広い。
@@ -27,7 +27,7 @@ grep -rn "<変更した境界のキーワード>" docs/ai/ CLAUDE.md AGENTS.md s
 1. `docs/ai/core.md`(全Roleが最初に読む共通原則) — **最も見落としやすく、最も影響が大きい**
 2. `docs/ai/roles/*.md`
 3. `docs/ai/policies/*_policy.md`、`docs/ai/context/`
-4. `skills/*/SKILL.md`、`CLAUDE.md`
+4. `skills/*/SKILL.md`、`AGENTS.md`
 
 あわせて、決定の**根拠と見直し条件**を`docs/ai/memory/decisions/`へ書く。運用上の境界そのものは正本(通常はRole文書かPolicy)に置き、decisions側へ複製しない。
 
@@ -41,7 +41,7 @@ grep -rn "<変更した境界のキーワード>" docs/ai/ CLAUDE.md AGENTS.md s
 
 **教訓の更新**: 掃引は目視でなく`grep`等で機械的に行い、**撤回した文言そのものを検索語にして残存ゼロを確認する**。「直した箇所を数える」のではなく「古い記述が1つも無いことを示す」。上記3件はいずれも、変更した箇所の周辺だけを見ていたために漏れた。
 
-対象には**実装コメント・promptテンプレート・正本文書のすべて**を含める。特にAIが読むファイル(prompt、SKILL.md、CLAUDE.md)に古い規範が残ると、人間が気づかないまま judgment が汚染され続ける。
+対象には**実装コメント・promptテンプレート・正本文書のすべて**を含める。特にAIが読むファイル(prompt、SKILL.md、AGENTS.md)に古い規範が残ると、人間が気づかないまま judgment が汚染され続ける。
 
 ## 関連
 

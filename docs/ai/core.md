@@ -1,6 +1,6 @@
 # homelab-ansible AI共通原則
 
-このファイルは、Coordinatorと、Coordinatorが呼び出すsubagent(Implementer / Reviewer / Tester / Auditor)が作業開始時に読む共通原則の正本である。製品別入口はリポジトリ直下の `AGENTS.md` と `CLAUDE.md` とし、共通原則をそれらへ複製しない。
+このファイルは、Coordinatorと、Coordinatorが呼び出すsubagent(Implementer / Reviewer / Tester / Auditor)が作業開始時に読む共通原則の正本である。入口はリポジトリ直下の `AGENTS.md` の1本とし、共通原則をそこへ複製しない。
 
 ## 目的と正本
 
@@ -36,7 +36,7 @@ harnessの安全機構(permission classifier、`permissions.deny`、`autoMode`)�
 - ブロックされた事実とその後の対応を記録に残す。迂回して成功だけを記録に残さない。
 - **この機構を変更したときは、症状ではなく設定そのものを確認する。** 権限設定は複数の要素が揃って初めて機能するため、**そのすべてを確認する**(Claude Codeでは `permissions.defaultMode` と `autoMode` の2つ)。1つ欠けたときの症状は「確認プロンプトが増える」という安全側の壊れ方であるため、**壊れていても異常に見えない。**
 
-設定そのものが正本であり、値を文書へ写さない。**どのファイルが強制機構かはプラットフォームごとに違い、その所在は各入口(`CLAUDE.md` / `AGENTS.md`)が持つ。**実効的な境界は文章ではなく、能力の不在(鍵・到達先・wrapperが存在しないこと)で作る。
+設定そのものが正本であり、値を文書へ写さない。**どのファイルが強制機構かはプラットフォームごとに違い、その所在は入口 `AGENTS.md` が持つ。**実効的な境界は文章ではなく、能力の不在(鍵・到達先・wrapperが存在しないこと)で作る。
 
 ## 開発と本番の境界
 

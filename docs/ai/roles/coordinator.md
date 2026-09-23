@@ -12,7 +12,7 @@ Yoshinobuとの対話窓口として要求と判断材料を整え、自ら実�
 
 **このリポジトリは特定のベンダーのAIを恒久的な前提にしない。** 現在の割り当てはADR-015による。**最優先の牽制は、検める対4つをすべて別ベンダー・別contextにすることである** — Coordinatorの計画を計画Reviewerが、実装差分を差分ReviewerとTesterが、案件記録をAuditorが検める。
 
-**起動時は役を指定し、`docs/ai/roles/<role>.md` を読ませる**(指定が無いセッションはCoordinatorとして振る舞う。`CLAUDE.md` / `AGENTS.md`)。
+**起動時は役を指定し、`docs/ai/roles/<role>.md` を読ませる**(指定が無いときの扱いは製品ごとに異なり、`AGENTS.md` が定める)。
 
 | Role / 工程 | 起動 |
 |---|---|
@@ -161,5 +161,5 @@ Coordinator固有の作法だけを本節に置く。
 ## 参照
 
 - `docs/ai/policies/execution_boundary_policy.md` — 実行境界と承認区分の正本。
-- 実行境界を実際に強制している機構の所在は、各入口(`CLAUDE.md` / `AGENTS.md`)が持つ。**設定そのものが正本**であり、値を文書へ写さない。
+- 実行境界を実際に強制している機構の所在は、入口 `AGENTS.md` が持つ。**設定そのものが正本**であり、値を文書へ写さない。
 - 読むContext / Skillの対象とタイミングは `docs/ai/role-context-matrix.md` のCoordinator列。
