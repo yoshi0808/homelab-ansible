@@ -18,6 +18,10 @@ Python の外側、systemd の ExecStart 上で `flock -n -E 75` が行う(こ�
   75 = (このスクリプトからは返らない。flock -E 75 が多重起動時に返す値。
         参考として記載するのみ。)
 
+相関先のないspool recordでも、文字列の `info` / `warning` に完全一致する通常通知は
+collection_errorsではなくbundleのcorrelation_notesへ記録し、exit 0の対象とする。
+未知値・欠落・非文字列を含む他のnotable recordは従来どおりcollection_errorsへ積む。
+
 **exit 2 の journal可読性**(2026-09-02、
 docs/ai/reviews/incident_capture_journal_legibility/2026-09-02_001_requirement.md
 AC1〜AC8、実装記録2026-09-02_002。2回の独立レビューで3件blocking差し戻し
@@ -191,6 +195,11 @@ REQUIRED_SPOOL_FIELDS = {
 # 通知経路が"問題あり"として記録した(ok/空文字以外の)ステータス集合。
 # ok/空文字は「捕捉はしたが単体では証拠バンドルの根拠にならない」通常通知。
 NON_NOTABLE_SLACK_STATUS = {"", "ok"}
+
+# 相関先のないnotableなspool recordのうち、成功したジョブからの通常通知だけは
+# collection errorではない。未知値・欠落・非文字列を含むそれ以外は、従来どおり
+# fail-closedでcollection_errorsへ残す。
+TOLERATED_UNCORRELATED_SLACK_STATUS = {"info", "warning"}
 
 # collection_errors の "what" のうち、非信頼データ(IC-016: spoolのpath/
 # basename/play_host/play_name。書き手は recovery-exec とAnsible controller
@@ -933,29 +942,33 @@ def main():
         if entry["used"]:
             continue
         rec = entry["record"]
-        if rec.get("slack_status") in NON_NOTABLE_SLACK_STATUS:
+        slack_status = rec.get("slack_status")
+        if isinstance(slack_status, str) and slack_status in NON_NOTABLE_SLACK_STATUS:
             continue
         entry["used"] = True
         bundle_id = spool_bundle_id(rec)
+        no_correlated_job = {
+            "what": f"{WHAT_PREFIX_NO_CORRELATED_JOB}{rec.get('play_name')!r})",
+            "why": (
+                "this spool record's slack_status is notable but no Semaphore "
+                "failed-job row correlated within the configured time tolerance "
+                f"({cfg['spool_correlation_tolerance_s']}s); the collector does not walk "
+                "Semaphore task ids beyond recent-failed to avoid adding new query "
+                "capability (ADR-003 (c))"
+            ),
+        }
         summary = {
             "bundle_id": bundle_id,
             "source": "spool",
             "semaphore": None,
             "spool_records": [rec],
             "snapshot": {"base": None, "host": None},
-            "collection_errors": [
-                {
-                    "what": f"{WHAT_PREFIX_NO_CORRELATED_JOB}{rec.get('play_name')!r})",
-                    "why": (
-                        "this spool record's slack_status is notable but no Semaphore "
-                        "failed-job row correlated within the configured time tolerance "
-                        f"({cfg['spool_correlation_tolerance_s']}s); the collector does not walk "
-                        "Semaphore task ids beyond recent-failed to avoid adding new query "
-                        "capability (ADR-003 (c))"
-                    ),
-                }
-            ],
+            "collection_errors": [],
         }
+        if isinstance(slack_status, str) and slack_status in TOLERATED_UNCORRELATED_SLACK_STATUS:
+            summary["correlation_notes"] = [no_correlated_job]
+        else:
+            summary["collection_errors"].append(no_correlated_job)
         pending_bundles.append((summary, {}, rec["play_host"]))
 
     bundles_created = [s["bundle_id"] for s, _r, _h in pending_bundles]
