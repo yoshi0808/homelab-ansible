@@ -13,8 +13,6 @@
 
 **incident-captureの分類変更: 2026-09-28(月)の観測待ち**。成功ジョブの `info` / `warning` 通知が相関先なしで収集エラー扱いになり、週1回 `Failed to start homelab-incident-capture.service` が出ていた件を直した(案件クローズ、`docs/ai/reviews/incident_capture_exit_semantics/`)。**配備は2026-09-23に完了した**(ジョブ#1210 success、`deployed-hash incident-capture-collector` がrepoの現物と一致)。**2026-09-28(月)09:00**の `SAFE: Syslog weekly digest` の成功通知のあと、09:05の収集周期で `Failed to start` が出なければ狙いどおり。
 
-**weekly fullの件数超過ゲート: 2026-09-25(金)のdry-run通知の観測待ち**。予告節が現行と同じ条件で出る/出ないことを確かめる。件数超過の週にchainがStep 2cのmute・退避へ入らずclean-skipするようにした案件(`docs/ai/reviews/proxmox_weekly_full_count_gate/`)の受入条件AC9は、実ノードへ到達できず本案件の検証設計の外にあるため未充足のままクローズしており、この観測がその代わりである(根拠は同フォルダ `_006` §7)。
-
 ## Next(着手候補) — 工程・体制
 
 | 項目 | 内容 | 根拠 |
