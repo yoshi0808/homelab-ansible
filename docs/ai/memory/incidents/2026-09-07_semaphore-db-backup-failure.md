@@ -4,7 +4,7 @@
 状態: 解決済み
 対象: `playbooks/semaphore_db_backup.yml` / incident capture pipeline / quory Semaphore
 種別: 動作不具合
-原因分類: サポート境界外の内部DB依存 / バックアップ要件との不一致
+原因分類: #要件定義ミス(サポート境界外の内部DB依存 / バックアップ要件との不一致)
 
 ## 症状
 

@@ -114,7 +114,7 @@ Policy または Skill (該当業務のPolicyファイル新設・改訂、ま�
 
 **起動はtimerが行う。** `roles/knowledge_review`が配置する`ansible-knowledge-review.timer`が毎月26日にansyで発火し、`playbooks/knowledge_review.yml`がきっかけの通知を出す。振り返り自体は人がCoordinatorとの対話セッションで行う。
 
-**期日の正本はCoordinatorのMEMORY.md先頭の1行**であり続ける。timerは起動機構、MEMORY.mdは実施記録という分担で、振り返り自身が最後にこの行を更新する。二重管理を避けるため、期日を他所へ書かない。
+**期日の正本はCoordinatorのMEMORY.md先頭の1行**であり続ける。**この行の日付はtimerが通知のときに翌月へ進める**(`playbooks/knowledge_review.yml`)。したがってこの行は実施の証拠にならない。**実施の記録は`docs/ai/memory/knowledge-review-log.md`の節である。** 二重管理を避けるため、期日を他所へ書かない。
 
 **書き出し先**: `docs/ai/memory/`・`docs/ai/context/`・`skills/`・`docs/ai/status.md`。`docs/ai/policies/`本文の改訂はYoshinobuの領域であり、必要なら提案として起こす。**状態の突合で見つかった差分は、その場で`docs/ai/status.md`へ反映する。**
 

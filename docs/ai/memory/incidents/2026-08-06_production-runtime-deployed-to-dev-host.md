@@ -1,7 +1,7 @@
 # Incident: 本番ランタイムが開発機へ配備され、ansy が二重の Slack リスナーになった
 
 日付: 2026-08-06
-状態: 調査中(repo 側の対象縮小が未了)
+状態: 解決済み(`recovery_io_setup` / `recovery_exec_setup` / `recovery_probe_setup` / `incident_inspect_setup` の `hosts:` はいずれも `control_nodes` のみ。2026-09-26に現物確認)
 対象: playbooks/recovery_io_setup.yml ほか3本 / roles/recovery_io / ansy
 種別: セキュリティ事故
 原因分類: #要件定義ミス #運用考慮ミス
