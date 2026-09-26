@@ -1,0 +1,59 @@
+---
+# tester-gate: safe-readonly -- localhost fixture only.
+#
+# AC4 / R3 (proxmox_patch_judgment_2a): when the AI's major_upgrade_suspected
+# is true but the mechanical R2 check finds nothing, Status must NOT become
+# MAJOR_UPGRADE_DETECTED, and the notification body must carry the R3
+# reference note. This drives the two verbatim expressions from
+# roles/proxmox_patch_dryrun/tasks/main.yml responsible for that.
+- name: Verify the AI-only major-upgrade reference note (AC4/R3)
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    cases:
+      - id: ai_true_mechanical_empty
+        ai_suspected: true
+        major_upgrade_findings: []
+        expected_flag: true
+      - id: ai_true_mechanical_present
+        ai_suspected: true
+        major_upgrade_findings: [{package: pve-manager, node: pve1, reason: 'major version changed'}]
+        expected_flag: false
+      - id: ai_false_mechanical_empty
+        ai_suspected: false
+        major_upgrade_findings: []
+        expected_flag: false
+  tasks:
+    - name: Evaluate each AI-only-notice case
+      ansible.builtin.include_tasks: _eval_ai_only_notice_case.yml
+      loop: "{{ cases }}"
+      loop_control:
+        loop_var: scenario
+        label: "{{ scenario.id }}"
+
+    - name: Assert flag matches expectation
+      ansible.builtin.assert:
+        that:
+          - item.flag == item.expected
+        fail_msg: "{{ item.id }}: flag={{ item.flag }}, expected={{ item.expected }}"
+        success_msg: "{{ item.id }}: OK"
+      loop: "{{ _ai_notice_results }}"
+      loop_control:
+        label: "{{ item.id }}"
+
+    # The 'ai_true_mechanical_empty' case must also produce a notify body
+    # carrying the R3 reference text (AC4's other half: notification content).
+    - name: Re-run the ai_true_mechanical_empty case to inspect the notify body
+      ansible.builtin.include_tasks: _eval_ai_only_notice_case.yml
+      vars:
+        scenario:
+          id: ai_true_mechanical_empty_body_check
+          ai_suspected: true
+          major_upgrade_findings: []
+
+    - name: AC4 -- notify body carries the R3 reference note
+      ansible.builtin.assert:
+        that:
+          - "'参考: AIはmajor upgradeの疑いを挙げましたが、機械判定では該当しませんでした。' in _notify_body"
+        fail_msg: "notify body did not carry the R3 reference note: {{ _notify_body }}"

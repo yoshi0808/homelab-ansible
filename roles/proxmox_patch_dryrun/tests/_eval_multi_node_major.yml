@@ -1,0 +1,55 @@
+---
+# Included with loop_var: scenario by test_multi_node_major.yml.
+# Drives the SAME expression as roles/proxmox_patch_dryrun/tasks/main.yml's
+# "Detect major-version changes from per-node dry-run data" against a
+# multi-node fixture, with hostvars for each node set from scenario.nodes
+# (a dict of {node_name: [updates...]}), iterated in scenario.node_order.
+
+- name: Reset per-node dryrun hostvars for this scenario
+  ansible.builtin.set_fact:
+    _reached_nodes: "{{ scenario.node_order }}"
+
+# hostvars[node].node_dryrun.updates requires node_dryrun to actually be a
+# hostvar of that inventory host. Since this test runs single-play against
+# localhost only, we fake per-node hostvars by using add_host to register
+# throwaway in-memory hosts carrying node_dryrun, matching what the real
+# role sees (each inventory node has its own node_dryrun fact).
+- name: Register throwaway hosts carrying this scenario's per-node updates
+  ansible.builtin.add_host:
+    name: "{{ node }}"
+    groups: scenario_nodes
+    node_dryrun:
+      updates: "{{ scenario.nodes[node] }}"
+  loop: "{{ scenario.node_order }}"
+  loop_control:
+    loop_var: node
+
+# --- Verbatim from roles/proxmox_patch_dryrun/tasks/main.yml ---
+
+- name: Detect major-version changes from per-node dry-run data
+  ansible.builtin.set_fact:
+    _major_upgrade_findings: >-
+      {%- set ns = namespace(items=[]) -%}
+      {%- for node in _reached_nodes -%}
+      {%- for update in hostvars[node].node_dryrun.updates | default([]) -%}
+      {%- if update.name in ['pve-manager', 'proxmox-ve', 'base-files'] -%}
+      {%- set installed = update.installed_version | default('', true) -%}
+      {%- set candidate = update.candidate_version | default('', true) -%}
+      {%- set installed_no_epoch = installed | regex_replace('^[0-9]+:', '') -%}
+      {%- set candidate_no_epoch = candidate | regex_replace('^[0-9]+:', '') -%}
+      {%- if installed | length == 0 or candidate | length == 0 or not (installed_no_epoch is match('^[0-9]')) or not (candidate_no_epoch is match('^[0-9]')) -%}
+      {%- set ns.items = ns.items + [{'package': update.name, 'node': node, 'reason': '版を判定できない'}] -%}
+      {%- elif (installed_no_epoch | regex_search('^[0-9]+')) != (candidate_no_epoch | regex_search('^[0-9]+')) -%}
+      {%- set ns.items = ns.items + [{'package': update.name, 'node': node, 'reason': 'major version changed'}] -%}
+      {%- endif -%}{%- endif -%}{%- endfor -%}{%- endfor -%}{{ ns.items }}
+
+# --- End verbatim block ---
+
+- name: Record multi-node result
+  ansible.builtin.set_fact:
+    _multi_node_results: >-
+      {{ (_multi_node_results | default([])) +
+         [{'id': scenario.id, 'node_order': scenario.node_order,
+           'detected': (_major_upgrade_findings | length > 0),
+           'findings': _major_upgrade_findings,
+           'expected': scenario.expected}] }}

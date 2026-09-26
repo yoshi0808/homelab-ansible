@@ -1,0 +1,132 @@
+---
+# tester-gate: safe-readonly -- localhost fixture only, no real Proxmox
+# host contact, no Slack send (the notify.yml include itself is not
+# exercised here; only the subject/body/status-building task is).
+#
+# AC8b (proxmox_patch_judgment_2a): when the final post-healthcheck status
+# is CRITICAL, the apply notification must become "[WARNING]"-equivalent
+# (subject prefix, body line, and slack_status). This was the gap flagged
+# by docs/ai/reviews/proxmox_patch_judgment_2a/2026-09-27_006_audit.md
+# indictment 1 -- _005 had marked AC8b PASS without exercising the
+# notification subject/body/status, only the retry-loop status transition.
+- name: Verify apply notification becomes WARNING-equivalent on final CRITICAL post-healthcheck (AC8b)
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    proxmox_patch_apply_mirror_host: "mirror.example"
+    cases:
+      - id: final_critical
+        post_hc_status: CRITICAL
+        expect_status: warning
+        expect_subject_prefix: "[WARNING]"
+      - id: final_ok
+        post_hc_status: OK
+        expect_status: ok
+        expect_subject_prefix: "[SUCCESS]"
+  tasks:
+    # --- Verbatim from roles/proxmox_patch_apply_node/tasks/main.yml,
+    # "Set run timestamp and initialize result facts" (the fields the
+    # notify task below reads unconditionally in its "not aborted, not
+    # failed" branches). _apply_run_ts is fixed instead of using the real
+    # lookup('pipe', 'date ...') task -- that lookup just runs `date`
+    # locally and has no branching logic to test. ---
+    - name: Initialize result facts (same defaults as main.yml's init task)
+      ansible.builtin.set_fact:
+        _apply_run_ts: "20260927T000000"
+        _apply_failed: false
+        _apply_abort_type: "none"
+        _apply_error_msg: ""
+        _predryrun: {}
+        _sim_updates: []
+        _sim_removes: []
+        _blocked_important_removes: []
+        _important_updates: []
+        _new_vs_dryrun: []
+        _unchanged_vs_dryrun: []
+        _download_stdout: ""
+        _download_stderr: ""
+        _download_bytes: 0
+        _download_seconds: 0
+        _download_cache_hit: false
+        _apply_seconds: 0
+        _apply_stdout: ""
+        _apply_collect: {}
+        _reboot_required_before: false
+        _apply_reboot_done: false
+        _post_hc_status: "UNKNOWN"
+        _pre_hc_status: "UNKNOWN"
+        _running_on_target: []
+        _notify_subject: "[UNKNOWN] {{ inventory_hostname }}: パッチ適用結果不明"
+        _notify_body: "パッチ適用の結果を取得できませんでした。ログを確認してください。"
+        _post_hc_retry_status: "CRITICAL"
+        _post_hc_retry_json: {}
+        _nas_cache_available: false
+        _nas_cache_warnings: []
+        _mirror_candidates: []
+        _mirror_probe_results: []
+        _mirror_selected_address: ""
+        _mirror_selected_rtt_ms: ""
+    # --- End verbatim init block. ---
+
+    # --- Verbatim from roles/proxmox_patch_apply_node/tasks/main.yml,
+    # "Set JST cache key and persistent phase log paths" (only the two
+    # fields the notify body reads; _apply_cache_date/_nas_cache_run_dir
+    # are unused by the notify task). ---
+    - name: Set persistent phase log paths (same as main.yml's path-setup task)
+      ansible.builtin.set_fact:
+        _download_log_path: "/var/log/proxmox-patch-apply/20260927T000000-download.log"
+        _apply_log_path: "/var/log/proxmox-patch-apply/20260927T000000-apply.log"
+    # --- End verbatim block. ---
+
+    - name: Evaluate each notify case
+      ansible.builtin.include_tasks: _eval_notify_case.yml
+      loop: "{{ cases }}"
+      loop_control:
+        loop_var: scenario
+        label: "{{ scenario.id }}"
+
+    - name: Assert notification subject/status match AC8b expectation
+      ansible.builtin.assert:
+        that:
+          - item.notify_status == item.expect_status
+          - item.notify_subject is search(item.expect_subject_prefix | regex_escape)
+          - "item.notify_body is search('post-healthcheck: ' + item.post_hc_status)"
+        fail_msg: >-
+          {{ item.id }}: notify_status={{ item.notify_status }} (expected {{ item.expect_status }}),
+          notify_subject={{ item.notify_subject }} (expected prefix {{ item.expect_subject_prefix }})
+        success_msg: "{{ item.id }}: OK (status={{ item.notify_status }}, subject={{ item.notify_subject }})"
+      loop: "{{ _notify_results }}"
+      loop_control:
+        label: "{{ item.id }}"
+
+    # Confirm the copied notify task still matches the real one, so this
+    # fixture cannot silently drift from the role it verifies.
+    - name: Confirm the WARNING-subject branch is unchanged in main.yml
+      ansible.builtin.command:
+        argv:
+          - grep
+          - -n
+          - -F
+          - "パッチ適用完了 - post-healthcheck"
+          - "{{ playbook_dir }}/../tasks/main.yml"
+      register: _notify_subject_check
+      changed_when: false
+
+    - name: Confirm the notify_status warning branch is unchanged in main.yml
+      ansible.builtin.command:
+        argv:
+          - grep
+          - -n
+          - -F
+          - "_post_hc_status != 'OK' -%}"
+          - "{{ playbook_dir }}/../tasks/main.yml"
+      register: _notify_status_check
+      changed_when: false
+
+    - name: Assert both copied expressions were found verbatim in the role
+      ansible.builtin.assert:
+        that:
+          - _notify_subject_check.stdout | length > 0
+          - _notify_status_check.stdout | length > 0
+        fail_msg: "copied notify expression no longer matches the role source"

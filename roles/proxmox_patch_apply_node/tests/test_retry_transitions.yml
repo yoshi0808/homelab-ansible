@@ -1,0 +1,94 @@
+---
+# tester-gate: safe-readonly -- localhost fixture only, no real Proxmox
+# host contact, no write to /usr/local/sbin (see _eval_retry_attempt.yml
+# header for what is mocked and why).
+#
+# AC8b (proxmox_patch_judgment_2a): retry_healthcheck_once.yml must (a)
+# resolve to OK once an attempt in the sequence comes back clean, and (b)
+# resolve to CRITICAL when every attempt in the sequence stays CRITICAL.
+# Drives the real roles/proxmox_healthcheck classify_critical.yml (shared
+# with AC9) through retry_healthcheck_once.yml's real control flow, per
+# attempt, exactly as roles/proxmox_patch_apply_node/tasks/main.yml's retry
+# loop does (loop range(hc_retry_count+1), each inclusion self-gated once
+# OK is reached).
+- name: Verify retry-loop CRITICAL->OK and all-CRITICAL transitions (AC8b)
+  hosts: localhost
+  connection: local
+  gather_facts: true
+  vars:
+    proxmox_healthcheck_root_fs_critical_pct: 90
+    proxmox_healthcheck_root_fs_warning_pct: 80
+    proxmox_healthcheck_repl_critical_hours: 24
+    proxmox_healthcheck_repl_warning_hours: 2
+    proxmox_patch_apply_hc_retry_count: 2
+    healthy:
+      cluster: {quorate: 'Yes'}
+      zfs: {collection_ok: true, pools: []}
+      apt: {check_ok: true, check_output: ''}
+      services: {pve_cluster: active, corosync: active, pvedaemon: active, pveproxy: active}
+      systemd: {failed_count: 0, failed_units: []}
+      filesystem: {root_used_pct: 20}
+      replication: {entries: []}
+      reboot_required: false
+    critical: "{{ healthy | combine({'cluster': {'quorate': 'No'}}, recursive=true) }}"
+  tasks:
+    - name: "Scenario: recovers to OK partway through retries"
+      ansible.builtin.set_fact:
+        _post_hc_retry_status: "CRITICAL"
+        scenario: {attempts: ["{{ critical }}", "{{ healthy }}", "{{ healthy }}"]}
+
+    - name: Run the retry loop (recovers scenario)
+      ansible.builtin.include_tasks: _eval_retry_attempt.yml
+      loop: "{{ range(proxmox_patch_apply_hc_retry_count | int + 1) | list }}"
+      loop_control:
+        loop_var: _post_hc_retry_idx
+
+    - name: Record recovers-scenario final status
+      ansible.builtin.set_fact:
+        _final_status_recovers: "{{ _post_hc_retry_status }}"
+
+    - name: "Scenario: stays CRITICAL through all retries"
+      ansible.builtin.set_fact:
+        _post_hc_retry_status: "CRITICAL"
+        scenario: {attempts: ["{{ critical }}", "{{ critical }}", "{{ critical }}"]}
+
+    - name: Run the retry loop (all-critical scenario)
+      ansible.builtin.include_tasks: _eval_retry_attempt.yml
+      loop: "{{ range(proxmox_patch_apply_hc_retry_count | int + 1) | list }}"
+      loop_control:
+        loop_var: _post_hc_retry_idx
+
+    - name: Record all-critical scenario final status
+      ansible.builtin.set_fact:
+        _final_status_all_critical: "{{ _post_hc_retry_status }}"
+
+    - name: AC8b -- assert both transitions resolve correctly
+      ansible.builtin.assert:
+        that:
+          - _final_status_recovers == 'OK'
+          - _final_status_all_critical == 'CRITICAL'
+        fail_msg: "recovers={{ _final_status_recovers }} (expected OK), all_critical={{ _final_status_all_critical }} (expected CRITICAL)"
+        success_msg: "AC8b: OK (recovers -> OK, all-critical -> CRITICAL)"
+
+    # Exit-code invariance (non-goal, but AC8b explicitly calls it out):
+    # nothing in this fixture or the real retry task ever calls
+    # ansible.builtin.fail / meta: end_play on _post_hc_retry_status, so the
+    # apply role's own exit code is untouched by this classification --
+    # confirmed by inspection (grep) rather than execution, since exercising
+    # the real exit code needs a real host and a real reboot.
+    - name: Confirm no fail/end_play is keyed on post-healthcheck status (static check)
+      ansible.builtin.command:
+        cmd: >-
+          grep -n "_post_hc_status\|_post_hc_retry_status"
+          {{ playbook_dir }}/../tasks/main.yml
+          {{ playbook_dir }}/../tasks/retry_healthcheck_once.yml
+      register: _hc_status_refs
+      changed_when: false
+      failed_when: false
+
+    - name: Assert none of those references trigger fail/end_play
+      ansible.builtin.assert:
+        that:
+          - "'ansible.builtin.fail' not in _hc_status_refs.stdout"
+          - "'end_play' not in _hc_status_refs.stdout"
+        fail_msg: "a fail/end_play appears near a post-healthcheck status reference: {{ _hc_status_refs.stdout }}"

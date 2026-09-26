@@ -41,7 +41,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# --- 2. Section 3 と Section 16 を抽出 ---
+# --- 2. 判断軸（Section 4）を抽出 ---
 extract_section() {
     local file="$1"
     local section_num="$2"
@@ -52,10 +52,10 @@ extract_section() {
     ' "$file"
 }
 
-SECTION3=$(extract_section "$POLICY_FILE" "3")
+SECTION4=$(extract_section "$POLICY_FILE" "4")
 
-if [ -z "$SECTION3" ]; then
-    echo "Error: Failed to extract Section 3 from $POLICY_FILE" >&2
+if [ -z "$SECTION4" ]; then
+    echo "Error: Failed to extract Section 4 from $POLICY_FILE" >&2
     exit 1
 fi
 
@@ -82,11 +82,11 @@ cat > "$PROMPT_FILE" << 'PROMPT_EOF'
 6. 日本語で report_md を生成する（changelog 差分の全文と分析結果を含む）
 7. JSON 形式のみ出力する（前後の説明文不要）
 
-## パッチポリシー（Section 3: 判断軸）
+## パッチポリシー（Section 4: 判断軸）
 
 PROMPT_EOF
 
-printf '%s\n' "$SECTION3" >> "$PROMPT_FILE"
+printf '%s\n' "$SECTION4" >> "$PROMPT_FILE"
 
 cat >> "$PROMPT_FILE" << 'PROMPT_EOF'
 

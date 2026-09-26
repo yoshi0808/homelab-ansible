@@ -1,0 +1,63 @@
+---
+# tester-gate: safe-readonly -- localhost fixture only, no real Proxmox
+# host contact. `_pvesh_raw` is faked; `_control_node_name` is set directly
+# instead of exercising the `lookup('pipe', 'hostname -s')` task (that
+# lookup runs a harmless local command, but this test cares about the
+# comparison logic, not localhost's own hostname).
+#
+# AC10 (proxmox_patch_judgment_2a, R6): the control-node check must match
+# the EXECUTION host's own short hostname against VM names on the target
+# node -- not the old hardcoded default 'ansy'.
+- name: Verify the control-node check uses the execution host's own hostname (AC10)
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    inventory_hostname: pve-target
+    cases:
+      # Execution host's own name matches a VM on the target -> must abort.
+      - id: exec_host_matches_vm_on_target
+        control_node_name: exec-host
+        pvesh_resources:
+          - {type: qemu, node: pve-target, name: exec-host}
+          - {type: qemu, node: pve-target, name: other-vm}
+        expect_abort: true
+      # No VM on target matches the execution host's name -> must NOT abort.
+      - id: no_match_no_abort
+        control_node_name: exec-host
+        pvesh_resources:
+          - {type: qemu, node: pve-target, name: other-vm}
+        expect_abort: false
+      # A VM named after the OLD hardcoded default ('ansy'-equivalent) is on
+      # the target, but the execution host is a DIFFERENT host -> must NOT
+      # abort (this is the regression AC10 exists to catch: the check no
+      # longer searches for a fixed name regardless of who is executing).
+      - id: old_default_name_present_but_not_executing_here
+        control_node_name: some-other-execution-host
+        pvesh_resources:
+          - {type: qemu, node: pve-target, name: legacy-default-name}
+        expect_abort: false
+      # Substring match must NOT trigger (equalto, not search/contains):
+      # execution host 'ans' should not match VM name 'ansy-like-vm'.
+      - id: substring_must_not_match
+        control_node_name: ans
+        pvesh_resources:
+          - {type: qemu, node: pve-target, name: ans-something-else}
+        expect_abort: false
+  tasks:
+    - name: Evaluate each control-node case
+      ansible.builtin.include_tasks: _eval_control_node_case.yml
+      loop: "{{ cases }}"
+      loop_control:
+        loop_var: scenario
+        label: "{{ scenario.id }}"
+
+    - name: Assert control-node abort matches expectation
+      ansible.builtin.assert:
+        that:
+          - item.aborted == item.expected
+        fail_msg: "{{ item.id }}: aborted={{ item.aborted }}, expected={{ item.expected }}, matched_vms={{ item.matched_vms }}"
+        success_msg: "{{ item.id }}: OK"
+      loop: "{{ _control_node_results }}"
+      loop_control:
+        label: "{{ item.id }}"

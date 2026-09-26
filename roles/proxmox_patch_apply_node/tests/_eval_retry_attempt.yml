@@ -1,8 +1,13 @@
 ---
-# Called per retry attempt via include_tasks with loop.
-# Guard block: when _post_hc_retry_status is already 'OK', the entire block is skipped.
-# This stops pause/run/parse from executing on iterations after OK is found.
-# The reset inside the block ensures no stale values persist into the determine task.
+# Included with loop_var: _post_hc_retry_idx by test_retry_transitions.yml.
+# Mirrors roles/proxmox_patch_apply_node/tasks/retry_healthcheck_once.yml
+# verbatim, EXCEPT the `ansible.builtin.command` task that runs the real
+# /usr/local/sbin/proxmox-healthcheck.sh is replaced with a set_fact that
+# returns this scenario's canned per-attempt output (that absolute path
+# cannot be safely faked without writing to real system paths -- see
+# test_result's AC8b notes). Everything after the mock (parse, shared
+# classify_critical.yml reuse, status determination) is byte-identical to
+# the real file.
 
 - block:
     - name: Reset facts for this retry attempt
@@ -10,16 +15,17 @@
         _post_hc_retry_status: "CRITICAL"
         _post_hc_retry_json: {}
 
-    - name: Wait before retry attempt
-      ansible.builtin.pause:
-        seconds: "{{ proxmox_patch_apply_hc_retry_delay }}"
+    # Real file has: "Wait before retry attempt" (ansible.builtin.pause).
+    # Skipped here to keep the fixture fast; it has no branching logic.
 
-    - name: Run healthcheck for retry attempt
-      ansible.builtin.command:
-        cmd: /usr/local/sbin/proxmox-healthcheck.sh
-      register: _post_hc_retry_raw
-      changed_when: false
-      ignore_errors: true
+    # Real file has: "Run healthcheck for retry attempt" (ansible.builtin.command
+    # cmd: /usr/local/sbin/proxmox-healthcheck.sh, register: _post_hc_retry_raw).
+    # Replaced with the scenario's canned attempt output.
+    - name: Fake healthcheck command output for this retry attempt
+      ansible.builtin.set_fact:
+        _post_hc_retry_raw:
+          failed: false
+          stdout: "{{ scenario.attempts[_post_hc_retry_idx] | to_json }}"
 
     - name: Parse healthcheck JSON for retry
       ansible.builtin.set_fact:

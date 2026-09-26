@@ -24,65 +24,8 @@
   ansible.builtin.set_fact:
     proxmox_health: "{{ healthcheck_raw.stdout | from_json }}"
 
-- name: Compute replication thresholds (epoch)
-  ansible.builtin.set_fact:
-    _thresh_repl_critical: "{{ (ansible_facts['date_time']['epoch'] | int) - (proxmox_healthcheck_repl_critical_hours | int * 3600) }}"
-    _thresh_repl_warning: "{{ (ansible_facts['date_time']['epoch'] | int) - (proxmox_healthcheck_repl_warning_hours | int * 3600) }}"
-
-- name: Find stale replication jobs
-  ansible.builtin.set_fact:
-    _repl_critical_jobs: "{{ proxmox_health.replication.entries |
-      selectattr('last_sync_epoch', 'lt', _thresh_repl_critical | int) |
-      map(attribute='job_id') | list }}"
-    _repl_warning_jobs: "{{ proxmox_health.replication.entries |
-      rejectattr('last_sync_epoch', 'lt', _thresh_repl_critical | int) |
-      selectattr('last_sync_epoch', 'lt', _thresh_repl_warning | int) |
-      map(attribute='job_id') | list }}"
-
-- name: Find degraded or faulted ZFS pools
-  ansible.builtin.set_fact:
-    _zfs_bad_pools: "{{ (proxmox_health.zfs.pools | selectattr('state', 'equalto', 'DEGRADED') | list) +
-                        (proxmox_health.zfs.pools | selectattr('state', 'equalto', 'FAULTED') | list) }}"
-
-- name: Classify criticals and warnings
-  ansible.builtin.set_fact:
-    proxmox_criticals: "{{ []
-      + ([] if proxmox_health.cluster.quorate == 'Yes'
-             else ['cluster has no quorum (quorate=' + proxmox_health.cluster.quorate + ')'])
-      + ([] if proxmox_health.zfs.collection_ok
-             else ['zpool status collection failed - ZFS state unknown'])
-      + (_zfs_bad_pools | map(attribute='name') | map('regex_replace', '^(.*)$', 'ZFS pool degraded/faulted: \\1') | list)
-      + ([] if proxmox_health.apt.check_ok
-             else ['apt/dpkg broken: ' + (proxmox_health.apt.check_output | trim)])
-      + ([] if proxmox_health.services.pve_cluster == 'active'
-             else ['service pve-cluster is not active: ' + proxmox_health.services.pve_cluster])
-      + ([] if proxmox_health.services.corosync == 'active'
-             else ['service corosync is not active: ' + proxmox_health.services.corosync])
-      + ([] if proxmox_health.services.pvedaemon == 'active'
-             else ['service pvedaemon is not active: ' + proxmox_health.services.pvedaemon])
-      + ([] if proxmox_health.services.pveproxy == 'active'
-             else ['service pveproxy is not active: ' + proxmox_health.services.pveproxy])
-      + ([] if proxmox_health.systemd.failed_count == 0
-             else ['systemd failed units (' + (proxmox_health.systemd.failed_count | string) + '): ' +
-                   (proxmox_health.systemd.failed_units | join(', '))])
-      + ([] if proxmox_health.filesystem.root_used_pct | int >= 0
-             else ['root filesystem usage collection failed (df returned -1)'])
-      + ([] if proxmox_health.filesystem.root_used_pct | int < 0 or
-               proxmox_health.filesystem.root_used_pct | int < proxmox_healthcheck_root_fs_critical_pct | int
-             else ['root filesystem ' + (proxmox_health.filesystem.root_used_pct | string) + '% used (threshold=' +
-                   (proxmox_healthcheck_root_fs_critical_pct | string) + '%)'])
-      + (_repl_critical_jobs | map('regex_replace', '^(.*)$', 'replication stale (>24h): \\1') | list)
-      }}"
-    proxmox_warnings: "{{ []
-      + (_repl_warning_jobs | map('regex_replace', '^(.*)$', 'replication stale (>2h): \\1') | list)
-      + ([] if not proxmox_health.reboot_required
-             else ['reboot-required flag is set'])
-      + ([] if (proxmox_health.filesystem.root_used_pct | int < 0 or
-                proxmox_health.filesystem.root_used_pct | int < proxmox_healthcheck_root_fs_warning_pct | int or
-                proxmox_health.filesystem.root_used_pct | int >= proxmox_healthcheck_root_fs_critical_pct | int)
-             else ['root filesystem ' + (proxmox_health.filesystem.root_used_pct | string) + '% used (threshold=' +
-                   (proxmox_healthcheck_root_fs_warning_pct | string) + '%)'])
-      }}"
+- name: Classify healthcheck criticals and warnings
+  ansible.builtin.include_tasks: classify_critical.yml
 
 - name: Build report
   ansible.builtin.set_fact:

@@ -60,6 +60,10 @@
       {%- endfor -%}
       {{ result.items }}
 
+- name: Set mechanical major findings for blocked-remove regression fixtures
+  ansible.builtin.set_fact:
+    _major_upgrade_findings: []
+
 - name: Compute final status
   ansible.builtin.set_fact:
     _final_status: >-
@@ -67,7 +71,7 @@
       {{ _pre_status }}
       {%- elif _blocked_important_removes | length > 0 -%}
       BLOCKED
-      {%- elif codex_output.status_inputs.major_upgrade_suspected | bool -%}
+      {%- elif _major_upgrade_findings | default([]) | length > 0 -%}
       MAJOR_UPGRADE_DETECTED
       {%- elif _has_important_component | bool or _has_removes | bool -%}
       MAINTENANCE_REQUIRED

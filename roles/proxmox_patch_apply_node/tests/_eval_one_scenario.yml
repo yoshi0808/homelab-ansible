@@ -41,9 +41,15 @@
       {%- endfor -%}
       {{ ns.items | unique | list }}
 
+- name: Set mechanical major findings for blocked-remove regression fixtures
+  ansible.builtin.set_fact:
+    _redryrun_major_version_findings: []
+
 - name: Compute re-dry-run flags
   ansible.builtin.set_fact:
-    _redryrun_major_upgrade: "{{ _sim_updates | length > proxmox_patch_apply_major_upgrade_threshold | int }}"
+    _redryrun_major_upgrade: >-
+      {{ (_sim_updates | length > proxmox_patch_apply_major_upgrade_threshold | int) or
+         (_redryrun_major_version_findings | length > 0) }}
     _redryrun_has_important: "{{ _important_updates | length > 0 }}"
     _redryrun_has_removes: "{{ _sim_removes | length > 0 }}"
     _redryrun_has_blocked_important_remove: "{{ _blocked_important_removes | length > 0 }}"

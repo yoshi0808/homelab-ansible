@@ -263,6 +263,33 @@
   become: false
   when: _pre_status == 'NEEDS_CLASSIFICATION'
 
+- name: Detect major-version changes from per-node dry-run data
+  ansible.builtin.set_fact:
+    _major_upgrade_findings: >-
+      {%- set ns = namespace(items=[]) -%}
+      {%- for node in _reached_nodes -%}
+      {%- for update in hostvars[node].node_dryrun.updates | default([]) -%}
+      {%- if update.name in ['pve-manager', 'proxmox-ve', 'base-files'] -%}
+      {%- set installed = update.installed_version | default('', true) -%}
+      {%- set candidate = update.candidate_version | default('', true) -%}
+      {%- set installed_no_epoch = installed | regex_replace('^[0-9]+:', '') -%}
+      {%- set candidate_no_epoch = candidate | regex_replace('^[0-9]+:', '') -%}
+      {%- if installed | length == 0 or candidate | length == 0 or
+             not (installed_no_epoch is match('^[0-9]')) or
+             not (candidate_no_epoch is match('^[0-9]')) -%}
+      {%- set ns.items = ns.items + [{'package': update.name, 'node': node, 'reason': '版を判定できない'}] -%}
+      {%- elif (installed_no_epoch | regex_search('^[0-9]+')) != (candidate_no_epoch | regex_search('^[0-9]+')) -%}
+      {%- set ns.items = ns.items + [{'package': update.name, 'node': node, 'reason': 'major version changed (' ~ installed ~ ' -> ' ~ candidate ~ ')'}] -%}
+      {%- endif -%}
+      {%- endif -%}
+      {%- endfor -%}
+      {%- endfor -%}
+      {{ ns.items }}
+  run_once: true
+  delegate_to: localhost
+  become: false
+  when: _pre_status == 'NEEDS_CLASSIFICATION'
+
 - name: Find important removes without an in-node replacement
   ansible.builtin.set_fact:
     _blocked_important_removes: >-
@@ -322,7 +349,7 @@
       {{ _pre_status }}
       {%- elif _blocked_important_removes | length > 0 -%}
       BLOCKED
-      {%- elif codex_output.status_inputs.major_upgrade_suspected | bool -%}
+      {%- elif _major_upgrade_findings | default([]) | length > 0 -%}
       MAJOR_UPGRADE_DETECTED
       {%- elif _has_important_component | bool or _has_removes | bool -%}
       MAINTENANCE_REQUIRED
@@ -350,6 +377,16 @@
   delegate_to: localhost
   become: false
 
+- name: Record AI-only major-upgrade suggestion
+  ansible.builtin.set_fact:
+    _ai_major_suspected_without_mechanical: >-
+      {{ (codex_output.status_inputs.major_upgrade_suspected | default(false) | bool) and
+         (_major_upgrade_findings | default([]) | length == 0) }}
+  run_once: true
+  delegate_to: localhost
+  become: false
+  when: _pre_status == 'NEEDS_CLASSIFICATION'
+
 - name: Show final determination
   ansible.builtin.debug:
     msg:
@@ -374,6 +411,7 @@
       update_count: "{{ unified_dryrun.cluster_summary.total_unique_updates }}"
       remove_count: "{{ unified_dryrun.cluster_summary.total_unique_removes }}"
       blocked_important_removes: "{{ _blocked_important_removes | default([]) }}"
+      major_upgrade_findings: "{{ _major_upgrade_findings | default([]) }}"
       # Schema intentionally kept as fixed pve1/pve2 keys (requirement.md P1
       # scope; a dynamic node-keyed redesign is deferred until repo-external
       # consumers, e.g. a Semaphore dashboard, are confirmed absent). Only the
@@ -513,6 +551,17 @@
   delegate_to: localhost
   become: false
   when: _final_status == 'BLOCKED'
+
+- name: Append AI-only major-upgrade suggestion to notification body
+  ansible.builtin.set_fact:
+    _notify_body: >-
+      {{ _notify_body }}
+
+      参考: AIはmajor upgradeの疑いを挙げましたが、機械判定では該当しませんでした。
+  run_once: true
+  delegate_to: localhost
+  become: false
+  when: _ai_major_suspected_without_mechanical | default(false) | bool
 
 # Applies to every status branch above (Codex-classified, NO_UPDATES,
 # BLOCKED) so a node missing from this run (AC1 -- UNREACHABLE or healthcheck

@@ -1,0 +1,46 @@
+---
+# tester-gate: safe-readonly -- localhost fixture only.
+- name: Verify the shared Proxmox healthcheck CRITICAL rule
+  hosts: localhost
+  connection: local
+  gather_facts: true
+  vars:
+    proxmox_healthcheck_root_fs_critical_pct: 90
+    proxmox_healthcheck_root_fs_warning_pct: 80
+    proxmox_healthcheck_repl_critical_hours: 24
+    proxmox_healthcheck_repl_warning_hours: 2
+    healthy:
+      cluster: {quorate: 'Yes'}
+      zfs: {collection_ok: true, pools: []}
+      apt: {check_ok: true, check_output: ''}
+      services: {pve_cluster: active, corosync: active, pvedaemon: active, pveproxy: active}
+      systemd: {failed_count: 0, failed_units: []}
+      filesystem: {root_used_pct: 20}
+      replication: {entries: []}
+      reboot_required: false
+    cases:
+      - {id: ok, change: {}, expected: false}
+      - {id: quorum, change: {cluster: {quorate: 'No'}}, expected: true}
+      - {id: zfs_collection, change: {zfs: {collection_ok: false}}, expected: true}
+      - {id: zfs_degraded, change: {zfs: {pools: [{name: rpool, state: DEGRADED}]}}, expected: true}
+      - {id: zfs_faulted, change: {zfs: {pools: [{name: rpool, state: FAULTED}]}}, expected: true}
+      - {id: apt, change: {apt: {check_ok: false}}, expected: true}
+      - {id: pve_cluster, change: {services: {pve_cluster: inactive}}, expected: true}
+      - {id: corosync, change: {services: {corosync: inactive}}, expected: true}
+      - {id: pvedaemon, change: {services: {pvedaemon: inactive}}, expected: true}
+      - {id: pveproxy, change: {services: {pveproxy: inactive}}, expected: true}
+      - {id: failed_unit, change: {systemd: {failed_count: 1, failed_units: [bad.service]}}, expected: true}
+      - {id: root_fs, change: {filesystem: {root_used_pct: 90}}, expected: true}
+      - {id: replication, change: {replication: {entries: [{job_id: job1, last_sync_epoch: 0}]}}, expected: true}
+  tasks:
+    - name: Evaluate each shared healthcheck case
+      ansible.builtin.include_tasks: _eval_shared_critical.yml
+      loop: "{{ cases }}"
+      loop_control:
+        loop_var: scenario
+
+    - name: Assert shared classifier status
+      ansible.builtin.assert:
+        that: "item.critical == item.expected"
+        fail_msg: "{{ item.id }}: critical={{ item.critical }}, expected={{ item.expected }}"
+      loop: "{{ _shared_health_results }}"

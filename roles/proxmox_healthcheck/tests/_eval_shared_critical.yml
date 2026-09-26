@@ -1,0 +1,11 @@
+---
+- name: Set shared healthcheck fixture input
+  ansible.builtin.set_fact:
+    proxmox_health: "{{ healthy | combine(scenario.change, recursive=true) }}"
+
+- name: Evaluate the shared healthcheck rule
+  ansible.builtin.include_tasks: ../tasks/classify_critical.yml
+
+- name: Record shared healthcheck result
+  ansible.builtin.set_fact:
+    _shared_health_results: "{{ (_shared_health_results | default([])) + [{'id': scenario.id, 'critical': (proxmox_criticals | length > 0), 'expected': scenario.expected}] }}"

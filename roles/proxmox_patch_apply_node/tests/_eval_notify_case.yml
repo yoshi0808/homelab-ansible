@@ -1,0 +1,155 @@
+---
+# Included with loop_var: scenario by test_notify_warning_on_critical.yml.
+
+- name: Set this scenario's final post-healthcheck status
+  ansible.builtin.set_fact:
+    _post_hc_status: "{{ scenario.post_hc_status }}"
+
+# --- Verbatim from roles/proxmox_patch_apply_node/tasks/main.yml,
+# "Set notification subject and body" / "_notify_channel" / "_notify_status". ---
+
+- name: Set notification subject and body
+  ansible.builtin.set_fact:
+    _notify_subject: >-
+      {%- if _apply_abort_type in ['maintenance_required', 'major_upgrade_detected', 'blocked_important_remove'] -%}
+      [ABORT] {{ inventory_hostname }}: 自動適用中止 - {{ _redryrun_status | default('MAINTENANCE_REQUIRED') }} 検出
+      {%- elif _apply_abort_type in ['control_node', 'healthcheck', 'vms_not_evacuated', 'apt_update', 'apt_check', 'sim_failed', 'manual_not_confirmed'] -%}
+      [ABORT] {{ inventory_hostname }}: 前提チェック失敗 ({{ _apply_abort_type }})
+      {%- elif _apply_abort_type == 'download_failed' -%}
+      [FAILED] {{ inventory_hostname }}: apt archive download 失敗
+      {%- elif _apply_abort_type == 'apply_failed' -%}
+      [FAILED] {{ inventory_hostname }}: apt-get dist-upgrade 失敗
+      {%- elif _apply_abort_type == 'reboot_timeout' -%}
+      [FAILED] {{ inventory_hostname }}: reboot 後の応答タイムアウト
+      {%- elif _apply_failed | bool -%}
+      [FAILED] {{ inventory_hostname }}: パッチ適用失敗
+      {%- elif _post_hc_status != 'OK' -%}
+      [WARNING] {{ inventory_hostname }}: パッチ適用完了 - post-healthcheck {{ _post_hc_status }}
+      {%- else -%}
+      [SUCCESS] {{ inventory_hostname }}: パッチ適用完了
+      {%- endif -%}
+    _notify_body: |
+      Proxmox パッチ適用結果
+
+      実行日時 : {{ _apply_run_ts }}
+      対象ノード: {{ inventory_hostname }}
+      結果      : {{ 'FAILED' if (_apply_failed | bool) else 'SUCCESS' }}
+
+      =========================================
+      Phase 1: 前提チェック
+      =========================================
+      pre-healthcheck: {{ _pre_hc_status }}
+      {% if _apply_abort_type in ['control_node', 'healthcheck', 'vms_not_evacuated', 'manual_not_confirmed'] %}
+      中止理由: {{ _apply_error_msg }}
+      {% endif %}
+
+      =========================================
+      Phase 2: pre-apply dry-run
+      =========================================
+      {% if _predryrun %}
+      apt_update_ok : {{ _predryrun.apt_update_ok | default('N/A') }}
+      apt_check_ok  : {{ _predryrun.apt_check_ok | default('N/A') }}
+      sim_ok        : {{ _predryrun.sim_ok | default('N/A') }}
+      更新パッケージ数: {{ _sim_updates | length }}
+      remove 数     : {{ _sim_removes | length }}
+      {% else %}
+      (未実施)
+      {% endif %}
+      {% if _apply_abort_type in ['maintenance_required', 'major_upgrade_detected', 'blocked_important_remove'] %}
+
+      [ABORT] {{ _redryrun_status | default('MAINTENANCE_REQUIRED') }} 検出
+      中止理由: {{ _apply_error_msg }}
+
+      最新 dry-run から追加された更新候補:
+      {% if _new_vs_dryrun | length > 0 %}
+      {% for pkg in _new_vs_dryrun %}
+        - {{ pkg }}
+      {% endfor %}
+      {% else %}
+        (なし)
+      {% endif %}
+
+      最新 dry-run から変わらない更新候補:
+      {% if _unchanged_vs_dryrun | length > 0 %}
+      {% for pkg in _unchanged_vs_dryrun %}
+        - {{ pkg }}
+      {% endfor %}
+      {% else %}
+        (なし)
+      {% endif %}
+
+      対応方法: {{ 'manual mode + 確認文字列で明示的に上書きするか、' if _apply_abort_type == 'major_upgrade_detected' else '' }}dry-run を再実行してください。
+      {% endif %}
+      {% if _apply_abort_type == 'none' and _redryrun_status is defined and _redryrun_status == 'MAINTENANCE_REQUIRED' %}
+
+      [INFO] MAINTENANCE_REQUIRED (remove なし) のため widened policy (2026-08-01) により自動適用しました。
+      理由: {{ _redryrun_reason }}
+      {% endif %}
+      {% if _apply_abort_type in ['apt_update', 'apt_check', 'sim_failed'] %}
+      中止理由: {{ _apply_error_msg }}
+      {% endif %}
+
+      =========================================
+      Phase 3: download
+      =========================================
+      {% if not (_apply_abort_type in ['control_node', 'healthcheck', 'vms_not_evacuated', 'apt_update', 'apt_check', 'sim_failed', 'maintenance_required', 'major_upgrade_detected', 'blocked_important_remove', 'manual_not_confirmed']) %}
+      download bytes  : {{ _download_bytes }}
+      download seconds: {{ _download_seconds }}
+      cache hit        : {{ _download_cache_hit }}
+      mirror host      : {{ proxmox_patch_apply_mirror_host }}
+      mirror address   : {{ _mirror_selected_address | default('') }}
+      mirror RTT (ms)  : {{ _mirror_selected_rtt_ms | default('') }}
+      download log     : {{ _download_log_path }}
+      NAS cache        : {{ 'available' if (_nas_cache_available | bool) else 'fallback/direct' }}
+      {% if _nas_cache_warnings | length > 0 %}
+      NAS warnings     : {{ _nas_cache_warnings | join(' | ') }}
+      {% endif %}
+      {% if _apply_abort_type == 'download_failed' %}
+      エラー: {{ _apply_error_msg }}
+      stderr excerpt: {{ ((_download_stderr | trim)[:400]) if ((_download_stderr | trim | length) > 0) else '(none)' }}
+      {% endif %}
+      {% else %}
+      (前提チェック失敗のため未実施)
+      {% endif %}
+
+      =========================================
+      Phase 4: apply
+      =========================================
+      {% if not (_apply_abort_type in ['control_node', 'healthcheck', 'vms_not_evacuated', 'apt_update', 'apt_check', 'sim_failed', 'maintenance_required', 'major_upgrade_detected', 'blocked_important_remove', 'manual_not_confirmed', 'download_failed']) %}
+      適用パッケージ数: {{ _sim_updates | length }}
+      apply seconds  : {{ _apply_seconds }}
+      apply log      : {{ _apply_log_path }}
+      reboot 実施   : {{ _apply_reboot_done }}
+      reboot trigger: {{ _apply_collect.reboot_trigger | default('') }}
+      {% if _apply_abort_type in ['apply_failed', 'reboot_timeout'] %}
+      エラー: {{ _apply_error_msg }}
+      {% endif %}
+      {% else %}
+      (前提チェック失敗のため未実施)
+      {% endif %}
+
+      =========================================
+      Phase 5: post-healthcheck
+      =========================================
+      post-healthcheck: {{ _post_hc_status }}
+    _notify_channel: "{{ 'alerts' if (_apply_abort_type != 'none' or _apply_failed | bool or _post_hc_status != 'OK') else 'patches' }}"
+    _notify_status: >-
+      {%- if _apply_abort_type != 'none' or _apply_failed | bool -%}
+      error
+      {%- elif _post_hc_status != 'OK' -%}
+      warning
+      {%- else -%}
+      ok
+      {%- endif -%}
+
+# --- End verbatim block. ---
+
+- name: Record notify scenario result
+  ansible.builtin.set_fact:
+    _notify_results: >-
+      {{ (_notify_results | default([])) +
+         [{'id': scenario.id, 'post_hc_status': scenario.post_hc_status,
+           'notify_subject': _notify_subject, 'notify_status': _notify_status,
+           'notify_body': _notify_body,
+           'expect_status': scenario.expect_status,
+           'expect_subject_prefix': scenario.expect_subject_prefix}] }}

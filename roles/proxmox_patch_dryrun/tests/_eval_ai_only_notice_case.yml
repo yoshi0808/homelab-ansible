@@ -1,0 +1,37 @@
+---
+# Included with loop_var: scenario by test_ai_only_major_notice.yml.
+
+- name: Set scenario inputs
+  ansible.builtin.set_fact:
+    codex_output:
+      status_inputs:
+        major_upgrade_suspected: "{{ scenario.ai_suspected }}"
+    _major_upgrade_findings: "{{ scenario.major_upgrade_findings }}"
+    _pre_status: "NEEDS_CLASSIFICATION"
+    _notify_body: "既存の本文。"
+
+# --- Verbatim from roles/proxmox_patch_dryrun/tasks/main.yml ---
+
+- name: Record AI-only major-upgrade suggestion
+  ansible.builtin.set_fact:
+    _ai_major_suspected_without_mechanical: >-
+      {{ (codex_output.status_inputs.major_upgrade_suspected | default(false) | bool) and
+         (_major_upgrade_findings | default([]) | length == 0) }}
+  when: _pre_status == 'NEEDS_CLASSIFICATION'
+
+- name: Append AI-only major-upgrade suggestion to notification body
+  ansible.builtin.set_fact:
+    _notify_body: >-
+      {{ _notify_body }}
+
+      参考: AIはmajor upgradeの疑いを挙げましたが、機械判定では該当しませんでした。
+  when: _ai_major_suspected_without_mechanical | default(false) | bool
+
+# --- End verbatim block ---
+
+- name: Record AI-only-notice result
+  ansible.builtin.set_fact:
+    _ai_notice_results: >-
+      {{ (_ai_notice_results | default([])) +
+         [{'id': scenario.id, 'flag': (_ai_major_suspected_without_mechanical | bool),
+           'expected': scenario.expected_flag | default(omit)}] }}

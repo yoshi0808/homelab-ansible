@@ -1,0 +1,78 @@
+---
+# tester-gate: safe-readonly -- localhost fixtures only.
+- name: Verify mechanical major-version detection for dry-run and re-dry-run
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    cases:
+      - id: pve_major
+        updates: [{name: pve-manager, installed_version: '8.4.1', candidate_version: '9.0.3'}]
+        sim: 'Inst pve-manager [8.4.1] (9.0.3 bookworm)'
+        expected: true
+      - id: base_files_major
+        updates: [{name: base-files, installed_version: '12.4+deb12u11', candidate_version: '13.0'}]
+        sim: 'Inst base-files [12.4+deb12u11] (13.0 bookworm)'
+        expected: true
+      - id: same_major_ai_only
+        updates: [{name: pve-manager, installed_version: '8.4.1', candidate_version: '8.4.14'}]
+        sim: 'Inst pve-manager [8.4.1] (8.4.14 bookworm)'
+        expected: false
+      - id: epoch_major
+        updates: [{name: pve-manager, installed_version: '1:8.4.1', candidate_version: '1:9.0.0'}]
+        sim: 'Inst pve-manager [1:8.4.1] (1:9.0.0 bookworm)'
+        expected: true
+      - id: missing_candidate
+        updates: [{name: pve-manager, installed_version: '8.4.1', candidate_version: ''}]
+        sim: 'Inst pve-manager (9.0.3 bookworm)'
+        expected: true
+      # AC5c variant 1: candidate_version key entirely absent from the
+      # updates dict (not just empty string).
+      - id: candidate_key_absent
+        updates: [{name: proxmox-ve, installed_version: '8.4.1'}]
+        sim: 'Inst proxmox-ve [8.4.1] (unknown bookworm)'
+        expected: true
+      # AC5c variant 2: candidate_version present but explicitly empty string.
+      - id: candidate_empty_string
+        updates: [{name: base-files, installed_version: '12.4+deb12u11', candidate_version: ''}]
+        sim: 'Inst base-files [12.4+deb12u11] ()'
+        expected: true
+      # AC5c variant 3: candidate_version present but its leading token is
+      # not numeric (unparsable version string).
+      - id: candidate_non_numeric
+        updates: [{name: pve-manager, installed_version: '8.4.1', candidate_version: 'unknown'}]
+        sim: 'Inst pve-manager [8.4.1] (unknown bookworm)'
+        expected: true
+  tasks:
+    - name: Evaluate each version case
+      ansible.builtin.include_tasks: _eval_major_version_case.yml
+      loop: "{{ cases }}"
+      loop_control:
+        loop_var: scenario
+
+    - name: Assert dry-run and apply classifications agree
+      ansible.builtin.assert:
+        that:
+          - item.dryrun == item.expected
+          - item.apply == item.expected
+          - item.dryrun == item.apply
+        fail_msg: "{{ item.id }}: dryrun={{ item.dryrun }}, apply={{ item.apply }}, expected={{ item.expected }}"
+      loop: "{{ _major_version_results }}"
+
+    # AC5c: the three "cannot determine" variants must record a reason
+    # containing 版を判定できない, with the package name (and, for dryrun,
+    # the node) identifiable in the finding.
+    - name: Assert AC5c undetermined-version reasons name the package (and node for dryrun)
+      ansible.builtin.assert:
+        that:
+          - (item.dryrun_findings | selectattr('reason', 'search', '版を判定できない') | list | length) > 0
+          - (item.dryrun_findings | selectattr('reason', 'search', '版を判定できない') | map(attribute='package') | list | length) > 0
+          - (item.dryrun_findings | selectattr('reason', 'search', '版を判定できない') | map(attribute='node') | select('defined') | list | length) > 0
+          - (item.apply_findings | selectattr('reason', 'search', '版を判定できない') | list | length) > 0
+          - (item.apply_findings | selectattr('reason', 'search', '版を判定できない') | map(attribute='package') | list | length) > 0
+        fail_msg: >-
+          {{ item.id }}: dryrun_findings={{ item.dryrun_findings }},
+          apply_findings={{ item.apply_findings }}
+      loop: "{{ _major_version_results | selectattr('id', 'in', ['candidate_key_absent', 'candidate_empty_string', 'candidate_non_numeric', 'missing_candidate']) | list }}"
+      loop_control:
+        label: "{{ item.id }}"

@@ -1,0 +1,55 @@
+---
+- name: Set this node's dry-run fixture
+  ansible.builtin.set_fact:
+    _reached_nodes: [localhost]
+    node_dryrun:
+      updates: "{{ scenario.updates }}"
+
+# Verbatim from roles/proxmox_patch_dryrun/tasks/main.yml.
+- name: Detect major-version changes from per-node dry-run data
+  ansible.builtin.set_fact:
+    _major_upgrade_findings: >-
+      {%- set ns = namespace(items=[]) -%}
+      {%- for node in _reached_nodes -%}
+      {%- for update in hostvars[node].node_dryrun.updates | default([]) -%}
+      {%- if update.name in ['pve-manager', 'proxmox-ve', 'base-files'] -%}
+      {%- set installed = update.installed_version | default('', true) -%}
+      {%- set candidate = update.candidate_version | default('', true) -%}
+      {%- set installed_no_epoch = installed | regex_replace('^[0-9]+:', '') -%}
+      {%- set candidate_no_epoch = candidate | regex_replace('^[0-9]+:', '') -%}
+      {%- if installed | length == 0 or candidate | length == 0 or not (installed_no_epoch is match('^[0-9]')) or not (candidate_no_epoch is match('^[0-9]')) -%}
+      {%- set ns.items = ns.items + [{'package': update.name, 'node': node, 'reason': '版を判定できない'}] -%}
+      {%- elif (installed_no_epoch | regex_search('^[0-9]+')) != (candidate_no_epoch | regex_search('^[0-9]+')) -%}
+      {%- set ns.items = ns.items + [{'package': update.name, 'node': node, 'reason': 'major version changed'}] -%}
+      {%- endif -%}{%- endif -%}{%- endfor -%}{%- endfor -%}{{ ns.items }}
+
+- name: Set re-dry-run input
+  ansible.builtin.set_fact:
+    _predryrun: {sim_output: "{{ scenario.sim }}"}
+
+# Verbatim from roles/proxmox_patch_apply_node/tasks/main.yml.
+- name: Detect major-version changes from re-dry-run simulation
+  ansible.builtin.set_fact:
+    _redryrun_major_version_findings: >-
+      {%- set ns = namespace(records=[], items=[]) -%}
+      {%- for line in _predryrun.sim_output.splitlines() -%}
+      {%- set fields = line.split() -%}
+      {%- if fields | length >= 2 and fields[0] == 'Inst' and fields[1] in ['pve-manager', 'proxmox-ve', 'base-files'] -%}
+      {%- set installed = fields[2][1:-1] if fields | length >= 4 and fields[2].startswith('[') and fields[2].endswith(']') else '' -%}
+      {%- set candidate = fields[3][1:] if fields | length >= 4 and fields[3].startswith('(') else '' -%}
+      {%- set ns.records = ns.records + [{'package': fields[1], 'installed': installed, 'candidate': candidate}] -%}
+      {%- endif -%}
+      {%- endfor -%}
+      {%- for package in ['pve-manager', 'proxmox-ve', 'base-files'] -%}
+      {%- set records = ns.records | selectattr('package', 'equalto', package) | list -%}
+      {%- if records | length > 1 -%}{%- set ns.items = ns.items + [{'package': package, 'reason': '版を判定できない'}] -%}
+      {%- elif records | length == 1 -%}
+      {%- set installed = records[0].installed | default('', true) -%}{%- set candidate = records[0].candidate | default('', true) -%}
+      {%- set installed_no_epoch = installed | regex_replace('^[0-9]+:', '') -%}{%- set candidate_no_epoch = candidate | regex_replace('^[0-9]+:', '') -%}
+      {%- if installed | length == 0 or candidate | length == 0 or not (installed_no_epoch is match('^[0-9]')) or not (candidate_no_epoch is match('^[0-9]')) -%}{%- set ns.items = ns.items + [{'package': package, 'reason': '版を判定できない'}] -%}
+      {%- elif (installed_no_epoch | regex_search('^[0-9]+')) != (candidate_no_epoch | regex_search('^[0-9]+')) -%}{%- set ns.items = ns.items + [{'package': package, 'reason': 'major version changed'}] -%}{%- endif -%}
+      {%- endif -%}{%- endfor -%}{{ ns.items }}
+
+- name: Record version result
+  ansible.builtin.set_fact:
+    _major_version_results: "{{ (_major_version_results | default([])) + [{'id': scenario.id, 'dryrun': (_major_upgrade_findings | length > 0), 'apply': (_redryrun_major_version_findings | length > 0), 'dryrun_findings': _major_upgrade_findings, 'apply_findings': _redryrun_major_version_findings, 'expected': scenario.expected}] }}"

@@ -1,0 +1,33 @@
+---
+# Included with loop_var: scenario by test_control_node_check.yml.
+
+- name: Fake pvesh cluster-resources output for this scenario
+  ansible.builtin.set_fact:
+    _pvesh_raw: {stdout: "{{ scenario.pvesh_resources | to_json }}"}
+    _control_node_name: "{{ scenario.control_node_name }}"
+
+# --- Verbatim from roles/proxmox_patch_apply_node/tasks/main.yml ---
+# ("Determine the control node name from the execution host" is replaced
+# above by the scenario's control_node_name -- the lookup('pipe', ...)
+# itself just runs `hostname -s` locally and has no branching logic to test.)
+
+- name: Detect control node running on target
+  ansible.builtin.set_fact:
+    _control_node_vms: >-
+      {{ _pvesh_raw.stdout | from_json |
+         selectattr('type', 'defined') |
+         selectattr('type', 'equalto', 'qemu') |
+         selectattr('node', 'defined') |
+         selectattr('node', 'equalto', inventory_hostname) |
+         selectattr('name', 'defined') |
+         selectattr('name', 'equalto', _control_node_name) |
+         list }}
+
+# --- End verbatim block ---
+
+- name: Record control-node result
+  ansible.builtin.set_fact:
+    _control_node_results: >-
+      {{ (_control_node_results | default([])) +
+         [{'id': scenario.id, 'aborted': (_control_node_vms | length > 0),
+           'matched_vms': _control_node_vms, 'expected': scenario.expect_abort}] }}

@@ -1,0 +1,142 @@
+---
+# tester-gate: safe-readonly -- localhost fixture only.
+#
+# AC6 (proxmox_patch_judgment_2a): a mechanically-detected R2 major upgrade
+# AND a blocked (no-replacement) important remove present at the same time
+# must resolve to BLOCKED, not MAJOR_UPGRADE_DETECTED (priority order:
+# BLOCKED checked before MAJOR_UPGRADE_DETECTED).
+#
+# This differs from the pre-existing AC6c_major_and_blocked_remove fixture
+# in roles/proxmox_patch_dryrun/tests/fixtures_blocked_removes.yml, which
+# stubs _major_upgrade_findings to [] and so never actually exercises R2's
+# mechanical version-based detection for the dryrun side (only the
+# blocked-remove branch). This test drives the real per-node major-version
+# expression (verbatim from roles/proxmox_patch_dryrun/tasks/main.yml) so
+# the priority order is exercised with a genuine mechanical major finding.
+- name: Verify BLOCKED still wins over a mechanical major-version finding (AC6)
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    proxmox_patch_dryrun_important_components:
+      - proxmox-ve
+      - pve-manager
+      - pve-cluster
+      - pve-ha-manager
+      - qemu-server
+      - pve-container
+      - corosync
+      - zfsutils-linux
+      - zfs-zed
+      - ifupdown2
+      - intel-microcode
+      - amd64-microcode
+      - systemd
+      - udev
+    proxmox_patch_dryrun_important_component_prefixes:
+      - proxmox-kernel-
+      - libpve-
+      - firmware-
+    _reached_nodes: [pve1]
+    node_dryrun:
+      updates:
+        - {name: pve-manager, installed_version: '8.4.1', candidate_version: '9.0.3'}
+    unified_dryrun:
+      updates:
+        - {name: pve-manager, nodes: [pve1], important_component: true}
+      removes:
+        - {name: zfsutils-linux, nodes: [pve1]}
+    _pre_status: "NEEDS_CLASSIFICATION"
+  tasks:
+    - name: Alias localhost's own hostvars as pve1 for the node loop
+      ansible.builtin.add_host:
+        name: pve1
+        node_dryrun: "{{ node_dryrun }}"
+
+    # --- Verbatim from roles/proxmox_patch_dryrun/tasks/main.yml ---
+
+    - name: Determine mechanical status from package flags
+      ansible.builtin.set_fact:
+        _has_important_component: "{{ unified_dryrun.updates | selectattr('important_component', 'equalto', true) | list | length > 0 }}"
+        _has_removes: "{{ unified_dryrun.removes | length > 0 }}"
+
+    - name: Detect major-version changes from per-node dry-run data
+      ansible.builtin.set_fact:
+        _major_upgrade_findings: >-
+          {%- set ns = namespace(items=[]) -%}
+          {%- for node in _reached_nodes -%}
+          {%- for update in hostvars[node].node_dryrun.updates | default([]) -%}
+          {%- if update.name in ['pve-manager', 'proxmox-ve', 'base-files'] -%}
+          {%- set installed = update.installed_version | default('', true) -%}
+          {%- set candidate = update.candidate_version | default('', true) -%}
+          {%- set installed_no_epoch = installed | regex_replace('^[0-9]+:', '') -%}
+          {%- set candidate_no_epoch = candidate | regex_replace('^[0-9]+:', '') -%}
+          {%- if installed | length == 0 or candidate | length == 0 or not (installed_no_epoch is match('^[0-9]')) or not (candidate_no_epoch is match('^[0-9]')) -%}
+          {%- set ns.items = ns.items + [{'package': update.name, 'node': node, 'reason': '版を判定できない'}] -%}
+          {%- elif (installed_no_epoch | regex_search('^[0-9]+')) != (candidate_no_epoch | regex_search('^[0-9]+')) -%}
+          {%- set ns.items = ns.items + [{'package': update.name, 'node': node, 'reason': 'major version changed'}] -%}
+          {%- endif -%}{%- endif -%}{%- endfor -%}{%- endfor -%}{{ ns.items }}
+
+    - name: Find important removes without an in-node replacement
+      ansible.builtin.set_fact:
+        _blocked_important_removes: >-
+          {%- set ns = namespace(items=[]) -%}
+          {%- for remove in unified_dryrun.removes -%}
+          {%- set exact = remove.name in proxmox_patch_dryrun_important_components -%}
+          {%- for prefix in proxmox_patch_dryrun_important_component_prefixes if remove.name.startswith(prefix) -%}
+          {%- set missing_nodes = namespace(value=[]) -%}
+          {%- for node in remove.nodes -%}
+          {%- set replacements = unified_dryrun.updates | selectattr('name', 'match', '^' + (prefix | regex_escape)) | selectattr('nodes', 'contains', node) | list -%}
+          {%- if replacements | length == 0 -%}
+          {%- set missing_nodes.value = missing_nodes.value + [node] -%}
+          {%- endif -%}
+          {%- endfor -%}
+          {%- if missing_nodes.value | length > 0 -%}
+          {%- set ns.items = ns.items + [{'name': remove.name, 'nodes': missing_nodes.value}] -%}
+          {%- endif -%}
+          {%- endfor -%}
+          {%- if exact -%}
+          {%- set ns.items = ns.items + [{'name': remove.name, 'nodes': remove.nodes}] -%}
+          {%- endif -%}
+          {%- endfor -%}
+          {%- set merged = namespace(by_name={}) -%}
+          {%- for item in ns.items -%}
+          {%- set existing = merged.by_name[item.name] | default([]) -%}
+          {%- set _ = merged.by_name.update({item.name: existing + item.nodes}) -%}
+          {%- endfor -%}
+          {%- set result = namespace(items=[]) -%}
+          {%- for name, nodes in merged.by_name.items() -%}
+          {%- set result.items = result.items + [{'name': name, 'nodes': nodes | unique | list}] -%}
+          {%- endfor -%}
+          {{ result.items }}
+
+    - name: Compute final status
+      ansible.builtin.set_fact:
+        _final_status: >-
+          {%- if _pre_status != 'NEEDS_CLASSIFICATION' -%}
+          {{ _pre_status }}
+          {%- elif _blocked_important_removes | length > 0 -%}
+          BLOCKED
+          {%- elif _major_upgrade_findings | default([]) | length > 0 -%}
+          MAJOR_UPGRADE_DETECTED
+          {%- elif _has_important_component | bool or _has_removes | bool -%}
+          MAINTENANCE_REQUIRED
+          {%- else -%}
+          PATCH_READY
+          {%- endif -%}
+
+    # --- End verbatim block ---
+
+    - name: Preconditions -- both signals must actually be present
+      ansible.builtin.assert:
+        that:
+          - _major_upgrade_findings | length > 0
+          - _blocked_important_removes | length > 0
+        fail_msg: "fixture is not actually exercising both signals: major_findings={{ _major_upgrade_findings }}, blocked={{ _blocked_important_removes }}"
+
+    - name: AC6 -- BLOCKED wins over a genuine mechanical major-version finding
+      ansible.builtin.assert:
+        that:
+          - (_final_status | trim) == 'BLOCKED'
+        fail_msg: "expected BLOCKED, got {{ _final_status | trim }} (major_findings={{ _major_upgrade_findings }}, blocked={{ _blocked_important_removes }})"
+        success_msg: "AC6: OK (BLOCKED, with major_findings={{ _major_upgrade_findings }})"

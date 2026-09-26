@@ -106,6 +106,12 @@
       changed_when: false
       check_mode: false
 
+    - name: Determine the control node name from the execution host
+      ansible.builtin.set_fact:
+        _control_node_name: "{{ lookup('pipe', 'hostname -s') | trim }}"
+      delegate_to: localhost
+      become: false
+
     - name: Detect control node running on target
       ansible.builtin.set_fact:
         _control_node_vms: >-
@@ -115,7 +121,7 @@
              selectattr('node', 'defined') |
              selectattr('node', 'equalto', inventory_hostname) |
              selectattr('name', 'defined') |
-             selectattr('name', 'search', proxmox_patch_apply_control_node_name) |
+             selectattr('name', 'equalto', _control_node_name) |
              list }}
 
     - name: Abort if control node is on target
@@ -124,7 +130,7 @@
         - ansible.builtin.set_fact:
             _apply_abort_type: "control_node"
             _apply_error_msg: >-
-              Control node '{{ proxmox_patch_apply_control_node_name }}' is running on
+              Control node '{{ _control_node_name }}' is running on
               {{ inventory_hostname }} ({{ _control_node_vms | map(attribute='name') | join(', ') }}).
               Cannot apply patch to a node hosting the control node.
         - ansible.builtin.fail:
@@ -264,6 +270,38 @@
              select('match', '^Remv ') |
              map('regex_replace', '^Remv (\S+).*', '\1') | list }}
 
+    - name: Detect major-version changes from re-dry-run simulation
+      ansible.builtin.set_fact:
+        _redryrun_major_version_findings: >-
+          {%- set ns = namespace(records=[], items=[]) -%}
+          {%- for line in _predryrun.sim_output.splitlines() -%}
+          {%- set fields = line.split() -%}
+          {%- if fields | length >= 2 and fields[0] == 'Inst' and fields[1] in ['pve-manager', 'proxmox-ve', 'base-files'] -%}
+          {%- set installed = fields[2][1:-1] if fields | length >= 4 and fields[2].startswith('[') and fields[2].endswith(']') else '' -%}
+          {%- set candidate = fields[3][1:] if fields | length >= 4 and fields[3].startswith('(') else '' -%}
+          {%- set ns.records = ns.records + [{'package': fields[1], 'installed': installed, 'candidate': candidate}] -%}
+          {%- endif -%}
+          {%- endfor -%}
+          {%- for package in ['pve-manager', 'proxmox-ve', 'base-files'] -%}
+          {%- set records = ns.records | selectattr('package', 'equalto', package) | list -%}
+          {%- if records | length > 1 -%}
+          {%- set ns.items = ns.items + [{'package': package, 'reason': '版を判定できない'}] -%}
+          {%- elif records | length == 1 -%}
+          {%- set installed = records[0].installed | default('', true) -%}
+          {%- set candidate = records[0].candidate | default('', true) -%}
+          {%- set installed_no_epoch = installed | regex_replace('^[0-9]+:', '') -%}
+          {%- set candidate_no_epoch = candidate | regex_replace('^[0-9]+:', '') -%}
+          {%- if installed | length == 0 or candidate | length == 0 or
+                 not (installed_no_epoch is match('^[0-9]')) or
+                 not (candidate_no_epoch is match('^[0-9]')) -%}
+          {%- set ns.items = ns.items + [{'package': package, 'reason': '版を判定できない'}] -%}
+          {%- elif (installed_no_epoch | regex_search('^[0-9]+')) != (candidate_no_epoch | regex_search('^[0-9]+')) -%}
+          {%- set ns.items = ns.items + [{'package': package, 'reason': 'major version changed (' ~ installed ~ ' -> ' ~ candidate ~ ')'}] -%}
+          {%- endif -%}
+          {%- endif -%}
+          {%- endfor -%}
+          {{ ns.items }}
+
     - name: Detect important components in update list
       ansible.builtin.set_fact:
         _important_updates: >-
@@ -296,7 +334,9 @@
     # weekly dry-run.
     - name: Classify re-dry-run result
       ansible.builtin.set_fact:
-        _redryrun_major_upgrade: "{{ _sim_updates | length > proxmox_patch_apply_major_upgrade_threshold | int }}"
+        _redryrun_major_upgrade: >-
+          {{ (_sim_updates | length > proxmox_patch_apply_major_upgrade_threshold | int) or
+             (_redryrun_major_version_findings | length > 0) }}
         _redryrun_has_important: "{{ _important_updates | length > 0 }}"
         _redryrun_has_removes: "{{ _sim_removes | length > 0 }}"
         _redryrun_has_blocked_important_remove: "{{ _blocked_important_removes | length > 0 }}"
@@ -317,7 +357,7 @@
           {%- if _redryrun_has_blocked_important_remove | bool -%}
           important removes without a replacement: {{ _blocked_important_removes | join(', ') }}
           {%- elif _redryrun_major_upgrade | bool -%}
-          major upgrade suspected ({{ _sim_updates | length }} packages exceed threshold {{ proxmox_patch_apply_major_upgrade_threshold }})
+          major upgrade suspected: {{ _redryrun_major_version_findings | map(attribute='package') | join(', ') if _redryrun_major_version_findings | length > 0 else (_sim_updates | length | string) ~ ' packages exceed threshold ' ~ (proxmox_patch_apply_major_upgrade_threshold | string) }}
           {%- elif (_redryrun_has_important | bool) and (_redryrun_has_removes | bool) -%}
           important components detected: {{ _important_updates | unique | join(', ') }}; removes detected: {{ _sim_removes | join(', ') }}
           {%- elif _redryrun_has_important | bool -%}
@@ -894,16 +934,23 @@
       ignore_errors: true
       when: _post_hc_raw is succeeded and (_post_hc_raw.stdout | length) > 0
 
+    - name: Prepare post-healthcheck data for shared classification
+      ansible.builtin.set_fact:
+        proxmox_health: "{{ _post_hc_json }}"
+      when: _post_hc_raw is succeeded and (_post_hc_json is defined)
+
+    - name: Classify post-healthcheck with the healthcheck role rule
+      ansible.builtin.include_role:
+        name: proxmox_healthcheck
+        tasks_from: classify_critical.yml
+      when: _post_hc_raw is succeeded and (_post_hc_json is defined)
+
     - name: Determine post-healthcheck status
       ansible.builtin.set_fact:
         _post_hc_status: >-
           {%- if _post_hc_raw is failed or _post_hc_json is not defined -%}
           UNKNOWN
-          {%- elif not (_post_hc_json.cluster.quorate == 'Yes') or
-                  not (_post_hc_json.apt.check_ok | bool) or
-                  not (_post_hc_json.services.pve_cluster == 'active') or
-                  not (_post_hc_json.services.corosync == 'active') or
-                  not (_post_hc_json.services.pvedaemon == 'active') -%}
+          {%- elif proxmox_criticals | default([]) | length > 0 -%}
           CRITICAL
           {%- else -%}
           OK

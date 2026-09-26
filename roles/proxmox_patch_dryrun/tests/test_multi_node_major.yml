@@ -1,0 +1,50 @@
+---
+# tester-gate: safe-readonly -- localhost fixture only, add_host registers
+# throwaway in-memory hosts for this play only (no inventory file touched).
+#
+# AC5b: pve1's pve-manager goes 8.4.1 -> 8.4.14 (not major), pve2's goes
+# 8.4.1 -> 9.0.3 (major). Result must be MAJOR_UPGRADE_DETECTED regardless
+# of node iteration order.
+- name: Verify node-order independence of the mechanical major-version rule (AC5b)
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    node_updates:
+      pve1:
+        - {name: pve-manager, installed_version: '8.4.1', candidate_version: '8.4.14'}
+      pve2:
+        - {name: pve-manager, installed_version: '8.4.1', candidate_version: '9.0.3'}
+    cases:
+      - id: order_pve1_then_pve2
+        node_order: [pve1, pve2]
+        nodes: "{{ node_updates }}"
+        expected: true
+      - id: order_pve2_then_pve1
+        node_order: [pve2, pve1]
+        nodes: "{{ node_updates }}"
+        expected: true
+  tasks:
+    - name: Evaluate each node-order case
+      ansible.builtin.include_tasks: _eval_multi_node_major.yml
+      loop: "{{ cases }}"
+      loop_control:
+        loop_var: scenario
+        label: "{{ scenario.id }}"
+
+    - name: Assert detection is unaffected by node iteration order
+      ansible.builtin.assert:
+        that:
+          - item.detected == item.expected
+        fail_msg: "{{ item.id }}: detected={{ item.detected }}, expected={{ item.expected }}, findings={{ item.findings }}"
+        success_msg: "{{ item.id }}: OK"
+      loop: "{{ _multi_node_results }}"
+      loop_control:
+        label: "{{ item.id }}"
+
+    - name: Assert both orders produce the SAME result (AC5b)
+      ansible.builtin.assert:
+        that:
+          - (_multi_node_results | selectattr('id', 'equalto', 'order_pve1_then_pve2') | map(attribute='detected') | first) ==
+            (_multi_node_results | selectattr('id', 'equalto', 'order_pve2_then_pve1') | map(attribute='detected') | first)
+        fail_msg: "node order changed the detection result: {{ _multi_node_results }}"

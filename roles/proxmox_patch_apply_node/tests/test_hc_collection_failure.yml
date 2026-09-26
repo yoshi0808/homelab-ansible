@@ -1,0 +1,167 @@
+---
+# tester-gate: safe-readonly -- localhost fixture only, no real Proxmox
+# host contact.
+#
+# AC8 (proxmox_patch_judgment_2a): JSON parse failure and collection
+# failure must classify as UNKNOWN in the initial post-healthcheck
+# judgment and CRITICAL in the retry judgment. This was the gap flagged
+# by docs/ai/reviews/proxmox_patch_judgment_2a/2026-09-27_006_audit.md
+# indictment 1 -- _005 had marked AC8 PASS without exercising this.
+#
+# Single-scenario playbook: run once per case via
+# test_hc_collection_failure.sh (a fresh `ansible-playbook` process per
+# scenario, not a loop within one play), because the initial judgment's
+# verbatim expression checks `_post_hc_json is not defined` -- a genuine
+# absence of the variable, which a loop within a single play cannot
+# reproduce after the first iteration (set_fact leaves the variable
+# defined for the rest of the play, even if reset to null/undef()).
+# Defaults below reproduce the `command_failed` case when run directly.
+- name: Verify JSON parse/collection failure classifies UNKNOWN (initial) / CRITICAL (retry) (AC8)
+  hosts: localhost
+  connection: local
+  gather_facts: true
+  vars:
+    proxmox_healthcheck_root_fs_critical_pct: 90
+    proxmox_healthcheck_root_fs_warning_pct: 80
+    proxmox_healthcheck_repl_critical_hours: 24
+    proxmox_healthcheck_repl_warning_hours: 2
+    hc_scenario_id: command_failed
+    hc_scenario_raw: {failed: true, rc: 1, stdout: ""}
+    hc_expect_initial: UNKNOWN
+    hc_expect_retry: CRITICAL
+  tasks:
+    # --- Verbatim from roles/proxmox_patch_apply_node/tasks/main.yml,
+    # "always" block of Phase 4 ("Run post-healthcheck script" is replaced
+    # below by the scenario's fake _post_hc_raw -- the real task is just
+    # `command: cmd: /usr/local/sbin/proxmox-healthcheck.sh`, an
+    # absolute-path execution this fixture cannot mock via PATH). ---
+
+    - name: Fake post-healthcheck command result for this scenario (initial)
+      ansible.builtin.set_fact:
+        _post_hc_raw: "{{ hc_scenario_raw }}"
+
+    - name: Parse post-healthcheck output
+      ansible.builtin.set_fact:
+        _post_hc_json: "{{ _post_hc_raw.stdout | from_json }}"
+      ignore_errors: true
+      when: _post_hc_raw is succeeded and (_post_hc_raw.stdout | length) > 0
+
+    - name: Prepare post-healthcheck data for shared classification
+      ansible.builtin.set_fact:
+        proxmox_health: "{{ _post_hc_json }}"
+      when: _post_hc_raw is succeeded and (_post_hc_json is defined)
+
+    - name: Classify post-healthcheck with the healthcheck role rule
+      ansible.builtin.include_role:
+        name: proxmox_healthcheck
+        tasks_from: classify_critical.yml
+      when: _post_hc_raw is succeeded and (_post_hc_json is defined)
+
+    - name: Determine post-healthcheck status
+      ansible.builtin.set_fact:
+        _post_hc_status: >-
+          {%- if _post_hc_raw is failed or _post_hc_json is not defined -%}
+          UNKNOWN
+          {%- elif proxmox_criticals | default([]) | length > 0 -%}
+          CRITICAL
+          {%- else -%}
+          OK
+          {%- endif -%}
+      ignore_errors: true
+
+    # --- End verbatim block (initial judgment). ---
+
+    # --- Verbatim from roles/proxmox_patch_apply_node/tasks/retry_healthcheck_once.yml
+    # (the `pause` task is dropped -- it is a plain sleep with no
+    # branching logic -- and "Run healthcheck for retry attempt" is faked
+    # the same way as the initial judgment above, for the same
+    # absolute-path reason). `_post_hc_retry_json` starts at {} here, same
+    # as main.yml's init task sets it before any retry ever runs. ---
+
+    - name: Reset facts for this retry attempt
+      ansible.builtin.set_fact:
+        _post_hc_retry_status: "CRITICAL"
+        _post_hc_retry_json: {}
+
+    - name: Fake healthcheck-for-retry command result for this scenario (retry)
+      ansible.builtin.set_fact:
+        _post_hc_retry_raw: "{{ hc_scenario_raw }}"
+
+    - name: Parse healthcheck JSON for retry
+      ansible.builtin.set_fact:
+        _post_hc_retry_json: "{{ _post_hc_retry_raw.stdout | from_json }}"
+      ignore_errors: true
+      when:
+        - not (_post_hc_retry_raw.failed | default(false) | bool)
+        - (_post_hc_retry_raw.stdout | default('') | length) > 0
+
+    - name: Prepare retry healthcheck data for shared classification
+      ansible.builtin.set_fact:
+        proxmox_health: "{{ _post_hc_retry_json }}"
+      when:
+        - not (_post_hc_retry_raw.failed | default(false) | bool)
+        - _post_hc_retry_json | length > 0
+
+    - name: Classify retry healthcheck with the healthcheck role rule
+      ansible.builtin.include_role:
+        name: proxmox_healthcheck
+        tasks_from: classify_critical.yml
+      when:
+        - not (_post_hc_retry_raw.failed | default(false) | bool)
+        - _post_hc_retry_json | length > 0
+
+    - name: Determine status for retry attempt
+      ansible.builtin.set_fact:
+        _post_hc_retry_status: >-
+          {%- if (_post_hc_retry_raw.failed | default(false) | bool) or
+                 not _post_hc_retry_json -%}
+          CRITICAL
+          {%- elif proxmox_criticals | default([]) | length > 0 -%}
+          CRITICAL
+          {%- else -%}
+          OK
+          {%- endif -%}
+      ignore_errors: true
+
+    # --- End verbatim block (retry judgment). ---
+
+    - name: "AC8 ({{ hc_scenario_id }}): assert initial=UNKNOWN-equivalent, retry=CRITICAL-equivalent"
+      ansible.builtin.assert:
+        that:
+          - _post_hc_status == hc_expect_initial
+          - _post_hc_retry_status == hc_expect_retry
+        fail_msg: >-
+          {{ hc_scenario_id }}: initial={{ _post_hc_status }} (expected {{ hc_expect_initial }}),
+          retry={{ _post_hc_retry_status }} (expected {{ hc_expect_retry }})
+        success_msg: "{{ hc_scenario_id }}: OK (initial={{ _post_hc_status }}, retry={{ _post_hc_retry_status }})"
+
+    # Confirm the copied determine expressions still match the role, so
+    # this fixture cannot silently drift from what it verifies.
+    - name: Confirm the initial-judgment determine expression is unchanged in main.yml
+      ansible.builtin.command:
+        argv:
+          - grep
+          - -n
+          - -F
+          - "_post_hc_raw is failed or _post_hc_json is not defined"
+          - "{{ playbook_dir }}/../tasks/main.yml"
+      register: _initial_expr_check
+      changed_when: false
+
+    - name: Confirm the retry-judgment determine expression is unchanged in retry_healthcheck_once.yml
+      ansible.builtin.command:
+        argv:
+          - grep
+          - -n
+          - -F
+          - "(_post_hc_retry_raw.failed | default(false) | bool) or"
+          - "{{ playbook_dir }}/../tasks/retry_healthcheck_once.yml"
+      register: _retry_expr_check
+      changed_when: false
+
+    - name: Assert both copied expressions were found verbatim in the role
+      ansible.builtin.assert:
+        that:
+          - _initial_expr_check.stdout | length > 0
+          - _retry_expr_check.stdout | length > 0
+        fail_msg: "copied determine expression no longer matches the role source"
