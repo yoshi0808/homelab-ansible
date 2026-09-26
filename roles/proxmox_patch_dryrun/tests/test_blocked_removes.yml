@@ -1,0 +1,104 @@
+---
+# tester-gate: safe-readonly -- localhost-only, no target hosts, no network,
+# no writes outside the report file this playbook itself declares below.
+#
+# Evaluates roles/proxmox_patch_dryrun/tasks/main.yml's "Find important
+# removes without an in-node replacement" and "Compute final status" set_fact
+# expressions verbatim (copy-pasted, not reimplemented) against the fixtures
+# in fixtures_blocked_removes.yml, so a future edit to those two expressions
+# that silently changes behavior is caught here without touching real
+# Proxmox nodes (execution_boundary_policy.md EXEC-010).
+#
+# Companion: roles/proxmox_patch_apply_node/tests/test_blocked_removes.yml
+# runs the apply-side equivalent against the SAME fixtures and asserts the
+# two roles agree (requirement.md R7 / AC10). Run both, then diff the JSON
+# result files they each write, or just run:
+#   roles/proxmox_patch_apply_node/tests/compare_dryrun_and_apply.sh
+- name: Evaluate proxmox_patch_dryrun's blocked-important-remove rule against fixtures
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    # Mirrors roles/proxmox_patch_dryrun/defaults/main.yml. Kept as a literal
+    # copy (not a vars_files include of the role's own defaults) because that
+    # file's other keys (e.g. proxmox_patch_dryrun_report_dir) reference
+    # reports_base_dir, which this standalone playbook does not define.
+    proxmox_patch_dryrun_important_components:
+      - proxmox-ve
+      - pve-manager
+      - pve-cluster
+      - pve-ha-manager
+      - qemu-server
+      - pve-container
+      - corosync
+      - zfsutils-linux
+      - zfs-zed
+      - ifupdown2
+      - intel-microcode
+      - amd64-microcode
+      - systemd
+      - udev
+    proxmox_patch_dryrun_important_component_prefixes:
+      - proxmox-kernel-
+      - libpve-
+      - firmware-
+    # Runtime scratch output (not part of the repo); override with -e if needed.
+    # /tmp itself always exists, so no directory-creation step is needed.
+    result_file: "/tmp/proxmox_patch_dryrun_test_results.json"
+  tasks:
+    - name: Load shared fixtures
+      ansible.builtin.include_vars:
+        file: "{{ playbook_dir }}/fixtures_blocked_removes.yml"
+
+    - name: Evaluate each scenario
+      ansible.builtin.include_tasks: _eval_one_scenario.yml
+      loop: "{{ blocked_removes_scenarios }}"
+      loop_control:
+        loop_var: scenario
+        label: "{{ scenario.id }}"
+
+    - name: Assert every scenario matched its expected dryrun status
+      ansible.builtin.assert:
+        that:
+          - item.status == item.expected
+        fail_msg: >-
+          scenario {{ item.id }}: dryrun _final_status was {{ item.status }},
+          expected {{ item.expected }}
+        success_msg: "scenario {{ item.id }}: OK ({{ item.status }})"
+      loop: "{{ _dryrun_results }}"
+      loop_control:
+        label: "{{ item.id }}"
+
+    # AC4a: the BLOCKED-by-important-remove notification subject is distinct
+    # from the apt-failure BLOCKED subject, the body names the removed
+    # package and its node, and the channel is 'alerts'.
+    - name: Re-evaluate AC4a's scenario alone to inspect its notification
+      ansible.builtin.include_tasks: _eval_one_scenario.yml
+      vars:
+        scenario: "{{ blocked_removes_scenarios | selectattr('id', 'equalto', 'AC4a_exact_match_no_replacement') | first }}"
+
+    - name: AC4a notification assertions
+      ansible.builtin.assert:
+        that:
+          - "'置換先の無い重要package remove' in _notify_subject"
+          - "'apt シミュレーション失敗' not in _notify_subject"
+          - "'zfsutils-linux' in _notify_body"
+          - "'pve1' in _notify_body"
+          - _notify_channel == 'alerts'
+        fail_msg: "AC4a: BLOCKED-by-remove notification did not meet requirement.md AC4a/R5"
+        success_msg: "AC4a: notification subject/body/channel OK"
+
+    # AC4d regression: the pre-existing apt-failure BLOCKED path (unrelated
+    # to R3) must be untouched.
+    - name: AC4d regression check
+      ansible.builtin.include_tasks: _eval_apt_failure_regression.yml
+
+    - name: Write results for cross-role comparison
+      ansible.builtin.copy:
+        dest: "{{ result_file }}"
+        content: "{{ _dryrun_results | to_nice_json }}"
+        mode: "0644"
+
+    - name: Summarize
+      ansible.builtin.debug:
+        msg: "OK: {{ _dryrun_results | length }} scenarios matched their expected dryrun status"

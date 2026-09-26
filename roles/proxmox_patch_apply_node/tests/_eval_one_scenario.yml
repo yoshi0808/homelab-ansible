@@ -1,0 +1,71 @@
+---
+# Included with loop_var: scenario by test_blocked_removes.yml.
+
+- name: Expand bulk filler updates for major-upgrade scenarios (AC6c)
+  ansible.builtin.set_fact:
+    _scenario_updates: >-
+      {%- set ns = namespace(items=scenario.updates) -%}
+      {%- for i in range(1, (scenario.bulk_update_count | default(0) | int) + 1) -%}
+      {%- set ns.items = ns.items + [{'name': 'bulk-pkg-' ~ i, 'nodes': [scenario.node], 'important_component': false}] -%}
+      {%- endfor -%}
+      {{ ns.items }}
+
+- name: Derive this node's single-node sim view from the shared fixture
+  ansible.builtin.set_fact:
+    _sim_updates: >-
+      {{ _scenario_updates | selectattr('nodes', 'contains', scenario.node) | map(attribute='name') | list }}
+    _sim_removes: >-
+      {{ scenario.removes | selectattr('nodes', 'contains', scenario.node) | map(attribute='name') | list }}
+
+# --- Verbatim from roles/proxmox_patch_apply_node/tasks/main.yml ---
+
+- name: Important updates
+  ansible.builtin.set_fact:
+    _important_updates: >-
+      {{ (_sim_updates | select('in', proxmox_patch_apply_important_components) | list) +
+         (_sim_updates | select('match', '^(' + (proxmox_patch_apply_important_component_prefixes | map('regex_escape') | join('|')) + ')') | list) }}
+
+- name: Find important removes without a replacement
+  ansible.builtin.set_fact:
+    _blocked_important_removes: >-
+      {%- set ns = namespace(items=[]) -%}
+      {%- for remove in _sim_removes -%}
+      {%- if remove in proxmox_patch_apply_important_components -%}
+      {%- set ns.items = ns.items + [remove] -%}
+      {%- endif -%}
+      {%- for prefix in proxmox_patch_apply_important_component_prefixes if remove.startswith(prefix) -%}
+      {%- if (_sim_updates | select('match', '^' + (prefix | regex_escape)) | list | length) == 0 -%}
+      {%- set ns.items = ns.items + [remove] -%}
+      {%- endif -%}
+      {%- endfor -%}
+      {%- endfor -%}
+      {{ ns.items | unique | list }}
+
+- name: Compute re-dry-run flags
+  ansible.builtin.set_fact:
+    _redryrun_major_upgrade: "{{ _sim_updates | length > proxmox_patch_apply_major_upgrade_threshold | int }}"
+    _redryrun_has_important: "{{ _important_updates | length > 0 }}"
+    _redryrun_has_removes: "{{ _sim_removes | length > 0 }}"
+    _redryrun_has_blocked_important_remove: "{{ _blocked_important_removes | length > 0 }}"
+
+- name: Determine re-dry-run status and reason
+  ansible.builtin.set_fact:
+    _redryrun_status: >-
+      {%- if _redryrun_has_blocked_important_remove | bool -%}
+      BLOCKED
+      {%- elif _redryrun_major_upgrade | bool -%}
+      MAJOR_UPGRADE_DETECTED
+      {%- elif (_redryrun_has_important | bool) or (_redryrun_has_removes | bool) -%}
+      MAINTENANCE_REQUIRED
+      {%- else -%}
+      PATCH_READY
+      {%- endif -%}
+
+# --- End verbatim block ---
+
+- name: Record scenario result
+  ansible.builtin.set_fact:
+    _apply_results: >-
+      {{ (_apply_results | default([])) +
+         [{'id': scenario.id, 'status': (_redryrun_status | trim), 'expected': scenario.expected_status,
+           'blocked_important_removes': _blocked_important_removes}] }}

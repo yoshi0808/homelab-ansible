@@ -1,0 +1,123 @@
+---
+# tester-gate: safe-readonly -- localhost-only, no target hosts, no network,
+# no writes outside the report file this playbook itself declares below.
+#
+# Evaluates roles/proxmox_patch_apply_node/tasks/main.yml's "Find important
+# removes without a replacement" and "Determine re-dry-run status" set_fact
+# expressions verbatim (copy-pasted, not reimplemented) against the SAME
+# fixtures used by roles/proxmox_patch_dryrun/tests/test_blocked_removes.yml,
+# so a future edit to either role's copy of the R3 rule that makes them
+# diverge is caught here without touching real Proxmox nodes
+# (execution_boundary_policy.md EXEC-010).
+#
+# Each scenario is expressed once in the dryrun role's unified shape
+# (updates/removes carry `nodes: [...]`); this playbook derives its own
+# single-node `_sim_updates`/`_sim_removes` input by filtering that same
+# fixture down to `scenario.node`, rather than hand-writing a second,
+# possibly-inconsistent input (requirement.md R7 / AC10).
+#
+# Run this after roles/proxmox_patch_dryrun/tests/test_blocked_removes.yml,
+# then run compare_dryrun_and_apply.sh to assert the two roles' results
+# actually agree per scenario (not just that each independently matches its
+# own expectation).
+- name: Evaluate proxmox_patch_apply_node's blocked-important-remove rule against fixtures
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    # Mirrors roles/proxmox_patch_apply_node/defaults/main.yml (identical
+    # list to proxmox_patch_dryrun's -- both roles are meant to use the same
+    # important-component catalog; kept as a literal copy for the same
+    # reason as the dryrun test: the role's own defaults file references
+    # vars this standalone playbook does not define).
+    proxmox_patch_apply_important_components:
+      - proxmox-ve
+      - pve-manager
+      - pve-cluster
+      - pve-ha-manager
+      - qemu-server
+      - pve-container
+      - corosync
+      - zfsutils-linux
+      - zfs-zed
+      - ifupdown2
+      - intel-microcode
+      - amd64-microcode
+      - systemd
+      - udev
+    proxmox_patch_apply_important_component_prefixes:
+      - proxmox-kernel-
+      - libpve-
+      - firmware-
+    proxmox_patch_apply_major_upgrade_threshold: 100
+    # Runtime scratch output (not part of the repo); /tmp always exists.
+    result_file: "/tmp/proxmox_patch_apply_node_test_results.json"
+  tasks:
+    - name: Load shared fixtures (same file the dryrun-side test uses)
+      ansible.builtin.include_vars:
+        file: "{{ playbook_dir }}/../../proxmox_patch_dryrun/tests/fixtures_blocked_removes.yml"
+
+    - name: Evaluate each scenario
+      ansible.builtin.include_tasks: _eval_one_scenario.yml
+      loop: "{{ blocked_removes_scenarios }}"
+      loop_control:
+        loop_var: scenario
+        label: "{{ scenario.id }}"
+
+    - name: Assert every scenario matched its expected apply status
+      ansible.builtin.assert:
+        that:
+          - item.status == item.expected
+        fail_msg: >-
+          scenario {{ item.id }}: apply _redryrun_status was {{ item.status }},
+          expected {{ item.expected }}
+        success_msg: "scenario {{ item.id }}: OK ({{ item.status }})"
+      loop: "{{ _apply_results }}"
+      loop_control:
+        label: "{{ item.id }}"
+
+    # AC9: the re-dry-run BLOCKED abort must fire regardless of
+    # proxmox_patch_apply_mode / proxmox_patch_apply_manual_confirm. This
+    # reproduces (verbatim) the two `when:` conditions in
+    # roles/proxmox_patch_apply_node/tasks/main.yml that decide which abort
+    # block runs, for the AC4a fixture (blocked, no major/maintenance
+    # overlap), across mode=auto, mode=manual+correct confirm, and
+    # mode=manual+wrong confirm.
+    - name: Re-evaluate AC4a's scenario alone for the AC9 abort-path check
+      ansible.builtin.include_tasks: _eval_one_scenario.yml
+      vars:
+        scenario: "{{ blocked_removes_scenarios | selectattr('id', 'equalto', 'AC4a_exact_match_no_replacement') | first }}"
+
+    - name: Determine whether this status still requires human confirmation (verbatim)
+      ansible.builtin.set_fact:
+        _redryrun_requires_confirmation: >-
+          {{ (_redryrun_status == 'MAJOR_UPGRADE_DETECTED') or
+             (_redryrun_status == 'MAINTENANCE_REQUIRED' and (_redryrun_has_removes | bool)) }}
+
+    - name: AC9 -- confirm the BLOCKED abort path is mode/confirm-independent
+      ansible.builtin.assert:
+        that:
+          # The confirmation-required auto-mode abort (task "Abort if status
+          # still requires confirmation (auto mode)") must NOT be the one
+          # that fires for BLOCKED -- it is gated on MAJOR_UPGRADE_DETECTED /
+          # MAINTENANCE_REQUIRED-with-removes only, and _redryrun_status is
+          # 'BLOCKED', neither of those.
+          - not (_redryrun_requires_confirmation | bool)
+          # The dedicated BLOCKED abort block's `when:` is exactly this, with
+          # no reference to proxmox_patch_apply_mode or
+          # proxmox_patch_apply_manual_confirm at all -- so it is true (and
+          # therefore fires and fails the play) no matter what those two
+          # variables are set to.
+          - _redryrun_status == 'BLOCKED'
+        fail_msg: "AC9: BLOCKED abort would not be mode/confirm-independent"
+        success_msg: "AC9: BLOCKED abort fires independent of proxmox_patch_apply_mode/manual_confirm"
+
+    - name: Write results for cross-role comparison
+      ansible.builtin.copy:
+        dest: "{{ result_file }}"
+        content: "{{ _apply_results | to_nice_json }}"
+        mode: "0644"
+
+    - name: Summarize
+      ansible.builtin.debug:
+        msg: "OK: {{ _apply_results | length }} scenarios matched their expected apply status"

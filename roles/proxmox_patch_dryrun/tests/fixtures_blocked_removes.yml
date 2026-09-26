@@ -1,0 +1,93 @@
+---
+# Fixture data for the R3 "important remove without a replacement" rule,
+# shared by:
+#   - roles/proxmox_patch_dryrun/tests/test_blocked_removes.yml
+#   - roles/proxmox_patch_apply_node/tests/test_blocked_removes.yml
+#
+# Each scenario is expressed once, in the unified-dry-run shape
+# (updates/removes items carry `nodes: [...]`). The apply-side test derives
+# its single-node `_sim_updates`/`_sim_removes` from the same scenario by
+# filtering on `node`, so both roles are fed the same underlying facts
+# (requirement.md R7 / AC10), not two independently hand-written inputs.
+#
+# `expected_status` is what BOTH roles must produce for this scenario
+# (dryrun's `_final_status` and apply's `_redryrun_status`), except where
+# noted (see `bulk_update_count` below for the one deliberate asymmetry that
+# is out of R3's scope).
+blocked_removes_scenarios:
+  # AC4a: exact-name important remove, no matching install anywhere.
+  - id: AC4a_exact_match_no_replacement
+    node: pve1
+    updates: []
+    removes:
+      - { name: zfsutils-linux, nodes: [pve1] }
+    expected_status: BLOCKED
+
+  # AC5: kernel prefix remove WITH a same-node replacement install -> not blocked.
+  - id: AC5_prefix_remove_with_replacement
+    node: pve1
+    updates:
+      - { name: proxmox-kernel-6.14.8-2-pve-signed, nodes: [pve1], important_component: true }
+    removes:
+      - { name: proxmox-kernel-6.8.12-4-pve-signed, nodes: [pve1] }
+    expected_status: MAINTENANCE_REQUIRED
+
+  # AC6: prefix remove, no install of the same prefix anywhere.
+  - id: AC6_prefix_remove_no_replacement_anywhere
+    node: pve1
+    updates: []
+    removes:
+      - { name: libpve-foo, nodes: [pve1] }
+    expected_status: BLOCKED
+
+  # AC6b: prefix remove on pve1, matching install exists but only on pve2 ->
+  # from pve1's point of view (dryrun's per-node check, apply's own-node
+  # view) that is still "no replacement".
+  - id: AC6b_prefix_replacement_on_other_node_only
+    node: pve1
+    updates:
+      - { name: libpve-bar, nodes: [pve2], important_component: true }
+    removes:
+      - { name: libpve-foo, nodes: [pve1] }
+    expected_status: BLOCKED
+
+  # AC6c: major-upgrade suspicion AND a blocked important remove at the same
+  # time -> BLOCKED must win (R4: checked before MAJOR_UPGRADE_DETECTED).
+  # bulk_update_count generates enough non-important filler updates on `node`
+  # to cross apply's local major-upgrade threshold; dryrun's major-upgrade
+  # signal instead comes from `major_upgrade_suspected` (AI output), which is
+  # a pre-existing, out-of-R3-scope asymmetry between the two roles' major
+  # detection -- both are just being driven independently into "would be
+  # MAJOR_UPGRADE_DETECTED if not for the blocked remove".
+  - id: AC6c_major_and_blocked_remove
+    node: pve1
+    updates: []
+    removes:
+      - { name: zfsutils-linux, nodes: [pve1] }
+    major_upgrade_suspected: true
+    bulk_update_count: 101
+    expected_status: BLOCKED
+
+  # AC7: remove present, but not an important component/prefix at all.
+  - id: AC7_non_important_remove
+    node: pve1
+    updates: []
+    removes:
+      - { name: some-random-package, nodes: [pve1] }
+    expected_status: MAINTENANCE_REQUIRED
+
+  # AC8 (no removes, no important updates): plain patch-ready.
+  - id: AC8_no_removes_no_important
+    node: pve1
+    updates:
+      - { name: some-random-package, nodes: [pve1], important_component: false }
+    removes: []
+    expected_status: PATCH_READY
+
+  # AC8 (no removes, WITH an important update): unaffected by R3.
+  - id: AC8_no_removes_with_important
+    node: pve1
+    updates:
+      - { name: pve-manager, nodes: [pve1], important_component: true }
+    removes: []
+    expected_status: MAINTENANCE_REQUIRED

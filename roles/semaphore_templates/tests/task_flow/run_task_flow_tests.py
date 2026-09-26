@@ -141,6 +141,7 @@ FIXTURE_PLAYBOOK = os.path.join(HERE, "fixture_pattern.yml")
 CANONICAL_GUARD_PLAYBOOK = os.path.join(HERE, "canonical_override_guard.yml")
 FINAL_UPDATE_CAP_PLAYBOOK = os.path.join(HERE, "final_update_cap.yml")
 DRIFT_CHECK_PLAYBOOK = os.path.join(REPO_ROOT, "playbooks", "deployment_drift_check.yml")
+CATALOG_SAFETY_TEST = os.path.join(HERE, "test_catalog_safety.py")
 
 
 def run_playbook(report_dir, extra_args=None):
@@ -194,6 +195,19 @@ def run_drift_check_scope_contract():
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, timeout=60,
     )
     return proc.returncode, proc.stdout
+
+
+def scenario_k():
+    """AC1/AC2: the three explicitly named surveys retain their safety contract."""
+    proc = subprocess.run(
+        [sys.executable, CATALOG_SAFETY_TEST],
+        cwd=REPO_ROOT,
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, timeout=30,
+    )
+    problems = []
+    if proc.returncode != 0:
+        problems.append(f"scenario K: catalog safety assertions failed: {proc.stdout.strip()}")
+    return problems
 
 
 def post_rescue_output(output):
@@ -503,6 +517,7 @@ def main():
         problems += scenario_h()
         problems += scenario_i()
         problems += scenario_j()
+        problems += scenario_k()
 
         if problems:
             print("FAILED:")
@@ -510,7 +525,7 @@ def main():
                 print(" -", p)
             return 1
         print(
-            "OK: all ten scenarios passed (no post-rescue sentinel leak; report-save failure did "
+            "OK: all eleven scenarios passed (no post-rescue sentinel leak; report-save failure did "
             "not replace the original failure; native-false extra-var override did not suppress "
             "the re-raise; UNREACHABLE report-save did not erase the original failure; the "
             "reserved-name guard rejects pre-defined internal-state names before they can be "
@@ -518,7 +533,8 @@ def main():
             "helper-variable names either; schedule preflight failure issued no template write; "
             "the retired canonical URL extra-var is rejected while normal config passes; and a "
             "five-update final diff is blocked after an at-cap pre-write plan; and the actual "
-            "deployment_drift_check.yml play-one scope assertion passed on isolated localhost)"
+            "deployment_drift_check.yml play-one scope assertion passed on isolated localhost; and "
+            "the named Semaphore surveys preserve their safety contract)"
         )
         return 0
     finally:

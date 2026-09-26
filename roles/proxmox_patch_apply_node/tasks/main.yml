@@ -45,6 +45,7 @@
     _predryrun: {}
     _sim_updates: []
     _sim_removes: []
+    _blocked_important_removes: []
     _important_updates: []
     _new_vs_dryrun: []
     _unchanged_vs_dryrun: []
@@ -267,7 +268,23 @@
       ansible.builtin.set_fact:
         _important_updates: >-
           {{ (_sim_updates | select('in', proxmox_patch_apply_important_components) | list) +
-             (_sim_updates | select('match', '^(' + (proxmox_patch_apply_important_component_prefixes | join('|')) + ')') | list) }}
+             (_sim_updates | select('match', '^(' + (proxmox_patch_apply_important_component_prefixes | map('regex_escape') | join('|')) + ')') | list) }}
+
+    - name: Find important removes without a replacement
+      ansible.builtin.set_fact:
+        _blocked_important_removes: >-
+          {%- set ns = namespace(items=[]) -%}
+          {%- for remove in _sim_removes -%}
+          {%- if remove in proxmox_patch_apply_important_components -%}
+          {%- set ns.items = ns.items + [remove] -%}
+          {%- endif -%}
+          {%- for prefix in proxmox_patch_apply_important_component_prefixes if remove.startswith(prefix) -%}
+          {%- if (_sim_updates | select('match', '^' + (prefix | regex_escape)) | list | length) == 0 -%}
+          {%- set ns.items = ns.items + [remove] -%}
+          {%- endif -%}
+          {%- endfor -%}
+          {%- endfor -%}
+          {{ ns.items | unique | list }}
 
     # requirement.md (2026-08-01 proxmox_auto_apply_widening) §2.1/§2.3:
     # classify the re-dry-run the same way SB-025 classifies the weekly
@@ -282,11 +299,14 @@
         _redryrun_major_upgrade: "{{ _sim_updates | length > proxmox_patch_apply_major_upgrade_threshold | int }}"
         _redryrun_has_important: "{{ _important_updates | length > 0 }}"
         _redryrun_has_removes: "{{ _sim_removes | length > 0 }}"
+        _redryrun_has_blocked_important_remove: "{{ _blocked_important_removes | length > 0 }}"
 
     - name: Determine re-dry-run status and reason
       ansible.builtin.set_fact:
         _redryrun_status: >-
-          {%- if _redryrun_major_upgrade | bool -%}
+          {%- if _redryrun_has_blocked_important_remove | bool -%}
+          BLOCKED
+          {%- elif _redryrun_major_upgrade | bool -%}
           MAJOR_UPGRADE_DETECTED
           {%- elif (_redryrun_has_important | bool) or (_redryrun_has_removes | bool) -%}
           MAINTENANCE_REQUIRED
@@ -294,7 +314,9 @@
           PATCH_READY
           {%- endif -%}
         _redryrun_reason: >-
-          {%- if _redryrun_major_upgrade | bool -%}
+          {%- if _redryrun_has_blocked_important_remove | bool -%}
+          important removes without a replacement: {{ _blocked_important_removes | join(', ') }}
+          {%- elif _redryrun_major_upgrade | bool -%}
           major upgrade suspected ({{ _sim_updates | length }} packages exceed threshold {{ proxmox_patch_apply_major_upgrade_threshold }})
           {%- elif (_redryrun_has_important | bool) and (_redryrun_has_removes | bool) -%}
           important components detected: {{ _important_updates | unique | join(', ') }}; removes detected: {{ _sim_removes | join(', ') }}
@@ -340,6 +362,15 @@
         - ansible.builtin.set_fact:
             _apply_abort_type: "{{ 'major_upgrade_detected' if _redryrun_status == 'MAJOR_UPGRADE_DETECTED' else 'maintenance_required' }}"
             _apply_error_msg: "{{ _redryrun_status }}: {{ _redryrun_reason }}"
+        - ansible.builtin.fail:
+            msg: "{{ _apply_error_msg }}"
+
+    - name: Abort on important remove without a replacement
+      when: _redryrun_status == 'BLOCKED'
+      block:
+        - ansible.builtin.set_fact:
+            _apply_abort_type: "blocked_important_remove"
+            _apply_error_msg: "BLOCKED: {{ _redryrun_reason }}"
         - ansible.builtin.fail:
             msg: "{{ _apply_error_msg }}"
 
@@ -901,7 +932,7 @@
     - name: Set notification subject and body
       ansible.builtin.set_fact:
         _notify_subject: >-
-          {%- if _apply_abort_type in ['maintenance_required', 'major_upgrade_detected'] -%}
+          {%- if _apply_abort_type in ['maintenance_required', 'major_upgrade_detected', 'blocked_important_remove'] -%}
           [ABORT] {{ inventory_hostname }}: 自動適用中止 - {{ _redryrun_status | default('MAINTENANCE_REQUIRED') }} 検出
           {%- elif _apply_abort_type in ['control_node', 'healthcheck', 'vms_not_evacuated', 'apt_update', 'apt_check', 'sim_failed', 'manual_not_confirmed'] -%}
           [ABORT] {{ inventory_hostname }}: 前提チェック失敗 ({{ _apply_abort_type }})
@@ -945,7 +976,7 @@
           {% else %}
           (未実施)
           {% endif %}
-          {% if _apply_abort_type in ['maintenance_required', 'major_upgrade_detected'] %}
+          {% if _apply_abort_type in ['maintenance_required', 'major_upgrade_detected', 'blocked_important_remove'] %}
 
           [ABORT] {{ _redryrun_status | default('MAINTENANCE_REQUIRED') }} 検出
           中止理由: {{ _apply_error_msg }}
@@ -982,7 +1013,7 @@
           =========================================
           Phase 3: download
           =========================================
-          {% if not (_apply_abort_type in ['control_node', 'healthcheck', 'vms_not_evacuated', 'apt_update', 'apt_check', 'sim_failed', 'maintenance_required', 'major_upgrade_detected', 'manual_not_confirmed']) %}
+          {% if not (_apply_abort_type in ['control_node', 'healthcheck', 'vms_not_evacuated', 'apt_update', 'apt_check', 'sim_failed', 'maintenance_required', 'major_upgrade_detected', 'blocked_important_remove', 'manual_not_confirmed']) %}
           download bytes  : {{ _download_bytes }}
           download seconds: {{ _download_seconds }}
           cache hit        : {{ _download_cache_hit }}
@@ -1005,7 +1036,7 @@
           =========================================
           Phase 4: apply
           =========================================
-          {% if not (_apply_abort_type in ['control_node', 'healthcheck', 'vms_not_evacuated', 'apt_update', 'apt_check', 'sim_failed', 'maintenance_required', 'major_upgrade_detected', 'manual_not_confirmed', 'download_failed']) %}
+          {% if not (_apply_abort_type in ['control_node', 'healthcheck', 'vms_not_evacuated', 'apt_update', 'apt_check', 'sim_failed', 'maintenance_required', 'major_upgrade_detected', 'blocked_important_remove', 'manual_not_confirmed', 'download_failed']) %}
           適用パッケージ数: {{ _sim_updates | length }}
           apply seconds  : {{ _apply_seconds }}
           apply log      : {{ _apply_log_path }}

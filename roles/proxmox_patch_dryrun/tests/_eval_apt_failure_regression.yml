@@ -1,0 +1,125 @@
+---
+# AC4d regression: when Status BLOCKED comes from the pre-existing apt
+# simulation failure path (_pre_status is set to BLOCKED directly, before
+# _blocked_important_removes is ever computed -- see roles/proxmox_patch_dryrun
+# /tasks/main.yml "Determine pre-Codex cluster status" and the
+# `when: _pre_status == 'NEEDS_CLASSIFICATION'` guards on every R3 task),
+# subject/body/channel must be byte-identical to the pre-change apt-failure
+# text. This reproduces that guard structure verbatim (unlike
+# _eval_one_scenario.yml, which always drives _pre_status through
+# NEEDS_CLASSIFICATION and so does not need the guards) to prove
+# _blocked_important_removes never gets computed on this path.
+
+- name: Reset facts that would otherwise leak from an earlier included scenario in this same play
+  # (In the real role this variable would simply never have been set, since
+  # the `when: _pre_status == 'NEEDS_CLASSIFICATION'` guard below skips it;
+  # this test file's playbook runs multiple scenarios in one play, so it must
+  # be reset explicitly. `[]` behaves identically to "undefined" everywhere
+  # this variable is read via `| default([])`.)
+  ansible.builtin.set_fact:
+    _blocked_important_removes: []
+    _has_important_component: false
+    _has_removes: false
+
+- name: Force the apt-simulation-failure pre-status (bypasses R3 entirely)
+  ansible.builtin.set_fact:
+    _pre_status: "BLOCKED"
+    unified_dryrun:
+      updates: []
+      removes: []
+      node_summaries:
+        pve1: { apt_update_ok: false, apt_check_ok: true, sim_ok: true }
+
+- name: Determine mechanical status from package flags (guarded, verbatim)
+  ansible.builtin.set_fact:
+    _has_important_component: "{{ unified_dryrun.updates | selectattr('important_component', 'equalto', true) | list | length > 0 }}"
+    _has_removes: "{{ unified_dryrun.removes | length > 0 }}"
+  when: _pre_status == 'NEEDS_CLASSIFICATION'
+
+- name: Find important removes without an in-node replacement (guarded, verbatim)
+  ansible.builtin.set_fact:
+    _blocked_important_removes: []
+  when: _pre_status == 'NEEDS_CLASSIFICATION'
+
+- name: Compute final status (verbatim)
+  ansible.builtin.set_fact:
+    _final_status: >-
+      {%- if _pre_status != 'NEEDS_CLASSIFICATION' -%}
+      {{ _pre_status }}
+      {%- elif _blocked_important_removes | length > 0 -%}
+      BLOCKED
+      {%- elif _has_important_component | bool or _has_removes | bool -%}
+      MAINTENANCE_REQUIRED
+      {%- else -%}
+      PATCH_READY
+      {%- endif -%}
+
+- name: Set dummy notification context vars
+  ansible.builtin.set_fact:
+    dryrun_timestamp: "2026-09-26T00-00-00"
+    _reached_nodes: ["pve1"]
+
+- name: Set notification content for BLOCKED (verbatim, current implementation)
+  ansible.builtin.set_fact:
+    _notify_subject: >-
+      {{ '[Proxmox Patch Dry-run][BLOCKED] 置換先の無い重要package remove - 適用停止'
+         if (_blocked_important_removes | default([]) | length > 0)
+         else '[Proxmox Patch Dry-run][BLOCKED] apt シミュレーション失敗 - 手動確認が必要' }}
+    _notify_body: |
+      {% if _blocked_important_removes | default([]) | length > 0 %}
+      Proxmox Patch Dry-run で置換先の無い重要packageのremoveを検出しました。自動・手動とも適用しません。
+
+      実行日時: {{ dryrun_timestamp }}
+      対象ノード: {{ _reached_nodes | join(', ') }}
+
+      Status: BLOCKED
+      {% for item in _blocked_important_removes %}
+      - remove: {{ item.name }} (node: {{ item.nodes | join(', ') }})
+      {% endfor %}
+      {% else %}
+      Proxmox Patch Dry-run で apt シミュレーションが失敗しました。
+
+      実行日時: {{ dryrun_timestamp }}
+      対象ノード: {{ _reached_nodes | join(', ') }}
+
+      Status: BLOCKED
+      自動パッチ適用は停止します。手動で apt の状態を確認してください。
+
+      ノード状態:
+      {% for node_name, summary in unified_dryrun.node_summaries.items() %}
+      - {{ node_name }}: apt_update_ok={{ summary.apt_update_ok }}, apt_check_ok={{ summary.apt_check_ok }}, sim_ok={{ summary.sim_ok }}
+      {% endfor %}
+      {% endif %}
+  when: _final_status == 'BLOCKED'
+
+- name: Set Slack channel for dryrun result (verbatim)
+  ansible.builtin.set_fact:
+    _notify_channel: "{{ 'alerts' if _final_status == 'BLOCKED' else 'patches' }}"
+
+- name: Reconstruct the pre-change apt-failure notification text for comparison
+  ansible.builtin.set_fact:
+    _expected_apt_failure_subject: "[Proxmox Patch Dry-run][BLOCKED] apt シミュレーション失敗 - 手動確認が必要"
+    _expected_apt_failure_body: |
+      Proxmox Patch Dry-run で apt シミュレーションが失敗しました。
+
+      実行日時: {{ dryrun_timestamp }}
+      対象ノード: {{ _reached_nodes | join(', ') }}
+
+      Status: BLOCKED
+      自動パッチ適用は停止します。手動で apt の状態を確認してください。
+
+      ノード状態:
+      {% for node_name, summary in unified_dryrun.node_summaries.items() %}
+      - {{ node_name }}: apt_update_ok={{ summary.apt_update_ok }}, apt_check_ok={{ summary.apt_check_ok }}, sim_ok={{ summary.sim_ok }}
+      {% endfor %}
+
+- name: AC4d assertions
+  ansible.builtin.assert:
+    that:
+      - _final_status == 'BLOCKED'
+      - _blocked_important_removes == []
+      - _notify_subject == _expected_apt_failure_subject
+      - _notify_body == _expected_apt_failure_body
+      - _notify_channel == 'alerts'
+    fail_msg: "AC4d regression: apt-failure BLOCKED notification changed"
+    success_msg: "AC4d: apt-failure BLOCKED subject/body/channel unchanged"
