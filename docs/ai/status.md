@@ -13,7 +13,7 @@
 
 **incident-captureの分類変更: 2026-09-28(月)の観測待ち**。成功ジョブの `info` / `warning` 通知が相関先なしで収集エラー扱いになり、週1回 `Failed to start homelab-incident-capture.service` が出ていた件を直した(案件クローズ、`docs/ai/reviews/incident_capture_exit_semantics/`)。**配備は2026-09-23に完了した**(ジョブ#1210 success、`deployed-hash incident-capture-collector` がrepoの現物と一致)。**2026-09-28(月)09:00**の `SAFE: Syslog weekly digest` の成功通知のあと、09:05の収集周期で `Failed to start` が出なければ狙いどおり。
 
-**確認が効かない3経路の修正: 配備待ちと 2026-10-02(金)の観測待ち**(案件クローズ、`docs/ai/reviews/patch_confirm_and_blocked_remove/`)。①quoryで `SEMI-SAFE: Semaphore templates setup` を Dry Run → 本実行で押す(Yoshinobu。押すまで本番の手動applyの確認欄とSAFEのPrometheusのボタンは変わらない)。②押したあと、`UN-SAFE:Proxmox patch apply (Manual)` の確認欄が未選択のまま起動できないことをUIで一度確かめる(Yoshinobu。ansyからは観測できない)。③置換先の無い重要removeの判定はpushでquoryへ自動反映される。10/2の金曜dry-runで、置換先なしremoveが無い週に `BLOCKED` が出ないこと(回帰なし)をCoordinatorが確かめる。重要remove由来の `BLOCKED` が初めて出たら、そのとき単独dry-runの終了コードを実測する(AC4b、`_007` のクローズ判断)。
+**確認が効かない3経路の修正: 2026-10-02(金)の観測待ち**(案件クローズ、`docs/ai/reviews/patch_confirm_and_blocked_remove/`)。Semaphoreの2テンプレートは反映済み(2026-09-27、Dry Run #1260で差分2件のみを確認、本実行後に手動applyの確認欄が未選択では起動できないことをYoshinobuがUIで確認)。置換先の無い重要removeの判定は、10/2の金曜dry-runで、置換先なしremoveが無い週に `BLOCKED` が出ないこと(回帰なし)をCoordinatorが確かめる。重要remove由来の `BLOCKED` が初めて出たら、そのとき単独dry-runの終了コードを実測する(AC4b、`_007` のクローズ判断)。
 
 ## Next(着手候補) — 工程・体制
 
