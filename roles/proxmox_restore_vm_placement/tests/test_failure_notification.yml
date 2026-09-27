@@ -1,0 +1,194 @@
+---
+# Fixture for proxmox_patch_notifications_2b AC2 / AC1c(restore側) / AC3 / AC7.
+#
+# Same technique as roles/proxmox_evacuate_node/tests/test_failure_notification.yml:
+# a line-by-line copy of the block/rescue/always structure from
+# roles/proxmox_restore_vm_placement/tasks/main.yml, with two documented
+# substitutions (fixed-output migrate command, and a scenario-gated deliberate
+# notify-build/include failure). Verify parity against the real file with
+# `diff` before trusting a PASS here.
+#
+# Run via the wrapper: roles/proxmox_restore_vm_placement/tests/run_failure_notification.sh
+# It stages a copy of this file under a temp playbooks/ dir (with a temp
+# roles/ symlinked to the real roles/ tree) so the single-dot
+# "{{ playbook_dir }}/../roles/..." include paths below resolve the same
+# way they do in the real role. Running this file directly from its
+# committed path no longer works (playbook_dir would be .../tests, one
+# level too deep). Use -e scenario=<healthcheck_fail|migrate_partial_fail|
+# success|notify_body_fail|notify_include_fail|report_save_fail> only via
+# the wrapper.
+- hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    proxmox_restore_report_dir: "{{ lookup('env', 'FIXTURE_REPORT_DIR') | default('/tmp/pxr_notify_fixture_reports', true) }}"
+    inventory_hostname_override: "pve1"
+    scenario: "migrate_partial_fail"
+  tasks:
+    - name: Fake inventory_hostname for the fixture (real role gets this from inventory)
+      ansible.builtin.set_fact:
+        inventory_hostname: "{{ inventory_hostname_override }}"
+
+    # --- copy: real file lines 41-59 ---
+    - name: Set run timestamp and initialize result facts
+      ansible.builtin.set_fact:
+        _restore_run_ts: "{{ lookup('pipe', 'date +%Y%m%dT%H%M%S') }}"
+        _restore_failed: false
+        _restore_error_msg: ""
+        _restore_failed_task: ""
+        _vms_to_restore: []
+        _restore_vms_migrated: []
+        _restore_vms_started: []
+        _restore_post_hc_status: "UNKNOWN"
+        _restore_maintenance_disabled: false
+        _restore_external_reachability_status: "NOT_RUN"
+        _restore_external_probe_attempts: 0
+        _restore_external_probe_elapsed_seconds: 0
+        _restore_report_saved: false
+
+    - name: Set restore report filename
+      ansible.builtin.set_fact:
+        _restore_report_filename: "{{ _restore_run_ts }}_{{ inventory_hostname }}_restore.json"
+
+    - name: Ensure report directory exists
+      ansible.builtin.file:
+        path: "{{ proxmox_restore_report_dir }}"
+        state: directory
+        mode: "0755"
+      check_mode: false
+
+    - block:
+        # --- substitution 1: post-restore healthcheck fixed by scenario, in
+        # place of the real Phase 4 include_role: proxmox_healthcheck (moved
+        # earlier so this fixture can exercise the failure without needing
+        # to replay every migrate/HA/reachability phase first) ---
+        - name: Migrate non-HA QEMU VMs back to target_node
+          ansible.builtin.command:
+            cmd: >-
+              {{ 'false'
+                 if (scenario in ['migrate_partial_fail', 'notify_body_fail', 'notify_include_fail', 'report_save_fail']
+                     and item.vmid == 102)
+                 else 'true' }}
+          loop: >-
+            {{ [] if scenario == 'healthcheck_fail'
+               else [{'vmid': 101}, {'vmid': 102}] }}
+          loop_control:
+            label: "QEMU {{ item.vmid }}"
+          changed_when: true
+          register: _restore_qemu_migrate
+
+        - name: Record migrated VM IDs
+          ansible.builtin.set_fact:
+            _restore_vms_migrated: >-
+              {{ ((_restore_qemu_migrate.results | default([])) +
+                  (_restore_lxc_migrate.results | default([]))) |
+                 rejectattr('failed', 'equalto', true) |
+                 map(attribute='item') | map(attribute='vmid') | list }}
+
+        - name: Record post-restore healthcheck status (fixture substitute for include_role)
+          ansible.builtin.set_fact:
+            _restore_post_hc_status: "{{ 'CRITICAL' if scenario == 'healthcheck_fail' else 'OK' }}"
+
+        - name: Abort if post-restore healthcheck is not OK
+          ansible.builtin.fail:
+            msg: >-
+              Post-restore healthcheck on {{ inventory_hostname }} is
+              {{ _restore_post_hc_status }}: (fixture)
+          when: _restore_post_hc_status != 'OK'
+
+      rescue:
+        # --- copy: real file lines 396-413 ---
+        - name: Record successful restore loop items before reporting failure
+          ansible.builtin.set_fact:
+            _restore_vms_migrated: >-
+              {{ ((_restore_qemu_migrate.results | default([])) +
+                  (_restore_lxc_migrate.results | default([]))) |
+                 rejectattr('failed', 'equalto', true) |
+                 map(attribute='item') | map(attribute='vmid') | list }}
+            _restore_vms_started: >-
+              {{ ((_restore_qemu_start.results | default([])) +
+                  (_restore_lxc_start.results | default([]))) |
+                 rejectattr('failed', 'equalto', true) |
+                 map(attribute='item') | map(attribute='vmid') | list }}
+
+        - name: Capture failure info
+          ansible.builtin.set_fact:
+            _restore_failed: true
+            _restore_error_msg: "{{ ansible_failed_result.msg | default('Unknown error during restore') }}"
+            _restore_failed_task: "{{ ansible_failed_task.name | default('Unknown task during restore') }}"
+
+      always:
+        # --- copy: real file lines 416-436, dest simplified to fixture scratch dir;
+        # substitution: report_save_fail scenario points dest at an unwritable
+        # path to exercise AC8b's failure branch for real ---
+        - name: Save restore report
+          ansible.builtin.copy:
+            content: "{{ {
+                'run_timestamp': _restore_run_ts,
+                'target_node': inventory_hostname,
+                'result': 'FAILED' if (_restore_failed | bool) else 'SUCCESS',
+                'error_msg': _restore_error_msg,
+                'vms_migrated_back': _restore_vms_migrated,
+                'vms_started': _restore_vms_started
+              } | to_nice_json }}"
+            dest: >-
+              {{ '/nonexistent-dir-pxr-fixture/' ~ _restore_report_filename
+                 if scenario == 'report_save_fail'
+                 else (proxmox_restore_report_dir ~ '/' ~ _restore_report_filename) }}
+          check_mode: false
+          ignore_errors: true
+          register: _restore_report_write
+
+        - name: Record restore report save result
+          ansible.builtin.set_fact:
+            _restore_report_saved: "{{ _restore_report_write is succeeded }}"
+
+        - name: Notify restore failure without masking it
+          when: _restore_failed | bool
+          block:
+            # --- copy: real file lines 445-455 ---
+            - name: Build restore failure notification
+              ansible.builtin.set_fact:
+                _restore_notify_message: |
+                  Proxmox VM復帰で停止しました。
+                  対象node: {{ inventory_hostname }}
+                  失敗task: {{ _restore_failed_task }}
+                  停止理由: {{ _restore_error_msg }}
+                  戻せたVM: {{ _restore_vms_migrated | join(', ') if (_restore_vms_migrated | length > 0) else '(なし)' }}
+                  起動したVM: {{ _restore_vms_started | join(', ') if (_restore_vms_started | length > 0) else '(なし)' }}
+                  VMが退避先に残っている可能性があります。
+                  report: {{ _restore_report_filename if (_restore_report_saved | bool) else 'report保存失敗' }}
+              when: scenario != 'notify_body_fail'
+
+            # --- substitution 2: deliberate body-build failure for AC1c parity test ---
+            - name: Build restore failure notification (fixture-injected failure)
+              ansible.builtin.set_fact:
+                _restore_notify_message: "{{ _fixture_undefined_marker | mandatory }}"
+              when: scenario == 'notify_body_fail'
+
+            # Single-dot form, identical to the real role file (main.yml).
+            # Only resolves when staged under <tmp>/playbooks/ with
+            # <tmp>/roles symlinked to the real roles/ tree — see
+            # run_failure_notification.sh. Direct execution from the
+            # committed path (roles/proxmox_restore_vm_placement/tests/) no
+            # longer resolves this path; use the wrapper script.
+            - name: Send restore failure notification
+              ansible.builtin.include_tasks:
+                file: >-
+                  {{ (playbook_dir ~ '/../roles/common_slack/tasks/notify.yml')
+                     if scenario != 'notify_include_fail'
+                     else (playbook_dir ~ '/../roles/common_slack/tasks/does-not-exist.yml') }}
+              vars:
+                slack_channel: alerts
+                slack_status: error
+                slack_title: "[FAILED] {{ inventory_hostname }}: VM復帰停止"
+                slack_message: "{{ _restore_notify_message }}"
+          rescue:
+            - name: Ignore restore failure notification error
+              ansible.builtin.debug:
+                msg: "Restore failure notification could not be prepared or sent; preserving the original failure."
+
+        - name: Re-raise failure
+          ansible.builtin.fail:
+            msg: "proxmox_restore_vm_placement failed: {{ _restore_error_msg }}"
+          when: _restore_failed | bool

@@ -838,5 +838,9 @@
               {% else %}
               {{ n }}: パッチ適用 完了(単一node適用のため退避は行っていません。復帰playbookは実行されますが、何も退避していないため実質no-opです)
               {% endif %}
+              {{ n }}: 再起動 {{ '実施した' if (hostvars[n]['_apply_reboot_done'] | default(false) | bool) else 'しなかった' }}
+              ({{ 'reboot required ではなかった'
+                  if (hostvars[n]['_apply_collect']['reboot_trigger'] | default('none')) == 'none'
+                  else hostvars[n]['_apply_collect']['reboot_trigger'] }})
               {% endfor %}
               {% endif %}

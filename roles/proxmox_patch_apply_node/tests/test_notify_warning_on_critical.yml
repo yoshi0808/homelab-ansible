@@ -15,6 +15,7 @@
   gather_facts: false
   vars:
     proxmox_patch_apply_mirror_host: "mirror.example"
+    proxmox_patch_apply_notification_package_limit: 3
     cases:
       - id: final_critical
         post_hc_status: CRITICAL
@@ -37,8 +38,34 @@
         _apply_failed: false
         _apply_abort_type: "none"
         _apply_error_msg: ""
+        _apply_failed_task: ""
         _predryrun: {}
-        _sim_updates: []
+        _sim_updates: [kernel, openssl, new-package, deferred-package]
+        _apply_package_notes:
+          - package: kernel
+            installed: "1.0"
+            candidate: "2.0"
+            is_new: false
+            summary: "security fix"
+            cves: [CVE-2026-1234]
+          - package: openssl
+            installed: "3.0"
+            candidate: "3.1"
+            is_new: false
+            summary: "tls fix"
+            cves: []
+          - package: new-package
+            installed: ""
+            candidate: "1.0"
+            is_new: true
+            summary: "new feature"
+            cves: []
+          - package: deferred-package
+            installed: "1.0"
+            candidate: "1.1"
+            is_new: false
+            summary: "deferred"
+            cves: []
         _sim_removes: []
         _blocked_important_removes: []
         _important_updates: []
@@ -54,6 +81,8 @@
         _apply_collect: {}
         _reboot_required_before: false
         _apply_reboot_done: false
+        _apply_report_filename: "20260927T000000_localhost_apply.json"
+        _apply_report_saved: true
         _post_hc_status: "UNKNOWN"
         _pre_hc_status: "UNKNOWN"
         _running_on_target: []
@@ -92,6 +121,10 @@
           - item.notify_status == item.expect_status
           - item.notify_subject is search(item.expect_subject_prefix | regex_escape)
           - "item.notify_body is search('post-healthcheck: ' + item.post_hc_status)"
+          - "item.notify_body is search('kernel 1.0 → 2.0: security fix \\(CVE-2026-1234\\)')"
+          - "item.notify_body is search('openssl 3.0 → 3.1: tls fix')"
+          - "item.notify_body is search('new-package \\(新規\\) → 1.0: new feature')"
+          - "item.notify_body is search('ほか 1件')"
         fail_msg: >-
           {{ item.id }}: notify_status={{ item.notify_status }} (expected {{ item.expect_status }}),
           notify_subject={{ item.notify_subject }} (expected prefix {{ item.expect_subject_prefix }})
@@ -101,32 +134,9 @@
         label: "{{ item.id }}"
 
     # Confirm the copied notify task still matches the real one, so this
-    # fixture cannot silently drift from the role it verifies.
-    - name: Confirm the WARNING-subject branch is unchanged in main.yml
-      ansible.builtin.command:
-        argv:
-          - grep
-          - -n
-          - -F
-          - "パッチ適用完了 - post-healthcheck"
-          - "{{ playbook_dir }}/../tasks/main.yml"
-      register: _notify_subject_check
-      changed_when: false
-
-    - name: Confirm the notify_status warning branch is unchanged in main.yml
-      ansible.builtin.command:
-        argv:
-          - grep
-          - -n
-          - -F
-          - "_post_hc_status != 'OK' -%}"
-          - "{{ playbook_dir }}/../tasks/main.yml"
-      register: _notify_status_check
-      changed_when: false
-
-    - name: Assert both copied expressions were found verbatim in the role
-      ansible.builtin.assert:
-        that:
-          - _notify_subject_check.stdout | length > 0
-          - _notify_status_check.stdout | length > 0
-        fail_msg: "copied notify expression no longer matches the role source"
+    # fixture cannot silently drift from the role it verifies (Major 2:
+    # extended from 2 fragments to all fragments _eval_notify_case.yml
+    # copies from main.yml, in a shared file since both this test and
+    # test_notify_stop_reason.yml use _eval_notify_case.yml).
+    - name: Confirm all copied notify fragments are unchanged in main.yml
+      ansible.builtin.include_tasks: _eval_notify_case_parity.yml

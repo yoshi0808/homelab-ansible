@@ -1,0 +1,104 @@
+---
+# tester-gate: safe-readonly -- localhost fixture only.  It evaluates the
+# weekly-full completion notification's per-node reboot lines without running
+# the weekly playbook or contacting a Proxmox host.
+- name: Verify weekly full completion notification reboot wording (AC6)
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    cases:
+      - id: both_rebooted
+        nodes: [pve2, pve1]
+        pve2: {done: true, trigger: kernel}
+        pve1: {done: true, trigger: microcode}
+        expected: ["pve2: 再起動 実施した", "(kernel)", "pve1: 再起動 実施した", "(microcode)"]
+      - id: one_not_rebooted
+        nodes: [pve2, pve1]
+        pve2: {done: true, trigger: kernel}
+        pve1: {done: false, trigger: none}
+        expected: ["pve2: 再起動 実施した", "pve1: 再起動 しなかった", "reboot required ではなかった"]
+      - id: single_node_not_rebooted
+        nodes: [pve2]
+        pve2: {done: false, trigger: none}
+        pve1: {done: false, trigger: none}
+        expected: ["pve2: 再起動 しなかった", "reboot required ではなかった"]
+  tasks:
+    - name: Add fixture node hosts for hostvars lookup
+      ansible.builtin.add_host:
+        name: "{{ item }}"
+      loop: [pve1, pve2]
+
+    - name: Evaluate each completion notification case
+      ansible.builtin.include_tasks: _eval_weekly_full_completion_case.yml
+      loop: "{{ cases }}"
+      loop_control:
+        loop_var: scenario
+        label: "{{ scenario.id }}"
+
+    - name: Assert reboot wording and no raw none value
+      ansible.builtin.assert:
+        that:
+          - "'\\n(none)' not in item.message"
+        fail_msg: "{{ item.id }}: unexpected completion notification text: {{ item.message }}"
+      loop: "{{ _weekly_completion_results }}"
+      loop_control:
+        loop_var: item
+
+    # Major 2: _eval_weekly_full_completion_case.yml claims (in its own
+    # header comment) to copy playbooks/proxmox_patch_weekly_full.yml's
+    # completion notification verbatim, but until now that was only checked
+    # by hand at review time. grep -F the same fragments out of the real
+    # playbook, the same mechanism _eval_notify_case_parity.yml uses for the
+    # apply-node role, so a future edit to the playbook's reboot wording that
+    # is not mirrored into the fixture fails this check instead of silently
+    # drifting.
+    - name: Confirm the reboot-done wording is unchanged in the weekly full playbook
+      ansible.builtin.command:
+        argv:
+          - grep
+          - -n
+          - -F
+          # {% raw %} disables Jinja parsing of this literal grep pattern,
+          # which itself contains {{ }} text that would otherwise be
+          # mistaken for a real template tag in THIS fixture file.
+          - "{% raw %}再起動 {{ '実施した' if (hostvars[n]['_apply_reboot_done'] | default(false) | bool) else 'しなかった' }}{% endraw %}"
+          - "{{ playbook_dir }}/../../../playbooks/proxmox_patch_weekly_full.yml"
+      register: _weekly_reboot_done_check
+      changed_when: false
+      failed_when: false
+
+    - name: Confirm the reboot-trigger wording is unchanged in the weekly full playbook
+      ansible.builtin.command:
+        argv:
+          - grep
+          - -n
+          - -F
+          - "'reboot required ではなかった'"
+          - "{{ playbook_dir }}/../../../playbooks/proxmox_patch_weekly_full.yml"
+      register: _weekly_reboot_trigger_label_check
+      changed_when: false
+      failed_when: false
+
+    - name: Confirm the reboot-trigger value expression is unchanged in the weekly full playbook
+      ansible.builtin.command:
+        argv:
+          - grep
+          - -n
+          - -F
+          - "else hostvars[n]['_apply_collect']['reboot_trigger'] }})"
+          - "{{ playbook_dir }}/../../../playbooks/proxmox_patch_weekly_full.yml"
+      register: _weekly_reboot_trigger_value_check
+      changed_when: false
+      failed_when: false
+
+    - name: Assert every copied completion-notification fragment was found verbatim in the playbook
+      ansible.builtin.assert:
+        that:
+          - _weekly_reboot_done_check.stdout | length > 0
+          - _weekly_reboot_trigger_label_check.stdout | length > 0
+          - _weekly_reboot_trigger_value_check.stdout | length > 0
+        fail_msg: >-
+          one or more fragments copied into _eval_weekly_full_completion_case.yml
+          no longer match playbooks/proxmox_patch_weekly_full.yml verbatim -- see
+          the individual grep results above for which one.

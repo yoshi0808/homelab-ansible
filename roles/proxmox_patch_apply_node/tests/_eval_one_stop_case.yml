@@ -1,0 +1,100 @@
+---
+# Included with loop_var: scenario by test_notify_stop_reason.yml.
+#
+# Unlike the previous version of this file, this does NOT take the expected
+# failed-task display name as input. It reproduces the actual mechanism from
+# roles/proxmox_patch_apply_node/tasks/main.yml: an abort branch runs an
+# UNNAMED ansible.builtin.fail task (every "Abort ..." block in main.yml does
+# this), so ansible_failed_task.name is genuinely empty when the rescue
+# block's dict-lookup expression runs below -- it is not fed a hand-typed
+# stand-in value (Major 1, docs/ai/reviews/proxmox_patch_notifications_2b/
+# 2026-09-27_008_test_files_review.md).
+#
+# scenario.abort_type: one of the 13 keys in the dict below, or a value not
+#   in the dict (to exercise the fallback), or "none" (paired with
+#   scenario.named_task_fail to exercise the "real task name" branch instead
+#   of the dict).
+# scenario.named_task_fail: when set, the simulated failing task uses this
+#   name instead of being unnamed (models a failure whose task genuinely has
+#   a name, e.g. "Reboot if required" or an ordinary named task elsewhere in
+#   the role).
+# scenario.expect_failed_task: the value this case's _apply_failed_task must
+#   equal.
+
+- name: Reset fact this case computes, per scenario
+  ansible.builtin.set_fact:
+    _apply_abort_type: "{{ scenario.abort_type }}"
+    _apply_failed: false
+    _apply_failed_task: ""
+
+- name: Reproduce one abort/failure branch the way main.yml actually fails
+  block:
+    - name: "{{ scenario.named_task_fail | default('') }}"
+      ansible.builtin.fail:
+        msg: "simulated failure: {{ scenario.id }}"
+      when: (scenario.named_task_fail | default('') | length) > 0
+
+    - ansible.builtin.fail:
+        msg: "simulated failure: {{ scenario.id }}"
+      when: (scenario.named_task_fail | default('') | length) == 0
+  rescue:
+    # --- Verbatim from roles/proxmox_patch_apply_node/tasks/main.yml,
+    # rescue block's "Capture failure info" _apply_failed_task expression.
+    # Kept in sync by the grep-parity check in test_notify_stop_reason.yml
+    # (one entry per dict key), so a key/value edited in main.yml without
+    # this copy being updated fails that check instead of this fixture
+    # silently drifting. ---
+    - name: Capture failure info
+      ansible.builtin.set_fact:
+        _apply_failed: true
+        _apply_failed_task: >-
+          {{ (ansible_failed_task.name | default('', true) | trim)
+             if (ansible_failed_task.name | default('', true) | trim | length > 0)
+             else {
+               'control_node': 'Abort when controller is a cluster guest',
+               'healthcheck': 'Abort when pre-healthcheck is not OK',
+               'vms_not_evacuated': 'Abort if VMs remain on target node',
+               'apt_update': 'Abort if apt update failed',
+               'apt_check': 'Abort if apt check failed',
+               'sim_failed': 'Abort if apt simulation failed',
+               'maintenance_required': 'Abort when maintenance is required',
+               'major_upgrade_detected': 'Abort when major upgrade is detected',
+               'blocked_important_remove': 'Abort when important package removal is blocked',
+               'manual_not_confirmed': 'Abort when manual confirmation is missing',
+               'download_failed': 'Abort when archive download fails',
+               'apply_failed': 'Abort when package apply fails',
+               'reboot_timeout': 'Reboot if required'
+             }.get(_apply_abort_type, 'Unknown task during patch apply') }}
+    # --- End verbatim block. ---
+
+- name: Assert the dict lookup / real task name produced the expected display name (AC5 / Major 1)
+  ansible.builtin.assert:
+    that:
+      - _apply_failed_task | length > 0
+      - _apply_failed_task == scenario.expect_failed_task
+    fail_msg: >-
+      {{ scenario.id }} (abort_type={{ scenario.abort_type }}):
+      expected failed_task '{{ scenario.expect_failed_task }}', got '{{ _apply_failed_task }}'
+    success_msg: "{{ scenario.id }}: OK (failed_task={{ _apply_failed_task }})"
+
+- name: Build the scenario dict _eval_notify_case.yml expects
+  ansible.builtin.set_fact:
+    # _eval_notify_case.yml's own bookkeeping task reads
+    # scenario.post_hc_status / expect_status / expect_subject_prefix; these
+    # two "expect_*" fields are dummies, unused by this file's own assertion
+    # (test_notify_stop_reason.yml asserts on _stop_results, not
+    # _notify_results). A separate fact (not named "scenario") avoids the
+    # self-referential `vars:` recursion that combine-in-place triggers.
+    _stop_scenario_combined: "{{ scenario | combine({'post_hc_status': 'OK', 'expect_status': 'error', 'expect_subject_prefix': '[ABORT]'}) }}"
+
+- name: Evaluate shared notify body/subject/status task
+  ansible.builtin.include_tasks: _eval_notify_case.yml
+  vars:
+    scenario: "{{ _stop_scenario_combined }}"
+
+- name: Record stop-scenario result
+  ansible.builtin.set_fact:
+    _stop_results: >-
+      {{ (_stop_results | default([])) +
+         [{'id': scenario.id, 'failed_task': _apply_failed_task,
+           'notify_status': _notify_status, 'notify_body': _notify_body}] }}

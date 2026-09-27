@@ -1,0 +1,144 @@
+---
+# Shared grep-parity check for _eval_notify_case.yml, included once (not
+# per-loop-iteration) by each test file that uses _eval_notify_case.yml:
+# test_notify_warning_on_critical.yml and test_notify_stop_reason.yml.
+#
+# _eval_notify_case.yml claims in its own header comment to be "verbatim
+# from roles/proxmox_patch_apply_node/tasks/main.yml", but until now that was
+# only checked by hand at review time (Tester diff, docs/ai/reviews/
+# proxmox_patch_notifications_2b/2026-09-27_005_test_result.md) and by two
+# grep checks living inside test_notify_warning_on_critical.yml that covered
+# only the WARNING-subject branch (Major 2, docs/ai/reviews/
+# proxmox_patch_notifications_2b/2026-09-27_008_test_files_review.md). This
+# file extends the same grep -F mechanism to the package-notes loop, the
+# failed-task/stop-scope lines, and the report line -- every fragment added
+# to _eval_notify_case.yml in this round -- so a future edit to main.yml's
+# notify body/subject that is not mirrored here fails this check instead of
+# the fixture silently drifting from the role it is supposed to verify.
+#
+# This is a snippet-presence check (grep -F on literal substrings), not a
+# full-template diff: it does not detect reordering of surrounding lines or
+# changes outside the checked fragments.
+
+- name: Confirm the WARNING-subject branch is unchanged in main.yml
+  ansible.builtin.command:
+    argv:
+      - grep
+      - -n
+      - -F
+      - --
+      - "パッチ適用完了 - post-healthcheck"
+      - "{{ playbook_dir }}/../tasks/main.yml"
+  register: _notify_subject_check
+  changed_when: false
+  failed_when: false
+
+- name: Confirm the notify_status warning branch is unchanged in main.yml
+  ansible.builtin.command:
+    argv:
+      - grep
+      - -n
+      - -F
+      - --
+      - "_post_hc_status != 'OK' -%}"
+      - "{{ playbook_dir }}/../tasks/main.yml"
+  register: _notify_status_check
+  changed_when: false
+  failed_when: false
+
+- name: Confirm the package-notes loop header is unchanged in main.yml
+  ansible.builtin.command:
+    argv:
+      - grep
+      - -n
+      - -F
+      - --
+      # {% raw %} disables Jinja parsing of the literal grep pattern below,
+      # which itself contains {% for %}/{{ }} text that would otherwise be
+      # mistaken for real template tags in THIS fixture file.
+      - "{% raw %}{% for package in _apply_package_notes[:proxmox_patch_apply_notification_package_limit | int] %}{% endraw %}"
+      - "{{ playbook_dir }}/../tasks/main.yml"
+  register: _notify_package_loop_check
+  changed_when: false
+  failed_when: false
+
+- name: Confirm the package-notes display line is unchanged in main.yml
+  ansible.builtin.command:
+    argv:
+      - grep
+      - -n
+      - -F
+      - --
+      - "{% raw %}- {{ package.package }} {{ '(新規)' if (package.is_new | bool) else package.installed }} → {{ package.candidate }}: {{ package.summary }}{{ ' (' ~ (package.cves | join(', ')) ~ ')' if (package.cves | length > 0) else '' }}{% endraw %}"
+      - "{{ playbook_dir }}/../tasks/main.yml"
+  register: _notify_package_line_check
+  changed_when: false
+  failed_when: false
+
+- name: Confirm the package-notes overflow line is unchanged in main.yml
+  ansible.builtin.command:
+    argv:
+      - grep
+      - -n
+      - -F
+      - --
+      - "{% raw %}- ほか {{ (_sim_updates | length) - (proxmox_patch_apply_notification_package_limit | int) }}件{% endraw %}"
+      - "{{ playbook_dir }}/../tasks/main.yml"
+  register: _notify_package_overflow_check
+  changed_when: false
+  failed_when: false
+
+- name: Confirm the failed-task line is unchanged in main.yml
+  ansible.builtin.command:
+    argv:
+      - grep
+      - -n
+      - -F
+      - --
+      - "{% raw %}失敗task: {{ _apply_failed_task }}{% endraw %}"
+      - "{{ playbook_dir }}/../tasks/main.yml"
+  register: _notify_failed_task_line_check
+  changed_when: false
+  failed_when: false
+
+- name: Confirm the stop-scope sentence is unchanged in main.yml
+  ansible.builtin.command:
+    argv:
+      - grep
+      - -n
+      - -F
+      - --
+      - "このnodeで停止しました。weekly full から実行されている場合、以降のnodeへは進みません。"
+      - "{{ playbook_dir }}/../tasks/main.yml"
+  register: _notify_stop_scope_check
+  changed_when: false
+  failed_when: false
+
+- name: Confirm the report line is unchanged in main.yml
+  ansible.builtin.command:
+    argv:
+      - grep
+      - -n
+      - -F
+      - --
+      - "{% raw %}report: {{ _apply_report_filename if (_apply_report_saved | bool) else 'report保存失敗' }}{% endraw %}"
+      - "{{ playbook_dir }}/../tasks/main.yml"
+  register: _notify_report_line_check
+  changed_when: false
+  failed_when: false
+
+- name: Assert every copied notify fragment was found verbatim in main.yml
+  ansible.builtin.assert:
+    that:
+      - _notify_subject_check.stdout | length > 0
+      - _notify_status_check.stdout | length > 0
+      - _notify_package_loop_check.stdout | length > 0
+      - _notify_package_line_check.stdout | length > 0
+      - _notify_package_overflow_check.stdout | length > 0
+      - _notify_failed_task_line_check.stdout | length > 0
+      - _notify_stop_scope_check.stdout | length > 0
+      - _notify_report_line_check.stdout | length > 0
+    fail_msg: >-
+      one or more fragments copied into _eval_notify_case.yml no longer
+      match roles/proxmox_patch_apply_node/tasks/main.yml verbatim -- see
+      the individual grep results above for which one.

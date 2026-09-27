@@ -1,0 +1,213 @@
+---
+# tester-gate: safe-readonly -- localhost fixture only, no real Proxmox host
+# contact, no Slack send (only the subject/body/status-building task from
+# _eval_notify_case.yml is exercised).
+#
+# AC5 (proxmox_patch_notifications_2b, docs/ai/reviews/
+# proxmox_patch_notifications_2b/2026-09-27_001_requirement.md): apply's
+# stop/abort notification body must name the failed task and state that the
+# node stopped / weekly full will not proceed to further nodes. This was not
+# covered by test_notify_warning_on_critical.yml (both its cases use
+# _apply_abort_type: "none" and _apply_failed: false).
+#
+# Major 1 (docs/ai/reviews/proxmox_patch_notifications_2b/
+# 2026-09-27_008_test_files_review.md): the previous version of this file fed
+# the expected failed-task display name straight into _apply_failed_task,
+# never exercising roles/proxmox_patch_apply_node/tasks/main.yml's actual
+# dict-lookup mechanism (ansible_failed_task.name empty -> {abort_type:
+# display_name}.get(...)). _eval_one_stop_case.yml now reproduces that
+# mechanism for real (an unnamed ansible.builtin.fail, same shape as every
+# "Abort ..." block in main.yml), and this file's cases cover every one of
+# the dict's 13 abort_type keys, plus a real-named-task case and an
+# unmapped-abort_type fallback case, plus a grep-parity check below so a
+# key/value edited in main.yml's dict without the fixture's copy being
+# updated fails loudly instead of the two silently drifting apart.
+- name: Verify apply stop/abort notification names the failed task and stop scope (AC5)
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    proxmox_patch_apply_mirror_host: "mirror.example"
+    proxmox_patch_apply_notification_package_limit: 10
+    cases:
+      # --- One case per dict key (12 of the 13; reboot_timeout is separate
+      # below because its failing task really is named in main.yml). Each
+      # exercises the unnamed-fail branch, so _apply_failed_task must come
+      # from the dict, not from ansible_failed_task.name. ---
+      - id: abort_control_node
+        abort_type: control_node
+        expect_failed_task: "Abort when controller is a cluster guest"
+      - id: abort_healthcheck
+        abort_type: healthcheck
+        expect_failed_task: "Abort when pre-healthcheck is not OK"
+      - id: abort_vms_not_evacuated
+        abort_type: vms_not_evacuated
+        expect_failed_task: "Abort if VMs remain on target node"
+      - id: abort_apt_update
+        abort_type: apt_update
+        expect_failed_task: "Abort if apt update failed"
+      - id: abort_apt_check
+        abort_type: apt_check
+        expect_failed_task: "Abort if apt check failed"
+      - id: abort_sim_failed
+        abort_type: sim_failed
+        expect_failed_task: "Abort if apt simulation failed"
+      - id: abort_maintenance_required
+        abort_type: maintenance_required
+        expect_failed_task: "Abort when maintenance is required"
+      - id: abort_major_upgrade_detected
+        abort_type: major_upgrade_detected
+        expect_failed_task: "Abort when major upgrade is detected"
+      - id: abort_blocked_important_remove
+        abort_type: blocked_important_remove
+        expect_failed_task: "Abort when important package removal is blocked"
+      - id: abort_manual_not_confirmed
+        abort_type: manual_not_confirmed
+        expect_failed_task: "Abort when manual confirmation is missing"
+      - id: abort_download_failed
+        abort_type: download_failed
+        expect_failed_task: "Abort when archive download fails"
+      - id: abort_apply_failed
+        abort_type: apply_failed
+        expect_failed_task: "Abort when package apply fails"
+      # --- reboot_timeout: the one abort_type whose real failing task in
+      # main.yml IS named ("Reboot if required"); the dict entry for it only
+      # matches by coincidence (Major 1 finding). Reproduce the named-task
+      # branch (ansible_failed_task.name non-empty), so this case actually
+      # exercises the "real name wins over the dict" path, not the dict. ---
+      - id: reboot_timeout_named_task
+        abort_type: reboot_timeout
+        named_task_fail: "Reboot if required"
+        expect_failed_task: "Reboot if required"
+      # --- An ordinary named task failing with no matching abort_type at
+      # all: must use the real task name (again the named-task branch, not
+      # the dict / its fallback). ---
+      - id: generic_named_task_failure
+        abort_type: none
+        named_task_fail: "Run apt-get dist-upgrade simulation"
+        expect_failed_task: "Run apt-get dist-upgrade simulation"
+      # --- An abort_type that is not a key in the dict at all (simulates a
+      # future abort branch added without a matching dict entry): must fall
+      # back to the dict's default, not silently return an empty string. ---
+      - id: unmapped_abort_type_fallback
+        abort_type: some_future_abort_type
+        expect_failed_task: "Unknown task during patch apply"
+  tasks:
+    # --- Verbatim from roles/proxmox_patch_apply_node/tasks/main.yml init
+    # task, same subset test_notify_warning_on_critical.yml uses. ---
+    - name: Initialize result facts (same defaults as main.yml's init task)
+      ansible.builtin.set_fact:
+        _apply_run_ts: "20260927T000000"
+        _apply_failed: false
+        _apply_abort_type: "none"
+        _apply_error_msg: ""
+        _apply_failed_task: ""
+        _predryrun: {}
+        _sim_updates: []
+        _apply_package_notes: []
+        _sim_removes: []
+        _blocked_important_removes: []
+        _important_updates: []
+        _new_vs_dryrun: []
+        _unchanged_vs_dryrun: []
+        _download_stdout: ""
+        _download_stderr: ""
+        _download_bytes: 0
+        _download_seconds: 0
+        _download_cache_hit: false
+        _apply_seconds: 0
+        _apply_stdout: ""
+        _apply_collect: {}
+        _reboot_required_before: false
+        _apply_reboot_done: false
+        _apply_report_filename: "20260927T000000_localhost_apply.json"
+        _apply_report_saved: true
+        _post_hc_status: "UNKNOWN"
+        _pre_hc_status: "UNKNOWN"
+        _running_on_target: []
+        _notify_subject: "[UNKNOWN] {{ inventory_hostname }}: パッチ適用結果不明"
+        _notify_body: "パッチ適用の結果を取得できませんでした。ログを確認してください。"
+        _post_hc_retry_status: "CRITICAL"
+        _post_hc_retry_json: {}
+        _nas_cache_available: false
+        _nas_cache_warnings: []
+        _mirror_candidates: []
+        _mirror_probe_results: []
+        _mirror_selected_address: ""
+        _mirror_selected_rtt_ms: ""
+
+    - name: Set persistent phase log paths (same as main.yml's path-setup task)
+      ansible.builtin.set_fact:
+        _download_log_path: "/var/log/proxmox-patch-apply/20260927T000000-download.log"
+        _apply_log_path: "/var/log/proxmox-patch-apply/20260927T000000-apply.log"
+
+    - name: Evaluate each stop-reason case through the real dict-lookup mechanism
+      ansible.builtin.include_tasks: _eval_one_stop_case.yml
+      loop: "{{ cases }}"
+      loop_control:
+        loop_var: scenario
+        label: "{{ scenario.id }}"
+
+    - name: Assert stop/abort body names the failed task and stop scope
+      ansible.builtin.assert:
+        that:
+          - "item.notify_body is search('失敗task: ' + (item.failed_task | regex_escape))"
+          - "item.notify_body is search('このnodeで停止しました。weekly full から実行されている場合、以降のnodeへは進みません。')"
+          - "item.notify_status in ['error', 'critical']"
+        fail_msg: >-
+          {{ item.id }}: expected 失敗task line for '{{ item.failed_task }}' and the
+          stop-scope sentence in body, got: {{ item.notify_body }}
+        success_msg: "{{ item.id }}: OK (status={{ item.notify_status }})"
+      loop: "{{ _stop_results }}"
+      loop_control:
+        label: "{{ item.id }}"
+
+    # Major 1 parity check: confirm every key/value pair copied into
+    # _eval_one_stop_case.yml's dict-lookup expression is still present
+    # verbatim in main.yml, so an edit to the real dict (key renamed, value
+    # reworded, key removed) fails this check instead of the fixture and the
+    # cases above silently continuing to pass against a stale copy. This
+    # does not catch a *new* abort_type key added to main.yml's dict without
+    # a matching case above (known residual gap, recorded in _005).
+    - name: Confirm each failed-task dict entry is unchanged in main.yml
+      ansible.builtin.command:
+        argv:
+          - grep
+          - -n
+          - -F
+          - "{{ item }}"
+          - "{{ playbook_dir }}/../tasks/main.yml"
+      register: _dict_entry_check
+      changed_when: false
+      failed_when: false
+      loop:
+        - "'control_node': 'Abort when controller is a cluster guest',"
+        - "'healthcheck': 'Abort when pre-healthcheck is not OK',"
+        - "'vms_not_evacuated': 'Abort if VMs remain on target node',"
+        - "'apt_update': 'Abort if apt update failed',"
+        - "'apt_check': 'Abort if apt check failed',"
+        - "'sim_failed': 'Abort if apt simulation failed',"
+        - "'maintenance_required': 'Abort when maintenance is required',"
+        - "'major_upgrade_detected': 'Abort when major upgrade is detected',"
+        - "'blocked_important_remove': 'Abort when important package removal is blocked',"
+        - "'manual_not_confirmed': 'Abort when manual confirmation is missing',"
+        - "'download_failed': 'Abort when archive download fails',"
+        - "'apply_failed': 'Abort when package apply fails',"
+        - "'reboot_timeout': 'Reboot if required'"
+      loop_control:
+        label: "{{ item }}"
+
+    - name: Assert every dict entry was found verbatim in main.yml
+      ansible.builtin.assert:
+        that:
+          - item.stdout | length > 0
+        fail_msg: "dict entry no longer matches roles/proxmox_patch_apply_node/tasks/main.yml: {{ item.item }}"
+      loop: "{{ _dict_entry_check.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+    # Major 2: this file also uses _eval_notify_case.yml (via
+    # _eval_one_stop_case.yml), so it needs the same fragment-parity check
+    # as test_notify_warning_on_critical.yml.
+    - name: Confirm all copied notify fragments are unchanged in main.yml
+      ansible.builtin.include_tasks: _eval_notify_case_parity.yml

@@ -1,0 +1,212 @@
+---
+# Fixture for proxmox_patch_notifications_2b AC1 / AC1b / AC1c / AC3 / AC7.
+#
+# This is NOT include_role of proxmox_evacuate_node. It is a line-by-line
+# copy of the block/rescue/always structure from
+# roles/proxmox_evacuate_node/tasks/main.yml (verify parity with `diff` before
+# trusting a PASS from this fixture — see docs/ai/reviews/
+# proxmox_patch_notifications_2b/2026-09-27_005_test_result.md for the diff
+# command actually run). Only two kinds of substitution are made, both
+# documented inline:
+#   1. Phase 1-6 real Proxmox commands (pvesh/qm/pct/ha-manager) are replaced
+#      by a fixed-output "true"/"false" command selected per `scenario`.
+#   2. The notify body-build / include tasks gain an extra `scenario`-gated
+#      branch that deliberately fails, to test AC1c without touching the
+#      real notify.yml.
+#
+# Run via the wrapper: roles/proxmox_evacuate_node/tests/run_failure_notification.sh
+# It stages a copy of this file under a temp playbooks/ dir (with a
+# temp roles/ symlinked to the real roles/ tree) so that the single-dot
+# "{{ playbook_dir }}/../roles/..." include paths below resolve exactly the
+# way they do in the real role (production playbooks all live directly
+# under playbooks/, one level above roles/) — including notify.yml's own
+# internal include of capture.yml, which otherwise fails to resolve when
+# this file is run in place. The wrapper also turns each scenario's
+# expected pass/fail into one line instead of a raw ansible-playbook
+# failed=N that does not say whether the failure was expected.
+#
+# Running this file directly from its committed path (without the wrapper)
+# no longer works — playbook_dir would be .../tests, one level too deep for
+# the single-dot include below. Use -e scenario=<healthcheck_fail|
+# migrate_partial_fail|success|notify_body_fail|notify_include_fail|
+# report_save_fail> only via the wrapper.
+- hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    proxmox_evacuate_report_dir: "{{ lookup('env', 'FIXTURE_REPORT_DIR') | default('/tmp/pxe_notify_fixture_reports', true) }}"
+    destination_node: "pve2"
+    inventory_hostname_override: "pve1"
+    scenario: "migrate_partial_fail"
+  tasks:
+    - name: Fake inventory_hostname for the fixture (real role gets this from inventory)
+      ansible.builtin.set_fact:
+        inventory_hostname: "{{ inventory_hostname_override }}"
+
+    # --- copy: real file lines 25-42 ---
+    - name: Set run timestamp and initialize result facts
+      ansible.builtin.set_fact:
+        _evac_run_ts: "{{ lookup('pipe', 'date +%Y%m%dT%H%M%S') }}"
+        _evac_failed: false
+        _evac_error_msg: ""
+        _evac_failed_task: ""
+        _vms_to_migrate: []
+        _vms_ha: []
+        _remaining_running: []
+        _evac_vms_migrated: []
+        _evac_vms_force_stopped: []
+        _evac_pre_hc_status: "UNKNOWN"
+        _evac_maintenance_enabled: false
+        _evac_report_saved: false
+
+    - name: Set evacuation report filename
+      ansible.builtin.set_fact:
+        _evac_report_filename: "{{ _evac_run_ts }}_{{ inventory_hostname }}_evacuate.json"
+
+    - name: Ensure report directory exists
+      ansible.builtin.file:
+        path: "{{ proxmox_evacuate_report_dir }}"
+        state: directory
+        mode: "0755"
+      check_mode: false
+
+    - block:
+        # --- substitution 1: healthcheck result fixed by scenario instead of
+        # include_role: proxmox_healthcheck ---
+        - name: Record target healthcheck status
+          ansible.builtin.set_fact:
+            _evac_pre_hc_status: "{{ 'CRITICAL' if scenario == 'healthcheck_fail' else 'OK' }}"
+
+        - name: Abort if target healthcheck is not OK
+          ansible.builtin.fail:
+            msg: >-
+              Target node {{ inventory_hostname }} healthcheck {{ _evac_pre_hc_status }}.
+              Cannot evacuate from an unhealthy node.
+          when: _evac_pre_hc_status != 'OK'
+
+        # --- substitution 1: qm/pct migrate replaced by fixed-output true/false ---
+        - name: Migrate non-HA QEMU VMs to destination_node
+          ansible.builtin.command:
+            cmd: >-
+              {{ 'false'
+                 if (scenario in ['migrate_partial_fail', 'notify_body_fail', 'notify_include_fail', 'report_save_fail']
+                     and item.vmid == 102)
+                 else 'true' }}
+          loop:
+            - vmid: 101
+            - vmid: 102
+          loop_control:
+            label: "QEMU {{ item.vmid }}"
+          changed_when: true
+          register: _evac_qemu_migrate
+          when: scenario != 'healthcheck_fail'
+
+        - name: Record migrated VM IDs
+          ansible.builtin.set_fact:
+            _evac_vms_migrated: >-
+              {{ ((_evac_qemu_migrate.results | default([])) +
+                  (_evac_lxc_migrate.results | default([]))) |
+                 rejectattr('failed', 'equalto', true) |
+                 map(attribute='item') | map(attribute='vmid') | list }}
+
+      rescue:
+        # --- copy: real file lines 283-300 ---
+        - name: Record successful evacuation loop items before reporting failure
+          ansible.builtin.set_fact:
+            _evac_vms_migrated: >-
+              {{ ((_evac_qemu_migrate.results | default([])) +
+                  (_evac_lxc_migrate.results | default([]))) |
+                 rejectattr('failed', 'equalto', true) |
+                 map(attribute='item') | map(attribute='vmid') | list }}
+            _evac_vms_force_stopped: >-
+              {{ ((_evac_qemu_stop.results | default([])) +
+                  (_evac_lxc_stop.results | default([]))) |
+                 rejectattr('failed', 'equalto', true) |
+                 map(attribute='item') | map(attribute='vmid') | list }}
+
+        - name: Capture failure info
+          ansible.builtin.set_fact:
+            _evac_failed: true
+            _evac_error_msg: "{{ ansible_failed_result.msg | default('Unknown error during evacuation') }}"
+            _evac_failed_task: "{{ ansible_failed_task.name | default('Unknown task during evacuation') }}"
+
+      always:
+        # --- copy: real file lines 303-323, dest simplified to fixture scratch dir;
+        # substitution: report_save_fail scenario points dest at an
+        # unwritable path to exercise AC8b's failure branch for real ---
+        - name: Save evacuation report
+          ansible.builtin.copy:
+            content: "{{ {
+                'run_timestamp': _evac_run_ts,
+                'target_node': inventory_hostname,
+                'destination_node': destination_node,
+                'result': 'FAILED' if (_evac_failed | bool) else 'SUCCESS',
+                'error_msg': _evac_error_msg,
+                'vms_migrated': _evac_vms_migrated,
+                'vms_force_stopped': _evac_vms_force_stopped
+              } | to_nice_json }}"
+            dest: >-
+              {{ '/nonexistent-dir-pxe-fixture/' ~ _evac_report_filename
+                 if scenario == 'report_save_fail'
+                 else (proxmox_evacuate_report_dir ~ '/' ~ _evac_report_filename) }}
+          check_mode: false
+          ignore_errors: true
+          register: _evac_report_write
+
+        - name: Record evacuation report save result
+          ansible.builtin.set_fact:
+            _evac_report_saved: "{{ _evac_report_write is succeeded }}"
+
+        - name: Notify evacuation failure without masking it
+          when: _evac_failed | bool
+          block:
+            # --- copy: real file lines 332-342 ---
+            - name: Build evacuation failure notification
+              ansible.builtin.set_fact:
+                _evac_notify_message: |
+                  Proxmox VM退避で停止しました。
+                  対象node: {{ inventory_hostname }}
+                  失敗task: {{ _evac_failed_task }}
+                  停止理由: {{ _evac_error_msg }}
+                  退避できたVM: {{ _evac_vms_migrated | join(', ') if (_evac_vms_migrated | length > 0) else '(なし)' }}
+                  強制停止したVM: {{ _evac_vms_force_stopped | join(', ') if (_evac_vms_force_stopped | length > 0) else '(なし)' }}
+                  このnodeへの適用および次のnodeへは進んでいません。
+                  report: {{ _evac_report_filename if (_evac_report_saved | bool) else 'report保存失敗' }}
+              when: scenario != 'notify_body_fail'
+
+            # --- substitution 2: deliberate body-build failure for AC1c ---
+            - name: Build evacuation failure notification (fixture-injected failure)
+              ansible.builtin.set_fact:
+                _evac_notify_message: "{{ _fixture_undefined_marker | mandatory }}"
+              when: scenario == 'notify_body_fail'
+
+            # Single-dot form, identical to the real role file (main.yml
+            # line 347). This only resolves correctly when this fixture is
+            # staged one level under a directory that has "roles" as a
+            # sibling (as notify.yml's own internal include of capture.yml
+            # requires) — see run_failure_notification.sh, which stages a
+            # copy under <tmp>/playbooks/ with <tmp>/roles symlinked to the
+            # real roles/ tree before invoking ansible-playbook. Running
+            # this file directly from its committed path
+            # (roles/proxmox_evacuate_node/tests/) no longer resolves this
+            # path; use the wrapper script.
+            - name: Send evacuation failure notification
+              ansible.builtin.include_tasks:
+                file: >-
+                  {{ (playbook_dir ~ '/../roles/common_slack/tasks/notify.yml')
+                     if scenario != 'notify_include_fail'
+                     else (playbook_dir ~ '/../roles/common_slack/tasks/does-not-exist.yml') }}
+              vars:
+                slack_channel: alerts
+                slack_status: error
+                slack_title: "[FAILED] {{ inventory_hostname }}: VM退避停止"
+                slack_message: "{{ _evac_notify_message }}"
+          rescue:
+            - name: Ignore evacuation failure notification error
+              ansible.builtin.debug:
+                msg: "Evacuation failure notification could not be prepared or sent; preserving the original failure."
+
+        - name: Re-raise failure
+          ansible.builtin.fail:
+            msg: "proxmox_evacuate_node failed: {{ _evac_error_msg }}"
+          when: _evac_failed | bool

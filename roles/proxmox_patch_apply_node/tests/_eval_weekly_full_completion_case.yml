@@ -1,0 +1,41 @@
+---
+# Included by test_weekly_full_completion_notify.yml.  The message expression
+# below is verbatim from playbooks/proxmox_patch_weekly_full.yml's completion
+# notification.
+- name: Set pve2 reboot facts for completion notification fixture
+  ansible.builtin.set_fact:
+    _apply_reboot_done: "{{ scenario.pve2.done }}"
+    _apply_collect: {reboot_trigger: "{{ scenario.pve2.trigger }}"}
+  delegate_to: pve2
+  delegate_facts: true
+
+- name: Set pve1 reboot facts for completion notification fixture
+  ansible.builtin.set_fact:
+    _apply_reboot_done: "{{ scenario.pve1.done }}"
+    _apply_collect: {reboot_trigger: "{{ scenario.pve1.trigger }}"}
+  delegate_to: pve1
+  delegate_facts: true
+
+- name: Build weekly full completion reboot lines
+  ansible.builtin.set_fact:
+    _weekly_completion_message: |
+      {% for n in scenario.nodes %}
+      {{ n }}: 再起動 {{ '実施した' if (hostvars[n]['_apply_reboot_done'] | default(false) | bool) else 'しなかった' }}
+      ({{ 'reboot required ではなかった'
+          if (hostvars[n]['_apply_collect']['reboot_trigger'] | default('none')) == 'none'
+          else hostvars[n]['_apply_collect']['reboot_trigger'] }})
+      {% endfor %}
+
+- name: Assert each expected completion notification phrase
+  ansible.builtin.assert:
+    that:
+      - "_weekly_completion_message is search(item | regex_escape)"
+    fail_msg: "{{ scenario.id }}: missing '{{ item }}' in {{ _weekly_completion_message }}"
+  loop: "{{ scenario.expected }}"
+
+- name: Record weekly full completion notification result
+  ansible.builtin.set_fact:
+    _weekly_completion_results: >-
+      {{ (_weekly_completion_results | default([])) +
+         [{'id': scenario.id, 'message': _weekly_completion_message,
+           'expected': scenario.expected}] }}

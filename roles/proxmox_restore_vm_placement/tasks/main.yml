@@ -43,6 +43,7 @@
     _restore_run_ts: "{{ lookup('pipe', 'date +%Y%m%dT%H%M%S') }}"
     _restore_failed: false
     _restore_error_msg: ""
+    _restore_failed_task: ""
     _vms_to_restore: []
     _restore_vms_migrated: []
     _restore_vms_started: []
@@ -51,6 +52,11 @@
     _restore_external_reachability_status: "NOT_RUN"
     _restore_external_probe_attempts: 0
     _restore_external_probe_elapsed_seconds: 0
+    _restore_report_saved: false
+
+- name: Set restore report filename
+  ansible.builtin.set_fact:
+    _restore_report_filename: "{{ _restore_run_ts }}_{{ inventory_hostname }}_restore.json"
 
 - name: Ensure report directory exists
   ansible.builtin.file:
@@ -124,6 +130,7 @@
             label: "QEMU {{ item.vmid }} {{ item.name | default('') }} from {{ item.node }} [{{ item.status }}]"
           delegate_to: "{{ item.node }}"
           changed_when: true
+          register: _restore_qemu_migrate
 
         - name: Migrate non-HA LXC containers back to target_node
           ansible.builtin.command:
@@ -135,10 +142,15 @@
             label: "LXC {{ item.vmid }} {{ item.name | default('') }} from {{ item.node }} [{{ item.status }}]"
           delegate_to: "{{ item.node }}"
           changed_when: true
+          register: _restore_lxc_migrate
 
         - name: Record migrated VM IDs
           ansible.builtin.set_fact:
-            _restore_vms_migrated: "{{ _vms_to_restore | map(attribute='vmid') | list }}"
+            _restore_vms_migrated: >-
+              {{ ((_restore_qemu_migrate.results | default([])) +
+                  (_restore_lxc_migrate.results | default([]))) |
+                 rejectattr('failed', 'equalto', true) |
+                 map(attribute='item') | map(attribute='vmid') | list }}
 
         # =====================================================================
         # Phase 2: Verify migrated VMs are running; start if stopped
@@ -178,6 +190,7 @@
           loop_control:
             label: "QEMU {{ item.vmid }} {{ item.name | default('') }}"
           changed_when: true
+          register: _restore_qemu_start
 
         - name: Start stopped LXC containers on target_node
           ansible.builtin.command:
@@ -186,10 +199,15 @@
           loop_control:
             label: "LXC {{ item.vmid }} {{ item.name | default('') }}"
           changed_when: true
+          register: _restore_lxc_start
 
         - name: Record started VM IDs
           ansible.builtin.set_fact:
-            _restore_vms_started: "{{ _stopped_after_migrate | default([]) | map(attribute='vmid') | list }}"
+            _restore_vms_started: >-
+              {{ ((_restore_qemu_start.results | default([])) +
+                  (_restore_lxc_start.results | default([]))) |
+                 rejectattr('failed', 'equalto', true) |
+                 map(attribute='item') | map(attribute='vmid') | list }}
 
         # =====================================================================
         # Phase 3: Disable maintenance mode and relocate HA VMs home
@@ -375,10 +393,24 @@
           when: proxmox_report.result.status != 'OK'
 
   rescue:
+    - name: Record successful restore loop items before reporting failure
+      ansible.builtin.set_fact:
+        _restore_vms_migrated: >-
+          {{ ((_restore_qemu_migrate.results | default([])) +
+              (_restore_lxc_migrate.results | default([]))) |
+             rejectattr('failed', 'equalto', true) |
+             map(attribute='item') | map(attribute='vmid') | list }}
+        _restore_vms_started: >-
+          {{ ((_restore_qemu_start.results | default([])) +
+              (_restore_lxc_start.results | default([]))) |
+             rejectattr('failed', 'equalto', true) |
+             map(attribute='item') | map(attribute='vmid') | list }}
+
     - name: Capture failure info
       ansible.builtin.set_fact:
         _restore_failed: true
         _restore_error_msg: "{{ ansible_failed_result.msg | default('Unknown error during restore') }}"
+        _restore_failed_task: "{{ ansible_failed_task.name | default('Unknown task during restore') }}"
 
   always:
     - name: Save restore report
@@ -396,11 +428,45 @@
             'external_probe_elapsed_seconds': _restore_external_probe_elapsed_seconds,
             'post_healthcheck_status': _restore_post_hc_status
           } | to_nice_json }}"
-        dest: "{{ proxmox_restore_report_dir }}/{{ _restore_run_ts }}_{{ inventory_hostname }}_restore.json"
+        dest: "{{ proxmox_restore_report_dir }}/{{ _restore_report_filename }}"
       delegate_to: localhost
       become: false
       ignore_errors: true
+      register: _restore_report_write
       check_mode: false
+
+    - name: Record restore report save result
+      ansible.builtin.set_fact:
+        _restore_report_saved: "{{ _restore_report_write is succeeded }}"
+
+    - name: Notify restore failure without masking it
+      when: _restore_failed | bool
+      block:
+        - name: Build restore failure notification
+          ansible.builtin.set_fact:
+            _restore_notify_message: |
+              Proxmox VM復帰で停止しました。
+              対象node: {{ inventory_hostname }}
+              失敗task: {{ _restore_failed_task }}
+              停止理由: {{ _restore_error_msg }}
+              戻せたVM: {{ _restore_vms_migrated | join(', ') if (_restore_vms_migrated | length > 0) else '(なし)' }}
+              起動したVM: {{ _restore_vms_started | join(', ') if (_restore_vms_started | length > 0) else '(なし)' }}
+              VMが退避先に残っている可能性があります。
+              report: {{ _restore_report_filename if (_restore_report_saved | bool) else 'report保存失敗' }}
+          delegate_to: localhost
+          become: false
+
+        - name: Send restore failure notification
+          ansible.builtin.include_tasks: "{{ playbook_dir }}/../roles/common_slack/tasks/notify.yml"
+          vars:
+            slack_channel: alerts
+            slack_status: error
+            slack_title: "[FAILED] {{ inventory_hostname }}: VM復帰停止"
+            slack_message: "{{ _restore_notify_message }}"
+      rescue:
+        - name: Ignore restore failure notification error
+          ansible.builtin.debug:
+            msg: "Restore failure notification could not be prepared or sent; preserving the original failure."
 
     - name: Re-raise failure
       ansible.builtin.fail:

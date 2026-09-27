@@ -27,6 +27,7 @@
     _evac_run_ts: "{{ lookup('pipe', 'date +%Y%m%dT%H%M%S') }}"
     _evac_failed: false
     _evac_error_msg: ""
+    _evac_failed_task: ""
     _vms_to_migrate: []
     _vms_ha: []
     _remaining_running: []
@@ -34,6 +35,11 @@
     _evac_vms_force_stopped: []
     _evac_pre_hc_status: "UNKNOWN"
     _evac_maintenance_enabled: false
+    _evac_report_saved: false
+
+- name: Set evacuation report filename
+  ansible.builtin.set_fact:
+    _evac_report_filename: "{{ _evac_run_ts }}_{{ inventory_hostname }}_evacuate.json"
 
 - name: Ensure report directory exists
   ansible.builtin.file:
@@ -145,6 +151,7 @@
           loop_control:
             label: "QEMU {{ item.vmid }} {{ item.name | default('') }} [{{ item.status }}]"
           changed_when: true
+          register: _evac_qemu_migrate
 
         - name: Migrate non-HA LXC containers to destination_node
           ansible.builtin.command:
@@ -155,10 +162,15 @@
           loop_control:
             label: "LXC {{ item.vmid }} {{ item.name | default('') }} [{{ item.status }}]"
           changed_when: true
+          register: _evac_lxc_migrate
 
         - name: Record migrated VM IDs
           ansible.builtin.set_fact:
-            _evac_vms_migrated: "{{ _vms_to_migrate | map(attribute='vmid') | list }}"
+            _evac_vms_migrated: >-
+              {{ ((_evac_qemu_migrate.results | default([])) +
+                  (_evac_lxc_migrate.results | default([]))) |
+                 rejectattr('failed', 'equalto', true) |
+                 map(attribute='item') | map(attribute='vmid') | list }}
 
         # =====================================================================
         # Phase 4: Enable maintenance mode (triggers HA evacuation)
@@ -247,6 +259,7 @@
             label: "QEMU {{ item.vmid }} {{ item.name | default('') }}"
           changed_when: true
           when: _remaining_running | length > 0
+          register: _evac_qemu_stop
 
         - name: Force-stop remaining LXC containers on target node
           ansible.builtin.command:
@@ -256,16 +269,35 @@
             label: "LXC {{ item.vmid }} {{ item.name | default('') }}"
           changed_when: true
           when: _remaining_running | length > 0
+          register: _evac_lxc_stop
 
         - name: Record force-stopped VM IDs
           ansible.builtin.set_fact:
-            _evac_vms_force_stopped: "{{ _remaining_running | map(attribute='vmid') | list }}"
+            _evac_vms_force_stopped: >-
+              {{ ((_evac_qemu_stop.results | default([])) +
+                  (_evac_lxc_stop.results | default([]))) |
+                 rejectattr('failed', 'equalto', true) |
+                 map(attribute='item') | map(attribute='vmid') | list }}
 
   rescue:
+    - name: Record successful evacuation loop items before reporting failure
+      ansible.builtin.set_fact:
+        _evac_vms_migrated: >-
+          {{ ((_evac_qemu_migrate.results | default([])) +
+              (_evac_lxc_migrate.results | default([]))) |
+             rejectattr('failed', 'equalto', true) |
+             map(attribute='item') | map(attribute='vmid') | list }}
+        _evac_vms_force_stopped: >-
+          {{ ((_evac_qemu_stop.results | default([])) +
+              (_evac_lxc_stop.results | default([]))) |
+             rejectattr('failed', 'equalto', true) |
+             map(attribute='item') | map(attribute='vmid') | list }}
+
     - name: Capture failure info
       ansible.builtin.set_fact:
         _evac_failed: true
         _evac_error_msg: "{{ ansible_failed_result.msg | default('Unknown error during evacuation') }}"
+        _evac_failed_task: "{{ ansible_failed_task.name | default('Unknown task during evacuation') }}"
 
   always:
     - name: Save evacuation report
@@ -283,11 +315,45 @@
             'ha_vms_count': (_vms_ha | length),
             'total_vms_on_node': (_target_vms | default([]) | length)
           } | to_nice_json }}"
-        dest: "{{ proxmox_evacuate_report_dir }}/{{ _evac_run_ts }}_{{ inventory_hostname }}_evacuate.json"
+        dest: "{{ proxmox_evacuate_report_dir }}/{{ _evac_report_filename }}"
       delegate_to: localhost
       become: false
       ignore_errors: true
+      register: _evac_report_write
       check_mode: false
+
+    - name: Record evacuation report save result
+      ansible.builtin.set_fact:
+        _evac_report_saved: "{{ _evac_report_write is succeeded }}"
+
+    - name: Notify evacuation failure without masking it
+      when: _evac_failed | bool
+      block:
+        - name: Build evacuation failure notification
+          ansible.builtin.set_fact:
+            _evac_notify_message: |
+              Proxmox VM退避で停止しました。
+              対象node: {{ inventory_hostname }}
+              失敗task: {{ _evac_failed_task }}
+              停止理由: {{ _evac_error_msg }}
+              退避できたVM: {{ _evac_vms_migrated | join(', ') if (_evac_vms_migrated | length > 0) else '(なし)' }}
+              強制停止したVM: {{ _evac_vms_force_stopped | join(', ') if (_evac_vms_force_stopped | length > 0) else '(なし)' }}
+              このnodeへの適用および次のnodeへは進んでいません。
+              report: {{ _evac_report_filename if (_evac_report_saved | bool) else 'report保存失敗' }}
+          delegate_to: localhost
+          become: false
+
+        - name: Send evacuation failure notification
+          ansible.builtin.include_tasks: "{{ playbook_dir }}/../roles/common_slack/tasks/notify.yml"
+          vars:
+            slack_channel: alerts
+            slack_status: error
+            slack_title: "[FAILED] {{ inventory_hostname }}: VM退避停止"
+            slack_message: "{{ _evac_notify_message }}"
+      rescue:
+        - name: Ignore evacuation failure notification error
+          ansible.builtin.debug:
+            msg: "Evacuation failure notification could not be prepared or sent; preserving the original failure."
 
     - name: Re-raise failure
       ansible.builtin.fail:

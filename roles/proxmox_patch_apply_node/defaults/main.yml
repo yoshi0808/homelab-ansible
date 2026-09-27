@@ -5,6 +5,11 @@ proxmox_patch_dryrun_report_dir: "{{ reports_base_dir }}/proxmox-dryrun"
 # Reboot wait timeout in seconds (15 minutes)
 proxmox_patch_apply_reboot_timeout: 900
 
+# Keep the success notification compact while still naming actual package work.
+proxmox_patch_apply_notification_package_limit: 10
+# Cap all changelog collection for one apply; unavailable entries never block apply.
+proxmox_patch_apply_changelog_timeout: 60
+
 # Apply mode: controls behavior when the re-dry-run classifies the result as
 # MAINTENANCE_REQUIRED-with-removes or MAJOR_UPGRADE_DETECTED (requirement.md
 # 2026-08-01 proxmox_auto_apply_widening §2.1: MAINTENANCE_REQUIRED without

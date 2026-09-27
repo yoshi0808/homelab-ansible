@@ -34,6 +34,10 @@
       実行日時 : {{ _apply_run_ts }}
       対象ノード: {{ inventory_hostname }}
       結果      : {{ 'FAILED' if (_apply_failed | bool) else 'SUCCESS' }}
+      {% if _apply_abort_type != 'none' or (_apply_failed | bool) %}
+      失敗task: {{ _apply_failed_task }}
+      このnodeで停止しました。weekly full から実行されている場合、以降のnodeへは進みません。
+      {% endif %}
 
       =========================================
       Phase 1: 前提チェック
@@ -117,6 +121,13 @@
       =========================================
       {% if not (_apply_abort_type in ['control_node', 'healthcheck', 'vms_not_evacuated', 'apt_update', 'apt_check', 'sim_failed', 'maintenance_required', 'major_upgrade_detected', 'blocked_important_remove', 'manual_not_confirmed', 'download_failed']) %}
       適用パッケージ数: {{ _sim_updates | length }}
+      適用パッケージ:
+      {% for package in _apply_package_notes[:proxmox_patch_apply_notification_package_limit | int] %}
+        - {{ package.package }} {{ '(新規)' if (package.is_new | bool) else package.installed }} → {{ package.candidate }}: {{ package.summary }}{{ ' (' ~ (package.cves | join(', ')) ~ ')' if (package.cves | length > 0) else '' }}
+      {% endfor %}
+      {% if (_sim_updates | length) > (proxmox_patch_apply_notification_package_limit | int) %}
+        - ほか {{ (_sim_updates | length) - (proxmox_patch_apply_notification_package_limit | int) }}件
+      {% endif %}
       apply seconds  : {{ _apply_seconds }}
       apply log      : {{ _apply_log_path }}
       reboot 実施   : {{ _apply_reboot_done }}
@@ -132,6 +143,8 @@
       Phase 5: post-healthcheck
       =========================================
       post-healthcheck: {{ _post_hc_status }}
+
+      report: {{ _apply_report_filename if (_apply_report_saved | bool) else 'report保存失敗' }}
     _notify_channel: "{{ 'alerts' if (_apply_abort_type != 'none' or _apply_failed | bool or _post_hc_status != 'OK') else 'patches' }}"
     _notify_status: >-
       {%- if _apply_abort_type != 'none' or _apply_failed | bool -%}

@@ -42,8 +42,10 @@
     _apply_failed: false
     _apply_abort_type: "none"
     _apply_error_msg: ""
+    _apply_failed_task: ""
     _predryrun: {}
     _sim_updates: []
+    _apply_package_notes: []
     _sim_removes: []
     _blocked_important_removes: []
     _important_updates: []
@@ -59,6 +61,7 @@
     _apply_collect: {}
     _reboot_required_before: false
     _apply_reboot_done: false
+    _apply_report_saved: false
     _post_hc_status: "UNKNOWN"
     _pre_hc_status: "UNKNOWN"
     _running_on_target: []
@@ -72,6 +75,10 @@
     _mirror_probe_results: []
     _mirror_selected_address: ""
     _mirror_selected_rtt_ms: ""
+
+- name: Set patch report filename
+  ansible.builtin.set_fact:
+    _apply_report_filename: "{{ _apply_run_ts }}_{{ inventory_hostname }}_apply.json"
 
 - name: Set JST cache key and persistent phase log paths
   ansible.builtin.set_fact:
@@ -269,6 +276,34 @@
           {{ _predryrun.sim_output.splitlines() |
              select('match', '^Remv ') |
              map('regex_replace', '^Remv (\S+).*', '\1') | list }}
+
+    - name: Install changelog collection helper
+      ansible.builtin.copy:
+        src: proxmox-patch-changelog-collect.py
+        dest: /usr/local/sbin/proxmox-patch-changelog-collect.py
+        mode: "0755"
+      check_mode: false
+
+    - name: Collect concise changelog notes for simulated updates
+      ansible.builtin.command:
+        argv:
+          - /usr/local/sbin/proxmox-patch-changelog-collect.py
+          - --limit
+          - "{{ proxmox_patch_apply_notification_package_limit | string }}"
+          - --timeout
+          - "{{ proxmox_patch_apply_changelog_timeout | string }}"
+        stdin: "{{ _predryrun.sim_output }}"
+      register: _apply_changelog_raw
+      changed_when: false
+      failed_when: false
+      check_mode: false
+
+    - name: Parse changelog notes when collection succeeded
+      ansible.builtin.set_fact:
+        _apply_package_notes: "{{ _apply_changelog_raw.stdout | from_json }}"
+      when:
+        - (_apply_changelog_raw.rc | default(1)) == 0
+        - (_apply_changelog_raw.stdout | default('') | trim | length) > 0
 
     - name: Detect major-version changes from re-dry-run simulation
       ansible.builtin.set_fact:
@@ -914,6 +949,24 @@
         _apply_error_msg: >-
           {{ _apply_error_msg if _apply_error_msg | length > 0
              else (ansible_failed_result.msg | default('Unknown error')) }}
+        _apply_failed_task: >-
+          {{ (ansible_failed_task.name | default('', true) | trim)
+             if (ansible_failed_task.name | default('', true) | trim | length > 0)
+             else {
+               'control_node': 'Abort when controller is a cluster guest',
+               'healthcheck': 'Abort when pre-healthcheck is not OK',
+               'vms_not_evacuated': 'Abort if VMs remain on target node',
+               'apt_update': 'Abort if apt update failed',
+               'apt_check': 'Abort if apt check failed',
+               'sim_failed': 'Abort if apt simulation failed',
+               'maintenance_required': 'Abort when maintenance is required',
+               'major_upgrade_detected': 'Abort when major upgrade is detected',
+               'blocked_important_remove': 'Abort when important package removal is blocked',
+               'manual_not_confirmed': 'Abort when manual confirmation is missing',
+               'download_failed': 'Abort when archive download fails',
+               'apply_failed': 'Abort when package apply fails',
+               'reboot_timeout': 'Reboot if required'
+             }.get(_apply_abort_type, 'Unknown task during patch apply') }}
 
   # ===========================================================================
   # Phase 4: Post-healthcheck + report + email (always runs)
@@ -976,6 +1029,47 @@
         _post_hc_status: "{{ _post_hc_retry_status }}"
       when: _post_hc_status in ['CRITICAL', 'UNKNOWN'] and (_apply_reboot_done | bool)
 
+    - name: Build and save final report
+      ansible.builtin.copy:
+        content: "{{ {
+            'run_timestamp': _apply_run_ts,
+            'target_node': inventory_hostname,
+            'result': 'FAILED' if (_apply_failed | bool) else 'SUCCESS',
+            'abort_type': _apply_abort_type,
+            'error_msg': _apply_error_msg,
+            'failed_task': _apply_failed_task,
+            'pre_healthcheck_status': _pre_hc_status,
+            'updates': _sim_updates,
+            'removes': _sim_removes,
+            'download_bytes': _download_bytes,
+            'download_seconds': _download_seconds,
+            'cache_hit': _download_cache_hit,
+            'download_stderr_excerpt': (_download_stderr | trim)[:1000],
+            'download_log': _download_log_path,
+            'mirror_host': proxmox_patch_apply_mirror_host,
+            'mirror_address': _mirror_selected_address,
+            'mirror_rtt_ms': _mirror_selected_rtt_ms,
+            'nas_cache_available': _nas_cache_available,
+            'nas_cache_warnings': _nas_cache_warnings,
+            'apply_seconds': _apply_seconds,
+            'apply_log': _apply_log_path,
+            'apply_output': _apply_stdout | truncate(3000),
+            'reboot_done': _apply_reboot_done,
+            'reboot_trigger': _apply_collect.reboot_trigger | default(''),
+            'running_kernel': _apply_collect.running_kernel | default(''),
+            'post_healthcheck_status': _post_hc_status
+          } | to_nice_json }}"
+        dest: "{{ proxmox_patch_apply_report_dir }}/{{ _apply_report_filename }}"
+      delegate_to: localhost
+      become: false
+      ignore_errors: true
+      register: _apply_report_write
+      check_mode: false
+
+    - name: Record patch report save result
+      ansible.builtin.set_fact:
+        _apply_report_saved: "{{ _apply_report_write is succeeded }}"
+
     - name: Set notification subject and body
       ansible.builtin.set_fact:
         _notify_subject: >-
@@ -1002,6 +1096,10 @@
           実行日時 : {{ _apply_run_ts }}
           対象ノード: {{ inventory_hostname }}
           結果      : {{ 'FAILED' if (_apply_failed | bool) else 'SUCCESS' }}
+          {% if _apply_abort_type != 'none' or (_apply_failed | bool) %}
+          失敗task: {{ _apply_failed_task }}
+          このnodeで停止しました。weekly full から実行されている場合、以降のnodeへは進みません。
+          {% endif %}
 
           =========================================
           Phase 1: 前提チェック
@@ -1085,6 +1183,13 @@
           =========================================
           {% if not (_apply_abort_type in ['control_node', 'healthcheck', 'vms_not_evacuated', 'apt_update', 'apt_check', 'sim_failed', 'maintenance_required', 'major_upgrade_detected', 'blocked_important_remove', 'manual_not_confirmed', 'download_failed']) %}
           適用パッケージ数: {{ _sim_updates | length }}
+          適用パッケージ:
+          {% for package in _apply_package_notes[:proxmox_patch_apply_notification_package_limit | int] %}
+            - {{ package.package }} {{ '(新規)' if (package.is_new | bool) else package.installed }} → {{ package.candidate }}: {{ package.summary }}{{ ' (' ~ (package.cves | join(', ')) ~ ')' if (package.cves | length > 0) else '' }}
+          {% endfor %}
+          {% if (_sim_updates | length) > (proxmox_patch_apply_notification_package_limit | int) %}
+            - ほか {{ (_sim_updates | length) - (proxmox_patch_apply_notification_package_limit | int) }}件
+          {% endif %}
           apply seconds  : {{ _apply_seconds }}
           apply log      : {{ _apply_log_path }}
           reboot 実施   : {{ _apply_reboot_done }}
@@ -1100,6 +1205,8 @@
           Phase 5: post-healthcheck
           =========================================
           post-healthcheck: {{ _post_hc_status }}
+
+          report: {{ _apply_report_filename if (_apply_report_saved | bool) else 'report保存失敗' }}
         _notify_channel: "{{ 'alerts' if (_apply_abort_type != 'none' or _apply_failed | bool or _post_hc_status != 'OK') else 'patches' }}"
         _notify_status: >-
           {%- if _apply_abort_type != 'none' or _apply_failed | bool -%}
@@ -1121,40 +1228,6 @@
         slack_title: "{{ _notify_subject }}"
         slack_message: "{{ _notify_body }}"
 
-    - name: Build and save final report
-      ansible.builtin.copy:
-        content: "{{ {
-            'run_timestamp': _apply_run_ts,
-            'target_node': inventory_hostname,
-            'result': 'FAILED' if (_apply_failed | bool) else 'SUCCESS',
-            'abort_type': _apply_abort_type,
-            'error_msg': _apply_error_msg,
-            'pre_healthcheck_status': _pre_hc_status,
-            'updates': _sim_updates,
-            'removes': _sim_removes,
-            'download_bytes': _download_bytes,
-            'download_seconds': _download_seconds,
-            'cache_hit': _download_cache_hit,
-            'download_stderr_excerpt': (_download_stderr | trim)[:1000],
-            'download_log': _download_log_path,
-            'mirror_host': proxmox_patch_apply_mirror_host,
-            'mirror_address': _mirror_selected_address,
-            'mirror_rtt_ms': _mirror_selected_rtt_ms,
-            'nas_cache_available': _nas_cache_available,
-            'nas_cache_warnings': _nas_cache_warnings,
-            'apply_seconds': _apply_seconds,
-            'apply_log': _apply_log_path,
-            'apply_output': _apply_stdout | truncate(3000),
-            'reboot_done': _apply_reboot_done,
-            'reboot_trigger': _apply_collect.reboot_trigger | default(''),
-            'running_kernel': _apply_collect.running_kernel | default(''),
-            'post_healthcheck_status': _post_hc_status
-          } | to_nice_json }}"
-        dest: "{{ proxmox_patch_apply_report_dir }}/{{ _apply_run_ts }}_{{ inventory_hostname }}_apply.json"
-      delegate_to: localhost
-      become: false
-      ignore_errors: true
-      check_mode: false
 
     - name: Re-raise failure to mark play as failed
       ansible.builtin.fail:
