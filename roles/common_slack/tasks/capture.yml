@@ -153,9 +153,10 @@
 #   slack_title          str    as passed to notify.yml (may be '')
 #   slack_message        str    as passed to notify.yml (may be '')
 #   skip_notifications   bool   flag only, not a filter (R1)
-#   check_mode           bool   ansible_check_mode; always false in practice because
-#                               this file never sets check_mode: false, so it does not
-#                               write anything under --check (ADR-004 補1)
+#   check_mode           bool   ansible_check_mode; the write tasks explicitly use
+#                               this CLI-derived value, so they do not write under
+#                               --check even when a caller inherits check_mode: false
+#                               (ADR-004 補1; capture_check_mode_inheritance R1)
 #
 # Invariants (do not violate when editing this file):
 #   - This file CREATES the spool directory if missing, but never CHANGES an
@@ -180,9 +181,12 @@
 #   - `rescue:` contains exactly one `ansible.builtin.debug` task.
 #   - Every task: `delegate_to: localhost`, `become: false`, `changed_when: false`.
 #     Capture always happens on the controller, never on the remote target host.
-#   - `check_mode: false` is intentionally NOT set anywhere in this file. Under
-#     `--check`, `file`/`copy` auto-simulate (no real write) and `command` auto-skips
-#     (module has no check_mode support), so the whole file no-ops under --check.
+#   - The spool directory, record write, and written-id mark explicitly set
+#     `check_mode: "{{ ansible_check_mode }}"`. This makes their behavior follow
+#     the CLI's `--check` value even when a caller includes notify.yml from a
+#     `check_mode: false` block. Under `--check`, file/copy simulate rather than
+#     write; the mark task preserves `_capture_written_id` by setting only a no-op
+#     fact (set_fact itself otherwise updates facts in check mode).
 #   - All referenced notify.yml vars go through `| default('')` / `| default(false)`
 #     so an undefined slack_channel/slack_status/slack_title/slack_message/
 #     skip_notifications never breaks the caller (ADR-004 補2).
@@ -300,6 +304,7 @@
           delegate_to: localhost
           become: false
           changed_when: false
+          check_mode: "{{ ansible_check_mode }}"
 
         - name: Write capture record directly to spool (atomic via copy's os.rename)
           ansible.builtin.copy:
@@ -308,6 +313,7 @@
           delegate_to: localhost
           become: false
           changed_when: false
+          check_mode: "{{ ansible_check_mode }}"
 
         - name: Mark capture id as actually written (2026-07-27, Coordinator decision post-review)
           # Deliberately a 4th, separate task instead of folding this into the
@@ -325,10 +331,12 @@
           # worth paying to close it. Cost accepted; do not re-collapse this into
           # the write task to save a task.
           ansible.builtin.set_fact:
-            _capture_written_id: "{{ _capture_ctx.id }}"
+            "{{ '_capture_check_mode_noop' if (ansible_check_mode | bool) else '_capture_written_id' }}": >-
+              {{ true if (ansible_check_mode | bool) else _capture_ctx.id }}
           delegate_to: localhost
           become: false
           changed_when: false
+          check_mode: "{{ ansible_check_mode }}"
 
   rescue:
     - name: Notification evidence capture failed (ignored)

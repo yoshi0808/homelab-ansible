@@ -1,0 +1,64 @@
+---
+# Local-only fixture for capture_check_mode_inheritance AC1–AC5.  The wrapper
+# creates a fresh marker and spool directory for each invocation; this file
+# never addresses the production spool.
+- hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    capture_collector_marker: "{{ lookup('env', 'CAPTURE_FIXTURE_MARKER') }}"
+    capture_spool_dir: "{{ lookup('env', 'CAPTURE_FIXTURE_SPOOL') }}"
+    fixture_include_from_check_mode_false_block: false
+    fixture_expected_records: 1
+    fixture_expect_written_id: true
+    fixture_create_marker: true
+  tasks:
+    - name: Create fixture collector marker
+      ansible.builtin.copy:
+        content: "fixture collector marker\n"
+        dest: "{{ capture_collector_marker }}"
+      check_mode: false
+      when: fixture_create_marker | bool
+
+    - name: Include notification normally
+      ansible.builtin.include_tasks: "{{ playbook_dir }}/../roles/common_slack/tasks/notify.yml"
+      vars:
+        slack_channel: alerts
+        slack_status: error
+        slack_title: capture fixture
+        slack_message: capture fixture message
+        skip_notifications: true
+      when: not (fixture_include_from_check_mode_false_block | bool)
+
+    - name: Include notification from a check-mode-disabled block
+      when: fixture_include_from_check_mode_false_block | bool
+      block:
+        - name: Include notification with inherited check mode disabled
+          ansible.builtin.include_tasks: "{{ playbook_dir }}/../roles/common_slack/tasks/notify.yml"
+          vars:
+            slack_channel: alerts
+            slack_status: error
+            slack_title: capture fixture
+            slack_message: capture fixture message
+            skip_notifications: true
+      check_mode: false
+
+    - name: Find fixture spool records
+      ansible.builtin.find:
+        paths: "{{ capture_spool_dir }}"
+        patterns: "*.json"
+        file_type: file
+      register: _capture_fixture_records
+
+    - name: Assert fixture capture result and footer value
+      ansible.builtin.assert:
+        that:
+          - _capture_fixture_records.matched | int == fixture_expected_records | int
+          - (_capture_written_id is defined) == (fixture_expect_written_id | bool)
+          - >-
+            (not (fixture_expect_written_id | bool)) or
+            (_capture_written_id == (_capture_fixture_records.files[0].path | basename | regex_replace('\\.json$', '')))
+          - >-
+            ('capture: ' ~ _capture_written_id if _capture_written_id is defined else '') ==
+            ('capture: ' ~ _capture_written_id if fixture_expect_written_id | bool else '')
+        quiet: true
