@@ -15,7 +15,7 @@
 
 **Proxmoxパッチ通知の強化(案件2b): 2026-10-03(土)の観測待ち**(`docs/ai/reviews/proxmox_patch_notifications_2b/`)。pushでquoryへ自動反映される。10/3の自動適用の通知で、①nodeごとのapply通知に、適用したpackageごとの `package 旧版 → 新版: changelogの1行目`(CVE番号)が出ること ②reportのファイル名が1行出ること(ディレクトリのパスは出ない) ③weekly fullの完了通知にnodeごとの再起動の有無が出ることをCoordinatorが確かめる。退避・復帰の失敗通知は、実際に止まるまで本番では観測できない。
 
-**障害捕捉の `--check` 継承の修正(案件3): 次のSemaphore Dry Runでの観測待ち**(`docs/ai/reviews/capture_check_mode_inheritance/`)。pushでquoryへ自動反映される。次にSemaphoreで Dry Run(`--check`)を押したジョブの前後で、`reports/incidents/_spool/` に `check_mode: true` のレコードが増えないことを、Coordinatorが `quory-investigate` の読み取り語彙で確かめられる範囲で確かめる。
+**障害捕捉の `--check` 継承の修正(案件3): 2026-10-26の観測待ち**(`docs/ai/reviews/capture_check_mode_inheritance/`)。10/26の月次振り返りのときに、9/27 20:44(commit `02edaed`)以降、`reports/incidents/_spool/` と収集後のバンドルに `check_mode: true` の記録が1件も無いことを、Coordinatorが `quory-investigate` の読み取り語彙で確かめる。不具合は「`--check`」と「自律復旧の3 roleかubuntu月次full-upgradeからの通知」が重なったときだけ起きるため、特定のDry Runを押して観測する方式は取らない。
 
 ## Next(着手候補) — 工程・体制
 
