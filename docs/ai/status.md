@@ -17,6 +17,8 @@
 
 **障害捕捉の `--check` 継承の修正(案件3): 2026-10-26の観測待ち**(`docs/ai/reviews/capture_check_mode_inheritance/`)。10/26の月次振り返りのときに、9/27 20:44(commit `02edaed`)以降、`reports/incidents/_spool/` と収集後のバンドルに `check_mode: true` の記録が1件も無いことを、Coordinatorが `quory-investigate` の読み取り語彙で確かめる。不具合は「`--check`」と「自律復旧の3 roleかubuntu月次full-upgradeからの通知」が重なったときだけ起きるため、特定のDry Runを押して観測する方式は取らない。
 
+**NVMe error-log増加を参考扱いに(`docs/ai/reviews/storage_monthly_error_log_note/`): 10月の月次点検の観測待ち**。pushでquoryへ自動反映される。10月の月次点検(Semaphoreのschedule)のNotionレポートで、pve2のerror-logが増え、かつほかのNVMe健康条件(媒体エラー0・重大警告なし・予備領域がしきい値以上)が正常なら、総合判定が「問題なし」のまま「## 参考」に「NVMeが拒否したコマンドの記録が+N件」が出ることを、Yoshinobuが貼ったレポートでCoordinatorが確かめる。
+
 ## Next(着手候補) — 工程・体制
 
 | 項目 | 内容 | 根拠 |

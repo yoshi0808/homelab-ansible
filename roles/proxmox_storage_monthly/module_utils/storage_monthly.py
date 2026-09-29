@@ -81,7 +81,7 @@ def build_report(observations, report_id, collected_at, baseline=None, stale_day
     now = datetime.fromisoformat(collected_at)
     if now.utcoffset() is None:
         raise ValueError("timestamp needs timezone")
-    hosts, issues = {}, []
+    hosts, issues, references = {}, [], []
     prior_hosts = (baseline or {}).get("hosts", {})
     for host, raw in observations.items():
         entry = {"collection": "error", "devices": [], "pools": [], "issues": []}
@@ -128,7 +128,15 @@ def build_report(observations, report_id, collected_at, baseline=None, stale_day
                     if any(v < 0 for v in delta.values()):
                         entry["issues"].append(["WARNING", serial + ": counter reset suspected"])
                     if delta["num_err_log_entries"] > 0:
-                        entry["issues"].append(["WARNING", serial + ": error log count increased"])
+                        if not (values["critical_warning"] or values["media_errors"] or
+                                values["avail_spare"] < values["spare_thresh"]):
+                            references.append(
+                                "参考: " + host + ": " + serial +
+                                ": NVMeが拒否したコマンドの記録が+" +
+                                str(delta["num_err_log_entries"]) +
+                                "件（媒体エラー0・重大警告なし。実害を示す値ではありません）")
+                        else:
+                            entry["issues"].append(["WARNING", serial + ": error log count increased"])
                 elif prior:
                     out["comparison"] = "replacement_or_added"
                     entry["issues"].append(["WARNING", serial + ": device replacement/addition"])
@@ -150,6 +158,7 @@ def build_report(observations, report_id, collected_at, baseline=None, stale_day
     health = max((i[0] for i in issues), key=levels.get, default="OK")
     return {"schema_version": 1, "report_id": report_id, "collected_at": collected_at,
             "month": now.astimezone(JST).strftime("%Y-%m"), "hosts": hosts, "issues": issues,
+            "references": references,
             "health": health, "collection": "ok" if hosts and all(h["collection"] == "ok" for h in hosts.values()) else "error",
             "comparison_source": {k: baseline.get(k) for k in ("report_id", "collected_at")} if baseline else None,
             "history_error": history_error}
@@ -231,13 +240,14 @@ def short_summary(report):
         lead = "異常は見つかりませんでした"
     else:
         lead = "確認が必要です（" + health + "）"
-    issues = [HEALTH_LABELS.get(level, level) + "：" + issue_text(reason)
-              for level, reason in sorted_issues(report)]
-    if not issues:
+    details = [HEALTH_LABELS.get(level, level) + "：" + issue_text(reason)
+               for level, reason in sorted_issues(report)]
+    details.extend(report.get("references", []))
+    if not details:
         return lead
-    shown = issues[:3]
-    if len(issues) > 3:
-        shown.append("ほか" + str(len(issues) - 3) + "件")
+    shown = details[:3]
+    if len(details) > 3:
+        shown.append("ほか" + str(len(details) - 3) + "件")
     return lead + " / " + " / ".join(shown)
 
 
@@ -251,6 +261,9 @@ def markdown(report):
              "- 観測日時: " + display_time(report["collected_at"]), "", "## 対応・未確認事項"]
     lines += ["- [" + HEALTH_LABELS.get(level, level) + "] " + issue_text(reason)
               for level, reason in sorted_issues(report)] or ["- 対応はありません"]
+    if report.get("references"):
+        lines += ["", "## 参考"]
+        lines += ["- " + reference for reference in report["references"]]
     lines += ["", "## 前回比較"]
     if report["history_error"]:
         lines.append("保存履歴が壊れているため比較できません。今回値を正常値として扱わないでください。")

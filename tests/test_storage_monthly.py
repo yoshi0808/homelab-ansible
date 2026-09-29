@@ -226,8 +226,57 @@ class ReportTests(unittest.TestCase):
         baseline = report()
         self.assertEqual(baseline['health'], 'OK')
         self.assertEqual(report(239, baseline)['hosts']['fixture-node']['devices'][0]['delta']['num_err_log_entries'], 0)
-        self.assertEqual(report(240, baseline)['health'], 'WARNING')
-        self.assertEqual(report(10, baseline)['hosts']['fixture-node']['devices'][0]['comparison'], 'reset_suspected')
+        reset = report(10, baseline)
+        self.assertEqual(reset['hosts']['fixture-node']['devices'][0]['comparison'], 'reset_suspected')
+        self.assertEqual(reset['health'], 'WARNING')
+
+    def test_error_log_increase_is_reference_when_nvme_is_healthy(self):
+        baseline = report(239)
+        result = report(241, baseline)
+        reference = '参考: fixture-node: fixture-serial: NVMeが拒否したコマンドの記録が+2件（媒体エラー0・重大警告なし。実害を示す値ではありません）'
+        self.assertEqual(result['health'], 'OK')
+        self.assertFalse(any(level == 'WARNING' for level, _ in result['issues']))
+        self.assertEqual(result['references'], [reference])
+        self.assertIn(reference, logic.markdown(result))
+        self.assertIn(reference, logic.short_summary(result))
+
+    def test_error_log_increase_keeps_critical_nvme_health_findings(self):
+        baseline = report(239)
+        for key, value in (('media_errors', 1), ('critical_warning', 4)):
+            raw = observation(241)
+            raw['devices'][0]['health']['json'][key] = value
+            result = logic.build_report({'fixture-node': raw}, 'fixture-report',
+                                        '2026-09-15T08:00:00+09:00', baseline)
+            self.assertEqual(result['health'], 'CRITICAL')
+            self.assertEqual(result['references'], [])
+
+    def test_error_log_increase_with_low_spare_keeps_critical_and_warning(self):
+        baseline = report(239)
+        raw = observation(241)
+        values = raw['devices'][0]['health']['json']
+        values['avail_spare'] = 9
+        values['spare_thresh'] = 10
+        result = logic.build_report({'fixture-node': raw}, 'fixture-report',
+                                    '2026-09-15T08:00:00+09:00', baseline)
+        self.assertEqual(result['health'], 'CRITICAL')
+        self.assertEqual(result['references'], [])
+        self.assertIn(['WARNING', 'fixture-node: fixture-serial: error log count increased'],
+                      result['issues'])
+        self.assertIn(['CRITICAL', 'fixture-node: fixture-serial: NVMe health warning/media errors/spare'],
+                      result['issues'])
+
+    def test_error_log_reference_is_absent_without_an_increase(self):
+        baseline = report(239)
+        self.assertEqual(report(239, baseline)['references'], [])
+
+    def test_legacy_report_without_references_remains_usable(self):
+        baseline = report(239)
+        baseline.pop('references')
+        result = report(241, baseline)
+        self.assertEqual(result['health'], 'OK')
+        self.assertIn('参考: fixture-node:', logic.markdown(result))
+        self.assertNotIn('## 参考', logic.markdown(baseline))
+        self.assertNotIn('参考:', logic.short_summary(baseline))
 
     def test_human_readable_normal_report(self):
         result = report()
@@ -242,10 +291,13 @@ class ReportTests(unittest.TestCase):
 
     def test_human_readable_warning_report_and_summary(self):
         baseline = report()
-        result = report(240, baseline)
+        raw = observation(240)
+        raw['devices'][0]['health']['json']['media_errors'] = 1
+        result = logic.build_report({'fixture-node': raw}, 'fixture-report',
+                                    '2026-09-15T08:00:00+09:00', baseline)
         body = logic.markdown(result)
         summary = logic.short_summary(result)
-        self.assertIn('確認が必要です（要確認）', summary)
+        self.assertIn('確認が必要です（異常）', summary)
         self.assertIn('NVMe error-logの累積数が増加しました', summary)
         self.assertIn('error-log +1', body)
         self.assertIn('fixture-node', body)
