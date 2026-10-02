@@ -16,6 +16,7 @@
   vars:
     proxmox_patch_apply_mirror_host: "mirror.example"
     proxmox_patch_apply_notification_package_limit: 3
+    proxmox_patch_apply_notification_body_limit: 3500
     cases:
       - id: final_critical
         post_hc_status: CRITICAL

@@ -11,9 +11,7 @@
 
 ## Now(進行中)
 
-**確認が効かない3経路の修正: 2026-10-02(金)の観測待ち**(案件クローズ、`docs/ai/reviews/patch_confirm_and_blocked_remove/`)。Semaphoreの2テンプレートは反映済み(2026-09-27、Dry Run #1260で差分2件のみを確認、本実行後に手動applyの確認欄が未選択では起動できないことをYoshinobuがUIで確認)。置換先の無い重要removeの判定は、10/2の金曜dry-runで、置換先なしremoveが無い週に `BLOCKED` が出ないこと(回帰なし)をCoordinatorが確かめる。重要remove由来の `BLOCKED` が初めて出たら、そのとき単独dry-runの終了コードを実測する(AC4b、`_007` のクローズ判断)。**同じ10/2のdry-runで、案件 `proxmox_patch_judgment_2a`(`docs/ai/reviews/proxmox_patch_judgment_2a/`)の機械的なmajor判定も観測する**: `pve-manager` / `proxmox-ve` / `base-files` のmajorが変わらない週に `MAJOR_UPGRADE_DETECTED` が出ないこと、「版を判定できない」が出ないこと(node別の版が本番の収集経路で取れていること)。AIがmajorを挙げた週は、通知に参考表示が付き、Statusが動かないこと。
-
-**Proxmoxパッチ通知の強化(案件2b): 2026-10-03(土)の観測待ち**(`docs/ai/reviews/proxmox_patch_notifications_2b/`)。pushでquoryへ自動反映される。10/3の自動適用の通知で、①nodeごとのapply通知に、適用したpackageごとの `package 旧版 → 新版: changelogの1行目`(CVE番号)が出ること ②reportのファイル名が1行出ること(ディレクトリのパスは出ない) ③weekly fullの完了通知にnodeごとの再起動の有無が出ることをCoordinatorが確かめる。退避・復帰の失敗通知は、実際に止まるまで本番では観測できない。
+**apply通知のCVE範囲と本文の長さの修正: 2026-10-10(土)の観測待ち**(`docs/ai/reviews/proxmox_apply_notice_changelog_scope/`)。2026-10-03の自動適用で、案件2b(`docs/ai/reviews/proxmox_patch_notifications_2b/`)の通知のうち、nodeごとの再起動の有無は確認できたが、packageごとのCVEが過去の全履歴から拾われ、本文がSlackで切れて適用後のhealthcheck(Phase 5)とreportのファイル名が届かなかった。これを直した。10/10の自動適用のapply通知で、①CVEが今回の更新分だけ(1packageにつき5件まで+ほかN件)になっていること ②Phase 5の結果とreportのファイル名の行が見えることを、Yoshinobuが貼った通知でCoordinatorが確かめる。
 
 **障害捕捉の `--check` 継承の修正(案件3): 2026-10-26の観測待ち**(`docs/ai/reviews/capture_check_mode_inheritance/`)。10/26の月次振り返りのときに、9/27 20:44(commit `02edaed`)以降、`reports/incidents/_spool/` と収集後のバンドルに `check_mode: true` の記録が1件も無いことを、Coordinatorが `quory-investigate` の読み取り語彙で確かめる。不具合は「`--check`」と「自律復旧の3 roleかubuntu月次full-upgradeからの通知」が重なったときだけ起きるため、特定のDry Runを押して観測する方式は取らない。
 

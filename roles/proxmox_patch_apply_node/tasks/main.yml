@@ -292,6 +292,8 @@
           - "{{ proxmox_patch_apply_notification_package_limit | string }}"
           - --timeout
           - "{{ proxmox_patch_apply_changelog_timeout | string }}"
+          - --cve-limit
+          - "{{ proxmox_patch_apply_notification_cve_limit | string }}"
         stdin: "{{ _predryrun.sim_output }}"
       register: _apply_changelog_raw
       changed_when: false
@@ -1126,23 +1128,7 @@
           [ABORT] {{ _redryrun_status | default('MAINTENANCE_REQUIRED') }} 検出
           中止理由: {{ _apply_error_msg }}
 
-          最新 dry-run から追加された更新候補:
-          {% if _new_vs_dryrun | length > 0 %}
-          {% for pkg in _new_vs_dryrun %}
-            - {{ pkg }}
-          {% endfor %}
-          {% else %}
-            (なし)
-          {% endif %}
-
-          最新 dry-run から変わらない更新候補:
-          {% if _unchanged_vs_dryrun | length > 0 %}
-          {% for pkg in _unchanged_vs_dryrun %}
-            - {{ pkg }}
-          {% endfor %}
-          {% else %}
-            (なし)
-          {% endif %}
+          __APPLY_ABORT_PACKAGE_NOTES__
 
           対応方法: {{ 'manual mode + 確認文字列で明示的に上書きするか、' if _apply_abort_type == 'major_upgrade_detected' else '' }}dry-run を再実行してください。
           {% endif %}
@@ -1184,12 +1170,7 @@
           {% if not (_apply_abort_type in ['control_node', 'healthcheck', 'vms_not_evacuated', 'apt_update', 'apt_check', 'sim_failed', 'maintenance_required', 'major_upgrade_detected', 'blocked_important_remove', 'manual_not_confirmed', 'download_failed']) %}
           適用パッケージ数: {{ _sim_updates | length }}
           適用パッケージ:
-          {% for package in _apply_package_notes[:proxmox_patch_apply_notification_package_limit | int] %}
-            - {{ package.package }} {{ '(新規)' if (package.is_new | bool) else package.installed }} → {{ package.candidate }}: {{ package.summary }}{{ ' (' ~ (package.cves | join(', ')) ~ ')' if (package.cves | length > 0) else '' }}
-          {% endfor %}
-          {% if (_sim_updates | length) > (proxmox_patch_apply_notification_package_limit | int) %}
-            - ほか {{ (_sim_updates | length) - (proxmox_patch_apply_notification_package_limit | int) }}件
-          {% endif %}
+          __APPLY_PACKAGE_NOTES__
           apply seconds  : {{ _apply_seconds }}
           apply log      : {{ _apply_log_path }}
           reboot 実施   : {{ _apply_reboot_done }}
@@ -1216,6 +1197,138 @@
           {%- else -%}
           ok
           {%- endif -%}
+      delegate_to: localhost
+      become: false
+      ignore_errors: true
+
+    - name: Render package notes within the actual notification body limit
+      ansible.builtin.set_fact:
+        _notify_package_notes: |-
+          {% set ns = namespace(lines=[], shown=0, stopped=false) %}
+          {% for package in _apply_package_notes[:proxmox_patch_apply_notification_package_limit | int] %}
+          {% set cve_text = (' (' ~ (package.cves | join(', ')) ~ (', ほか ' ~ (package.cve_overflow | default(0) | string) ~ '件' if (package.cve_overflow | default(0) | int) > 0 else '') ~ ')') if (package.cves | length > 0) else '' %}
+          {% set line = '- ' ~ package.package ~ ' ' ~ ('(新規)' if (package.is_new | bool) else package.installed) ~ ' → ' ~ package.candidate ~ ': ' ~ package.summary ~ cve_text %}
+          {% set candidate_lines = ns.lines + [line] %}
+          {% set candidate_text %}
+          {% for rendered_line in candidate_lines %}
+          {{ rendered_line }}
+          {% endfor %}
+          {% if (_sim_updates | length) > (candidate_lines | length) %}
+          - ほか {{ (_sim_updates | length) - (candidate_lines | length) }}件
+          {% endif %}
+          {% endset %}
+          {% if not ns.stopped and ((_notify_body | replace('__APPLY_PACKAGE_NOTES__', candidate_text | trim) | length) <= (proxmox_patch_apply_notification_body_limit | int)) %}
+          {% set ns.lines = ns.lines + [line] %}
+          {% set ns.shown = ns.shown + 1 %}
+          {% else %}
+          {% set ns.stopped = true %}
+          {% endif %}
+          {% endfor %}
+          {% for rendered_line in ns.lines %}
+          {{ rendered_line }}
+          {% endfor %}
+          {% if (_sim_updates | length) > ns.shown %}
+          - ほか {{ (_sim_updates | length) - ns.shown }}件
+          {% endif %}
+      delegate_to: localhost
+      become: false
+      ignore_errors: true
+
+    - name: Insert bounded package notes into notification body
+      ansible.builtin.set_fact:
+        _notify_body: "{{ _notify_body | replace('__APPLY_PACKAGE_NOTES__', _notify_package_notes | trim) }}"
+      delegate_to: localhost
+      become: false
+      ignore_errors: true
+
+    - name: Render abort package notes within the actual notification body limit
+      ansible.builtin.set_fact:
+        _notify_abort_package_notes: |-
+          {% set ns = namespace(new_lines=[], unchanged_lines=[], shown_new=0, shown_unchanged=0, stop_new=false, stop_unchanged=false) %}
+          {% for package in _new_vs_dryrun %}
+          {% set line = '- ' ~ package %}
+          {% set candidate_new_lines = ns.new_lines + [line] %}
+          {% set candidate_text %}
+          最新 dry-run から追加された更新候補:
+          {% for rendered_line in candidate_new_lines %}
+          {{ rendered_line }}
+          {% endfor %}
+          {% if (_new_vs_dryrun | length) > (candidate_new_lines | length) %}
+            - ほか {{ (_new_vs_dryrun | length) - (candidate_new_lines | length) }}件
+          {% endif %}
+
+          最新 dry-run から変わらない更新候補:
+          {% if _unchanged_vs_dryrun | length > 0 %}
+            (なし)
+            - ほか {{ _unchanged_vs_dryrun | length }}件
+          {% else %}
+            (なし)
+          {% endif %}
+          {% endset %}
+          {% if not ns.stop_new and ((_notify_body | replace('__APPLY_ABORT_PACKAGE_NOTES__', candidate_text | trim) | length) <= (proxmox_patch_apply_notification_body_limit | int)) %}
+          {% set ns.new_lines = ns.new_lines + [line] %}
+          {% set ns.shown_new = ns.shown_new + 1 %}
+          {% else %}
+          {% set ns.stop_new = true %}
+          {% endif %}
+          {% endfor %}
+          {% for package in _unchanged_vs_dryrun %}
+          {% set line = '- ' ~ package %}
+          {% set candidate_unchanged_lines = ns.unchanged_lines + [line] %}
+          {% set candidate_text %}
+          最新 dry-run から追加された更新候補:
+          {% for rendered_line in ns.new_lines %}
+          {{ rendered_line }}
+          {% endfor %}
+          {% if (_new_vs_dryrun | length) > (ns.new_lines | length) %}
+            - ほか {{ (_new_vs_dryrun | length) - (ns.new_lines | length) }}件
+          {% endif %}
+
+          最新 dry-run から変わらない更新候補:
+          {% for rendered_line in candidate_unchanged_lines %}
+          {{ rendered_line }}
+          {% endfor %}
+          {% if (_unchanged_vs_dryrun | length) > (candidate_unchanged_lines | length) %}
+            - ほか {{ (_unchanged_vs_dryrun | length) - (candidate_unchanged_lines | length) }}件
+          {% endif %}
+          {% endset %}
+          {% if not ns.stop_unchanged and ((_notify_body | replace('__APPLY_ABORT_PACKAGE_NOTES__', candidate_text | trim) | length) <= (proxmox_patch_apply_notification_body_limit | int)) %}
+          {% set ns.unchanged_lines = ns.unchanged_lines + [line] %}
+          {% set ns.shown_unchanged = ns.shown_unchanged + 1 %}
+          {% else %}
+          {% set ns.stop_unchanged = true %}
+          {% endif %}
+          {% endfor %}
+          最新 dry-run から追加された更新候補:
+          {% if ns.new_lines | length > 0 %}
+          {% for rendered_line in ns.new_lines %}
+          {{ rendered_line }}
+          {% endfor %}
+          {% else %}
+            (なし)
+          {% endif %}
+          {% if (_new_vs_dryrun | length) > ns.shown_new %}
+            - ほか {{ (_new_vs_dryrun | length) - ns.shown_new }}件
+          {% endif %}
+
+          最新 dry-run から変わらない更新候補:
+          {% if ns.unchanged_lines | length > 0 %}
+          {% for rendered_line in ns.unchanged_lines %}
+          {{ rendered_line }}
+          {% endfor %}
+          {% else %}
+            (なし)
+          {% endif %}
+          {% if (_unchanged_vs_dryrun | length) > ns.shown_unchanged %}
+            - ほか {{ (_unchanged_vs_dryrun | length) - ns.shown_unchanged }}件
+          {% endif %}
+      delegate_to: localhost
+      become: false
+      ignore_errors: true
+
+    - name: Insert bounded abort package notes into notification body
+      ansible.builtin.set_fact:
+        _notify_body: "{{ _notify_body | replace('__APPLY_ABORT_PACKAGE_NOTES__', _notify_abort_package_notes | trim) }}"
       delegate_to: localhost
       become: false
       ignore_errors: true

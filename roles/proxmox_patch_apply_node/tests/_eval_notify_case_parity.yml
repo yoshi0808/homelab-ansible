@@ -46,45 +46,81 @@
   changed_when: false
   failed_when: false
 
-- name: Confirm the package-notes loop header is unchanged in main.yml
+- name: Confirm the package-notes placeholder is unchanged in main.yml
   ansible.builtin.command:
     argv:
       - grep
       - -n
       - -F
       - --
-      # {% raw %} disables Jinja parsing of the literal grep pattern below,
-      # which itself contains {% for %}/{{ }} text that would otherwise be
-      # mistaken for real template tags in THIS fixture file.
-      - "{% raw %}{% for package in _apply_package_notes[:proxmox_patch_apply_notification_package_limit | int] %}{% endraw %}"
+      - __APPLY_PACKAGE_NOTES__
       - "{{ playbook_dir }}/../tasks/main.yml"
   register: _notify_package_loop_check
   changed_when: false
   failed_when: false
 
-- name: Confirm the package-notes display line is unchanged in main.yml
+- name: Confirm the abort package-notes placeholder is unchanged in main.yml
   ansible.builtin.command:
     argv:
       - grep
       - -n
       - -F
       - --
-      - "{% raw %}- {{ package.package }} {{ '(新規)' if (package.is_new | bool) else package.installed }} → {{ package.candidate }}: {{ package.summary }}{{ ' (' ~ (package.cves | join(', ')) ~ ')' if (package.cves | length > 0) else '' }}{% endraw %}"
+      - __APPLY_ABORT_PACKAGE_NOTES__
+      - "{{ playbook_dir }}/../tasks/main.yml"
+  register: _notify_abort_package_placeholder_check
+  changed_when: false
+  failed_when: false
+
+- name: Confirm the bounded package-notes loop is unchanged in main.yml
+  ansible.builtin.command:
+    argv:
+      - grep
+      - -n
+      - -F
+      - --
+      - "{% raw %}{% for package in _apply_package_notes[:proxmox_patch_apply_notification_package_limit | int] %}{% endraw %}"
       - "{{ playbook_dir }}/../tasks/main.yml"
   register: _notify_package_line_check
   changed_when: false
   failed_when: false
 
-- name: Confirm the package-notes overflow line is unchanged in main.yml
+- name: Confirm the bounded package-notes overflow line is unchanged in main.yml
   ansible.builtin.command:
     argv:
       - grep
       - -n
       - -F
       - --
-      - "{% raw %}- ほか {{ (_sim_updates | length) - (proxmox_patch_apply_notification_package_limit | int) }}件{% endraw %}"
+      - "{% raw %}- ほか {{ (_sim_updates | length) - ns.shown }}件{% endraw %}"
       - "{{ playbook_dir }}/../tasks/main.yml"
   register: _notify_package_overflow_check
+  changed_when: false
+  failed_when: false
+
+- name: Confirm bounded note insertion trims the rendered candidate in main.yml
+  ansible.builtin.command:
+    argv:
+      - grep
+      - -n
+      - -F
+      - --
+      - "replace('__APPLY_PACKAGE_NOTES__', _notify_package_notes | trim)"
+      - "{{ playbook_dir }}/../tasks/main.yml"
+  register: _notify_package_trim_check
+  changed_when: false
+  failed_when: false
+
+- name: Confirm bounded abort-note insertion trims the rendered candidate in main.yml
+  ansible.builtin.command:
+    argv:
+      - grep
+      - -n
+      - -F
+      - --
+      - "replace('__APPLY_ABORT_PACKAGE_NOTES__', _notify_abort_package_notes | trim)"
+      - "{{ playbook_dir }}/../tasks/main.yml"
+  register: _notify_abort_package_trim_check
   changed_when: false
   failed_when: false
 
@@ -133,8 +169,11 @@
       - _notify_subject_check.stdout | length > 0
       - _notify_status_check.stdout | length > 0
       - _notify_package_loop_check.stdout | length > 0
+      - _notify_abort_package_placeholder_check.stdout | length > 0
       - _notify_package_line_check.stdout | length > 0
       - _notify_package_overflow_check.stdout | length > 0
+      - _notify_package_trim_check.stdout | length > 0
+      - _notify_abort_package_trim_check.stdout | length > 0
       - _notify_failed_task_line_check.stdout | length > 0
       - _notify_stop_scope_check.stdout | length > 0
       - _notify_report_line_check.stdout | length > 0

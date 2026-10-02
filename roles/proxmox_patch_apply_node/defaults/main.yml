@@ -7,6 +7,11 @@ proxmox_patch_apply_reboot_timeout: 900
 
 # Keep the success notification compact while still naming actual package work.
 proxmox_patch_apply_notification_package_limit: 10
+# Limit CVE detail per package; the collector reports the remainder as a count.
+proxmox_patch_apply_notification_cve_limit: 5
+# Slack recommends keeping message text within 4,000 characters.  Leave 500
+# characters of margin while retaining the post-apply evidence.
+proxmox_patch_apply_notification_body_limit: 3500
 # Cap all changelog collection for one apply; unavailable entries never block apply.
 proxmox_patch_apply_changelog_timeout: 60
 

@@ -29,6 +29,7 @@
   vars:
     proxmox_patch_apply_mirror_host: "mirror.example"
     proxmox_patch_apply_notification_package_limit: 10
+    proxmox_patch_apply_notification_body_limit: 3500
     cases:
       # --- One case per dict key (12 of the 13; reboot_timeout is separate
       # below because its failing task really is named in main.yml). Each

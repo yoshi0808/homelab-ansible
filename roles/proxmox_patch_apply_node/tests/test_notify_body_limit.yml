@@ -1,0 +1,213 @@
+---
+# tester-gate: safe-readonly -- localhost fixture only; no Slack send.
+- name: Verify apply notification body keeps terminal evidence under its limit
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    proxmox_patch_apply_mirror_host: "mirror.example"
+    proxmox_patch_apply_notification_package_limit: 2000
+    proxmox_patch_apply_notification_body_limit: 3500
+    long_packages_json: >-
+      [{% for number in range(60) %}
+       {"package":"package{{ number }}","installed":"1.0","candidate":"2.0","is_new":false,
+        "summary":"security update {{ 'x' * 130 }}","cves":["CVE-2026-{{ '%04d' | format(number) }}"],"cve_overflow":0}
+       {{ ',' if not loop.last else '' }}{% endfor %}]
+    long_packages: "{{ long_packages_json | from_json }}"
+    short_packages_json: >-
+      [{% for number in range(2000) %}
+       {"package":"p{{ number }}","installed":"1","candidate":"2","is_new":false,
+        "summary":"x","cves":[],"cve_overflow":0}{{ ',' if not loop.last else '' }}{% endfor %}]
+    short_packages: "{{ short_packages_json | from_json }}"
+  tasks:
+    - name: Initialize success-case notification facts
+      ansible.builtin.set_fact:
+        _apply_run_ts: "20261003T000000"
+        _apply_failed: false
+        _apply_abort_type: "none"
+        _apply_error_msg: ""
+        _apply_failed_task: ""
+        _predryrun: {}
+        _sim_updates: "{{ short_packages[:300] | map(attribute='package') | list }}"
+        _apply_package_notes: "{{ short_packages[:300] }}"
+        _sim_removes: []
+        _blocked_important_removes: []
+        _important_updates: []
+        _new_vs_dryrun: []
+        _unchanged_vs_dryrun: []
+        _download_bytes: 0
+        _download_seconds: 0
+        _download_cache_hit: false
+        _apply_seconds: 0
+        _apply_collect: {}
+        _apply_reboot_done: false
+        _apply_report_filename: "20261003T000000_localhost_apply.json"
+        _apply_report_saved: true
+        _post_hc_status: "OK"
+        _pre_hc_status: "OK"
+        _nas_cache_available: false
+        _nas_cache_warnings: []
+        _mirror_selected_address: ""
+        _mirror_selected_rtt_ms: ""
+        _download_log_path: "/tmp/download.log"
+        _apply_log_path: "/tmp/apply.log"
+
+    - name: Evaluate the bounded notification body
+      ansible.builtin.include_tasks: _eval_notify_case.yml
+      vars:
+        scenario:
+          id: long_success
+          post_hc_status: OK
+          expect_status: ok
+          expect_subject_prefix: "[SUCCESS]"
+
+    - name: Assert body limit retains healthcheck and report evidence
+      ansible.builtin.assert:
+        that:
+          - _notify_results[0].notify_body | length <= proxmox_patch_apply_notification_body_limit | int
+          - "'post-healthcheck: OK' in _notify_results[0].notify_body"
+          - "'report: 20261003T000000_localhost_apply.json' in _notify_results[0].notify_body"
+          - "'- ほか ' in _notify_results[0].notify_body"
+
+    - name: Prepare a 2,000-package success notification
+      ansible.builtin.set_fact:
+        _sim_updates: "{{ short_packages | map(attribute='package') | list }}"
+        _apply_package_notes: "{{ short_packages }}"
+
+    - name: Evaluate the 2,000-package success notification
+      ansible.builtin.include_tasks: _eval_notify_case.yml
+      vars:
+        scenario:
+          id: short_success_2000
+          post_hc_status: OK
+          expect_status: ok
+          expect_subject_prefix: "[SUCCESS]"
+
+    - name: Assert the 2,000-package success body remains bounded
+      ansible.builtin.assert:
+        that:
+          - _notify_results[1].notify_body | length <= proxmox_patch_apply_notification_body_limit | int
+          - "'post-healthcheck: OK' in _notify_results[1].notify_body"
+          - "'report: 20261003T000000_localhost_apply.json' in _notify_results[1].notify_body"
+          - "'- ほか ' in _notify_results[1].notify_body"
+
+    - name: Prepare a long abort notification
+      ansible.builtin.set_fact:
+        _apply_abort_type: "maintenance_required"
+        _apply_failed: true
+        _apply_error_msg: "maintenance approval is required"
+        _apply_failed_task: "Abort when maintenance is required"
+        _redryrun_status: "MAINTENANCE_REQUIRED"
+        _redryrun_reason: "fixture"
+        _new_vs_dryrun: "{{ range(300) | map('string') | map('regex_replace', '^(.*)$', 'n\\1') | list }}"
+        _unchanged_vs_dryrun: "{{ range(300) | map('string') | map('regex_replace', '^(.*)$', 'u\\1') | list }}"
+
+    - name: Evaluate the bounded abort notification body
+      ansible.builtin.include_tasks: _eval_notify_case.yml
+      vars:
+        scenario:
+          id: long_abort
+          post_hc_status: UNKNOWN
+          expect_status: error
+          expect_subject_prefix: "[ABORT]"
+
+    - name: Assert abort body limit retains stop reason and report evidence
+      ansible.builtin.assert:
+        that:
+          - _notify_results[2].notify_body | length <= proxmox_patch_apply_notification_body_limit | int
+          - "'中止理由: maintenance approval is required' in _notify_results[2].notify_body"
+          - "'report: 20261003T000000_localhost_apply.json' in _notify_results[2].notify_body"
+          - "'- ほか ' in _notify_results[2].notify_body"
+
+    - name: Prepare a 2,000-package abort notification
+      ansible.builtin.set_fact:
+        _new_vs_dryrun: "{{ range(2000) | map('string') | map('regex_replace', '^(.*)$', 'n\\1') | list }}"
+        _unchanged_vs_dryrun: "{{ range(2000) | map('string') | map('regex_replace', '^(.*)$', 'u\\1') | list }}"
+
+    - name: Evaluate the 2,000-package abort notification
+      ansible.builtin.include_tasks: _eval_notify_case.yml
+      vars:
+        scenario:
+          id: short_abort_2000
+          post_hc_status: UNKNOWN
+          expect_status: error
+          expect_subject_prefix: "[ABORT]"
+
+    - name: Assert the 2,000-package abort body remains bounded
+      ansible.builtin.assert:
+        that:
+          - _notify_results[3].notify_body | length <= proxmox_patch_apply_notification_body_limit | int
+          - "'中止理由: maintenance approval is required' in _notify_results[3].notify_body"
+          - "'report: 20261003T000000_localhost_apply.json' in _notify_results[3].notify_body"
+          - "'- ほか ' in _notify_results[3].notify_body"
+
+    - name: Render an unbounded success baseline for boundary cases
+      ansible.builtin.set_fact:
+        proxmox_patch_apply_notification_body_limit: 10000
+        _apply_abort_type: "none"
+        _apply_failed: false
+        _sim_updates: [boundary]
+        _apply_package_notes:
+          - package: boundary
+            installed: "1"
+            candidate: "2"
+            is_new: false
+            summary: ""
+            cves: []
+            cve_overflow: 0
+        _new_vs_dryrun: []
+        _unchanged_vs_dryrun: []
+
+    - name: Evaluate the unbounded success baseline
+      ansible.builtin.include_tasks: _eval_notify_case.yml
+      vars:
+        scenario:
+          id: success_baseline
+          post_hc_status: OK
+          expect_status: ok
+          expect_subject_prefix: "[SUCCESS]"
+
+    - name: Record success baseline length
+      ansible.builtin.set_fact:
+        _success_boundary_base: "{{ (_notify_results | last).notify_body | length }}"
+
+    - name: Verify success boundaries at limit minus one, limit, and limit plus one
+      ansible.builtin.include_tasks: _eval_notify_limit_boundary.yml
+      loop:
+        - {kind: success, target: 3499, base: "{{ _success_boundary_base | int }}"}
+        - {kind: success, target: 3500, base: "{{ _success_boundary_base | int }}"}
+        - {kind: success, target: 3501, base: "{{ _success_boundary_base | int }}"}
+      loop_control:
+        loop_var: boundary
+
+    - name: Render an unbounded abort baseline for boundary cases
+      ansible.builtin.set_fact:
+        proxmox_patch_apply_notification_body_limit: 10000
+        _apply_abort_type: "maintenance_required"
+        _apply_failed: true
+        _sim_updates: []
+        _apply_package_notes: []
+        _new_vs_dryrun: [boundary]
+        _unchanged_vs_dryrun: []
+
+    - name: Evaluate the unbounded abort baseline
+      ansible.builtin.include_tasks: _eval_notify_case.yml
+      vars:
+        scenario:
+          id: abort_baseline
+          post_hc_status: OK
+          expect_status: error
+          expect_subject_prefix: "[ABORT]"
+
+    - name: Record abort baseline length
+      ansible.builtin.set_fact:
+        _abort_boundary_base: "{{ (_notify_results | last).notify_body | length }}"
+
+    - name: Verify abort boundaries at limit minus one, limit, and limit plus one
+      ansible.builtin.include_tasks: _eval_notify_limit_boundary.yml
+      loop:
+        - {kind: abort, target: 3499, base: "{{ _abort_boundary_base | int }}"}
+        - {kind: abort, target: 3500, base: "{{ _abort_boundary_base | int }}"}
+        - {kind: abort, target: 3501, base: "{{ _abort_boundary_base | int }}"}
+      loop_control:
+        loop_var: boundary

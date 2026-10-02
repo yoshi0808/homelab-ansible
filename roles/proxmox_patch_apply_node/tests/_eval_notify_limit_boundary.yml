@@ -1,0 +1,33 @@
+---
+# Included with loop_var: boundary by test_notify_body_limit.yml.
+- name: Configure this notification-length boundary case
+  ansible.builtin.set_fact:
+    proxmox_patch_apply_notification_body_limit: 3500
+    _apply_package_notes: >-
+      {{ [{'package': 'boundary', 'installed': '1', 'candidate': '2',
+           'is_new': false, 'summary': 'x' * (boundary.target - boundary.base - 1),
+           'cves': [], 'cve_overflow': 0}] if boundary.kind == 'success' else [] }}
+    _sim_updates: "{{ ['boundary'] if boundary.kind == 'success' else [] }}"
+    _new_vs_dryrun: "{{ ['boundary-' ~ ('x' * (boundary.target - boundary.base - 1))] if boundary.kind == 'abort' else [] }}"
+    _unchanged_vs_dryrun: []
+    _apply_abort_type: "{{ 'maintenance_required' if boundary.kind == 'abort' else 'none' }}"
+    _apply_failed: "{{ boundary.kind == 'abort' }}"
+
+- name: Render this notification-length boundary case
+  ansible.builtin.include_tasks: _eval_notify_case.yml
+  vars:
+    scenario:
+      id: "{{ boundary.kind }}_{{ boundary.target }}"
+      post_hc_status: OK
+      expect_status: "{{ 'error' if boundary.kind == 'abort' else 'ok' }}"
+      expect_subject_prefix: "{{ '[ABORT]' if boundary.kind == 'abort' else '[SUCCESS]' }}"
+
+- name: Assert the actual boundary body never exceeds its limit
+  ansible.builtin.assert:
+    that:
+      - (_notify_results | last).notify_body | length <= proxmox_patch_apply_notification_body_limit | int
+      - >-
+        (boundary.target | int) > (proxmox_patch_apply_notification_body_limit | int) or
+        ((_notify_results | last).notify_body | length) == (boundary.target | int)
+    fail_msg: >-
+      {{ boundary.kind }} target={{ boundary.target }}, actual={{ (_notify_results | last).notify_body | length }}
