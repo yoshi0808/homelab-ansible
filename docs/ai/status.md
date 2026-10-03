@@ -17,7 +17,7 @@
 
 **NVMe error-log増加を参考扱いに(`docs/ai/reviews/storage_monthly_error_log_note/`): 10月の月次点検の観測待ち**。pushでquoryへ自動反映される。10月の月次点検(Semaphoreのschedule)のNotionレポートで、pve2のerror-logが増え、かつほかのNVMe健康条件(媒体エラー0・重大警告なし・予備領域がしきい値以上)が正常なら、総合判定が「問題なし」のまま「## 参考」に「NVMeが拒否したコマンドの記録が+N件」が出ることを、Yoshinobuが貼ったレポートでCoordinatorが確かめる。
 
-**incident-captureの登録外ホストを収集エラーにしない(`docs/ai/reviews/incident_capture_unregistered_host/`): 配備待ち→2026-10-10(土)の観測待ち**。収集器のscriptを変えたため、Yoshinobuがquoryの Semaphore で `incident_capture_setup.yml`(SEMI-SAFE)を実行するまで本番に効かない。配備後、10/10 06:00のProxmox週次パッチの時間帯で `homelab-incident-capture.service` の `status=2` が出ない(出ても `no correlated Semaphore job` 起因だけである)ことを、Coordinatorが `quory-investigate journal-unit` で確かめる。
+**incident-captureの登録外ホストを収集エラーにしない(`docs/ai/reviews/incident_capture_unregistered_host/`): 2026-10-10(土)の観測待ち**。配備済み(#1339、2026-10-03 17:38。quoryの収集器のsha256がrepoと一致)。10/10 06:00のProxmox週次パッチの時間帯で `homelab-incident-capture.service` の `status=2` が出ない(出ても `no correlated Semaphore job` 起因だけである)ことを、Coordinatorが `quory-investigate journal-unit` で確かめる。
 
 ## Next(着手候補) — 工程・体制
 
