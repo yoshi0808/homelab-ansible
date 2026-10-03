@@ -49,10 +49,9 @@ Grafanaダッシュボード(infra-syslog-all-nodes.json)の既定`level`フィ�
 B3)。EXIT_INTERNAL_ERROR の1行には`<4>`を付けていない(今回のscope外)。
 
 集約対象は周期全体のcollection_errors(このmain()内のローカル変数)と
-各バンドルのsummary["collection_errors"]の両方 — 2026-09-01の実
-インシデントが示した「no named investigate operations available for
-host 'quory'」は後者(バンドル単位)にしか記録されず、write_run_reportが
-書くcollection_errorsには載らない。
+各バンドルのsummary["collection_errors"]の両方。failure_snapshot_opsに
+登録の無い有効なhostは追加snapshotを取らないが、これは収集エラーではなく
+summary["snapshot"]["host"]のnot_collectedへ記録する。
 
 表示するのは"what"のみで"why"は出さない(AC7)。ただし"what"自体にも
 非信頼データ(IC-016: spoolのpath/basename/play_host/play_nameを連結する
@@ -207,13 +206,12 @@ TOLERATED_UNCORRELATED_SLACK_STATUS = {"info", "warning"}
 # (B2是正、2026-09-02 Reviewer)。journal表示側(log_collection_errors_to_journal
 # の _redact_untrusted_what)はこの定数を使ってprefixだけを残し、連結された
 # 非信頼値は出さない。生成側(reject_spool_file/consume_spool_file/
-# collect_host_snapshot/spool単独バンドル生成)もこの定数からf-stringを組み立て、
-# 文字列リテラルを二重管理しない — _runs/・バンドル本体に書く内容(prefix+値)は
-# 従来と完全に同じ文字列になる。
+# spool単独バンドル生成)もこの定数からf-stringを組み立て、文字列リテラルを
+# 二重管理しない — _runs/・バンドル本体に書く内容(prefix+値)は従来と完全に
+# 同じ文字列になる。
 WHAT_PREFIX_REJECT_MOVE_FAILED = "failed to move malformed spool record "
 WHAT_PREFIX_REJECT_MALFORMED = "malformed spool record "
 WHAT_PREFIX_CONSUME_REMOVE_FAILED = "failed to remove consumed spool record "
-WHAT_PREFIX_NO_INVESTIGATE_OPS = "no named investigate operations available for host '"
 WHAT_PREFIX_NO_CORRELATED_JOB = "no correlated Semaphore job found for spool record ("
 
 
@@ -434,8 +432,11 @@ def collect_base_snapshot(cfg):
 def collect_host_snapshot(cfg, host):
     """指定ホストの failure_snapshot_ops を全て呼ぶ。
 
-    戻り値: (results_or_None, no_ops_error_or_None)。host が
-    failure_snapshot_ops のキーに無い場合は (None, エラー辞書)。
+    戻り値: (results_or_None, collection_error_or_None, no_ops_note_or_None)。
+    host が有効な文字列で failure_snapshot_ops のキーに無い場合は、
+    (None, None, note) を返す。これは収集エラーではないが、呼び出し元が
+    summary の snapshot.host へ「登録操作が無かった」事実を残す。キーが
+    あるのに操作が空、または host が判定不能な場合は従来どおりエラーにする。
     呼び出し元(main)がホスト単位でこの結果をキャッシュし、同じホストを
     参照する全バンドルへ個別に error/snapshot を反映する(1回しか呼ばれない
     ことに依存して2件目以降のバンドルへの反映が抜けないようにするため、
@@ -443,20 +444,26 @@ def collect_host_snapshot(cfg, host):
     2026-07-27 独立レビュー対応で、missing_binaryの反映漏れを避けるために
     この形にした)。
     """
-    ops = cfg["failure_snapshot_ops"].get(host)
+    if not isinstance(host, str) or not host:
+        return None, {
+            "what": "spool play_host is missing or not a non-empty string",
+            "why": "cannot select incident_capture_failure_snapshot_ops safely",
+        }, None
+
+    failure_snapshot_ops = cfg["failure_snapshot_ops"]
+    if host not in failure_snapshot_ops:
+        return None, None, {"reason": "no registered snapshot operations"}
+
+    ops = failure_snapshot_ops[host]
     if not ops:
         return None, {
-            "what": f"{WHAT_PREFIX_NO_INVESTIGATE_OPS}{host}'",
-            "why": (
-                "host is not a key in incident_capture_failure_snapshot_ops "
-                "(ADR-003 constraint 4: named operations only exist for "
-                "authy/monnie/pve1/pve2)"
-            ),
-        }
+            "what": "registered host has no failure snapshot operations",
+            "why": f"incident_capture_failure_snapshot_ops[{host!r}] is empty",
+        }, None
     results = [
         run_investigate(cfg["investigate_bin_template"], host, op, cfg["ssh_snapshot_timeout_s"]) for op in ops
     ]
-    return results, None
+    return results, None, None
 
 
 def append_missing_binary_errors(snapshot_results, bundle_collection_errors):
@@ -736,7 +743,6 @@ _UNTRUSTED_WHAT_REDACTIONS = (
     (WHAT_PREFIX_REJECT_MOVE_FAILED, "failed to move a malformed spool record (filename omitted — untrusted, IC-016)"),
     (WHAT_PREFIX_REJECT_MALFORMED, "malformed spool record (filename omitted — untrusted, IC-016)"),
     (WHAT_PREFIX_CONSUME_REMOVE_FAILED, "failed to remove a consumed spool record (filename omitted — untrusted, IC-016)"),
-    (WHAT_PREFIX_NO_INVESTIGATE_OPS, "no named investigate operations available for a spool-correlated host (host name omitted — untrusted, IC-016)"),
     (WHAT_PREFIX_NO_CORRELATED_JOB, "no correlated Semaphore job found for a spool record (play name omitted — untrusted, IC-016)"),
 )
 
@@ -985,12 +991,19 @@ def main():
             # バンドルで共有するため、参照する全バンドルへ個別に積む
             # (キャッシュ経由でも、ホストを共有する全バンドルへ毎回反映する)。
             append_missing_binary_errors(base_snapshot, summary["collection_errors"])
-            if host_for_ops:
-                if host_for_ops not in host_cache:
-                    host_cache[host_for_ops] = collect_host_snapshot(cfg, host_for_ops)
-                results, no_ops_error = host_cache[host_for_ops]
-                if no_ops_error is not None:
-                    summary["collection_errors"].append(no_ops_error)
+            if summary["source"] != "semaphore":
+                cache_key = (
+                    ("string", host_for_ops)
+                    if isinstance(host_for_ops, str)
+                    else ("non-string", repr(host_for_ops))
+                )
+                if cache_key not in host_cache:
+                    host_cache[cache_key] = collect_host_snapshot(cfg, host_for_ops)
+                results, host_error, no_ops_note = host_cache[cache_key]
+                if host_error is not None:
+                    summary["collection_errors"].append(host_error)
+                elif no_ops_note is not None:
+                    summary["snapshot"]["host"] = {"name": host_for_ops, "not_collected": no_ops_note}
                 else:
                     summary["snapshot"]["host"] = {"name": host_for_ops, "results": results}
                     append_missing_binary_errors(results, summary["collection_errors"])

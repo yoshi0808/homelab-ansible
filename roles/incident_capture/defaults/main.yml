@@ -74,8 +74,8 @@ incident_capture_base_snapshot_targets:
     ops: [cluster-quorum, ha-status]
 
 # 失敗ホストに対応する操作がある場合に追加で取る操作。
-# キーに無いホスト(quory自身・ansy等)は「叩ける操作が無い」事実を
-# collection_errors へ記録する(ADR-003 制約4、D3 §5のカタログ拡張根拠)。
+# キーに無いホスト(quory自身・ansy等)は追加snapshotを取らない。その事実と
+# host名はbundle summaryのsnapshot.hostへ残すが、collection_errorsにはしない。
 incident_capture_failure_snapshot_ops:
   authy: [status, failed, disk, journal-system]
   monnie: [status, failed, disk, journal-system]

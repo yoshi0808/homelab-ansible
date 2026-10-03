@@ -20,13 +20,13 @@ from _path_setup import COLLECTOR_PATH, _REPO_ROOT, collector
 
 
 class CollectorExitSemanticsTests(unittest.TestCase):
-    def _record(self, status):
+    def _record(self, status, host="fixture-host"):
         return {
             "record_version": 1,
             "written_at": "2026-09-21T09:00:13+09:00",
             "controller": "fixture",
             "play_name": "fixture play",
-            "play_host": "fixture-host",
+            "play_host": host,
             "slack_channel": "patches",
             "slack_status": status,
             "slack_title": "fixture",
@@ -35,7 +35,17 @@ class CollectorExitSemanticsTests(unittest.TestCase):
             "check_mode": False,
         }
 
-    def _run(self, records, base_snapshot=None, host_snapshot=None, break_move=False):
+    def _run(
+        self,
+        records,
+        base_snapshot=None,
+        host_snapshot=None,
+        break_move=False,
+        config_overrides=None,
+        query=None,
+        investigate_results=None,
+        mock_host_snapshot=True,
+    ):
         with tempfile.TemporaryDirectory() as root:
             spool_dir = os.path.join(root, "spool")
             bundle_dir = os.path.join(root, "bundles")
@@ -53,28 +63,34 @@ class CollectorExitSemanticsTests(unittest.TestCase):
                 "recent_failed_batch": 10,
                 "spool_correlation_tolerance_s": 90,
                 "base_snapshot_targets": [],
-                "failure_snapshot_ops": {},
+                "failure_snapshot_ops": {"fixture-host": ["status"]},
                 "investigate_bin_template": "/fixture/investigate-{host}",
                 "ssh_snapshot_timeout_s": 1,
                 "retention_days": 7,
             }
+            if config_overrides:
+                cfg.update(config_overrides)
+
             config_path = os.path.join(root, "config.json")
             with open(config_path, "w", encoding="utf-8") as handle:
                 json.dump(cfg, handle)
 
-            def query(_bin_path, _timeout, operation, *_args):
+            def default_query(_bin_path, _timeout, operation, *_args):
                 self.assertEqual(operation, "recent-failed")
                 return 0, "", ""
 
-            snapshots = host_snapshot or ([], None)
+            snapshots = host_snapshot or ([], None, None)
             base_results = base_snapshot or []
             patches = [
-                mock.patch.object(collector, "run_semaphore_query", side_effect=query),
+                mock.patch.object(collector, "run_semaphore_query", side_effect=query or default_query),
                 mock.patch.object(collector, "collect_base_snapshot", return_value=base_results),
-                mock.patch.object(collector, "collect_host_snapshot", return_value=snapshots),
                 mock.patch.object(collector, "apply_retention"),
                 mock.patch.object(sys, "argv", [COLLECTOR_PATH, config_path]),
             ]
+            if mock_host_snapshot:
+                patches.append(mock.patch.object(collector, "collect_host_snapshot", return_value=snapshots))
+            if investigate_results is not None:
+                patches.append(mock.patch.object(collector, "run_investigate", return_value=investigate_results))
             if break_move:
                 patches.append(mock.patch.object(collector.shutil, "move", side_effect=OSError("fixture move failure")))
             with contextlib.ExitStack() as stack:
@@ -84,7 +100,7 @@ class CollectorExitSemanticsTests(unittest.TestCase):
                 with contextlib.redirect_stderr(stderr):
                     exit_code = collector.main()
             summaries = []
-            for path in glob.glob(os.path.join(bundle_dir, "spool-*", "summary.json")):
+            for path in glob.glob(os.path.join(bundle_dir, "*", "summary.json")):
                 with open(path, encoding="utf-8") as handle:
                     summaries.append(json.load(handle))
             return exit_code, stderr.getvalue(), summaries, bundle_dir
@@ -132,14 +148,140 @@ class CollectorExitSemanticsTests(unittest.TestCase):
         exit_code, _stderr, _summaries, _ = self._run([missing])
         self.assertEqual(exit_code, collector.EXIT_COLLECTION_ERRORS)
 
-    def test_bundle_level_error_after_info_note_remains_exit_two(self):
-        no_ops_error = {"what": "no named investigate operations available", "why": "fixture"}
+    def test_host_wrapper_missing_after_info_note_remains_exit_two(self):
+        missing_wrapper = {
+            "host": "fixture-host",
+            "op": "status",
+            "missing_binary": True,
+            "error": "fixture wrapper missing",
+        }
         exit_code, _stderr, summaries, _ = self._run(
-            [self._record("info")], host_snapshot=(None, no_ops_error)
+            [self._record("info")],
+            investigate_results=missing_wrapper,
+            mock_host_snapshot=False,
         )
         self.assertEqual(exit_code, collector.EXIT_COLLECTION_ERRORS)
+        self.assertEqual(len(summaries), 1)
         self.assertEqual(len(summaries[0]["correlation_notes"]), 1)
-        self.assertEqual(summaries[0]["collection_errors"], [no_ops_error])
+        self.assertEqual(
+            summaries[0]["collection_errors"][0]["what"],
+            "investigate wrapper missing for fixture-host status",
+        )
+
+    def test_unregistered_hosts_are_notes_not_collection_errors(self):
+        for host in ("quory", "localhost", "ansy"):
+            with self.subTest(host=host):
+                exit_code, stderr, summaries, _ = self._run(
+                    [self._record("warning", host)],
+                    config_overrides={"failure_snapshot_ops": {}},
+                    mock_host_snapshot=False,
+                )
+                self.assertEqual(exit_code, collector.EXIT_OK)
+                self.assertEqual(stderr, "")
+                self.assertEqual(len(summaries), 1)
+                self.assertEqual(summaries[0]["collection_errors"], [])
+                self.assertEqual(summaries[0]["snapshot"]["base"], [])
+                self.assertEqual(
+                    summaries[0]["snapshot"]["host"],
+                    {"name": host, "not_collected": {"reason": "no registered snapshot operations"}},
+                )
+
+    def test_uncorrelated_error_for_unregistered_host_remains_collection_error(self):
+        exit_code, _stderr, summaries, _ = self._run(
+            [self._record("error", "quory")],
+            config_overrides={"failure_snapshot_ops": {}},
+            mock_host_snapshot=False,
+        )
+        self.assertEqual(exit_code, collector.EXIT_COLLECTION_ERRORS)
+        self.assertEqual(len(summaries), 1)
+        self.assertEqual(len(summaries[0]["collection_errors"]), 1)
+        self.assertIn("no correlated Semaphore job", summaries[0]["collection_errors"][0]["what"])
+        self.assertEqual(summaries[0]["snapshot"]["host"]["name"], "quory")
+
+    def test_unregistered_host_in_semaphore_bundle_is_not_collection_error(self):
+        def query(_bin_path, _timeout, operation, *_args):
+            if operation == "recent-failed":
+                return 0, "99|template|playbook.yml|error|2026-09-21T00:00:00+00:00\n", ""
+            if operation == "task-time":
+                return 0, "99|template|playbook.yml|error|2026-09-21T00:00:00+00:00|2026-09-21T00:01:00+00:00\n", ""
+            if operation == "task-output":
+                return 0, "fixture output\n", ""
+            self.assertIn(operation, ("task-errors", "task-hosts"))
+            return 0, "", ""
+
+        exit_code, stderr, summaries, _ = self._run(
+            [self._record("warning", "quory")],
+            config_overrides={"failure_snapshot_ops": {}},
+            query=query,
+            mock_host_snapshot=False,
+        )
+        self.assertEqual(exit_code, collector.EXIT_OK)
+        self.assertEqual(stderr, "")
+        self.assertEqual(len(summaries), 1)
+        self.assertEqual(summaries[0]["source"], "semaphore+spool")
+        self.assertEqual(summaries[0]["collection_errors"], [])
+        self.assertEqual(
+            summaries[0]["snapshot"]["host"],
+            {"name": "quory", "not_collected": {"reason": "no registered snapshot operations"}},
+        )
+
+    def test_invalid_play_hosts_remain_collection_errors(self):
+        for host in ("", None, 42, [], {}):
+            with self.subTest(host=repr(host)):
+                exit_code, _stderr, summaries, _ = self._run(
+                    [self._record("warning", host)], mock_host_snapshot=False
+                )
+                self.assertEqual(exit_code, collector.EXIT_COLLECTION_ERRORS)
+                self.assertEqual(len(summaries), 1)
+                self.assertEqual(
+                    summaries[0]["collection_errors"][0]["what"],
+                    "spool play_host is missing or not a non-empty string",
+                )
+
+    def test_registered_empty_snapshot_operations_remains_collection_error(self):
+        exit_code, _stderr, summaries, _ = self._run(
+            [self._record("warning", "monnie")],
+            config_overrides={"failure_snapshot_ops": {"monnie": []}},
+            mock_host_snapshot=False,
+        )
+        self.assertEqual(exit_code, collector.EXIT_COLLECTION_ERRORS)
+        self.assertEqual(len(summaries), 1)
+        self.assertEqual(
+            summaries[0]["collection_errors"][0]["what"],
+            "registered host has no failure snapshot operations",
+        )
+
+    def test_registered_host_snapshot_uses_real_collect_host_snapshot(self):
+        result = {"host": "monnie", "op": "status", "ok": True, "rc": 0, "stdout": "ok", "stderr": ""}
+        exit_code, _stderr, summaries, _ = self._run(
+            [self._record("warning", "monnie")],
+            config_overrides={"failure_snapshot_ops": {"monnie": ["status"]}},
+            investigate_results=result,
+            mock_host_snapshot=False,
+        )
+        self.assertEqual(exit_code, collector.EXIT_OK)
+        self.assertEqual(len(summaries), 1)
+        self.assertEqual(summaries[0]["snapshot"]["host"], {"name": "monnie", "results": [result]})
+
+    def test_string_and_non_string_cache_keys_do_not_collide(self):
+        exit_code, _stderr, summaries, _ = self._run(
+            [self._record("warning", "[]"), self._record("warning", [])],
+            config_overrides={"failure_snapshot_ops": {}},
+            mock_host_snapshot=False,
+        )
+        self.assertEqual(exit_code, collector.EXIT_COLLECTION_ERRORS)
+        self.assertEqual(len(summaries), 2)
+        string_summary = next(
+            summary for summary in summaries if summary["spool_records"][0]["play_host"] == "[]"
+        )
+        list_summary = next(
+            summary for summary in summaries if isinstance(summary["spool_records"][0]["play_host"], list)
+        )
+        self.assertEqual(string_summary["collection_errors"], [])
+        self.assertEqual(
+            list_summary["collection_errors"][0]["what"],
+            "spool play_host is missing or not a non-empty string",
+        )
 
     def test_missing_wrapper_after_info_note_remains_exit_two(self):
         missing_wrapper = {

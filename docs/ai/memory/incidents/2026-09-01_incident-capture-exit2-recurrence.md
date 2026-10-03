@@ -102,7 +102,7 @@ Yoshinobu提起(同日)「monnieのLokiにwarning/errorが溜まっているが�
 
 ## 再発(2026-10-03、捕捉)
 
-**状態: 調査中(この節だけ。上の2026-09-01分の結論は変えない)。**
+**状態: 原因判明・修正済み(未配備)。** 上の2026-09-01分の結論は変えない。通知元は7件すべてスナップショット手順の登録外(localhost / quory / ansy)だった(OPRES `req-20261003T163124+0900-941d459370e9135f`)。登録外ホストを収集エラーにしない修正を `docs/ai/reviews/incident_capture_unregistered_host/` で行った。
 
 2026-10-03 10:30:04、`homelab-incident-capture.service` が `status=2/INVALIDARGUMENT` で失敗した。collectorのjournal(Lokiで確認): `exiting with 2 collection_errors this cycle (run: 0, bundles: 2)`、2件とも `no named investigate operations available for a spool-correlated host (host name omitted — untrusted, IC-016)`(spool `spool-1790990851-…` = 10:27:31、`spool-1790990984-…` = 10:29:44)。当日の失敗Semaphoreジョブは無い(`semaphore-query recent-failed`)。
 
@@ -122,4 +122,3 @@ quoryの再起動(10:31)で失敗状態は消えた。対応は `docs/ai/status.
 
 #1334 monnie(〜10:24)と #1337 authy(〜15:58)のあとの収集(07:00〜10:30の間、16:00)は成功しており、登録のあるホストのapplyでは失敗していない。ubuntu applyだけでなく、Proxmoxパッチ時間帯にも同じ理由で失敗している。
 
-未確認: 各recordの通知元ホストと `slack_status`。
