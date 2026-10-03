@@ -99,3 +99,13 @@ Yoshinobu提起(同日)「monnieのLokiにwarning/errorが溜まっているが�
 - 05:50のSemaphore task 915(`SAFE: Time sync check`)との因果関係は未確認。時刻が近いだけで、確かめていない
 - `semaphore_query_ok` の値は実装からの推定であり、直接確認できていない(run reportが保存しないため)
 - **spool record がSemaphore jobへ相関しなかった理由**は、今回の依頼範囲では調べていない
+
+## 再発(2026-10-03、捕捉)
+
+**状態: 調査中(この節だけ。上の2026-09-01分の結論は変えない)。**
+
+2026-10-03 10:30:04、`homelab-incident-capture.service` が `status=2/INVALIDARGUMENT` で失敗した。collectorのjournal(Lokiで確認): `exiting with 2 collection_errors this cycle (run: 0, bundles: 2)`、2件とも `no named investigate operations available for a spool-correlated host (host name omitted — untrusted, IC-016)`(spool `spool-1790990851-…` = 10:27:31、`spool-1790990984-…` = 10:29:44)。当日の失敗Semaphoreジョブは無い(`semaphore-query recent-failed`)。
+
+時刻はubuntu月次full-upgradeの手動apply(#1334 monnie、#1335 quory)の終了通知と重なる。`incident_capture_failure_snapshot_ops` に登録があるのは authy / monnie / pve1 / pve2 だけで、quory / ansy は無い(`roles/incident_capture/defaults/main.yml`)。2026-09-23の修正(`docs/ai/reviews/incident_capture_exit_semantics/`)は「相関先が無い info / warning を収集エラーに数えない」部分で、**通知元ホストのsnapshotを取る段で登録の無いホストに当たる経路は対象外だった**。
+
+quoryの再起動(10:31)で失敗状態は消えた。未確認: 2件それぞれの通知元ホストと `slack_status`(ホスト名は非信頼値として伏せられている)。対応は `docs/ai/status.md` のNextで扱う。
