@@ -108,4 +108,18 @@ Yoshinobu提起(同日)「monnieのLokiにwarning/errorが溜まっているが�
 
 時刻はubuntu月次full-upgradeの手動apply(#1334 monnie、#1335 quory)の終了通知と重なる。`incident_capture_failure_snapshot_ops` に登録があるのは authy / monnie / pve1 / pve2 だけで、quory / ansy は無い(`roles/incident_capture/defaults/main.yml`)。2026-09-23の修正(`docs/ai/reviews/incident_capture_exit_semantics/`)は「相関先が無い info / warning を収集エラーに数えない」部分で、**通知元ホストのsnapshotを取る段で登録の無いホストに当たる経路は対象外だった**。
 
-quoryの再起動(10:31)で失敗状態は消えた。未確認: 2件それぞれの通知元ホストと `slack_status`(ホスト名は非信頼値として伏せられている)。対応は `docs/ai/status.md` のNextで扱う。
+quoryの再起動(10:31)で失敗状態は消えた。対応は `docs/ai/status.md` のNextで扱う。
+
+同日の全件(quoryの `journal-unit homelab-incident-capture.service 12h` と、Semaphore APIの各jobの `node` / 開始・終了時刻の突合。ホスト名はjournalに出ないため、spool IDのepochと時刻で対応づけた):
+
+| 収集 | spool(JST) | 時刻が重なるjob | 理由 |
+|---|---|---|---|
+| 06:30 `status=2`(3件) | 06:28:22 / 06:29:43 | #1332 Proxmox patch weekly full(06:00〜06:29) | 06:28:22は「相関するSemaphore jobなし」と「named investigate operationsなし」の2件。06:29:43は後者 |
+| 07:00 `status=2` | 06:59:08 | なし | named investigate operationsなし |
+| 10:30 `status=2` | 10:27:31 / 10:29:44 | #1335 quory apply(10:27〜10:29) | 同上 |
+| 10:35 `status=2`(quory再起動後) | 10:32:14 | なし(#1335終了後) | 同上 |
+| 16:05 `status=2` | 16:01:24 | #1338 ansy apply(16:01〜16:02) | 同上 |
+
+#1334 monnie(〜10:24)と #1337 authy(〜15:58)のあとの収集(07:00〜10:30の間、16:00)は成功しており、登録のあるホストのapplyでは失敗していない。ubuntu applyだけでなく、Proxmoxパッチ時間帯にも同じ理由で失敗している。
+
+未確認: 各recordの通知元ホストと `slack_status`。
