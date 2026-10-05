@@ -18,6 +18,7 @@ Policy: docs/ai/policies/autonomous_recovery_policy.md AR-095〜AR-101)。
   recovery-loki-helper count  <since> <window>
   recovery-loki-helper window <job> <since> <window> <level>
   recovery-loki-helper errors <since> <window>
+  recovery-loki-helper text   <job|all> <since> <window> <text>
 
 `errors` は全job横断で `level="error"` の行を返す(2026-09-01追加、requirement:
 docs/ai/reviews/loki_investigate_vocabulary/2026-09-01_001_requirement.md)。
@@ -64,7 +65,7 @@ QUERY_LIMIT = 300  # query_range `limit` param (返すlog行数の上限)
 # note(1) + entries(MAX_LINES-2) + 切り詰め通知(1) = MAX_LINES を超えない
 # よう entries 側の予算をさらに1行減らす(2026-09-01レビューB1で修正)。
 MAX_LINES = 300
-MAX_LINE_LENGTH = 300  # 1行あたりの文字数上限
+MAX_LINE_LENGTH = 1000  # 1行あたりの文字数上限
 
 # --- R9(P2)/将来のjob・host増加への保険。実測は11系列。 ---
 MAX_SERIES = 500
@@ -72,6 +73,7 @@ MAX_SERIES = 500
 ALLOWED_COUNT_WINDOWS = {"5m", "10m", "15m", "30m", "1h", "3h", "6h", "12h", "24h"}
 ALLOWED_WINDOW_WINDOWS = {"5m", "10m", "15m", "30m", "1h"}
 ALLOWED_ERRORS_WINDOWS = {"1h", "6h", "12h", "24h"}
+ALLOWED_TEXT_WINDOWS = {"1h", "6h", "24h", "3d", "7d"}
 ALLOWED_JOBS = {"unifi", "network-devices", "pve-nodes", "sophos-fw", "ubuntu-nodes"}
 ALLOWED_LEVELS = {"any", "error", "warning", "info"}
 
@@ -85,6 +87,8 @@ WINDOW_SECONDS = {
     "6h": 21600,
     "12h": 43200,
     "24h": 86400,
+    "3d": 259200,
+    "7d": 604800,
 }
 
 
@@ -349,6 +353,63 @@ def cmd_errors(argv):
         )
 
 
+def cmd_text(argv):
+    if len(argv) != 4:
+        deny("invalid parameter count for 'text'")
+    job, since, window, text = argv
+    if job != "all" and job not in ALLOWED_JOBS:
+        deny(f"invalid job '{job}'")
+    if window not in ALLOWED_TEXT_WINDOWS:
+        deny(f"invalid window '{window}' for 'text'")
+    if not text.isascii() or not text or len(text) > 64 or not all(
+        char.isalnum() or char in ":._-" for char in text
+    ):
+        deny("invalid text for 'text'")
+    start = parse_since_jst(since)
+    end = start + timedelta(seconds=WINDOW_SECONDS[window])
+
+    # The text value has passed the fixed literal character allowlist above.
+    # `|=` is deliberately a literal LogQL filter, never the regex `|~`.
+    selector = "{}" if job == "all" else '{job="%s"}' % job
+    query = '%s |= "%s"' % (selector, text)
+    params = {
+        "query": query,
+        "start": rfc3339_utc(start),
+        "end": rfc3339_utc(end),
+        "limit": str(QUERY_LIMIT + 1),
+        "direction": "forward",
+    }
+    data = loki_get("/loki/api/v1/query_range", params)
+    result = data.get("data", {}).get("result", [])
+
+    entries = []
+    for stream in result:
+        labels = stream.get("stream", {})
+        entry_job = labels.get("job", "")
+        host = labels.get("host") or labels.get("unit") or entry_job
+        for ts_ns, line in stream.get("values", []):
+            entries.append((int(ts_ns), entry_job, host, line))
+    entries.sort(key=lambda entry: entry[0])
+
+    truncated = len(entries) > MAX_LINES
+    if truncated:
+        entries = entries[: MAX_LINES - 1]
+
+    for ts_ns, entry_job, host, line in entries:
+        timestamp = datetime.fromtimestamp(ts_ns / 1e9, tz=timezone.utc).astimezone(JST)
+        normalized_line = " ".join(line.splitlines()) if line else line
+        formatted = (
+            f"{timestamp.strftime('%Y-%m-%dT%H:%M:%S+09:00')} "
+            f"[{entry_job}/{host}] {normalized_line}"
+        )
+        if len(formatted) > MAX_LINE_LENGTH:
+            formatted = formatted[: MAX_LINE_LENGTH - 3] + "..."
+        print(formatted)
+
+    if truncated:
+        print(_truncation_notice(start, end, entries[-1][0], len(entries), MAX_LINES))
+
+
 def main():
     if len(sys.argv) < 2:
         deny("missing subcommand")
@@ -360,6 +421,8 @@ def main():
         cmd_window(rest)
     elif sub == "errors":
         cmd_errors(rest)
+    elif sub == "text":
+        cmd_text(rest)
     else:
         deny(f"unknown subcommand '{sub}'")
 

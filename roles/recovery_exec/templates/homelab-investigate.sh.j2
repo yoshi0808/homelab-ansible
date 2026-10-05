@@ -4,6 +4,7 @@
 {% if 'loki' in target.investigate_services %}#              or: homelab-investigate-{{ target.name }} loki-count <since> <window>
 #              or: homelab-investigate-{{ target.name }} loki-window <job> <since> <window> <level>
 #              or: homelab-investigate-{{ target.name }} loki-errors <since> <window>
+#              or: homelab-investigate-{{ target.name }} loki-text <job|all> <since> <window> <text>
 {% endif %}# Hostname is hardcoded (§4.3: connection target fixed in script, not from args).
 # -F /dev/null: skip system ssh_config (bwrap UID mapping breaks ownership checks).
 #
@@ -14,8 +15,20 @@
 # independently re-parses and re-validates every operand (AR-097).
 set -euo pipefail
 
-KEY=/home/recovery-exec/.ssh/id_recovery_investigate
-KNOWN=/home/recovery-exec/.ssh/known_hosts
+case "$(/usr/bin/id -un)" in
+  recovery-exec)
+    KEY={{ recovery_exec_investigate_key }}
+    KNOWN={{ recovery_exec_ssh_dir }}/known_hosts
+    ;;
+  {{ recovery_exec_operator_user }})
+    KEY={{ recovery_exec_operator_investigate_key }}
+    KNOWN={{ recovery_exec_operator_ssh_dir }}/known_hosts
+    ;;
+  *)
+    echo "denied: investigation wrapper requires recovery-exec or {{ recovery_exec_operator_user }}" >&2
+    exit 1
+    ;;
+esac
 
 check="${1:-status}"
 p1="${2:-}"
@@ -101,6 +114,20 @@ case "$check" in
       *) deny_invalid window ;;
     esac
     run_remote "$check $p1 $p2"
+    ;;
+  loki-text)
+    (( argc == 5 )) || deny_count
+    case "$p1" in
+      all|unifi|network-devices|pve-nodes|sophos-fw|ubuntu-nodes) ;;
+      *) deny_invalid job ;;
+    esac
+    valid_since "$p2" || deny_invalid since
+    case "$p3" in
+      1h|6h|24h|3d|7d) ;;
+      *) deny_invalid window ;;
+    esac
+    [[ "$p4" =~ ^[A-Za-z0-9:._-]{1,64}$ ]] || deny_invalid text
+    run_remote "$check $p1 $p2 $p3 $p4"
     ;;
 {% endif %}
   # journal-ssh (catalog §7, D7, 2026-08-03). Takes only a window — the unit

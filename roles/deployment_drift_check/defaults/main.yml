@@ -289,8 +289,8 @@ deployment_drift_check_units:
 # いずれも quory の play から delegate_to で配布しているため、R9の
 # run_host: quory を明示する(files欄の delegate_to エントリと同じ理由)。
 deployment_drift_check_forced_command_keys:
-  - { hosts: [authy, monnie], path: /home/recovery-exec/.ssh/authorized_keys, entries: 3, playbook: playbooks/recovery_exec_setup.yml, run_host: quory }
-  - { hosts: [pve1, pve2], path: /home/recovery-exec/.ssh/authorized_keys, entries: 2, playbook: playbooks/recovery_exec_setup.yml, run_host: quory }
+  - { hosts: [authy, monnie], path: /home/recovery-exec/.ssh/authorized_keys, entries: 4, playbook: playbooks/recovery_exec_setup.yml, run_host: quory }
+  - { hosts: [pve1, pve2], path: /home/recovery-exec/.ssh/authorized_keys, entries: 3, playbook: playbooks/recovery_exec_setup.yml, run_host: quory }
   # quory の read 専用受け口(Phase 3 で新設)。forced command 1本だけであること
   # が境界そのものなので、エントリが増えていないことを日次で見る。
   # roles/dev_investigate/tasks/main.yml は quory 自身の play で直接

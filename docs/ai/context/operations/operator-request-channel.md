@@ -38,9 +38,11 @@ ansy: 取り込み前DLP → Coordinator が受領
 
 **DEVREQはOPREQへの返信に限らない。** quoryで見つけた障害を起点にOperatorが単独で発行できる。真因の確定と修正方法の設計は開発側Coordinatorが主体となる。
 
-## 2. 鍵とidentityは1つも増えていない
+## 2. Channel経路の鍵と、Operator調査鍵
 
-**既存の `dev-investigate` 鍵・ユーザー・forced command をそのまま使う。** 新しいSSH鍵、新しい着地ユーザー、逆方向のSSH鍵、常駐broker service、sudoersのいずれも作っていない。
+**Channel経路は既存の `dev-investigate` 鍵・ユーザー・forced command をそのまま使う。** Channelのために新しい着地ユーザー、逆方向のSSH鍵、常駐broker service、sudoersは作っていない。
+
+**Operator自身の対象host調査には、quoryの `yoshi` 専用のread-only SSH鍵を使う。** これはOperatorが既存の `homelab-investigate-<host>` wrapperからauthy / monnie / pve1 / pve2の既存forced-command dispatchへ到達するための鍵であり、`recovery-exec` の鍵を読ませるものでもaction経路を与えるものでもない。鍵の生成・登録・known_hostsの正本は `roles/recovery_exec/` である。
 
 - 経路が証明するのは個人ではなく「ansy側の開発identity」である。
 - `source` はpayloadの自己申告を信用せず、**実行入口がサーバー側で決める**。ansyからは調査依頼しか作れず、quoryのlocal CLIからは調査結果と開発修正依頼しか作れない。

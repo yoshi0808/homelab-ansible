@@ -14,6 +14,14 @@ recovery_exec_action_key: /home/recovery-exec/.ssh/id_recovery_action
 # reach.
 recovery_exec_investigate_pve_key: /home/recovery-exec/.ssh/id_recovery_investigate_pve
 
+# Operator (quory's yoshi) uses separate read-only keys. These are deliberately
+# separate from recovery-exec's keys so the Operator never needs to read or
+# impersonate the autonomous-recovery identity.
+recovery_exec_operator_user: yoshi
+recovery_exec_operator_ssh_dir: "/home/{{ recovery_exec_operator_user }}/.ssh"
+recovery_exec_operator_investigate_key: "{{ recovery_exec_operator_ssh_dir }}/id_operator_investigate"
+recovery_exec_operator_investigate_pve_key: "{{ recovery_exec_operator_ssh_dir }}/id_operator_investigate_pve"
+
 # pve_unreachable_handling(R1/R7): pve targetのTCP到達性probe(target_setup.yml
 # の "Probe TCP reachability of pve target nodes")のタイムアウト秒数。pve1は
 # 夏季平日にシャットダウンする運用にあり、その日でも

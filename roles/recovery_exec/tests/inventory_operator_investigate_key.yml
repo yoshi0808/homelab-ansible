@@ -1,0 +1,6 @@
+all:
+  children:
+    control_nodes:
+      hosts:
+        quory:
+          ansible_connection: local

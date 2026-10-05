@@ -11,8 +11,20 @@
 # forced-command dispatch, which is the actual authorization boundary.
 set -euo pipefail
 
-KEY=/home/recovery-exec/.ssh/id_recovery_investigate_pve
-KNOWN=/home/recovery-exec/.ssh/known_hosts
+case "$(/usr/bin/id -un)" in
+  recovery-exec)
+    KEY={{ recovery_exec_investigate_pve_key }}
+    KNOWN={{ recovery_exec_ssh_dir }}/known_hosts
+    ;;
+  {{ recovery_exec_operator_user }})
+    KEY={{ recovery_exec_operator_investigate_pve_key }}
+    KNOWN={{ recovery_exec_operator_ssh_dir }}/known_hosts
+    ;;
+  *)
+    echo "denied: investigation wrapper requires recovery-exec or {{ recovery_exec_operator_user }}" >&2
+    exit 1
+    ;;
+esac
 
 # Allowlist and validators mirror the dispatch script on {{ target.name }}.
 # This wrapper is a first-line filter, not the sole gate. Only validated

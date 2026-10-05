@@ -256,7 +256,7 @@ actionは無引数でallowlist内の全serviceを一括restartし、個別servic
 Loki横断ログ調査は、`recovery_exec` roleのdispatch templateが列挙する検証済みparameter付きcheckの範囲だけを許可する。
 
 <!-- AR-096 -->
-parameterは固定arityとし、時刻は分精度の固定書式、それ以外は列挙allowlistに限定する。自由文字列によるlog本文filterを許可しない。
+parameterは固定arityとし、時刻は分精度の固定書式とする。log本文の絞り込みは固定文字列一致(LogQL `|=`)だけを許し、その値は英数字と `:` `.` `_` `-` からなる1〜64文字に限る。それ以外のparameterは列挙allowlistに限定する。正規表現による絞り込みを許可しない。
 
 <!-- AR-097 -->
 quory側wrapperを一次filter、対象host側dispatchを権限の本gateとし、dispatchが独立に再parseして不正tokenをLoki問い合わせ到達前に拒否する。
@@ -384,3 +384,4 @@ Codex wrapperはsudo、setuid、file capabilityによる権限昇格を前提に
 | 2026-08-25 | Codex向けAGENTS.mdが2つあり能力が異なることを規定としてAR-104を新設。同一化・統合を禁じ、一次調査のLLMのAGENTS.mdへdispatchのcommandを書かないことを明記した。既存AR番号の改訂・退番はない |
 | 2026-08-25 | Pull ladderの説明文にあった未定義識別子「P4」(本文書のどこにも定義が無い)と、列挙と一致しない数の宣言「4分岐」を削除した。許可・禁止・停止条件は変更していない。 |
 | 2026-08-25 | AR-102後段(「境界は能力の不在で作る」)を`docs/ai/core.md`「安全機構がブロックしたとき」への1行ポインタへ改めた(core.mdの原則文の言い直しで領域適用を加えていなかった)。前段(execpolicy禁止)は領域適用のため本文のまま残した。AR番号の新設・退番はない。 |
+| 2026-10-05 | AR-096を改訂し、log本文の固定文字列一致(文字種と長さを限定)を許した(Yoshinobu決定)。2026-07-29の導入時は本文filterを「初版に含めない、実運用で判断する」と先送りしていたものが禁止として写されていた。正規表現の禁止、AR-097〜AR-101は変更していない。AR番号の新設・退番はない。案件記録: `docs/ai/reviews/loki_text_filter/` |
