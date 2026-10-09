@@ -17,6 +17,8 @@
 
 **Operatorの調査鍵(`docs/ai/reviews/operator_investigate_key/`)とLokiの固定文字列検索(`docs/ai/reviews/loki_text_filter/`): 配備済み、残り1点**。配備は #1362(2026-10-05)と、`loki-text all` の不具合修正の #1419(2026-10-10、`all` で全jobを検索できることをansyから確認済み)。Operatorの鍵(AC9)と障害捕捉の収集器の経路(AC9b)は確認済み。残りは、自律復旧のCodex(sandbox経由)が次に調査を走らせたとき、wrapperの `denied: investigation wrapper requires` が出ていないこと(ansyでの実測を根拠に受け入れ、quory上では未観測)。
 
+**Wi-Fiテレビの切断(5GHzチャンネル入れ替えの実験): 2026-10-13に結果をまとめる**。テレビ(MAC `00:16:f5:22:da:86`)は1階のAP(u7-1f)にLock to AP中。2026-10-06 07:07に5GHzのチャンネルを入れ替えた(1階 36→52、2階 52→36。Yoshinobuが操作)。入れ替え前の7日間で、テレビの再送過多(`Excessive Retries`)による切断は2件(10/5 07:12 u7-2f、09:36 u7-1f)。入れ替え後のテレビの再送過多を数え、件数が0〜1件なら一時的なものとみなす。家族のiPhoneの切断(圏外へ出たとき・眠っている間)は除外する。手段は `ssh monnie-investigate loki-text network-devices <since> 7d Excessive`。結果をYoshinobuへ報告し、1階を元のch36(DFS対象外)へ戻すかはYoshinobuが決める。UniFiの設定は人が操作する。
+
 ## Next(着手候補) — 工程・体制
 
 | 項目 | 内容 | 根拠 |
