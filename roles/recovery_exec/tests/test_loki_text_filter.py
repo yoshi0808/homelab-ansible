@@ -133,7 +133,8 @@ class LokiTextFilterTests(unittest.TestCase):
             with self.subTest(text=text):
                 helper.cmd_text(["all", "2026-10-01T00:00", "7d", text])
                 query = captured[-1][1]["query"]
-                self.assertEqual(query, '{} |= "%s"' % text)
+                self.assertEqual(query, '{job=~".+"} |= "%s"' % text)
+                self.assertNotIn("{}", query)
                 self.assertIn('|= "%s"' % text, query)
                 self.assertNotIn("|~", query)
                 self.assertNotIn("level=", query)

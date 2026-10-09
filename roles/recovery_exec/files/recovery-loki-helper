@@ -370,7 +370,7 @@ def cmd_text(argv):
 
     # The text value has passed the fixed literal character allowlist above.
     # `|=` is deliberately a literal LogQL filter, never the regex `|~`.
-    selector = "{}" if job == "all" else '{job="%s"}' % job
+    selector = '{job=~".+"}' if job == "all" else '{job="%s"}' % job
     query = '%s |= "%s"' % (selector, text)
     params = {
         "query": query,

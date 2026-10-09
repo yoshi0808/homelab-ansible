@@ -16,3 +16,8 @@
 ## 差し戻し対応
 
 - job固有の`loki-text` queryについて、`unifi`指定時に`{job="unifi"} |= "kicked"`となり、level selectorを含まないことを確認するoffline testを追加した。
+
+## 配備後の不具合修正(2026-10-10)
+
+- `all`のselectorをLokiが受け付けない`{}`から、既存`loki-count`と同じ全job一致の`{job=~".+"}`へ修正した。level selectorは追加していない。
+- offline testで、`all`のqueryが空selectorではなく`{job=~".+"} |= "<text>"`になることを確認する。

@@ -15,7 +15,7 @@
 
 **NVMe error-log増加を参考扱いに(`docs/ai/reviews/storage_monthly_error_log_note/`): 10月の月次点検の観測待ち**。pushでquoryへ自動反映される。10月の月次点検(Semaphoreのschedule)のNotionレポートで、pve2のerror-logが増え、かつほかのNVMe健康条件(媒体エラー0・重大警告なし・予備領域がしきい値以上)が正常なら、総合判定が「問題なし」のまま「## 参考」に「NVMeが拒否したコマンドの記録が+N件」が出ることを、Yoshinobuが貼ったレポートでCoordinatorが確かめる。
 
-**Operatorの調査鍵(`docs/ai/reviews/operator_investigate_key/`)とLokiの固定文字列検索(`docs/ai/reviews/loki_text_filter/`): 配備済み、Operator経路の観測待ち**。配備は #1362(2026-10-05、commit `78d706e`、4ホストとも反映)。Loki固定文字列検索の7日検索はansyから0.5秒で返った(RR-5済み)。残りは3つ: ①Operatorが自分の鍵で各ホストを調べられること(AC9。OPREQ `req-20261005T195450+0900-77360731c9729cdf`、未回答) ②障害捕捉の収集器(`recovery-exec`)がwrapperに拒否されていないこと(AC9b)。収集器はwrapperの非ゼロ終了を収集エラーにせずバンドル内に `ok:false` で残すため、journalでは判別できない。2026-10-10のバンドル `spool-1791580983-c1e84523` の中身をOPREQ `req-20261010T072049+0900-12899be5f6d1344d` で依頼済み ③自律復旧のCodex(sandbox経由)が次に調査を走らせたとき、wrapperの `denied: investigation wrapper requires` が出ていないこと(ansyでの実測を根拠に受け入れ、quory上では未観測)。
+**Operatorの調査鍵(`docs/ai/reviews/operator_investigate_key/`)とLokiの固定文字列検索(`docs/ai/reviews/loki_text_filter/`): 配備済み、残り2点**。配備は #1362(2026-10-05)。Operatorは自分の鍵で monnie / authy / pve1 / pve2 へ届き(AC9、OPRES `req-20261010T081034+0900-2d823a3fd5c5d61f` ほか)、障害捕捉の収集器もwrapperに拒否されていない(AC9b、OPRES `req-20261010T075739+0900-a5138e5c393e496f`)。残りは ①`loki-text all` が本番でHTTP 400になった不具合の修正(2026-10-10 commit)を `recovery_exec_setup.yml` で配備し、ansyから `loki-text all` が返ることを確かめる ②自律復旧のCodex(sandbox経由)が次に調査を走らせたとき、wrapperの `denied: investigation wrapper requires` が出ていないこと(ansyでの実測を根拠に受け入れ、quory上では未観測)。
 
 ## Next(着手候補) — 工程・体制
 
