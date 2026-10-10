@@ -210,12 +210,17 @@ rm -f <run>/role-session.homelab-ops__operator     # 1. 掃除
 （残存 bridge と app-server の pid を落とす）
 delivery.sh set monitor codex <project>            #    冪等
 tmux ... で codex を起動
-codex-record-session.sh homelab-ops operator <project>   # 2. 張り直し(数秒リトライ)
+この起動で作られた app-server の seat record を見つけ、その seat key を渡して
+  AGMSG_CODEX_SEAT_KEY=<key> codex-record-session.sh homelab-ops operator <project>   # 2. 張り直し(リトライ)
 ```
 
-**最後の1行は通常シェルから呼べる。AI に実行させる必要はない。** `CODEX_THREAD_ID` が無い文脈で呼ばれると、このスクリプトは app-server へ loaded スレッドを問い、**既に seat のあるものを引き算して、残りが1つならそれを記録する**。1 で掃除してあれば残りは必ず、いま立てた可視スレッドである。
+**張り直しには、いま起動した席の seat key を渡す。** agmsg v1.3 で app-server は席ごとになり、`codex-record-session.sh` はその所在を `AGMSG_CODEX_SEAT_KEY` でしか引けない。**渡さずに通常シェルから呼ぶと app-server を特定できず**、直近40件の rollout から推定し、thread が1つに絞れなければ**何も記録せずに終わる**。quory では19種類あり、この条件が成立していた(2026-10-10)。seat key を渡せば loaded スレッドを問い、掃除済みなら残りはいま立てた可視スレッドだけになる。同時に、その席の bridge request にも team と agent が書かれる。
 
-**1 を省くと 2 は黙って何もしない。** 「seat が既にあるなら推論で上書きしない」という規則に当たるためで、エラーは出ない。
+seat key は、起動の直前より新しい `run/codex-app-server.<key>.record` のうち、`project=` がプロジェクトパスの sha1 に一致するものから取る。**この張り直しを Codex のセッション内(`actas`)で行わせる形は quory では採れない** — Operator は `--sandbox read-only` で動いており、run 配下へ書けない。
+
+**待った結果の失敗は、人が見る pane に出す。** 起動スクリプト側の出力は `tmux attach` に隠れる。seat が無いまま動くセッションは、エラーを出さずに受信だけが成立しない。
+
+**1 を省くと、古い seat を新しいセッションと取り違える。** 待つ側は seat ファイルの有無しか見ないため、前回の seat が残っていれば成功と判定する。
 
 **この掃除を欠いたまま運用すると、人が見ていないスレッドが `operator` を名乗って応答しうる** — 2026-08-16 に実際に起きた(`docs/ai/memory/incidents/2026-08-16_headless-codex-thread-replied-as-operator.md`)。
 
@@ -233,10 +238,10 @@ spawn.sh codex implementer --team homelab --project <project> --split h --fresh 
   --model <現在値> --boot-prompt "<起動指示>"
 ```
 
-- **pane 1は`spawn.sh --fresh`で立てるため、seatの掃除と張り直しはspawn.shが担う**(本節冒頭)。起動スクリプトが自前で面倒を見るのはpane 0側だけであり、Claude Code側のseatは`.claude/settings.local.json`のSessionStart / SessionEnd hookが扱う
+- **pane 1は`spawn.sh --fresh`で立てるため、seatの掃除と張り直しはspawn.shが担う**(本節冒頭)。起動スクリプトが自前で面倒を見るのはpane 0側だけであり、Claude Code側のseatは`.claude/settings.local.json`のSessionStart / SessionEnd hookと、pane 0の最初の入力で行うactas(下記)が扱う
 - **`delivery.sh set monitor codex`をspawnより前に置く。** 逆順だとペインは開きCodexも動くのに、送ったメッセージだけが届かない(§2)
 - **`coordinator` identityを、Coordinatorが載っているCLIの型で、`homelab`と`homelab-ops`の両teamに登録しておく。** `watch.sh`は`(project, 型)`で解決したidentityしか購読しないため、型がずれていると**ペインもbridgeも正常なのにcoordinator宛だけが届かない**(2026-09-14、ADR-013期のcodex登録が残り、Implementerの起動報告が未読のまま滞留した)。確認は`identities.sh <project> <型>`、登録は`join.sh <team> coordinator <型> <project>`。**`leave.sh`はagent単位でしか外せず、registration単位の削除手段は無い** — 型を移すときはleaveしてから正しい型でjoinする。id付きteam(`homelab-ops`)ではleaveがrosterへ退会イベントを書き、それが同期先へ渡る
-- **このprojectのclaude-code型の登録は `coordinator` だけにする。** SessionStart hookは、claude-code型の登録が複数あり、どれがこのセッションの席かを決められないと、受信の監視を始めずに止まる(他の席宛ての未読を既読にしないため)。2026-10-10、ADR-013期に残ったclaude-code型の登録15件(reviewer / auditor / tester系)が原因で、Coordinatorが毎回受信できていなかった。Codexの役は `spawn.sh codex` がcodex型で登録するため、claude-code型の登録は要らない。確認は `identities.sh <project> claude-code` で、`coordinator` 以外が出たら `reset.sh <project> claude-code <name>` で外す。監視は30分で切れるため、`.claude/settings.local.json` の `env` に `AGMSG_CC_MONITOR_KEEP_ALIVE=1` を置き、切れるたびに張り直させる
+- **pane 0のclaudeは、最初の入力に `/agmsg actas coordinator` を渡して起動する。** `coordinator` は `homelab` と `homelab-ops` の両方に居るため、SessionStart hookは席を2つと数え、どちらがこのセッションか決められずに受信の監視を始めない(他の席宛ての未読を既読にしないため)。actasで席を名指しすると、両teamの `coordinator` 宛てを受ける監視が始まる。**このprojectのclaude-code型の登録は `coordinator` だけにする** — 余分な登録はactasの対象を増やすだけで要らない。確認は `identities.sh <project> claude-code` で、`coordinator` 以外が出たら `reset.sh <project> claude-code <name>` で外す。監視は30分で切れるため、`.claude/settings.local.json` の `env` に `AGMSG_CC_MONITOR_KEEP_ALIVE=1` を置き、切れるたびに張り直させる
 - **Implementerの起動はfail-openにする。** agmsgが欠けていても、半端に復元されていても、Coordinatorのpaneは必ず上がること。pane 0の表示は`exec claude`で消えるため、失敗はログファイルへ残す
 - **計画ReviewerとAuditorは常駐させない。** 案件ごとにCoordinatorが`spawn.sh codex`でfresh起動し、終わったら`despawn.sh`で畳む(§4)
 - 通常のSSH再接続では起動スクリプトを使わず、`tmux attach -d -t homelab`で既存sessionへ戻る。引数なしの`new-session.sh`も同じくattachし、稼働中のペインを畳まない。Codexのrule変更やversion更新をImplementerへ反映するときは`./new-session.sh --reset`を使う
