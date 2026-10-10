@@ -19,7 +19,7 @@
 
 **Wi-Fiテレビの切断(5GHzチャンネル入れ替えの実験): 2026-10-13に結果をまとめる**。テレビ(MAC `00:16:f5:22:da:86`)は1階のAP(u7-1f)にLock to AP中。2026-10-06 07:07に5GHzのチャンネルを入れ替えた(1階 36→52、2階 52→36。Yoshinobuが操作)。入れ替え前の7日間で、テレビの再送過多(`Excessive Retries`)による切断は2件(10/5 07:12 u7-2f、09:36 u7-1f)。入れ替え後のテレビの再送過多を数え、件数が0〜1件なら一時的なものとみなす。家族のiPhoneの切断(圏外へ出たとき・眠っている間)は除外する。手段は `ssh monnie-investigate loki-text network-devices <since> 7d Excessive`。結果をYoshinobuへ報告し、1階を元のch36(DFS対象外)へ戻すかはYoshinobuが決める。UniFiの設定は人が操作する。
 
-**agmsgの起動直後にseatが張られず通知が届かない件(`docs/ai/reviews/agmsg_operator_seat_bind/`): ansyの再起動の検証待ち**。quoryは修正を適用し、再起動後にテスト通知が自動で届くことを確認済み(2026-10-10)。ansyの `new-session.sh` は修正済みで、別端末から `--reset` を実行したあと、pane 0で `actas coordinator` が走り、受信の監視が自動で始まることを確かめる。
+**agmsgの `--reset` 後にImplementerが起動しない件(`docs/ai/reviews/agmsg_operator_seat_bind/`): 原因の調査待ち**。ansyの `--reset` でCoordinatorの受信が自動で始まることは確認済み(2026-10-10。quoryも同日確認済み)。一方、pane 1のImplementerは、前回のスレッドが持つ `implementer` のactasロックが「生きている」と判定されて `spawn.sh --fresh` が拒否し、起動しない(10/10の `--reset` 3回とも失敗。`/tmp/new-session-implementer-boot.log`)。Coordinatorが `reset.sh` でロックを外して手で起動し直し、READYを受けた(10/10 19:40)。tmuxを閉じても10/3起動のCodex app-serverが残ることと関係するとみているが未確認で、次の `--reset` でも再発する見込み。
 
 ## Next(着手候補) — 工程・体制
 
