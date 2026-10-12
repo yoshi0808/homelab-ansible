@@ -1,11 +1,14 @@
-prefix_rule(pattern=["git", "commit"], decision="allow")
-prefix_rule(pattern=["git", "push"], decision="allow")
+# Only the Coordinator stages, commits and pushes (docs/ai/core.md, EXEC-030).
+# Under `codex exec` (approval never) these rules do not reject a sandboxed
+# command; what stops it is the sandbox: .git is read-only and the network is
+# off (measured 2026-10-12, docs/ai/reviews/codex_exec_roles/). The rules keep
+# an interactive Codex from being granted these.
+prefix_rule(pattern=["git", ["add", "commit", "push"]], decision="forbidden")
 prefix_rule(pattern=["git", "status"], decision="allow")
 prefix_rule(pattern=["git", "diff"], decision="allow")
 prefix_rule(pattern=["git", "log"], decision="allow")
 prefix_rule(pattern=["git", "show"], decision="allow")
 prefix_rule(pattern=["git", "rev-parse"], decision="allow")
-prefix_rule(pattern=["git", "add"], decision="allow")
 prefix_rule(pattern=["git", ["restore", "checkout", "switch", "stash", "reset", "clean"]], decision="prompt")
 prefix_rule(pattern=["scripts/safe-ansible-check.sh"], decision="allow")
 prefix_rule(pattern=["ansible-playbook"], decision="allow")
@@ -47,19 +50,10 @@ prefix_rule(pattern=["apt", "list", "--upgradable"], decision="allow")
 prefix_rule(pattern=["dpkg-query", "-W"], decision="allow")
 
 prefix_rule(pattern=["sleep", "2"], decision="allow")
-prefix_rule(pattern=["tmux", "capture-pane", "-p", "-t", "%5", "-S", "-30"], decision="allow")
-prefix_rule(pattern=["tmux", "capture-pane", "-p", "-t", "%5", "-S", "-35"], decision="allow")
-
-# Yoshinobu: tmux operations do not require confirmation (2026-09-06).
-prefix_rule(pattern=["tmux"], decision="allow")
 
 # Read-only Operator Request Channel retrieval. `submit` is intentionally not
 # included: it appends an irreversible request to the production-side spool.
 prefix_rule(pattern=["operator-channel-client", ["list", "get", "status"]], decision="allow")
-prefix_rule(pattern=["bash", "/home/yoshi/.agents/skills/agmsg/scripts/send.sh"],
-  decision="allow")
-prefix_rule(pattern=["bash", "/home/yoshi/.agents/skills/agmsg/scripts/remote.sh",
-  "status", "homelab-ops"], decision="allow")
-prefix_rule(pattern=["bash","/home/yoshi/.agents/skills/agmsg/scripts/remote.sh","sync","start","homelab-ops"],decision="allow")
 prefix_rule(pattern=["python3","scripts/oprc-prepare.py"],decision="allow")
-prefix_rule(pattern=["bash","scripts/oprc-submit.sh"],decision="allow")
+# Submitting an OPREQ and notifying the Operator is the Coordinator's act.
+prefix_rule(pattern=["bash","scripts/oprc-submit.sh"],decision="forbidden")

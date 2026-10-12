@@ -16,14 +16,16 @@ Yoshinobuとの対話窓口として要求と判断材料を整え、自ら実�
 
 | Role / 工程 | 起動 |
 |---|---|
-| Coordinator | Claude Code。人が直接使うセッション、tmux pane 0 |
-| Implementer | **Codex。agmsg経由でtmux pane 1へ常駐し、セッションごとにfreshで立ち上がる。調査・実装・自己検証・差し戻し対応を一貫して担う** |
-| 計画Reviewer | **Codex。agmsg経由で案件ごとにfresh起動し、Implementerとは別identityにする** |
+| Coordinator | Claude Code。人が直接使うセッション(ansyのtmux pane 0) |
+| Implementer | **Codex。案件ごとに `scripts/codex-role.sh implementer` で起動し、差し戻しは同じセッションへ `--resume` で続ける。調査・実装・自己検証・差し戻し対応を一貫して担う** |
+| 計画Reviewer | **Codex。案件ごとに `scripts/codex-role.sh plan-reviewer` で起動し、Implementerとは別identityにする**(スクリプトが役の違うセッションの継続を拒否する) |
 | 差分Reviewer | **Claude Code subagent。実装履歴を継承しないfresh contextで案件ごとに起動する** |
 | Tester | Claude Code subagent。Reviewerとは別のfresh contextで案件ごとに起動する。**subagentのうち、実ホストへ到達してよい唯一のRoleである**(到達してよい範囲は `docs/ai/policies/execution_boundary_policy.md` が定め、ansyが認証情報を持たないホストへは届かない) |
-| Auditor | **Codex。agmsg経由で案件クローズ時に1回だけ起動する。** 入力はrepoの成果物のみで、Coordinatorの説明を受け取らない |
+| Auditor | **Codex。案件クローズ時に `scripts/codex-role.sh auditor` で1回だけ起動する。** 入力はrepoの成果物のみで、Coordinatorの説明を受け取らない(スクリプトは案件フォルダと読み始める場所しか受け付けない) |
 
 **Claude CodeでImplementerとAuditorを起こす手段は持たない。** `.claude/agents/` にこの2役の定義を置かない(ADR-015)。宣言で避けるのではなく、起動できない状態にする。
+
+**Codexの役は `scripts/codex-role.sh` 以外から起動しない**(ADR-016)。モデル・effort・sandbox・役の起動指示・session idと役の対応を、このスクリプトが固定する。計画ReviewerとAuditorはread-onlyで動きファイルを書けないため、`--output` で受け取った最終メッセージを、Coordinatorが案件フォルダへ原文のまま転記する。
 
 **非自明な実装はImplementerへ委任し、Coordinator自身は実装ファイルを編集しない。** 文書だけの軽微変更、緊急対応、規範そのものの変更はこの制約の対象外とし、適用したかどうかを案件記録へ残す。計画を査読したReviewerと差分Reviewerは別体かつ別CLIとなる。
 
@@ -38,22 +40,22 @@ Yoshinobuとの対話窓口として要求と判断材料を整え、自ら実�
 値の出どころは起動のしかたで違う。
 
 - **Coordinator** — 自分が載っているCLIの設定(現在はClaude Codeの設定)
-- **agmsg経由で起動するImplementer / 計画Reviewer / Auditor** — `spawn.sh --model` と、型ごとの `spawn_options.yaml`
+- **Codexで起動するImplementer / 計画Reviewer / Auditor** — `scripts/codex-role.sh` の役ごとの定義
 - **Claude Code subagentとして起動する差分Reviewer / Tester** — 下表の値を `subagent_type` の指定で効かせる(**subagentは指定しなければ親のモデルを継承する**)
 
-現在の配分では次を既定とする。`spawn.sh`でもsubagent委任でもmodelを省略しない。
+現在の配分では次を既定とする。subagent委任でもmodelを省略しない。
 
 | Role / 工程 | 現在のCLI | 起動時指定 | 既定段 |
 |---|---|---|---|
-| Implementer | Codex（agmsg） | `gpt-5.6-terra` | medium |
-| 計画Reviewer | Codex（agmsg） | `gpt-5.6-sol` | medium |
+| Implementer | Codex（`codex exec`） | `gpt-5.6-terra` | medium |
+| 計画Reviewer | Codex（`codex exec`） | `gpt-5.6-sol` | medium |
 | 差分Reviewer | Claude Code（subagent） | `sonnet` | medium |
 | Tester | Claude Code（subagent） | `sonnet` | medium |
-| Auditor | Codex（agmsg） | `gpt-5.6-sol` | medium |
+| Auditor | Codex（`codex exec`） | `gpt-5.6-sol` | medium |
 
-Implementerは、複数role、複雑なcheck mode、rollback、shell / Pythonを含む場合にhighへ引き上げる。Testerをlowにできるのは、**実ホストへ到達せず、期待値と手順が完全に固定されたローカル検査で、起動時に明示した場合だけ**である。現在値の正本は`docs/ai/adr/015-claude-coordinator-codex-implementer-allocation.md`である。
+Implementerは、複数role、複雑なcheck mode、rollback、shell / Pythonを含む場合にhighへ引き上げる(`scripts/codex-role.sh implementer --effort high`)。Testerをlowにできるのは、**実ホストへ到達せず、期待値と手順が完全に固定されたローカル検査で、起動時に明示した場合だけ**である。
 
-agmsgの起動経路はrole別のeffortを渡さず、型ごとの既定(`~/.agmsg/config/spawn_options.yaml`)が効く。role別に段を変えたいときは、そこを変えるか起動経路を変える。実効経路がない値をRole表へ宣言しない。
+Codexの役の値は `scripts/codex-role.sh` が持ち、上表との一致は `scripts/check-doc-consistency.py` の check4 が機械的に検査する。値を変えるときは両方を揃える。実効経路がない値をRole表へ宣言しない。
 
 下表はClaude Code subagent経路の値であり、`.claude/agents/*.md` の frontmatter と対で維持する。
 
@@ -62,11 +64,11 @@ agmsgの起動経路はrole別のeffortを渡さず、型ごとの既定(`~/.agm
 | Reviewer | sonnet | medium |
 | Tester | sonnet | medium |
 
-品質低下または起動経路の運用不能が観測されたら配分を見直す。根拠は `docs/ai/adr/015-claude-coordinator-codex-implementer-allocation.md`。
+品質低下または起動経路の運用不能が観測されたら配分を見直す。配分の根拠は `docs/ai/adr/015-claude-coordinator-codex-implementer-allocation.md`、Codexの役の起動経路の根拠は `docs/ai/adr/016-codex-roles-via-codex-exec.md`。
 
 ### Agent定義との関係
 
-`.claude/agents/<role>.md` は、**CoordinatorがAgent toolでClaude Codeの役を起動する場合の実行機構**だけを持つ(agmsg経由で起動するCodexの役には使われない)。役割の規範は `docs/ai/roles/<role>.md` が正本であり、agent定義へ複製しない。**body に置いてよいのは、正本へのポインタと、Roleごとの成果物ファイル名の対応だけである。** 読ませたい規範は `docs/ai/core.md` か `docs/ai/roles/<role>.md` へ足し、agent定義は指すだけにする。
+`.claude/agents/<role>.md` は、**CoordinatorがAgent toolでClaude Codeの役を起動する場合の実行機構**だけを持つ(Codexの役には使われない)。役割の規範は `docs/ai/roles/<role>.md` が正本であり、agent定義へ複製しない。**body に置いてよいのは、正本へのポインタと、Roleごとの成果物ファイル名の対応だけである。** 読ませたい規範は `docs/ai/core.md` か `docs/ai/roles/<role>.md` へ足し、agent定義は指すだけにする。
 
 **agent定義の作成・編集は、次のセッションから効く前提で扱う。** 変更した直後の同一セッションで起動したsubagentへは、変更前の定義が渡ることがある。定義を作成・編集したら、それに依存する案件へ組み込む前に一度subagentを起動し、**渡された定義本文を書き出させて現物と照合する。**
 

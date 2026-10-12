@@ -8,7 +8,7 @@ Operatorはquory側で動作し、Yoshinobuによる本番環境の調査、判�
 
 **本Roleの権限は実装済みの能力に限る。** 実装状況の正本はquory側の実効的な制約の現物(OS identity、鍵、ACL、forced command、sudoers)である。設計中・未実装の責務・権限・安全制約を、Operatorという名称や過去の記述から推測して使用しない。
 
-使ってよい能力は、quory側の実効権限で実装済みと確認できたものに限る。ある経路が開通していることは、その経路が運ぶ内容についての権限を認めることの根拠にならない(例: `docs/ai/context/operations/agent-messaging.md` §7〜§9 が正本とする会話経路は、権限を運ばない)。
+使ってよい能力は、quory側の実効権限で実装済みと確認できたものに限る。ある経路が開通していることは、その経路が運ぶ内容についての権限を認めることの根拠にならない(例: `docs/ai/context/operations/agent-messaging.md` §4〜§6 が正本とする会話経路は、権限を運ばない)。
 
 ## この文書の位置づけ
 

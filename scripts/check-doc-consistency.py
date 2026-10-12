@@ -22,6 +22,8 @@ Checks
    docs/ai/roles/coordinator.md "モデル・effort配分" table
 3. Markdown internal links (normative layer only, explicit allowlist -
    see _is_normative_markdown)  <-> existence of the linked file
+4. `scripts/codex-role.sh` role model/effort arrays  <->
+   docs/ai/roles/coordinator.md "モデル・effort配分" Codex-role table
 
 Design notes
 ------------
@@ -44,7 +46,7 @@ Usage
 -----
     check-doc-consistency.py [--repo-root PATH]
 
-Exit status: 0 if all three checks find zero drift, 1 if any check finds
+Exit status: 0 if all checks find zero drift, 1 if any check finds
 drift, 2 if a check's input set is empty (analysis itself is broken/blocked)
 or a file the check depends on cannot be read.
 """
@@ -601,6 +603,131 @@ def check_agent_model_effort(repo_root):
 
 
 # ---------------------------------------------------------------------------
+# check 4: codex-role.sh <-> docs/ai/roles/coordinator.md
+# ---------------------------------------------------------------------------
+
+_CODEX_ROLE_TABLE_ROWS = {
+    "Implementer": "implementer",
+    "計画Reviewer": "plan-reviewer",
+    "Auditor": "auditor",
+}
+
+
+def _parse_bash_role_array(content, array_name):
+    """Return exact role/value pairs from one readonly Bash array."""
+    match = re.search(
+        r"(?ms)^declare -Ar {}=\(\n(?P<body>.*?)^\)\s*$".format(
+            re.escape(array_name)
+        ),
+        content,
+    )
+    if not match:
+        raise AnalysisError("check4: scripts/codex-role.sh has no {} declaration".format(array_name))
+    parsed = {}
+    for line in match.group("body").splitlines():
+        entry = re.fullmatch(r'\s*\[([a-z][a-z-]*)\]="([^"\\]+)"\s*', line)
+        if not entry:
+            raise AnalysisError(
+                "check4: scripts/codex-role.sh: malformed {} entry: {!r}".format(
+                    array_name, line
+                )
+            )
+        role, value = entry.groups()
+        if role in parsed:
+            raise AnalysisError(
+                "check4: scripts/codex-role.sh: duplicate {} entry for {}".format(
+                    array_name, role
+                )
+            )
+        parsed[role] = value
+    if not parsed:
+        raise AnalysisError("check4: scripts/codex-role.sh: {} has no entries".format(array_name))
+    return parsed
+
+
+def check_codex_role_model_effort(repo_root):
+    script_path = "scripts/codex-role.sh"
+    routing_path = "docs/ai/roles/coordinator.md"
+    script_content = read_index_content(repo_root, script_path)
+    routing_content = read_index_content(repo_root, routing_path)
+
+    # Existing standalone fixtures predate Codex roles. Skip only when both
+    # sides of this relationship are absent; a real staged deletion of either
+    # side still fails because the other remains present.
+    has_role_table = routing_content is not None and all(
+        row_name in routing_content for row_name in _CODEX_ROLE_TABLE_ROWS
+    )
+    if script_content is None and not has_role_table:
+        return CheckResult("check4", compared=0)
+    if script_content is None:
+        raise AnalysisError("check4: cannot read index content of {}".format(script_path))
+    if routing_content is None:
+        raise AnalysisError("check4: cannot read index content of {}".format(routing_path))
+
+    role_models = _parse_bash_role_array(script_content, "ROLE_MODEL")
+    role_efforts = _parse_bash_role_array(script_content, "ROLE_EFFORT")
+    expected_roles = set(_CODEX_ROLE_TABLE_ROWS.values())
+    if set(role_models) != expected_roles or set(role_efforts) != expected_roles:
+        raise AnalysisError(
+            "check4: scripts/codex-role.sh role arrays must contain exactly {}".format(
+                ", ".join(sorted(expected_roles))
+            )
+        )
+
+    table = find_table(routing_content, ["role", "現在のcli", "起動時指定", "既定段"])
+    if table is None:
+        raise AnalysisError(
+            "check4: could not find Role / 工程, 現在のCLI, 起動時指定, 既定段 table in {}".format(
+                routing_path
+            )
+        )
+    header_cells, data_lines = table
+    header_lower = [_strip_cell_markup(cell).lower() for cell in header_cells]
+    role_idx = header_lower.index("role / 工程")
+    model_idx = header_lower.index("起動時指定")
+    effort_idx = header_lower.index("既定段")
+
+    table_info = {}
+    for line in data_lines:
+        cells = _split_row(line)
+        if len(cells) <= max(role_idx, model_idx, effort_idx):
+            raise AnalysisError(
+                "check4: {}: malformed model/effort table row: {!r}".format(
+                    routing_path, line.strip()
+                )
+            )
+        row_name = _strip_cell_markup(cells[role_idx])
+        if row_name not in _CODEX_ROLE_TABLE_ROWS:
+            continue
+        table_info[_CODEX_ROLE_TABLE_ROWS[row_name]] = (
+            _strip_cell_markup(cells[model_idx]),
+            _strip_cell_markup(cells[effort_idx]),
+        )
+
+    if set(table_info) != expected_roles:
+        raise AnalysisError(
+            "check4: {} lacks one or more Codex-role rows".format(routing_path)
+        )
+
+    findings = []
+    for role in sorted(expected_roles):
+        table_model, table_effort = table_info[role]
+        if role_models[role] != table_model:
+            findings.append(
+                "check4: model mismatch for {}: scripts/codex-role.sh='{}', {}='{}'".format(
+                    role, role_models[role], routing_path, table_model
+                )
+            )
+        if role_efforts[role] != table_effort:
+            findings.append(
+                "check4: effort mismatch for {}: scripts/codex-role.sh='{}', {}='{}'".format(
+                    role, role_efforts[role], routing_path, table_effort
+                )
+            )
+    return CheckResult("check4", findings, compared=len(expected_roles) * 2)
+
+
+# ---------------------------------------------------------------------------
 # check 3: Markdown internal links (normative layer only, explicit allowlist)
 # ---------------------------------------------------------------------------
 
@@ -788,6 +915,7 @@ def main(argv):
         check_playbook_tester_gate,
         check_agent_model_effort,
         check_internal_links,
+        check_codex_role_model_effort,
     ]
 
     overall_ok = True

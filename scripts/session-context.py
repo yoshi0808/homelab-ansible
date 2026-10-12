@@ -21,7 +21,6 @@ Usage: session-context.py <chunk番号(1始まり)>
 
 import datetime
 import json
-import os
 import re
 import subprocess
 import sys
@@ -82,7 +81,7 @@ def agmsg_sync_block():
 
     **取得できないときは黙って空にせず、確認できなかったと書く。**
     engine が生きていても「最後に成功した同期」が古ければ運べていない
-    (`docs/ai/context/operations/agent-messaging.md` §9)。
+    (`docs/ai/context/operations/agent-messaging.md` §6)。
     """
     lines = []
     for team in AGMSG_TEAMS:
@@ -167,14 +166,6 @@ def pack(blocks):
 
 
 def main():
-    # 現在地を要るのは Coordinator だけである(docs/ai/core.md「開発の作業時に読む情報」)。
-    # agmsg が spawn した役(Reviewer / Tester / Auditor / Implementer)は、
-    # 自分の Role 文書と依頼文で足りる。spawn.sh の boot script が
-    # AGMSG_SPAWNED=1 を置くので、それがあれば何も載せない。
-    # Coordinator は spawn されないため、この変数を持たない(2026-09-06 実測)。
-    if os.environ.get("AGMSG_SPAWNED"):
-        return
-
     try:
         index = int(sys.argv[1])
     except (IndexError, ValueError):

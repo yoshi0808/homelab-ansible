@@ -19,7 +19,9 @@
 
 **Wi-Fiテレビの切断(5GHzチャンネル入れ替えの実験): 2026-10-13に結果をまとめる**。テレビ(MAC `00:16:f5:22:da:86`)は1階のAP(u7-1f)にLock to AP中。2026-10-06 07:07に5GHzのチャンネルを入れ替えた(1階 36→52、2階 52→36。Yoshinobuが操作)。入れ替え前の7日間で、テレビの再送過多(`Excessive Retries`)による切断は2件(10/5 07:12 u7-2f、09:36 u7-1f)。入れ替え後のテレビの再送過多を数え、件数が0〜1件なら一時的なものとみなす。家族のiPhoneの切断(圏外へ出たとき・眠っている間)は除外する。手段は `ssh monnie-investigate loki-text network-devices <since> 7d Excessive`。結果をYoshinobuへ報告し、1階を元のch36(DFS対象外)へ戻すかはYoshinobuが決める。UniFiの設定は人が操作する。
 
-**agmsgの `--reset` 後にImplementerが起動しない件(`docs/ai/reviews/agmsg_operator_seat_bind/`): 原因の調査待ち**。ansyの `--reset` でCoordinatorの受信が自動で始まることは確認済み(2026-10-10。quoryも同日確認済み)。一方、pane 1のImplementerは、前回のスレッドが持つ `implementer` のactasロックが「生きている」と判定されて `spawn.sh --fresh` が拒否し、起動しない(10/10の `--reset` 3回とも失敗。`/tmp/new-session-implementer-boot.log`)。Coordinatorが `reset.sh` でロックを外して手で起動し直し、READYを受けた(10/10 19:40)。tmuxを閉じても10/3起動のCodex app-serverが残ることと関係するとみているが未確認で、次の `--reset` でも再発する見込み。
+**ansy内のCodexの役を `codex exec` へ移す(`docs/ai/reviews/codex_exec_roles/`、ADR-016): repo外の変更と実機確認の待ち**。repo内(`scripts/codex-role.sh`、規範・Context、`.codex/rules`)は実装・レビュー済み。残りはrequirement R5(ansyの `new-session.sh` からImplementerを外す、agmsgのteam `homelab` の登録を外す、`~/.codex/config.toml` のwritable_rootsからagmsgを外す、Codexのagmsg hookとshimを外す)と、AC6(`--reset` 後にpane 0だけが上がり、`actas` なしで受信の監視が始まる)・AC7(Implementerがagmsgで送れない)の確認。Coordinatorが行う。
+
+**月次full-upgradeでauthy / monnieのhealthcheck WARNINGを通知する(`docs/ai/reviews/ubuntu_full_upgrade_warning_drop/`): 次の月次自動発火の観測待ち**。2026-10-12にcommit `30da754`。次の月次の自動発火で、authyかmonnieのhealthcheckが `WARNING` を出したら、Slackの通知にその項目が載ることをCoordinatorが確かめる。`WARNING` が出なかった月は観測にならないので、出る月まで持ち越す。
 
 ## Next(着手候補) — 工程・体制
 

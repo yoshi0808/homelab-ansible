@@ -1,6 +1,6 @@
 # ADR-015: CoordinatorをClaude Code、ImplementerをCodexへ置く
 
-**Status:** Accepted
+**Status:** Accepted(Codexの役の起動経路は[`ADR-016`](016-codex-roles-via-codex-exec.md)がsupersede。役の割り当て、計画ReviewerをCodexへ残す理由、modelとeffortの値は維持)
 
 ## Context
 

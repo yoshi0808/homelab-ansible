@@ -26,7 +26,7 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 AGMSG_SCRIPTS_DIR="${AGMSG_SCRIPTS_DIR:-$HOME/.agents/skills/agmsg/scripts}"
 OPRC_CLIENT="${OPRC_CLIENT:-operator-channel-client}"
 
-# 相手先は docs/ai/context/operations/agent-messaging.md §7 の identity。
+# 相手先は docs/ai/context/operations/agent-messaging.md §4 の identity。
 TEAM="homelab-ops"
 FROM="coordinator"
 TO="operator"
@@ -74,7 +74,7 @@ done
 # いると**エラーを出さずに溜まるだけ**になる(2026-08-29から2026-09-02まで実際に
 # 5日間止まっており、その間の通知は1通も出ていなかった)。engine の生死と
 # 「最後に成功した同期」の両方を見る — 前者だけでは足りないことは
-# `docs/ai/context/operations/agent-messaging.md` §9 が定めている。
+# `docs/ai/context/operations/agent-messaging.md` §6 が定めている。
 if ! sync_status="$("$remote_sh" status "$TEAM" 2>/dev/null)"; then
   echo "sync_unobservable: 同期状態を取得できません。停止とは断定せず、同じstatusを正規のsandbox外実行で確認してください。登録していません。" >&2
   exit 4
