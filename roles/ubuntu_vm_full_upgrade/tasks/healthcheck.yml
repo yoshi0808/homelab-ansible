@@ -99,10 +99,11 @@
          + (monitoring_criticals | default([]))
          + (ubuntu_vm_full_upgrade_generic_health.criticals | default([])) }}
 
-# radius / monitoring の各roleは warnings を返さない(criticalsのみ)。
-# したがってこの一覧は現状ansy/quoryの汎用checkだけが埋める(U5: 他の
-# ノード種別の扱いを変えない)。
+# radius / monitoring の各roleも warnings を返す。criticalsと同様に、
+# 各ノード種別の結果をこのroleで集約し、main.ymlの既存通知フローへ渡す。
 - name: Consolidate healthcheck warnings across all node types
   ansible.builtin.set_fact:
     ubuntu_vm_full_upgrade_healthcheck_warnings: >-
-      {{ ubuntu_vm_full_upgrade_generic_health.warnings | default([]) }}
+      {{ (radius_warnings | default([]))
+         + (monitoring_warnings | default([]))
+         + (ubuntu_vm_full_upgrade_generic_health.warnings | default([])) }}
