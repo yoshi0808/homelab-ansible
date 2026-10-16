@@ -906,13 +906,13 @@ semaphore_schedules_catalog:
     task_params:
       environment: "{}"
 
-  # 初回の固定Notionページreadback後にYoshinobuがSemaphore UIで有効化する。
-  # canonical endpointでは既存scheduleのactiveはoperator-ownedのため、この
-  # falseは新規作成時だけ効く。UIで有効化した後は別commitでtrueへ揃える。
+  # 初回の固定Notionページreadback(タスク#1493)後にYoshinobuがSemaphore UIで
+  # 有効化した。既存scheduleのactiveはoperator-ownedのため、この値はreconcileへ
+  # 効かず、実態を読めるように揃えている。
   - name: "SEMI-SAFE: Proxmox running versions daily"
     template: "SEMI-SAFE: Proxmox running versions"
     cron: "0 7 * * *"
-    active: false
+    active: true
     task_params:
       environment: "{}"
 

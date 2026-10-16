@@ -19,8 +19,6 @@
 
 **Wi-Fiテレビの切断(5GHzチャンネル入れ替えの実験): 2026-10-13に結果をまとめる**。テレビ(MAC `00:16:f5:22:da:86`)は1階のAP(u7-1f)にLock to AP中。2026-10-06 07:07に5GHzのチャンネルを入れ替えた(1階 36→52、2階 52→36。Yoshinobuが操作)。入れ替え前の7日間で、テレビの再送過多(`Excessive Retries`)による切断は2件(10/5 07:12 u7-2f、09:36 u7-1f)。入れ替え後のテレビの再送過多を数え、件数が0〜1件なら一時的なものとみなす。家族のiPhoneの切断(圏外へ出たとき・眠っている間)は除外する。手段は `ssh monnie-investigate loki-text network-devices <since> 7d Excessive`。結果をYoshinobuへ報告し、1階を元のch36(DFS対象外)へ戻すかはYoshinobuが決める。UniFiの設定は人が操作する。
 
-**Proxmoxの稼働中の版をNotion「Proxmox Watch: 稼働バージョン」へ毎日書く(`docs/ai/reviews/proxmox_running_versions/`): 初回の手動実行待ち**。quoryの04:00のreconcileでtemplateと無効のscheduleが作られた後、YoshinobuがSemaphoreのtemplate「SEMI-SAFE: Proxmox running versions」を手動実行する。CoordinatorがNotionの読み戻しで AC1(ヘッダ `state: complete` / `status: ok`、両ノードの版)を確かめたら、YoshinobuがUIでscheduleを有効にし、カタログの `active` を `true` に揃える変更をcommitして、Auditorを起こして閉じる。
-
 **月次full-upgradeでauthy / monnieのhealthcheck WARNINGを通知する(`docs/ai/reviews/ubuntu_full_upgrade_warning_drop/`): 次の月次自動発火の観測待ち**。2026-10-12にcommit `30da754`。次の月次の自動発火で、authyかmonnieのhealthcheckが `WARNING` を出したら、Slackの通知にその項目が載ることをCoordinatorが確かめる。`WARNING` が出なかった月は観測にならないので、出る月まで持ち越す。
 
 ## Next(着手候補) — 工程・体制
