@@ -87,6 +87,7 @@ reboot影響を受けないcluster外control nodeからだけ、pve2、pve1、VM
 |---|---|---|
 | safe | `proxmox_healthcheck.yml`、`proxmox_hw_check.yml`、`proxmox_snapshot_check.yml` | read-only状態収集。自動可 |
 | semi-safe | `proxmox_storage_monthly.yml` | ZFS/NVMeのread-only収集、ローカル記録、Notion参照コピー、Slack短報、限定した履歴整理。host/device変更なし。自動可(SB-096〜SB-099) |
+| semi-safe | `proxmox_running_versions.yml` | 稼働中のkernel・Proxmox関連packageの版のread-only収集と、固定Notionページの上書き。host変更なし。片系の到達不能は継続し、全系の到達不能・収集不能・Notion失敗は非0。自動可 |
 | semi-safe | `proxmox_patch_dryrun.yml` | package metadata更新、simulation、分類。実patchなし。自動可 |
 | controlled apply | `proxmox_evacuate_node.yml`、`proxmox_restore_vm_placement.yml` | guest配置変更。条件付き可 |
 | controlled apply | `proxmox_backup_restore_verify.yml` | backup restore検証。許可、禁止、停止条件の詳細は[proxmox_backup_restore_verify_policy.md](proxmox_backup_restore_verify_policy.md)が正本(本表は自動実行tierの索引のみ)。条件付き可 |
@@ -426,6 +427,7 @@ Sophos Firewall VMのHA relocateはstop → migrate → startであり、VM再�
 
 | 日付 | 変更 |
 |---|---|
+| 2026-10-16 | SB-020の表へ`proxmox_running_versions.yml`(semi-safe)を追加した(Yoshinobu承認)。稼働中の版の収集と固定Notionページの上書きだけを行い、hostを変更しない。許可・禁止・停止条件の既存規定は変更していない |
 | 2026-09-12 | 本番稼働済みの`proxmox_storage_monthly.yml`がSB-020に無く、デバイス非変更、部分失敗、JSON正本、collect/replay、保持・外部公開の規範がrequirement/Contextに留まっていたため、semi-safe入口として追加しSB-096〜SB-099を新設。新しい機能や許可範囲は追加せず、現行契約をPolicyへ正本化した |
 | 2026-08-25 | SB-011・SB-038が条件句を持たない無条件規定のまま残り、§1・SB-028・SB-032が定める単一node適用(pve2利用不能時)と矛盾していた(2026-08-01の追随改訂で挙がった条項に含まれず改訂漏れ)。両者へ「両nodeが利用可能なときの順序制約である」旨の条件句を追加した。文言は§1・2026-08-01変更履歴の既存表現と揃えた。許可・禁止・停止条件の実質は変更していない |
 | 2026-08-02 | 本文に埋め込まれていた改訂注記・実測日付・撤回の経緯説明を除去し、規則本文と括弧内のPolicy ID(SB-nnn)だけを残す整理を行った(`docs/ai/reviews/norm_docs_rationale_removal_round3/`)。許可・禁止・停止条件、SB番号はいずれも変更していない。既存の退番記録(SB-023、SB-049 / SB-083 / SB-084 / SB-086)は本表のとおりで変更なし。SB番号の新設・退番はない |

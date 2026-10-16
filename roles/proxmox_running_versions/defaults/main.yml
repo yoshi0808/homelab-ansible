@@ -1,0 +1,9 @@
+---
+# Dedicated fixed page. This is a page ID, not a database parent ID.
+proxmox_running_versions_notion_page: "3fb22f45-f1b0-8009-aee6-f24447508b5e"
+proxmox_running_versions_notion_token_file: /etc/homelab/notion-storage.token
+proxmox_running_versions_lock_dir: "{{ reports_base_dir }}/proxmox-running-versions"
+
+# The patch role owns this default. The playbook imports that role's defaults
+# so this role reads the same report location without maintaining a copy.
+proxmox_running_versions_apply_report_dir: "{{ proxmox_patch_apply_report_dir }}"

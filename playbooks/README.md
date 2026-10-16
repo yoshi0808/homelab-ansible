@@ -70,6 +70,7 @@ Semaphoreのロールバックは復旧をdpkgの状態に依存させないた�
 | [`proxmox_evacuate_node.yml`](proxmox_evacuate_node.yml) | `localhost`, 移動先、`target_node` | 対象ノードからVMを退避 | `check-mode-native` | `proxmox_evacuate_node`, `proxmox_healthcheck` |
 | [`proxmox_healthcheck.yml`](proxmox_healthcheck.yml) | `proxmox` | クラスタ・ノード・VMのhealthcheck | `safe-readonly` | `proxmox_healthcheck` |
 | [`proxmox_hw_check.yml`](proxmox_hw_check.yml) | `proxmox` | ハードウェア状態の収集・判定 | `safe-readonly` | `proxmox_hw_check` |
+| [`proxmox_running_versions.yml`](proxmox_running_versions.yml) | `proxmox`, `localhost` | pve1 / pve2の稼働中kernel・Proxmox関連package版と直近apply試行を固定Notionページへ更新 | `check-mode-native` | `proxmox_running_versions` |
 | [`proxmox_storage_monthly.yml`](proxmox_storage_monthly.yml) | `localhost`, `storage_monthly_targets`, `localhost` | inventoryのproxmoxを対象に月次ZFS/NVMe点検、履歴比較、Notion正式レポート | `check-mode-native` | `proxmox_storage_monthly` |
 | [`proxmox_patch_apply_node.yml`](proxmox_patch_apply_node.yml) | `target_node` | Proxmox単一ノードへのパッチ適用 | `check-mode-native` | `proxmox_patch_apply_node` |
 | [`proxmox_patch_dryrun.yml`](proxmox_patch_dryrun.yml) | `proxmox` | パッチ候補の収集・シミュレーション | `safe-readonly` | `proxmox_patch_dryrun`, `proxmox_healthcheck` |

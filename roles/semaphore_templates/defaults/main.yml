@@ -124,6 +124,10 @@ semaphore_templates_catalog:
       - name: quory_health_monthly_report_id
         title: "Replay report ID (collectでは空欄)"
 
+  - playbook: playbooks/proxmox_running_versions.yml
+    class: SEMI-SAFE
+    title: "Proxmox running versions"
+
   - playbook: playbooks/ubuntu_nightly.yml
     class: SEMI-SAFE
     legacy_name: "SEMI-SAFE: Ubuntu nightly reboot if required"
@@ -899,6 +903,16 @@ semaphore_schedules_catalog:
     template: "SAFE: Proxmox healthcheck"
     cron: "40 5 * * *"
     active: true
+    task_params:
+      environment: "{}"
+
+  # 初回の固定Notionページreadback後にYoshinobuがSemaphore UIで有効化する。
+  # canonical endpointでは既存scheduleのactiveはoperator-ownedのため、この
+  # falseは新規作成時だけ効く。UIで有効化した後は別commitでtrueへ揃える。
+  - name: "SEMI-SAFE: Proxmox running versions daily"
+    template: "SEMI-SAFE: Proxmox running versions"
+    cron: "0 7 * * *"
+    active: false
     task_params:
       environment: "{}"
 

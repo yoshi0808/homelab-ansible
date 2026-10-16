@@ -1,0 +1,25 @@
+---
+# tester-gate: check-mode-native — --check still collects versions and renders the page, but never reads the Notion token or writes Notion/Slack.
+- name: Collect running Proxmox versions without changing nodes
+  hosts: proxmox
+  gather_facts: false
+  ignore_unreachable: true
+
+  tasks:
+    - name: Collect each reachable node's running versions
+      ansible.builtin.include_role:
+        name: proxmox_running_versions
+        tasks_from: collect
+
+- name: Render and publish the fixed Proxmox Watch page independently of node reachability
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars_files:
+    - ../roles/proxmox_patch_apply_node/defaults/main.yml
+
+  tasks:
+    - name: Render and publish running Proxmox versions
+      ansible.builtin.include_role:
+        name: proxmox_running_versions
+        tasks_from: report

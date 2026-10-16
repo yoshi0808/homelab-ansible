@@ -1,0 +1,79 @@
+---
+- name: Require the two fixed Proxmox node names
+  ansible.builtin.assert:
+    that:
+      - "'pve1' in (groups['proxmox'] | default([]))"
+      - "'pve2' in (groups['proxmox'] | default([]))"
+    fail_msg: proxmox_running_versions requires pve1 and pve2 in groups['proxmox'].
+
+- name: Build every node observation including unreachable nodes
+  ansible.builtin.set_fact:
+    _prv_observations: "{{ _prv_observations | default({}) | combine({item: _prv_node_observation}) }}"
+  vars:
+    _prv_raw: "{{ hostvars[item].proxmox_running_versions_observation | default({}) }}"
+    _prv_node_observation: >-
+      {{ {'status': 'unreachable'}
+         if ((hostvars[item]._prv_collect | default({})).unreachable | default(false) | bool)
+         else (_prv_raw if (_prv_raw | length > 0) else {'status': 'error'}) }}
+  loop: [pve1, pve2]
+
+- name: Define publication suppression before any token or HTTP I/O
+  ansible.builtin.set_fact:
+    _prv_suppress: >-
+      {{ ansible_check_mode or (skip_notifications | default(false) | bool)
+         or (lookup('env', 'CLAUDECODE') | trim | length > 0) }}
+
+- name: Render and publish the fixed page
+  block:
+    - name: Publish running version page or prepare its preview
+      proxmox_running_versions_notion:
+        page: "{{ proxmox_running_versions_notion_page }}"
+        token_file: "{{ proxmox_running_versions_notion_token_file }}"
+        lock_directory: "{{ proxmox_running_versions_lock_dir }}"
+        observations: "{{ _prv_observations }}"
+        apply_report_dir: "{{ proxmox_running_versions_apply_report_dir }}"
+        suppress: "{{ _prv_suppress }}"
+      register: _prv_publication
+      no_log: true
+      tags: [destructive]
+      # The module independently gates before token and HTTP I/O.
+
+    - name: Keep collection failure observable after publication
+      ansible.builtin.set_fact:
+        _prv_failed: "{{ _prv_publication.execution_error | bool }}"
+        _prv_failure_code: >-
+          {{ 'collection_error' if (_prv_publication.execution_error | bool) else '' }}
+  rescue:
+    - name: Keep publication failure observable without exposing credentials
+      ansible.builtin.set_fact:
+        _prv_failed: true
+        _prv_failure_code: "{{ _prv_publication.msg | default('publication_failed') }}"
+        _prv_publication:
+          publication: incomplete
+          body: "{{ _prv_publication.body | default('') }}"
+          overall_status: "{{ _prv_publication.overall_status | default('error') }}"
+  always:
+    - name: Show the full page body planned for this run
+      ansible.builtin.debug:
+        msg: "{{ _prv_publication.body | default('ページ本文を生成できませんでした') }}"
+
+    - name: Send one alert for collection or publication failure
+      ansible.builtin.include_role:
+        name: common_slack
+        tasks_from: notify
+      vars:
+        slack_channel: alerts
+        slack_status: error
+        slack_title: Proxmox稼働バージョン更新失敗
+        slack_message: >-
+          Proxmox Watchの稼働バージョン更新に失敗しました。
+          status={{ _prv_publication.overall_status | default('error') }}
+          publication={{ _prv_publication.publication | default('incomplete') }}
+          reason={{ _prv_failure_code | default('publication_failed') }}
+      when: _prv_failed | default(true) | bool
+
+- name: Fail when collection or publication was incomplete
+  ansible.builtin.assert:
+    that:
+      - not (_prv_failed | default(true) | bool)
+    fail_msg: Proxmox running version collection or page publication is incomplete.
