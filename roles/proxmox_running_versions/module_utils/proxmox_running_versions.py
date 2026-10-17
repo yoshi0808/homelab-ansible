@@ -11,7 +11,7 @@ VERSION_KEYS = (
 )
 APPLY_KEYS = ("last_apply_at", "last_apply_result", "reboot_done")
 REPORT_NAME = re.compile(r"^(\d{8}T\d{6})_(pve[12])_apply\.json$")
-NOTE = "pve_qemu_kvm_installed はパッケージのインストール版であり、稼働中VMのQEMUの版ではない"
+NOTE = "pve_qemu_kvm_installed はインストール版。週次パッチは各ノードのVMを退避してから適用し戻すため、パッチ後の稼働中VMはこの版で動いている"
 
 
 def latest_apply(directory, node):
