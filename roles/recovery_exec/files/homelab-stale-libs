@@ -1,0 +1,68 @@
+#!/usr/bin/python3
+"""List processes retaining deleted regular-file mappings without changing state."""
+
+import os
+import sys
+
+
+DELETED_SUFFIX = " (deleted)"
+EXCLUDED_PREFIXES = ("/memfd:", "/dev/shm/", "/tmp/", "/var/tmp/", "/run/")
+
+
+def emit(line):
+    """Write paths safely even when /proc/maps contains non-UTF-8 bytes."""
+    sys.stdout.buffer.write(line.encode("utf-8", errors="backslashreplace") + b"\n")
+
+
+def deleted_paths(maps_path):
+    """Return distinct, in-scope deleted mapping paths from one maps file."""
+    paths = set()
+    with open(maps_path, encoding="utf-8", errors="surrogateescape") as maps_file:
+        for line in maps_file:
+            fields = line.rstrip("\n").split(maxsplit=5)
+            if len(fields) < 6:
+                continue
+            pathname = fields[5]
+            if not pathname.endswith(DELETED_SUFFIX):
+                continue
+            pathname = pathname[: -len(DELETED_SUFFIX)]
+            if not pathname.startswith("/"):
+                continue
+            if pathname.startswith(EXCLUDED_PREFIXES):
+                continue
+            paths.add(pathname)
+    return sorted(paths)
+
+
+def main():
+    if len(sys.argv) != 1:
+        return 64
+
+    found = False
+    try:
+        proc_entries = list(os.scandir("/proc"))
+    except OSError as error:
+        print(f"error: cannot list /proc: {error}", file=sys.stderr)
+        return 1
+
+    for entry in proc_entries:
+        if not entry.name.isdecimal():
+            continue
+        try:
+            with open(f"/proc/{entry.name}/comm", encoding="utf-8", errors="replace") as comm_file:
+                process_name = comm_file.read().strip()
+            paths = deleted_paths(f"/proc/{entry.name}/maps")
+        except OSError:
+            # Processes can exit or become unreadable between directory scan and read.
+            continue
+        for pathname in paths:
+            emit(f"pid={entry.name} process={process_name} path={pathname}")
+            found = True
+
+    if not found:
+        emit("stale-libs: no deleted shared libraries or executable mappings found")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

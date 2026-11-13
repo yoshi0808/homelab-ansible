@@ -10,3 +10,6 @@
 # Read-only config check: does not start the daemon or bind ports.
 {{ recovery_exec_user }} ALL = NOPASSWD: /usr/sbin/freeradius -XC
 {% endif %}
+# stale-libs is deliberately the only added privileged inspection command.
+# Empty sudoers arguments reject every operand before the script is started.
+{{ recovery_exec_user }} ALL=(root) NOPASSWD: /usr/local/sbin/homelab-stale-libs ""

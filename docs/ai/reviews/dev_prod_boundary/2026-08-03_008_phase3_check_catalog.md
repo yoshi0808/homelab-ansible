@@ -407,3 +407,28 @@ requirement: `docs/ai/reviews/dispatch_pkg_and_schedule_vocabulary/2026-09-14_00
 | P(pve1 / pve2) | +6 | +1(V1) | **+7** | — | **+7** |
 
 Qの`27`はD番号系列（§1〜§3/§6/§7と今回§10）の値であり、dispatchが実際に受け付けるcheck数は、D系列27にOperator Request Channelの4語彙を加えた**31**である。G/PにはOPRC語彙を加えない。この2つの母集団を混同しないこと。V1/V2はいずれも状態を変えない。配備後の実host・Semaphore API応答・sha256突合・日次drift検査は本実装記録の自己検証対象外であり、Tester/配備工程で確認する。
+
+---
+
+## 11. 追加 — ホスト状態のread-only語彙(2026-11-14)
+
+requirement: `docs/ai/reviews/dispatch_host_state_vocabulary/2026-11-14_001_requirement.md`
+
+§0の不変条件I-1〜I-7をそのまま適用する。class Qは`dev-investigate`のsudoなし契約を維持し、`stale-libs`を公開しない。class G/Pの`stale-libs`だけは、root所有`0755`の固定スクリプトを**引数なしで**起動する1行のsudoers許可を使う。ほかの3語彙はsudoを使わない。
+
+| # | check | class | operand と検証 | 実行内容 | sudo |
+|---|---|---|---|---|---|
+| H1 | `kernel-status` | Q / G / P | なし。引数はdispatchで拒否 | `uname -r`、読める`/boot/vmlinuz-*`のファイル名、`/run/reboot-required`と存在時の`/run/reboot-required.pkgs`を出す。カーネルイメージが0件・読めないときは非ゼロ | なし |
+| H2 | `kmod-list` | Q / G / P | なし。引数はdispatchで拒否 | `/proc/modules`の第1列を1行ずつ出す | なし |
+| H3 | `ports` | P(pve1 / pve2) | なし。引数はdispatchで拒否 | class Q/Gの既存語彙と同じ`ss -ltnup` | なし |
+| H4 | `stale-libs` | G(authy / monnie) / P(pve1 / pve2) | なし。引数はdispatchで拒否。スクリプト自身も引数をrc 64で拒否 | `/proc/*/maps`から、削除済みで`/`始まりの通常ファイルmappingを、PID・プロセス名・重複除外したパスで出す。`/memfd:`、`/dev/shm/`、`/tmp/`、`/var/tmp/`、`/run/`、疑似領域・無名mappingは除外。対象0件は明示してrc 0 | `sudo -n /usr/local/sbin/homelab-stale-libs`のみ。sudoersは絶対パスと空引数指定`""`だけで、ワイルドカードなし |
+
+### 11.1 総数の更新
+
+| class | §10時点のD系列 | §11追加 | D系列の今回追加後 | D系列外の加算 | dispatch実数 |
+|---|---:|---:|---:|---:|---:|
+| Q(quory) | 27 | +2(H1/H2) | **29** | +4(OPRC) | **33** |
+| G(authy / monnie) | +7 | +3(H1/H2/H4) | **+10** | — | **+10** |
+| P(pve1 / pve2) | +7 | +4(H1/H2/H3/H4) | **+11** | — | **+11** |
+
+`stale-libs`の配備物は`roles/recovery_exec/files/homelab-stale-libs`であり、`playbooks/recovery_exec_setup.yml`から`roles/recovery_exec/tasks/target_setup.yml`がG/Pへcopyする。copy配備物なので`roles/deployment_drift_check/defaults/main.yml`のTier 1対象にも加える。class Qのdispatchは同様に`playbooks/dev_investigate_setup.yml`から`roles/dev_investigate/tasks/main.yml`がcopyし、既存のTier 1対象を維持する。

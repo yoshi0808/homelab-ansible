@@ -30,6 +30,41 @@ pkg_list() {
   fi
 }
 
+kernel_status() (
+  # This is a subshell so enabling nullglob cannot affect later dispatch arms.
+  # An unmatched glob (including an unreadable /boot directory) would make
+  # the installed-kernel list ambiguous, so fail rather than reporting a
+  # misleading success. The required observation is each file name, not its
+  # contents; image files are commonly root-readable only.
+  shopt -s nullglob
+  local -a images=(/boot/vmlinuz-*)
+  local image
+
+  if [[ -z "${images[0]:-}" ]]; then
+    echo "error: no installed kernel images found under /boot" >&2
+    return 1
+  fi
+  printf 'running-kernel: %s\n' "$(uname -r)"
+  for image in "${images[@]}"; do
+    printf 'installed-kernel-image: %s\n' "${image##*/}"
+  done
+  if [[ -e /run/reboot-required ]]; then
+    printf '%s\n' 'reboot-required: yes'
+    if [[ -e /run/reboot-required.pkgs ]]; then
+      if [[ ! -r /run/reboot-required.pkgs ]]; then
+        echo 'error: reboot-required package list is not readable' >&2
+        return 1
+      fi
+      printf '%s\n' 'reboot-required-packages:'
+      cat /run/reboot-required.pkgs
+    else
+      printf '%s\n' 'reboot-required-packages: (not present)'
+    fi
+  else
+    printf '%s\n' 'reboot-required: no'
+  fi
+)
+
 if [[ "$cmd" == *$'\n'* || "$cmd" == *$'\r'* ]]; then
   echo "denied: command contains a line break" >&2
   exit 1
@@ -88,6 +123,15 @@ case "$cmd" in
     ;;
   ports)
     ss -ltnup
+    ;;
+  kernel-status)
+    kernel_status
+    ;;
+  kmod-list)
+    awk '{ print $1 }' /proc/modules
+    ;;
+  stale-libs)
+    exec sudo -n /usr/local/sbin/homelab-stale-libs
     ;;
   journal-system)
     journalctl -p warning..err -n 50 --no-pager

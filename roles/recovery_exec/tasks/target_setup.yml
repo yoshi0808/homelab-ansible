@@ -112,6 +112,21 @@
   when: not ansible_check_mode
   tags: [destructive]
 
+- name: Deploy stale-libs inspection script on target nodes
+  ansible.builtin.copy:
+    src: homelab-stale-libs
+    dest: /usr/local/sbin/homelab-stale-libs
+    owner: root
+    group: root
+    mode: "0755"
+  loop: "{{ recovery_exec_targets }}"
+  loop_control:
+    loop_var: target_item
+  delegate_to: "{{ target_item.name }}"
+  become: true
+  when: not ansible_check_mode
+  tags: [destructive]
+
 - name: Deploy recovery-loki-helper on target nodes with Loki (Loki横断ログ調査, AR-095〜AR-101)
   ansible.builtin.copy:
     src: recovery-loki-helper
@@ -157,6 +172,78 @@
     loop_var: target_item
   delegate_to: "{{ target_item.name }}"
   become: true
+  when: not ansible_check_mode
+  tags: [destructive]
+
+- name: Run stale-libs without arguments as recovery-exec on target nodes
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/sudo
+      - -n
+      - -u
+      - "{{ recovery_exec_user }}"
+      - /usr/bin/sudo
+      - -n
+      - /usr/local/sbin/homelab-stale-libs
+  loop: "{{ recovery_exec_targets }}"
+  loop_control:
+    loop_var: target_item
+  delegate_to: "{{ target_item.name }}"
+  register: recovery_exec_stale_libs_sudo_positive_probe
+  changed_when: false
+  failed_when: false
+  become: true
+  when: not ansible_check_mode
+  tags: [destructive]
+
+- name: Assert stale-libs runs through sudo without arguments on target nodes
+  ansible.builtin.assert:
+    that:
+      - item.rc == 0
+    fail_msg: >-
+      recovery-exec could not run /usr/local/sbin/homelab-stale-libs without
+      arguments through sudo on {{ item.target_item.name }} (rc={{ item.rc }}).
+  loop: "{{ recovery_exec_stale_libs_sudo_positive_probe.results }}"
+  loop_control:
+    label: "{{ item.target_item.name }}"
+  become: false
+  when: not ansible_check_mode
+  tags: [destructive]
+
+- name: Try stale-libs with an argument as recovery-exec on target nodes
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/sudo
+      - -n
+      - -u
+      - "{{ recovery_exec_user }}"
+      - /usr/bin/sudo
+      - -n
+      - /usr/local/sbin/homelab-stale-libs
+      - x
+  loop: "{{ recovery_exec_targets }}"
+  loop_control:
+    loop_var: target_item
+  delegate_to: "{{ target_item.name }}"
+  register: recovery_exec_stale_libs_sudo_arg_probe
+  changed_when: false
+  failed_when: false
+  become: true
+  when: not ansible_check_mode
+  tags: [destructive]
+
+- name: Assert stale-libs argument is rejected by sudo on target nodes
+  ansible.builtin.assert:
+    that:
+      - item.rc != 0
+      - item.rc != 64
+    fail_msg: >-
+      sudo did not reject an argument for /usr/local/sbin/homelab-stale-libs
+      on {{ item.target_item.name }} (rc={{ item.rc }}).
+  loop: "{{ recovery_exec_stale_libs_sudo_arg_probe.results }}"
+  loop_control:
+    label: "{{ item.target_item.name }}"
+  become: false
   when: not ansible_check_mode
   tags: [destructive]
 
@@ -311,6 +398,21 @@
   when: not ansible_check_mode
   tags: [destructive]
 
+- name: Deploy stale-libs inspection script on pve target nodes
+  ansible.builtin.copy:
+    src: homelab-stale-libs
+    dest: /usr/local/sbin/homelab-stale-libs
+    owner: root
+    group: root
+    mode: "0755"
+  loop: "{{ recovery_exec_pve_targets_reachable }}"
+  loop_control:
+    loop_var: target_item
+  delegate_to: "{{ target_item.name }}"
+  become: true
+  when: not ansible_check_mode
+  tags: [destructive]
+
 - name: Deploy sudoers for recovery-exec read-only investigation on pve target nodes
   ansible.builtin.template:
     src: sudoers-recovery-exec-pve-target.j2
@@ -324,6 +426,78 @@
     loop_var: target_item
   delegate_to: "{{ target_item.name }}"
   become: true
+  when: not ansible_check_mode
+  tags: [destructive]
+
+- name: Run stale-libs without arguments as recovery-exec on pve target nodes
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/sudo
+      - -n
+      - -u
+      - "{{ recovery_exec_user }}"
+      - /usr/bin/sudo
+      - -n
+      - /usr/local/sbin/homelab-stale-libs
+  loop: "{{ recovery_exec_pve_targets_reachable }}"
+  loop_control:
+    loop_var: target_item
+  delegate_to: "{{ target_item.name }}"
+  register: recovery_exec_stale_libs_sudo_positive_probe_pve
+  changed_when: false
+  failed_when: false
+  become: true
+  when: not ansible_check_mode
+  tags: [destructive]
+
+- name: Assert stale-libs runs through sudo without arguments on pve target nodes
+  ansible.builtin.assert:
+    that:
+      - item.rc == 0
+    fail_msg: >-
+      recovery-exec could not run /usr/local/sbin/homelab-stale-libs without
+      arguments through sudo on {{ item.target_item.name }} (rc={{ item.rc }}).
+  loop: "{{ recovery_exec_stale_libs_sudo_positive_probe_pve.results }}"
+  loop_control:
+    label: "{{ item.target_item.name }}"
+  become: false
+  when: not ansible_check_mode
+  tags: [destructive]
+
+- name: Try stale-libs with an argument as recovery-exec on pve target nodes
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/sudo
+      - -n
+      - -u
+      - "{{ recovery_exec_user }}"
+      - /usr/bin/sudo
+      - -n
+      - /usr/local/sbin/homelab-stale-libs
+      - x
+  loop: "{{ recovery_exec_pve_targets_reachable }}"
+  loop_control:
+    loop_var: target_item
+  delegate_to: "{{ target_item.name }}"
+  register: recovery_exec_stale_libs_sudo_arg_probe_pve
+  changed_when: false
+  failed_when: false
+  become: true
+  when: not ansible_check_mode
+  tags: [destructive]
+
+- name: Assert stale-libs argument is rejected by sudo on pve target nodes
+  ansible.builtin.assert:
+    that:
+      - item.rc != 0
+      - item.rc != 64
+    fail_msg: >-
+      sudo did not reject an argument for /usr/local/sbin/homelab-stale-libs
+      on {{ item.target_item.name }} (rc={{ item.rc }}).
+  loop: "{{ recovery_exec_stale_libs_sudo_arg_probe_pve.results }}"
+  loop_control:
+    label: "{{ item.target_item.name }}"
+  become: false
   when: not ansible_check_mode
   tags: [destructive]
 

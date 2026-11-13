@@ -69,6 +69,14 @@ deployment_drift_check_files:
     dest: /usr/local/sbin/recovery-loki-helper
     playbook: playbooks/recovery_exec_setup.yml
     run_host: quory
+  # stale-libs is a copy deployment delegated from quory to all recovery-exec
+  # landing targets. Keep it Tier 1 so a missed setup run cannot leave a
+  # privileged dispatch arm pointing at an old helper.
+  - hosts: [authy, monnie, pve1, pve2]
+    src: roles/recovery_exec/files/homelab-stale-libs
+    dest: /usr/local/sbin/homelab-stale-libs
+    playbook: playbooks/recovery_exec_setup.yml
+    run_host: quory
   # --- Phase 3(dev_prod_boundary)で追加 ---
   # 調査面そのもの。Phase 4 は「配備物の版ずれを常時検出できること」を前提に
   # 開発側の鍵を捨てるため、**その検出を担う口と、検出のために読む口自身**が

@@ -12,8 +12,9 @@
 # acl-status is Q-only; X2/X3/X4 users/unit-files/forced-command-keys are
 # shared with classes G/P) plus §7 (D7, 1 check: journal-ssh) — 25 total.
 # §8 (D8) changed journal-unit's operands but added no check. §10 adds
-# pkg-list and schedule-list under the requirement below. Do not add checks
-# beyond those tables without Yoshinobu's approval.
+# pkg-list and schedule-list, and §11 adds kernel-status / kmod-list under
+# the requirements below. Do not add checks beyond those tables without
+# Yoshinobu's approval.
 #
 # Operator Request Channel MVP (2026-08-08) added 4 more checks — contract:
 # docs/ai/reviews/operator_request_channel/2026-08-08_001_requirement.md §5.2,
@@ -26,7 +27,8 @@
 # processing (DLP, schema, request storage) lives entirely in oprc-receive
 # and the oprc/ library it imports, not here. Total is now 31. None of the
 # original 25 arms, their arity checks, or their denial text changed by one
-# character to make room for these.
+# character to make room for these. §11 adds two checks, so the total is now
+# 33.
 #
 # 2026-08-25 (docs/ai/reviews/investigate_acl_observation/
 # 2026-08-25_001_requirement.md): acl-status's fixed name->path table grew
@@ -72,6 +74,41 @@ deny_invalid() {
   echo "denied: invalid ${param_name} for ${check}" >&2
   exit 1
 }
+
+kernel_status() (
+  # This is a subshell so enabling nullglob cannot affect later dispatch arms.
+  # An unmatched glob (including an unreadable /boot directory) would make
+  # the installed-kernel list ambiguous, so fail rather than reporting a
+  # misleading success. The required observation is each file name, not its
+  # contents; image files are commonly root-readable only.
+  shopt -s nullglob
+  local -a images=(/boot/vmlinuz-*)
+  local image
+
+  if [[ -z "${images[0]:-}" ]]; then
+    echo "error: no installed kernel images found under /boot" >&2
+    return 1
+  fi
+  printf 'running-kernel: %s\n' "$(uname -r)"
+  for image in "${images[@]}"; do
+    printf 'installed-kernel-image: %s\n' "${image##*/}"
+  done
+  if [[ -e /run/reboot-required ]]; then
+    printf '%s\n' 'reboot-required: yes'
+    if [[ -e /run/reboot-required.pkgs ]]; then
+      if [[ ! -r /run/reboot-required.pkgs ]]; then
+        echo 'error: reboot-required package list is not readable' >&2
+        return 1
+      fi
+      printf '%s\n' 'reboot-required-packages:'
+      cat /run/reboot-required.pkgs
+    else
+      printf '%s\n' 'reboot-required-packages: (not present)'
+    fi
+  else
+    printf '%s\n' 'reboot-required: no'
+  fi
+)
 
 # --- Shared validation constants (kept identical to the helpers they front,
 # so a rejection here and a rejection inside the helper agree) ---
@@ -231,6 +268,14 @@ case "$check" in
   ports)
     [[ -z "$p1" && -z "$p2" && -z "$p3" ]] || deny_count
     ss -ltnup
+    ;;
+  kernel-status)
+    [[ -z "$p1" && -z "$p2" && -z "$p3" ]] || deny_count
+    kernel_status
+    ;;
+  kmod-list)
+    [[ -z "$p1" && -z "$p2" && -z "$p3" ]] || deny_count
+    awk '{ print $1 }' /proc/modules
     ;;
   journal-system)
     [[ -z "$p1" && -z "$p2" && -z "$p3" ]] || deny_count

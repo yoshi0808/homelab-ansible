@@ -53,6 +53,9 @@
 # controlling tty. Confirm `sudo -n` succeeds here (this Proxmox/Debian host
 # may set `Defaults requiretty` unlike authy/monnie's Ubuntu default) —
 # verify with the cluster-status check first, before trusting the rest.
+# stale-libs is deliberately the only added privileged inspection command.
+# Empty sudoers arguments reject every operand before the script is started.
+recovery-exec ALL=(root) NOPASSWD: /usr/local/sbin/homelab-stale-libs ""
 recovery-exec ALL=(root) NOPASSWD: /usr/bin/pvesh get /cluster/status --output-format json
 recovery-exec ALL=(root) NOPASSWD: /usr/bin/pvesh get /cluster/resources --output-format json
 recovery-exec ALL=(root) NOPASSWD: /usr/sbin/ha-manager status
