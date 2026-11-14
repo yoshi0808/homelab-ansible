@@ -21,6 +21,8 @@
 
 **月次full-upgradeでauthy / monnieのhealthcheck WARNINGを通知する(`docs/ai/reviews/ubuntu_full_upgrade_warning_drop/`): 次の月次自動発火の観測待ち**。2026-10-12にcommit `30da754`。次の月次の自動発火で、authyかmonnieのhealthcheckが `WARNING` を出したら、Slackの通知にその項目が載ることをCoordinatorが確かめる。`WARNING` が出なかった月は観測にならないので、出る月まで持ち越す。
 
+**ホスト状態の調査語彙(kernel-status / kmod-list / ports / stale-libs、`docs/ai/reviews/dispatch_host_state_vocabulary/`): 2026-11-15のドリフト検査でAC9を確かめる**。commit `4c2e586`、配備は #1854 / #1855(2026-11-14)、AC1〜7・AC8a・AC10はPASS。11/15の日次ドリフト検査で、本案件の配備物にfindingが無く、対象ホストがすべて `checked`(`unverified` でない)であることをCoordinatorが確かめ、Auditorを起動してクローズする。
+
 ## Next(着手候補) — 工程・体制
 
 | 項目 | 内容 | 根拠 |

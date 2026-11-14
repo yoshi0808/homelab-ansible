@@ -6,7 +6,7 @@ import sys
 
 
 DELETED_SUFFIX = " (deleted)"
-EXCLUDED_PREFIXES = ("/memfd:", "/dev/shm/", "/tmp/", "/var/tmp/", "/run/")
+EXCLUDED_PREFIXES = ("/memfd:", "/dev/", "/tmp/", "/var/tmp/", "/run/")
 
 
 def emit(line):

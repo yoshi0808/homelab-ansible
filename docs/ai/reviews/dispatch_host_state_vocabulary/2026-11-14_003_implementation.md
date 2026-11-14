@@ -56,3 +56,10 @@
 - Suggestion（`uname -r`を`/boot`検査より先に出す）は対応しない。`kernel-status`は3点を揃えて返すか、判定不能として非ゼロにする契約であり、部分出力を成功相当の観測値と誤読させない現在の順序を維持する。
 
 追加検証後も`ansible-playbook --syntax-check playbooks/recovery_exec_setup.yml`、`python3 -m py_compile`、`git diff --check`は成功した。`ansible-lint --offline roles/recovery_exec/tasks/target_setup.yml`は従来どおり既存の5件（24/32/40/48/56行のrole-prefix命名）だけで失敗し、今回のtaskにはfindingがない。
+
+## `/dev/` mapping除外の追加修正（2026-11-14）
+
+- 配備後の実機観測で、pve1の`stale-libs`が`process=kvm path=/dev/zero`を出した。`/dev/zero`は古い共有ライブラリ・実行ファイルではなく、サービス再起動の根拠にならないため、`/dev/`配下を除外対象へ追加した。
+- 正本のP0-4「判定の契約」の除外箇所を`/dev/shm/`から`/dev/`へ広げ、`EXCLUDED_PREFIXES`と語彙カタログ§11のH4も同じ契約に更新した。`/dev/shm/`は`/dev/`の部分集合となる。ほかの対象・除外・sudo契約は変更していない。
+- ansyローカルで、`/dev/zero (deleted)`・`/dev/shm/... (deleted)`・通常ファイルの3行を与えたmaps分類fixtureを実行し、通常ファイルだけが残ることを確認した。さらに削除済み通常ファイル、memfd、`/dev/zero`を同時にmappingするプロセスを走らせ、通常ファイルだけが出力され、`/dev/`・`/memfd:`が出ないことを確認した。引数rc 64、走査中の短命プロセス50本、対象プロセス終了後の20回連続走査も前回どおり成功した。
+- `python3 -m py_compile roles/recovery_exec/files/homelab-stale-libs`、`git diff --check`、`git diff --cached --check`はいずれも成功した。実ホストへの接続・再配備はしていない。

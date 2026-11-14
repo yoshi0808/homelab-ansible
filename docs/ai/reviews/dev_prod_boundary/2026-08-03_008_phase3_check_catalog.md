@@ -421,7 +421,7 @@ requirement: `docs/ai/reviews/dispatch_host_state_vocabulary/2026-11-14_001_requ
 | H1 | `kernel-status` | Q / G / P | なし。引数はdispatchで拒否 | `uname -r`、読める`/boot/vmlinuz-*`のファイル名、`/run/reboot-required`と存在時の`/run/reboot-required.pkgs`を出す。カーネルイメージが0件・読めないときは非ゼロ | なし |
 | H2 | `kmod-list` | Q / G / P | なし。引数はdispatchで拒否 | `/proc/modules`の第1列を1行ずつ出す | なし |
 | H3 | `ports` | P(pve1 / pve2) | なし。引数はdispatchで拒否 | class Q/Gの既存語彙と同じ`ss -ltnup` | なし |
-| H4 | `stale-libs` | G(authy / monnie) / P(pve1 / pve2) | なし。引数はdispatchで拒否。スクリプト自身も引数をrc 64で拒否 | `/proc/*/maps`から、削除済みで`/`始まりの通常ファイルmappingを、PID・プロセス名・重複除外したパスで出す。`/memfd:`、`/dev/shm/`、`/tmp/`、`/var/tmp/`、`/run/`、疑似領域・無名mappingは除外。対象0件は明示してrc 0 | `sudo -n /usr/local/sbin/homelab-stale-libs`のみ。sudoersは絶対パスと空引数指定`""`だけで、ワイルドカードなし |
+| H4 | `stale-libs` | G(authy / monnie) / P(pve1 / pve2) | なし。引数はdispatchで拒否。スクリプト自身も引数をrc 64で拒否 | `/proc/*/maps`から、削除済みで`/`始まりの通常ファイルmappingを、PID・プロセス名・重複除外したパスで出す。`/memfd:`、`/dev/`、`/tmp/`、`/var/tmp/`、`/run/`、疑似領域・無名mappingは除外。対象0件は明示してrc 0 | `sudo -n /usr/local/sbin/homelab-stale-libs`のみ。sudoersは絶対パスと空引数指定`""`だけで、ワイルドカードなし |
 
 ### 11.1 総数の更新
 
