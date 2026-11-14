@@ -15,7 +15,7 @@ import fcntl
 
 from ansible.module_utils.basic import AnsibleModule
 from ansible.module_utils.proxmox_running_versions import (
-    NODES, header_block, node_block, normalize, render_complete,
+    header_block, normalize, render_blocks, render_complete,
 )
 
 VERSION = "2025-09-03"
@@ -86,6 +86,8 @@ class Client:
 
 
 def code_block(text):
+    if len(text) > 2000:
+        raise PublishError("block_text_too_large")
     return {"object": "block", "type": "code", "code": {
         "language": "plain text",
         "rich_text": [{"type": "text", "text": {"content": text}}],
@@ -142,13 +144,17 @@ def page_lock(directory):
 
 
 def publish(client, page, nodes, updated_at, overall):
+    """Update header first, then every managed block, then mark complete."""
     blocks = client.children(page)
     # The page Yoshinobu created reads as <empty-block/>. Treat exactly one
     # empty paragraph as a Notion editor placeholder, not managed content.
     if len(blocks) == 1 and is_empty_paragraph(blocks[0]):
         client.call("DELETE", "/blocks/" + blocks[0]["id"])
         blocks = []
-    if len(blocks) > 3 or any(block.get("type") != "code" or not isinstance(block.get("id"), str) for block in blocks):
+    desired = render_blocks(nodes, updated_at, overall)
+    if len(desired) > 100:
+        raise PublishError("managed_blocks_too_many")
+    if len(blocks) > 100 or any(block.get("type") != "code" or not isinstance(block.get("id"), str) for block in blocks):
         raise PublishError("managed_blocks_invalid")
     # This is intentionally first: any later failure leaves readers state=updating.
     if blocks:
@@ -157,12 +163,14 @@ def publish(client, page, nodes, updated_at, overall):
     else:
         header_id = append_code(client, page, header_block("updating", "unknown", "unknown"))
         blocks = [{"id": header_id}]
-    values = (node_block(nodes["pve1"]), node_block(nodes["pve2"]))
-    for index, value in enumerate(values, start=1):
+    for index, value in enumerate(desired[1:], start=1):
         if len(blocks) > index:
             patch_code(client, blocks[index]["id"], value)
         else:
             append_code(client, page, value)
+    # Deletion is deliberately after updating: any failure retains updating.
+    for block in blocks[len(desired):]:
+        client.call("DELETE", "/blocks/" + block["id"])
     patch_code(client, header_id, header_block("complete", updated_at, overall))
 
 
@@ -173,11 +181,18 @@ def main():
         "lock_directory": {"type": "path", "required": True},
         "observations": {"type": "dict", "required": True},
         "apply_report_dir": {"type": "path", "required": True},
+        "node_roles": {"type": "dict", "required": True},
         "suppress": {"type": "bool", "default": True},
     }, supports_check_mode=True)
-    updated_at = datetime.now(ZoneInfo("Asia/Tokyo")).strftime("%Y-%m-%dT%H:%M:%S%z")
-    nodes, overall, execution_error = normalize(module.params["observations"], module.params["apply_report_dir"])
-    body = render_complete(nodes, updated_at, overall)
+    updated_at = datetime.now(ZoneInfo("Asia/Tokyo")).isoformat(timespec="seconds")
+    try:
+        nodes, overall, execution_error = normalize(
+            module.params["observations"], module.params["apply_report_dir"], module.params["node_roles"]
+        )
+        body = render_complete(nodes, updated_at, overall)
+    except (TypeError, ValueError):
+        module.fail_json(msg="render_invalid", publication="incomplete", body="", overall_status="error",
+                         execution_error=True)
     if module.check_mode or module.params["suppress"]:
         module.exit_json(changed=False, publication="suppressed", body=body,
                          overall_status=overall, execution_error=execution_error)

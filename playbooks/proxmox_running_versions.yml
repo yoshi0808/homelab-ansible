@@ -1,7 +1,7 @@
 ---
 # tester-gate: check-mode-native — --check still collects versions and renders the page, but never reads the Notion token or writes Notion/Slack.
-- name: Collect running Proxmox versions without changing nodes
-  hosts: proxmox
+- name: Collect running package versions without changing nodes
+  hosts: proxmox:control_nodes:radius_servers:monitoring_servers
   gather_facts: false
   ignore_unreachable: true
 

@@ -1,10 +1,13 @@
 ---
 - name: Collect version facts without changing this Proxmox node
   ansible.builtin.command:
-    argv: [python3, '-']
+    argv:
+      - python3
+      - '-'
+      - "{{ proxmox_running_versions_node_roles[inventory_hostname] }}"
     stdin: "{{ lookup('file', role_path ~ '/files/collect.py') }}"
   become: true
-  register: _prv_collect
+  register: proxmox_running_versions_collect_result
   changed_when: false
   failed_when: false
   ignore_unreachable: true
@@ -14,10 +17,10 @@
   block:
     - name: Save decoded version observation
       ansible.builtin.set_fact:
-        proxmox_running_versions_observation: "{{ _prv_collect.stdout | from_json }}"
+        proxmox_running_versions_observation: "{{ proxmox_running_versions_collect_result.stdout | from_json }}"
       when:
-        - not (_prv_collect.unreachable | default(false) | bool)
-        - (_prv_collect.rc | default(-1)) == 0
+        - not (proxmox_running_versions_collect_result.unreachable | default(false) | bool)
+        - (proxmox_running_versions_collect_result.rc | default(-1)) == 0
   rescue:
     - name: Save invalid collection as an explicit error observation
       ansible.builtin.set_fact:

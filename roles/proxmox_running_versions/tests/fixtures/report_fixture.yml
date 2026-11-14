@@ -1,0 +1,66 @@
+---
+- name: Local report-path fixture; never connects to the named inventory hosts
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    fixture_case: partial
+    proxmox_running_versions_node_roles:
+      pve1: pve
+      pve2: pve
+      quory: qdevice
+      authy: radius
+      monnie: monitoring
+    proxmox_running_versions_notion_page: fixture-page
+    proxmox_running_versions_notion_token_file: /must-not-be-read
+    proxmox_running_versions_lock_dir: /tmp/proxmox-running-versions-fixture
+    proxmox_running_versions_apply_report_dir: /missing
+    fixture_observation:
+      ok: true
+      values:
+        os: debian-13
+        kernel_running: 6.14.0-1-pve
+        kernel_installed: 6.14.0-2
+        kernel_reboot_required: 'true'
+        packages:
+          - name: apt
+            installed: '3.0'
+            candidate: '3.0'
+            proxmox_origin: false
+        services: []
+        collected_at: '2026-11-14T07:00:00+09:00'
+    fixture_required_error_observation:
+      ok: true
+      values:
+        os: ubuntu-26.04
+        kernel_running: 6.14.0-1-generic
+        kernel_installed: 6.14.0-2-generic
+        kernel_reboot_required: invalid
+        packages:
+          - name: apt
+            installed: '3.0'
+            candidate: '3.0'
+            proxmox_origin: false
+        collected_at: '2026-11-14T07:00:00+09:00'
+
+  tasks:
+    - name: Add fixture observations without contacting nodes
+      ansible.builtin.add_host:
+        name: '{{ item }}'
+        proxmox_running_versions_observation: >-
+          {{ fixture_required_error_observation
+             if (fixture_case == 'required_error' and item == 'authy')
+             else fixture_observation }}
+        proxmox_running_versions_collect_result: >-
+          {{ {'unreachable': true}
+             if ((fixture_case == 'partial' and item == 'authy')
+                 or (fixture_case == 'pve_unreachable' and item in ['pve1', 'pve2'])
+                 or fixture_case == 'all_unreachable')
+             else {} }}
+      loop: [pve1, pve2, quory, authy, monnie]
+      check_mode: false
+
+    - name: Execute the production report task against fixture observations
+      ansible.builtin.include_role:
+        name: proxmox_running_versions
+        tasks_from: report

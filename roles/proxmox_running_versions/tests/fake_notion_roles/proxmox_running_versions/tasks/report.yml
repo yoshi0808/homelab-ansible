@@ -1,0 +1,5 @@
+---
+# Execute the production task file while resolving the fixture module from this
+# role's library directory. This never changes the production role.
+- name: Run production report tasks with the fixture publication module
+  ansible.builtin.import_tasks: '{{ role_path }}/../../../tasks/report.yml'

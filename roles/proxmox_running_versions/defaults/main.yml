@@ -7,3 +7,12 @@ proxmox_running_versions_lock_dir: "{{ reports_base_dir }}/proxmox-running-versi
 # The patch role owns this default. The playbook imports that role's defaults
 # so this role reads the same report location without maintaining a copy.
 proxmox_running_versions_apply_report_dir: "{{ proxmox_patch_apply_report_dir }}"
+
+# This is the output contract, not an inference from a hostname. Keep the
+# page's reader-facing roles stable if inventory groups are reorganized.
+proxmox_running_versions_node_roles:
+  pve1: pve
+  pve2: pve
+  quory: qdevice
+  authy: radius
+  monnie: monitoring

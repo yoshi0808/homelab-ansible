@@ -1,0 +1,4 @@
+---
+- name: Capture one fixture notification instead of sending Slack
+  ansible.builtin.debug:
+    msg: 'fixture-alert {{ slack_message }}'
