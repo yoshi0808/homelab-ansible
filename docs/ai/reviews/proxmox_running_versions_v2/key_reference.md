@@ -26,7 +26,7 @@
 | `kernel_running` | `uname -r` | 文字列、取得不能は`unknown` |
 | `kernel_installed` | dpkg版比較で最新の起動可能カーネル実体の版 | 文字列、取得不能は`unknown` |
 | `kernel_reboot_required` | 新カーネルまたは`/run/reboot-required`による再起動要否 | `true` / `false`、取得不能は`unknown` |
-| `services_restart_required` | 削除済みライブラリを保持するプロセス | 先頭は`count=N; ライブラリ -> プロセス[, プロセス]`、2行目以降は各`ライブラリ -> ...`。`none` / `unknown`、上限超過時の末尾は`(+N more)` |
+| `services_restart_required` | 削除済みライブラリを保持するプロセス | 1ライブラリ1行。先頭行は`count=N; ライブラリ -> プロセス(unit)[, ...]`、2行目以降は`ライブラリ -> ...`。**`count=N`はライブラリの数**(プロセス数ではない)。1行に出すプロセスは最大10個で、超えた分は**その行の末尾**に`(+N more)`(N=省いたプロセス数)。行は最大20行で、超えた分は**独立した最終行**`(+N more)`(N=省いたライブラリ数)。unitを引けないプロセスはunitを省く。`none` / `unknown` |
 | `last_apply_at` | pveの直近apply report時刻 | patch reportのJST基本形式を変換した`+09:00`付き ISO 8601 / `unknown`、非PVEは`n/a` |
 | `last_apply_result` | 直近apply reportの結果 | `SUCCESS` / `FAILED` / `unknown`、非PVEは`n/a` |
 | `reboot_required` | reportの`reboot_trigger`から導いた直近apply時の要否 | `true` / `false` / `unknown`、非PVEは`n/a` |
