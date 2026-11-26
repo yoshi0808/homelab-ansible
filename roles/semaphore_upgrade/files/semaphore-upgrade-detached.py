@@ -281,7 +281,7 @@ def notify(webhook_file, title, message):
     try:
         webhook = path.read_text(encoding="utf-8").strip()
         body = json.dumps(
-            {"link_names": 1, "attachments": [{"title": title, "text": message, "fallback": title,
+            {"link_names": 1, "text": f"*{title}*\n{message}", "attachments": [{"title": title, "fallback": title,
               "color": "good" if title.startswith("✅") else "warning" if title.startswith("⚠️") else "danger"}]}
         ).encode()
         request = urllib.request.Request(

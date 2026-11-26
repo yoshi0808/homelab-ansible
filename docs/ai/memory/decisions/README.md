@@ -11,3 +11,4 @@
 - `improve-prompts-by-deleting-not-adding.md` — 規範の品質向上をAI側で自律的に回す。**自律化するのは削除だけ**で、足すのはYoshinobuが決める(2026-08-19)。削除の根拠は「その文を書いた後にも再発しているか」であり、**未発火を不要と読まない**。固定点(AIが書き換えてよい文書の分離)は未着手。
 - `grant-read-access-rather-than-police-speculation.md` — 観測手段が無いことに起因する推測は、規範ではなく read-only のアクセス追加で対応する(2026-08-25)。**原因を「作りの問題」と「観測不能に起因する推測」に分ける**のが芯で、混ぜると対応を誤る。Operator経路が在ることはこの判断を変えない(能力の不在ではなく傾向として現れるため)。足し方の設計論点は未決。
 - `ansy-must-not-trigger-production-changes.md` — ansyから本番の状態を変えない。配備を自動起動する2案の却下理由と、判定の軸を「叩かれる余地があるか」から「本番の状態が変わるか」へ移した経緯(2026-08-04)。規範の正本は`docs/ai/core.md`。
+- `slack-notifications-must-stand-alone.md` — Slack通知は本文だけで判断でき、本文をコピーできる形で送る。reportパスや金曜の予告への参照で済ませない(2026-09-27)。本文は最上位の`text`へ、attachmentには色帯とタイトルだけ(2026-11-27)。

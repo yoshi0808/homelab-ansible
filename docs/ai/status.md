@@ -15,6 +15,8 @@
 
 **月次full-upgradeでauthy / monnieのhealthcheck WARNINGを通知する(`docs/ai/reviews/ubuntu_full_upgrade_warning_drop/`): 次の月次自動発火の観測待ち**。2026-10-12にcommit `30da754`。次の月次の自動発火で、authyかmonnieのhealthcheckが `WARNING` を出したら、Slackの通知にその項目が載ることをCoordinatorが確かめる。`WARNING` が出なかった月は観測にならないので、出る月まで持ち越す。
 
+**【Yoshinobuの作業】quoryの `quory-post-upgrade-check.sh` を置き直す**。2026-11-27にSlack通知の本文をコピーできる形へ変えた(`docs/ai/memory/decisions/slack-notifications-must-stand-alone.md`)。このscriptはAnsible管理外で、quoryの `/usr/local/sbin/` へ手で置いたもののため、repoの `scripts/quory_post_upgrade_check/quory-post-upgrade-check.sh` をコピーし直すまで古い形で送られる(手順は同scriptの冒頭)。動くのはquoryをfull-upgradeして再起動した後だけなので、次にその作業をするときで間に合う。
+
 ## Next(着手候補) — 工程・体制
 
 | 項目 | 内容 | 根拠 |

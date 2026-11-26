@@ -147,9 +147,9 @@ if [ -n "${SLACK_WEBHOOK_URL:-}" ]; then
   payload=$(python3 -c '
 import json, sys
 print(json.dumps({
+    "text": "*[quory-post-upgrade-check] " + sys.argv[1] + "*\n" + sys.argv[2],
     "attachments": [{
         "title": "[quory-post-upgrade-check] " + sys.argv[1],
-        "text": sys.argv[2],
         "color": sys.argv[3],
         "fallback": "[quory-post-upgrade-check] " + sys.argv[1],
     }]

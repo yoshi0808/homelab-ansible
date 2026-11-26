@@ -138,9 +138,14 @@
           # resolving. Omitting it here would silently change the rendered
           # notification (§3 "見た目を変えない").
           link_names: 1
+          # The body goes in the top-level text, not in the attachment:
+          # Slack's "copy text" picks up only the top-level text, so a body
+          # inside an attachment could not be copied. The title stays the
+          # first line so the mobile push preview still shows it; the
+          # attachment keeps only the colored bar and the title.
+          text: "*{{ _slack_icon }} {{ slack_title }}*\n{{ slack_message }}"
           attachments:
             - title: "{{ _slack_icon }} {{ slack_title }}"
-              text: "{{ slack_message }}"
               color: "{{ _slack_color }}"
               fallback: "{{ slack_title }}"
               footer: "{{ 'capture: ' ~ _capture_written_id if _capture_written_id is defined else '' }}"
