@@ -1,7 +1,7 @@
 # Incident: agmsg sync engineのstale config lock再発
 
 日付: 2026-09-07
-状態: 未解決
+状態: 未解決(2026-11-26打ち切り。9月以降の再発記録は無い。agmsg v1.5.3でregistry lockの解除条件が変わったため、更新後に再発したら改めて記録する)
 対象: agmsg remote team `homelab-ops` のsync engine(ansy側、リポジトリ外)
 種別: 動作不具合
 原因分類: #運用考慮ミス

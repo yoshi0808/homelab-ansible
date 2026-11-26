@@ -1,7 +1,7 @@
 # Incident: clean start後にCodexのapp-server経路が成立しない
 
 日付: 2026-09-07
-状態: 調査中
+状態: 未解決(2026-11-26打ち切り。2026-10-12にCodexのagmsg pane経路を廃止し、調査対象が無くなった)
 対象: `new-session.sh` / Codex app-server / agmsg Codex monitor (`homelab`, `homelab-ops`)
 種別: 動作不具合
 原因分類: #製造ミス #テスト不足 #運用考慮ミス

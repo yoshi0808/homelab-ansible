@@ -11,13 +11,7 @@
 
 ## Now(進行中)
 
-**障害捕捉の `--check` 継承の修正(案件3): 2026-10-26の観測待ち**(`docs/ai/reviews/capture_check_mode_inheritance/`)。10/26の月次振り返りのときに、9/27 20:44(commit `02edaed`)以降、`reports/incidents/_spool/` と収集後のバンドルに `check_mode: true` の記録が1件も無いことを、Coordinatorが `quory-investigate` の読み取り語彙で確かめる。不具合は「`--check`」と「自律復旧の3 roleかubuntu月次full-upgradeからの通知」が重なったときだけ起きるため、特定のDry Runを押して観測する方式は取らない。
-
-**NVMe error-log増加を参考扱いに(`docs/ai/reviews/storage_monthly_error_log_note/`): 10月の月次点検の観測待ち**。pushでquoryへ自動反映される。10月の月次点検(Semaphoreのschedule)のNotionレポートで、pve2のerror-logが増え、かつほかのNVMe健康条件(媒体エラー0・重大警告なし・予備領域がしきい値以上)が正常なら、総合判定が「問題なし」のまま「## 参考」に「NVMeが拒否したコマンドの記録が+N件」が出ることを、Yoshinobuが貼ったレポートでCoordinatorが確かめる。
-
 **Operatorの調査鍵(`docs/ai/reviews/operator_investigate_key/`)とLokiの固定文字列検索(`docs/ai/reviews/loki_text_filter/`): 配備済み、残り1点**。配備は #1362(2026-10-05)と、`loki-text all` の不具合修正の #1419(2026-10-10、`all` で全jobを検索できることをansyから確認済み)。Operatorの鍵(AC9)と障害捕捉の収集器の経路(AC9b)は確認済み。残りは、自律復旧のCodex(sandbox経由)が次に調査を走らせたとき、wrapperの `denied: investigation wrapper requires` が出ていないこと(ansyでの実測を根拠に受け入れ、quory上では未観測)。
-
-**Wi-Fiテレビの切断(5GHzチャンネル入れ替えの実験): 2026-10-13に結果をまとめる**。テレビ(MAC `00:16:f5:22:da:86`)は1階のAP(u7-1f)にLock to AP中。2026-10-06 07:07に5GHzのチャンネルを入れ替えた(1階 36→52、2階 52→36。Yoshinobuが操作)。入れ替え前の7日間で、テレビの再送過多(`Excessive Retries`)による切断は2件(10/5 07:12 u7-2f、09:36 u7-1f)。入れ替え後のテレビの再送過多を数え、件数が0〜1件なら一時的なものとみなす。家族のiPhoneの切断(圏外へ出たとき・眠っている間)は除外する。手段は `ssh monnie-investigate loki-text network-devices <since> 7d Excessive`。結果をYoshinobuへ報告し、1階を元のch36(DFS対象外)へ戻すかはYoshinobuが決める。UniFiの設定は人が操作する。
 
 **月次full-upgradeでauthy / monnieのhealthcheck WARNINGを通知する(`docs/ai/reviews/ubuntu_full_upgrade_warning_drop/`): 次の月次自動発火の観測待ち**。2026-10-12にcommit `30da754`。次の月次の自動発火で、authyかmonnieのhealthcheckが `WARNING` を出したら、Slackの通知にその項目が載ることをCoordinatorが確かめる。`WARNING` が出なかった月は観測にならないので、出る月まで持ち越す。
 

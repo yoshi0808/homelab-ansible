@@ -1,7 +1,7 @@
 # Incident: agmsgのメッセージが既読になるのに、Codexの可視スレッドへ届かない
 
 日付: 2026-09-15
-状態: **原因特定(2026-09-15)。Coordinator側を`actas`モードにして再発を止めたが、これはセッションごとに取り直す運用であり、恒久対処(roster登録の整理)は未実施**
+状態: 未解決(2026-11-26打ち切り。2026-10-12にCodex側の受け手のpaneを廃止し、恒久対処の対象が無くなった)
 対象: agmsgのcodex monitor経路(ansy pane 1 Implementer / pane 2 計画Reviewer)
 種別: 動作不具合
 
