@@ -47,11 +47,11 @@ Yoshinobuとの対話窓口として要求と判断材料を整え、自ら実�
 
 | Role / 工程 | 現在のCLI | 起動時指定 | 既定段 |
 |---|---|---|---|
-| Implementer | Codex（`codex exec`） | `gpt-5.6-terra` | medium |
-| 計画Reviewer | Codex（`codex exec`） | `gpt-5.6-sol` | medium |
+| Implementer | Codex（`codex exec`） | `gpt-6.1-sol` | medium |
+| 計画Reviewer | Codex（`codex exec`） | `gpt-6.1-sol` | medium |
 | 差分Reviewer | Claude Code（subagent） | `sonnet` | medium |
 | Tester | Claude Code（subagent） | `sonnet` | medium |
-| Auditor | Codex（`codex exec`） | `gpt-5.6-sol` | medium |
+| Auditor | Codex（`codex exec`） | `gpt-6.1-sol` | medium |
 
 Implementerは、複数role、複雑なcheck mode、rollback、shell / Pythonを含む場合にhighへ引き上げる(`scripts/codex-role.sh implementer --effort high`)。Testerをlowにできるのは、**実ホストへ到達せず、期待値と手順が完全に固定されたローカル検査で、起動時に明示した場合だけ**である。
 

@@ -14,9 +14,9 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # Keep the role values in these two arrays: check-doc-consistency.py reads the
 # staged definitions below and compares them with coordinator.md.
 declare -Ar ROLE_MODEL=(
-    [implementer]="gpt-5.6-terra"
-    [plan-reviewer]="gpt-5.6-sol"
-    [auditor]="gpt-5.6-sol"
+    [implementer]="gpt-6.1-sol"
+    [plan-reviewer]="gpt-6.1-sol"
+    [auditor]="gpt-6.1-sol"
 )
 declare -Ar ROLE_EFFORT=(
     [implementer]="medium"

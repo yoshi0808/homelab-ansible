@@ -117,7 +117,7 @@ run_role implementer-session implementer --output "$WORKDIR/implementer-final" <
 Implement the accepted requirement.
 EOF
 expect_contains "$CAPTURE_ARGS" "-m"
-expect_contains "$CAPTURE_ARGS" "gpt-5.6-terra"
+expect_contains "$CAPTURE_ARGS" "gpt-6.1-sol"
 expect_contains "$CAPTURE_ARGS" "model_reasoning_effort=medium"
 expect_contains "$CAPTURE_ARGS" "-s"
 expect_contains "$CAPTURE_ARGS" "workspace-write"
@@ -140,7 +140,7 @@ expect test ! -e "$REPO_ROOT/$RELATIVE_OUTPUT"
 PROMPT_FILE="$WORKDIR/request.md"
 printf 'Review the plan.\n' > "$PROMPT_FILE"
 run_role reviewer-session plan-reviewer --prompt "$PROMPT_FILE" --output "$WORKDIR/reviewer-final"
-expect_contains "$CAPTURE_ARGS" "gpt-5.6-sol"
+expect_contains "$CAPTURE_ARGS" "gpt-6.1-sol"
 expect_contains "$CAPTURE_ARGS" "model_reasoning_effort=medium"
 expect_contains "$CAPTURE_ARGS" "read-only"
 expect_prompt_contains "docs/ai/roles/reviewer.md"
@@ -151,7 +151,7 @@ START_AT="$CASE_DIR/2026-10-12_001_requirement.md"
 CASE_DIR_INPUT="$CASE_DIR/../codex_exec_roles"
 START_AT_INPUT="$CASE_DIR/../codex_exec_roles/2026-10-12_001_requirement.md"
 run_role auditor-session auditor --case-dir "$CASE_DIR_INPUT" --start-at "$START_AT_INPUT" --output "$WORKDIR/auditor-final"
-expect_contains "$CAPTURE_ARGS" "gpt-5.6-sol"
+expect_contains "$CAPTURE_ARGS" "gpt-6.1-sol"
 expect_contains "$CAPTURE_ARGS" "model_reasoning_effort=medium"
 expect_contains "$CAPTURE_ARGS" "read-only"
 expect_prompt_contains "docs/ai/roles/auditor.md"
@@ -323,9 +323,9 @@ spec.loader.exec_module(module)
 
 table = """| Role / 工程 | 現在のCLI | 起動時指定 | 既定段 |
 |---|---|---|---|
-| Implementer | rewritten freely | gpt-5.6-terra | medium |
-| 計画Reviewer | ignored | gpt-5.6-sol | medium |
-| Auditor | ignored | gpt-5.6-sol | medium |
+| Implementer | rewritten freely | gpt-6.1-sol | medium |
+| 計画Reviewer | ignored | gpt-6.1-sol | medium |
+| Auditor | ignored | gpt-6.1-sol | medium |
 """
 
 def result_for(script):
@@ -338,7 +338,7 @@ def result_for(script):
 
 assert result_for(wrapper).ok
 for role, value in (("implementer", "gpt-0"), ("plan-reviewer", "gpt-0"), ("auditor", "gpt-0")):
-    broken = wrapper.replace('[{}]="{}"'.format(role, "gpt-5.6-terra" if role == "implementer" else "gpt-5.6-sol"), '[{}]="{}"'.format(role, value), 1)
+    broken = wrapper.replace('[{}]="{}"'.format(role, "gpt-6.1-sol"), '[{}]="{}"'.format(role, value), 1)
     findings = result_for(broken).findings
     assert any("model mismatch for " + role in finding for finding in findings), findings
 for role in ("implementer", "plan-reviewer", "auditor"):
