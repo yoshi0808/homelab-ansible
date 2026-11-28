@@ -134,10 +134,5 @@
       loop_control:
         label: "{{ item.id }}"
 
-    # Confirm the copied notify task still matches the real one, so this
-    # fixture cannot silently drift from the role it verifies (Major 2:
-    # extended from 2 fragments to all fragments _eval_notify_case.yml
-    # copies from main.yml, in a shared file since both this test and
-    # test_notify_stop_reason.yml use _eval_notify_case.yml).
-    - name: Confirm all copied notify fragments are unchanged in main.yml
+    - name: Validate current production notification extraction
       ansible.builtin.include_tasks: _eval_notify_case_parity.yml

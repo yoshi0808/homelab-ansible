@@ -28,6 +28,9 @@ Proxmox patchは通常のLinux server更新より慎重に扱う。kernel、ZFS�
 <!-- SB-004 -->
 removeを伴う更新、major upgrade疑いは自動適用しない。`MAINTENANCE_REQUIRED`(removeあり)、`BLOCKED`、`MAJOR_UPGRADE_DETECTED`のいずれかとして、人間判断または別計画へ移す(SB-003)。
 
+<!-- SB-100 -->
+SB-004の例外として、週次パッチでkernelの更新により再起動し、post-healthcheckが`OK`で、実行中のkernelがインストール済みの最新であるnodeに限り、`proxmox-boot-tool kernel list`が選んだ版と実行中の版を除く`proxmox-kernel-<ver>-pve-signed`を`dpkg --purge`で自動削除する。削除前のsimulationで他のpackageの削除・導入が出る場合は削除しない。削除後の検証に通らない場合はそのnodeの適用をFAILEDとする。
+
 <!-- SB-005 -->
 `MAINTENANCE_REQUIRED`に軽微な更新が含まれても、通常運用では部分適用しない。Proxmox更新は`apt-get dist-upgrade`による一括更新を基本とし、依存関係とpackage状態を通常flowから分岐させない。
 
@@ -427,6 +430,7 @@ Sophos Firewall VMのHA relocateはstop → migrate → startであり、VM再�
 
 | 日付 | 変更 |
 |---|---|
+| 2026-11-28 | SB-100を新設し、週次パッチの古いkernel削除をSB-004(無人のremoveを自動適用しない)の例外として許可した(Yoshinobu承認、`docs/ai/reviews/proxmox_old_kernel_cleanup/`)。対象はkernel更新で再起動しpost-healthcheckが`OK`のnodeに限り、`proxmox-boot-tool`が起動用に選んだ版と実行中の版を残す。他の許可・禁止・停止条件は変更していない |
 | 2026-11-14 | SB-020の`proxmox_running_versions.yml`行を、対象hostへquory / authy / monnieを加え、収集項目(package版・再起動待ち・直近apply補助情報)を足した内容へ改めた(Yoshinobu承認)。read-only収集と固定Notionページの上書きだけを行う点は変えていない。pve1・pve2両方の不達を非0とする条件は従来の「全系の到達不能」と同じで、Ubuntu hostの到達不能は継続として扱う分類を新たに加えた |
 | 2026-10-16 | SB-020の表へ`proxmox_running_versions.yml`(semi-safe)を追加した(Yoshinobu承認)。稼働中の版の収集と固定Notionページの上書きだけを行い、hostを変更しない。許可・禁止・停止条件の既存規定は変更していない |
 | 2026-09-12 | 本番稼働済みの`proxmox_storage_monthly.yml`がSB-020に無く、デバイス非変更、部分失敗、JSON正本、collect/replay、保持・外部公開の規範がrequirement/Contextに留まっていたため、semi-safe入口として追加しSB-096〜SB-099を新設。新しい機能や許可範囲は追加せず、現行契約をPolicyへ正本化した |

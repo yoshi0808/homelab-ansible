@@ -1,0 +1,24 @@
+---
+- name: Allocate a temporary production notification include
+  ansible.builtin.tempfile:
+    state: file
+    suffix: .yml
+  register: _production_notify_file
+  check_mode: false
+
+- block:
+    - name: Extract current notification tasks from main.yml
+      ansible.builtin.command:
+        argv: [/usr/bin/python3, "{{ playbook_dir }}/extract_production_notify.py", "{{ _production_notify_file.path }}"]
+      changed_when: false
+      check_mode: false
+
+    - name: Evaluate the production notification expressions
+      ansible.builtin.include_tasks: "{{ _production_notify_file.path }}"
+
+  always:
+    - name: Remove generated notification include
+      ansible.builtin.file:
+        path: "{{ _production_notify_file.path }}"
+        state: absent
+      check_mode: false

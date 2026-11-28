@@ -207,8 +207,5 @@
       loop_control:
         label: "{{ item.item }}"
 
-    # Major 2: this file also uses _eval_notify_case.yml (via
-    # _eval_one_stop_case.yml), so it needs the same fragment-parity check
-    # as test_notify_warning_on_critical.yml.
-    - name: Confirm all copied notify fragments are unchanged in main.yml
+    - name: Validate current production notification extraction
       ansible.builtin.include_tasks: _eval_notify_case_parity.yml

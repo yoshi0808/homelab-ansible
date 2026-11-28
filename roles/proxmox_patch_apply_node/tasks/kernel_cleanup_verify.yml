@@ -1,0 +1,110 @@
+---
+# Called from cleanup's always: observe partial progress after failed purges too.
+- name: Retain the end of purge output for diagnosis
+  ansible.builtin.set_fact:
+    _apply_kernel_cleanup: >-
+      {{ _apply_kernel_cleanup | combine({'purge_output':
+        ((_kernel_cleanup_purge.stdout | default('')) + ('%c' | format(10)) +
+         (_kernel_cleanup_purge.stderr | default('')))[-3000:] | trim,
+        'async_job_id': _kernel_cleanup_job.ansible_job_id | default('')}) }}
+  # Generate LF directly; backslash escapes in this folded Jinja scalar can
+  # survive Ansible templating as literal characters.
+
+- block:
+    - name: Collect kernel state after cleanup
+      ansible.builtin.command:
+        argv:
+          - "{{ proxmox_patch_apply_kernel_cleanup_timeout_path }}"
+          - --kill-after=10s
+          - "{{ proxmox_patch_apply_kernel_cleanup_timeout }}s"
+          - "{{ proxmox_patch_apply_kernel_cleanup_collector_path }}"
+      register: _kernel_cleanup_post_raw
+      changed_when: false
+      ignore_unreachable: true
+      check_mode: false
+
+    - name: Require a reachable post-cleanup collection
+      ansible.builtin.assert:
+        that:
+          - not (_kernel_cleanup_post_raw.unreachable | default(false) | bool)
+
+    - name: Parse post-cleanup kernel state
+      ansible.builtin.set_fact:
+        _kernel_cleanup_post: "{{ _kernel_cleanup_post_raw.stdout | from_json }}"
+
+    - name: Require a complete post-cleanup package list
+      ansible.builtin.assert:
+        that:
+          - (_kernel_cleanup_post.packages.rc | int) == 0
+
+    - name: Evaluate actual package removals after cleanup
+      ansible.builtin.command:
+        argv: [/usr/bin/python3, "{{ proxmox_patch_apply_kernel_cleanup_evaluator_path }}"]
+        stdin: >-
+          {{ {'mode': 'post', 'targets': _apply_kernel_cleanup.targets,
+              'package_text': (_kernel_cleanup_post.packages.output | b64decode)} | to_json }}
+      register: _kernel_cleanup_post_eval_raw
+      changed_when: false
+      ignore_unreachable: true
+      check_mode: false
+
+    - name: Record observed removals before boot and audit verification
+      ansible.builtin.set_fact:
+        _kernel_cleanup_post_eval: "{{ _kernel_cleanup_post_eval_raw.stdout | from_json }}"
+        _apply_kernel_cleanup: >-
+          {{ _apply_kernel_cleanup | combine({
+            'removed': (_kernel_cleanup_post_eval_raw.stdout | from_json).removed,
+            'removal_observed': true}) }}
+
+    - name: Verify dpkg has no unfinished package state after cleanup
+      ansible.builtin.command:
+        argv: ["{{ proxmox_patch_apply_kernel_cleanup_timeout_path }}", --kill-after=10s,
+               "{{ proxmox_patch_apply_kernel_cleanup_timeout }}s", "{{ proxmox_patch_apply_kernel_cleanup_dpkg_path }}", --audit]
+      register: _kernel_cleanup_audit
+      changed_when: false
+      ignore_unreachable: true
+      check_mode: false
+
+    - name: Verify old kernel cleanup
+      ansible.builtin.assert:
+        that:
+          - not (_kernel_cleanup_audit.unreachable | default(false) | bool)
+          - (_kernel_cleanup_audit.rc | default(1) | int) == 0
+          - (_kernel_cleanup_audit.stdout | trim | length) == 0
+          - (_kernel_cleanup_audit.stderr | trim | length) == 0
+          - (_kernel_cleanup_post.boot_tool.rc | int) == 0
+          - _kernel_cleanup_post.boot_tool.output == _kernel_cleanup_collect.boot_tool.output
+          - _kernel_cleanup_post.running_kernel == _apply_kernel_cleanup.running_kernel
+          - (_apply_kernel_cleanup.keep_kernels | difference(_kernel_cleanup_post_eval.installed_kernels) | length) == 0
+          - _kernel_cleanup_post_eval.protected_packages == _apply_kernel_cleanup.protected_packages
+          - "'proxmox-ve' in _kernel_cleanup_post_eval.protected_packages"
+          - "'proxmox-default-kernel' in _kernel_cleanup_post_eval.protected_packages"
+          - (_apply_kernel_cleanup.targets | sort) == (_apply_kernel_cleanup.removed | sort)
+          - not (((_kernel_cleanup_purge.stdout | default('')) + (_kernel_cleanup_purge.stderr | default(''))) is search('(?i)hook.*(fail|error)'))
+
+    - name: Mark fully verified cleanup as removed
+      ansible.builtin.set_fact:
+        _apply_kernel_cleanup: "{{ _apply_kernel_cleanup | combine({'status': 'removed', 'reason': '削除後の検証が完了しました'}) }}"
+      when: _apply_kernel_cleanup.status == 'unevaluated'
+
+  rescue:
+    - name: Record post-purge verification failure
+      ansible.builtin.set_fact:
+        _apply_kernel_cleanup: >-
+          {{ _apply_kernel_cleanup | combine({
+            'status': 'broken',
+            'reason': '削除後の検証に失敗しました: ' + (ansible_failed_task.name | default('unknown task')),
+            'failed_task': ansible_failed_task.name | default('unknown task')}) }}
+      # Keep the original purge failure if subsequent observations also fail.
+      when: _apply_kernel_cleanup.status != 'broken'
+
+- name: Remove completed purge job result
+  ansible.builtin.async_status:
+    jid: "{{ _kernel_cleanup_job.ansible_job_id }}"
+    mode: cleanup
+  when:
+    - _kernel_cleanup_job.ansible_job_id is defined
+    - _kernel_cleanup_purge.finished | default(false) | bool
+  ignore_errors: true
+  ignore_unreachable: true
+  # Do not erase an unfinished job: its output is still needed for recovery.

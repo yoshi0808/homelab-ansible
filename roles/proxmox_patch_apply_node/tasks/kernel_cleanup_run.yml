@@ -1,0 +1,191 @@
+---
+# Included only after the mandatory gate succeeds.
+- block:
+    - name: Collect current kernel cleanup inputs
+      ansible.builtin.command:
+        argv:
+          - "{{ proxmox_patch_apply_kernel_cleanup_timeout_path }}"
+          - --kill-after=10s
+          - "{{ proxmox_patch_apply_kernel_cleanup_timeout }}s"
+          - "{{ proxmox_patch_apply_kernel_cleanup_collector_path }}"
+      register: _kernel_cleanup_collect_raw
+      changed_when: false
+      failed_when: false
+      ignore_unreachable: true
+      check_mode: false
+
+    - name: Parse current kernel cleanup collection
+      ansible.builtin.set_fact:
+        _kernel_cleanup_collect: "{{ _kernel_cleanup_collect_raw.stdout | from_json }}"
+      when:
+        - (_kernel_cleanup_collect_raw.rc | default(1)) == 0
+        - (_kernel_cleanup_collect_raw.stdout | default('') | trim | length) > 0
+
+    - name: Abort cleanup when collection is unavailable
+      ansible.builtin.set_fact:
+        _apply_kernel_cleanup: "{{ _apply_kernel_cleanup | combine({'status': 'aborted', 'reason': 'kernel一覧またはproxmox-boot-toolの収集に失敗したため中止しました'}, recursive=true) }}"
+      when: >-
+        _kernel_cleanup_collect is not defined or
+        (_kernel_cleanup_collect.packages.rc | default(1) | int) != 0 or
+        (_kernel_cleanup_collect.boot_tool.rc | default(1) | int) != 0
+
+    - name: Evaluate retained kernels and targets
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/python3
+          - "{{ proxmox_patch_apply_kernel_cleanup_evaluator_path }}"
+        stdin: >-
+          {{ {'mode': 'inventory',
+              'running_kernel': _kernel_cleanup_collect.running_kernel,
+              'package_text': (_kernel_cleanup_collect.packages.output | b64decode),
+              'boot_text': (_kernel_cleanup_collect.boot_tool.output | b64decode)} | to_json }}
+      register: _kernel_cleanup_inventory_raw
+      changed_when: false
+      failed_when: false
+      ignore_unreachable: true
+      check_mode: false
+      when: _apply_kernel_cleanup.status == 'unevaluated'
+
+    - name: Record evaluated cleanup inventory
+      ansible.builtin.set_fact:
+        _apply_kernel_cleanup: "{{ _apply_kernel_cleanup | combine((_kernel_cleanup_inventory_raw.stdout | from_json), recursive=true) }}"
+      when:
+        - _apply_kernel_cleanup.status == 'unevaluated'
+        - (_kernel_cleanup_inventory_raw.rc | default(1)) == 0
+        - (_kernel_cleanup_inventory_raw.stdout | default('') | trim | length) > 0
+
+    - name: Abort cleanup when inventory evaluation fails
+      ansible.builtin.set_fact:
+        _apply_kernel_cleanup: "{{ _apply_kernel_cleanup | combine({'status': 'aborted', 'reason': 'kernel評価処理に失敗しました: ' + (_kernel_cleanup_inventory_raw.stderr | default('empty result'))[-500:]}, recursive=true) }}"
+      when:
+        - _apply_kernel_cleanup.status == 'unevaluated'
+        - (_kernel_cleanup_inventory_raw.rc | default(1)) != 0 or (_kernel_cleanup_inventory_raw.stdout | default('') | trim | length) == 0
+
+    - name: Mark no cleanup targets as skipped
+      ansible.builtin.set_fact:
+        _apply_kernel_cleanup: "{{ _apply_kernel_cleanup | combine({'status': 'skipped', 'reason': '削除対象の古いkernelはありません'}, recursive=true) }}"
+      when:
+        - _apply_kernel_cleanup.status == 'unevaluated'
+        - _apply_kernel_cleanup.targets | length == 0
+
+    - name: Simulate exact dpkg purge
+      ansible.builtin.command:
+        argv: "{{ [proxmox_patch_apply_kernel_cleanup_timeout_path, '--kill-after=10s', proxmox_patch_apply_kernel_cleanup_timeout | string + 's', proxmox_patch_apply_kernel_cleanup_dpkg_path, '--simulate', '--purge'] + _apply_kernel_cleanup.targets }}"
+      register: _kernel_cleanup_dpkg_sim
+      changed_when: false
+      failed_when: false
+      ignore_unreachable: true
+      check_mode: false
+      when: _apply_kernel_cleanup.status == 'unevaluated'
+
+    - name: Simulate exact apt purge
+      ansible.builtin.command:
+        argv: "{{ [proxmox_patch_apply_kernel_cleanup_timeout_path, '--kill-after=10s', proxmox_patch_apply_kernel_cleanup_timeout | string + 's', proxmox_patch_apply_kernel_cleanup_apt_path, '-s', 'purge'] + _apply_kernel_cleanup.targets }}"
+      register: _kernel_cleanup_apt_sim
+      changed_when: false
+      failed_when: false
+      ignore_unreachable: true
+      check_mode: false
+      when: _apply_kernel_cleanup.status == 'unevaluated'
+
+    - name: Validate simulations before purge
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/python3
+          - "{{ proxmox_patch_apply_kernel_cleanup_evaluator_path }}"
+        stdin: >-
+          {{ {'mode': 'simulation', 'targets': _apply_kernel_cleanup.targets,
+              'dpkg_rc': _kernel_cleanup_dpkg_sim.rc | default(1),
+              'dpkg_output': _kernel_cleanup_dpkg_sim.stdout | default(''),
+              'apt_rc': _kernel_cleanup_apt_sim.rc | default(1),
+              'apt_output': _kernel_cleanup_apt_sim.stdout | default('')} | to_json }}
+      register: _kernel_cleanup_validation_raw
+      changed_when: false
+      failed_when: false
+      ignore_unreachable: true
+      check_mode: false
+      when: _apply_kernel_cleanup.status == 'unevaluated'
+
+    - name: Record cleanup simulation validation
+      ansible.builtin.set_fact:
+        _apply_kernel_cleanup: "{{ _apply_kernel_cleanup | combine({'validation': (_kernel_cleanup_validation_raw.stdout | from_json)}, recursive=true) }}"
+      when:
+        - _apply_kernel_cleanup.status == 'unevaluated'
+        - (_kernel_cleanup_validation_raw.rc | default(1)) == 0
+        - (_kernel_cleanup_validation_raw.stdout | default('') | trim | length) > 0
+
+    - name: Abort cleanup when simulations are not valid
+      ansible.builtin.set_fact:
+        _apply_kernel_cleanup: "{{ _apply_kernel_cleanup | combine({'status': 'aborted', 'reason': (_apply_kernel_cleanup.validation.reason | default('削除前simulationを検証できません'))}, recursive=true) }}"
+      when: >-
+        _apply_kernel_cleanup.status == 'unevaluated' and
+        not (_apply_kernel_cleanup.validation.valid | default(false) | bool)
+
+    - name: Record that old-kernel purge has started
+      ansible.builtin.set_fact:
+        _apply_kernel_cleanup: "{{ _apply_kernel_cleanup | combine({'purge_started': true}, recursive=true) }}"
+      when: _apply_kernel_cleanup.status == 'unevaluated'
+
+    # poll: 0 detaches dpkg from the SSH session. Each async_status query is
+    # short; a lost connection still becomes broken via an explicit failure
+    # because Ansible UNREACHABLE does not enter rescue by itself.
+    - name: Purge only validated old kernel packages
+      ansible.builtin.command:
+        argv: "{{ [proxmox_patch_apply_kernel_cleanup_timeout_path, '--kill-after=10s', proxmox_patch_apply_kernel_cleanup_purge_timeout | string + 's', proxmox_patch_apply_kernel_cleanup_dpkg_path, '--purge'] + _apply_kernel_cleanup.targets }}"
+      async: "{{ (proxmox_patch_apply_kernel_cleanup_purge_timeout | int) + 30 }}"
+      poll: 0
+      register: _kernel_cleanup_job
+      changed_when: true
+      ignore_unreachable: true
+      tags: [destructive]
+      when:
+        - _apply_kernel_cleanup.status == 'unevaluated'
+        - not ansible_check_mode
+
+    - name: Require a reachable detached purge job
+      ansible.builtin.assert:
+        that:
+          - not (_kernel_cleanup_job.unreachable | default(false) | bool)
+          - _kernel_cleanup_job.ansible_job_id is defined
+      when: _apply_kernel_cleanup.purge_started | bool
+
+    - name: Wait for detached old-kernel purge
+      ansible.builtin.async_status:
+        jid: "{{ _kernel_cleanup_job.ansible_job_id }}"
+      register: _kernel_cleanup_purge
+      until: >-
+        (_kernel_cleanup_purge.finished | default(false) | bool) or
+        (_kernel_cleanup_purge.unreachable | default(false) | bool)
+      retries: "{{ (((proxmox_patch_apply_kernel_cleanup_purge_timeout | int) + 30) / 5) | round(0, 'ceil') | int }}"
+      delay: 5
+      changed_when: false
+      failed_when: false
+      ignore_unreachable: true
+      when: _apply_kernel_cleanup.purge_started | bool
+
+    - name: Require successful completion of old-kernel purge
+      ansible.builtin.assert:
+        that:
+          - not (_kernel_cleanup_purge.unreachable | default(false) | bool)
+          - _kernel_cleanup_purge.finished | default(false) | bool
+          - (_kernel_cleanup_purge.rc | default(1) | int) == 0
+      when: _apply_kernel_cleanup.purge_started | bool
+
+  rescue:
+    - name: Record cleanup failure without suppressing final report or notification
+      ansible.builtin.set_fact:
+        _apply_kernel_cleanup: >-
+          {{ _apply_kernel_cleanup | combine({
+            'status': ('broken' if (_apply_kernel_cleanup.purge_started | bool) else 'aborted'),
+            'reason': (('kernel削除開始後に失敗しました: ' if (_apply_kernel_cleanup.purge_started | bool)
+                        else 'kernel削除着手前に失敗しました: ') + (ansible_failed_task.name | default('unknown task')) +
+                       ('。host側のpurgeが継続している可能性があります'
+                        if (_apply_kernel_cleanup.purge_started | bool) and
+                           (not (_kernel_cleanup_purge.finished | default(false) | bool) or
+                            (_kernel_cleanup_purge.unreachable | default(false) | bool)) else '')) | trim,
+            'failed_task': ansible_failed_task.name | default('unknown task')}) }}
+  always:
+    - name: Observe and verify kernel state even after a partial purge failure
+      ansible.builtin.include_tasks: kernel_cleanup_verify.yml
+      when: _apply_kernel_cleanup.purge_started | bool
+

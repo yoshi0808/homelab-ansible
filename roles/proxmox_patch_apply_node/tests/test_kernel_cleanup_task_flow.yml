@@ -1,0 +1,13 @@
+---
+# Local-only integration suite. Its generated driver includes production tasks;
+# all package-manager paths point to doubles in its temporary directory.
+- name: Exercise production kernel cleanup and final notifications
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Run permanent production-path regression cases
+      ansible.builtin.command:
+        argv: "{{ ['/usr/bin/python3', playbook_dir + '/test_kernel_cleanup_task_flow.py'] + (['--check-only'] if ansible_check_mode else []) }}"
+      changed_when: false
+      check_mode: false

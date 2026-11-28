@@ -14,6 +14,16 @@ proxmox_patch_apply_notification_cve_limit: 5
 proxmox_patch_apply_notification_body_limit: 3500
 # Cap all changelog collection for one apply; unavailable entries never block apply.
 proxmox_patch_apply_changelog_timeout: 60
+# Bound each kernel-cleanup collection, simulation, and purge invocation.
+proxmox_patch_apply_kernel_cleanup_timeout: 120
+# A first cleanup can run dozens of postrm/ESP hooks. Run detached from SSH;
+# allow the command 30 minutes and its async supervisor another 30 seconds.
+proxmox_patch_apply_kernel_cleanup_purge_timeout: 1800
+proxmox_patch_apply_kernel_cleanup_collector_path: /usr/local/sbin/proxmox-kernel-cleanup-collect.sh
+proxmox_patch_apply_kernel_cleanup_evaluator_path: /usr/local/sbin/proxmox-kernel-cleanup-evaluate.py
+proxmox_patch_apply_kernel_cleanup_dpkg_path: /usr/bin/dpkg
+proxmox_patch_apply_kernel_cleanup_apt_path: /usr/bin/apt-get
+proxmox_patch_apply_kernel_cleanup_timeout_path: /usr/bin/timeout
 
 # Apply mode: controls behavior when the re-dry-run classifies the result as
 # MAINTENANCE_REQUIRED-with-removes or MAJOR_UPGRADE_DETECTED (requirement.md

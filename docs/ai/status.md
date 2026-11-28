@@ -17,6 +17,8 @@
 
 **【Yoshinobuの作業】quoryの `quory-post-upgrade-check.sh` を置き直す**。2026-11-27にSlack通知の本文をコピーできる形へ変えた(`docs/ai/memory/decisions/slack-notifications-must-stand-alone.md`)。このscriptはAnsible管理外で、quoryの `/usr/local/sbin/` へ手で置いたもののため、repoの `scripts/quory_post_upgrade_check/quory-post-upgrade-check.sh` をコピーし直すまで古い形で送られる(手順は同scriptの冒頭)。動くのはquoryをfull-upgradeして再起動した後だけなので、次にその作業をするときで間に合う。
 
+**古いkernelの自動削除(`docs/ai/reviews/proxmox_old_kernel_cleanup/`): 本番初回の観測待ち**。2026-11-28にcommit。kernelの更新で再起動する最初の週次パッチで、Coordinatorが次を確かめる: 各nodeの残ったkernelが `proxmox-boot-tool kernel list` と一致する(`pkg-list` / `kernel-status`)、完了通知の削除結果、purgeの所要時間とhook出力、通知本文の長さ。確かめたら案件をAuditorで閉じる。
+
 ## Next(着手候補) — 工程・体制
 
 | 項目 | 内容 | 根拠 |

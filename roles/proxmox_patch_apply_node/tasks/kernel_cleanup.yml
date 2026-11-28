@@ -1,0 +1,44 @@
+---
+# This file is included by main.yml and the localhost fixture.  Collection is
+# read-only; the only mutation is the explicitly tagged dpkg --purge task.
+- name: Initialize kernel cleanup result
+  ansible.builtin.set_fact:
+    _apply_kernel_cleanup:
+      status: "unevaluated"
+      reason: "削除結果は未評価です"
+      running_kernel: ""
+      latest_kernel: ""
+      keep_kernels: []
+      installed_kernels: []
+      targets: []
+      removed: []
+      removal_observed: false
+      validation: {}
+      purge_started: false
+      purge_output: ""
+
+- name: Skip cleanup when its mandatory gate is not met
+  ansible.builtin.set_fact:
+    _apply_kernel_cleanup: "{{ _apply_kernel_cleanup | combine({'status': 'skipped', 'reason': _kernel_cleanup_skip_reason | trim}, recursive=true) }}"
+  vars:
+    _kernel_cleanup_skip_reason: >-
+      {% if ansible_check_mode %}--check のため削除しません
+      {% elif _apply_failed | bool %}適用が失敗したため削除しません
+      {% elif not (_apply_reboot_done | bool) %}今回再起動していないため削除しません
+      {% elif _post_hc_status != 'OK' %}post-healthcheck が OK でないため削除しません
+      {% else %}削除条件を満たしません{% endif %}
+  when: >-
+    ansible_check_mode or (_apply_failed | bool) or
+    not (_apply_reboot_done | bool) or _post_hc_status != 'OK'
+
+- name: Run gated kernel cleanup
+  ansible.builtin.include_tasks: kernel_cleanup_run.yml
+  when: _apply_kernel_cleanup.status == 'unevaluated'
+
+- name: Mark apply failed when cleanup verification is broken
+  ansible.builtin.set_fact:
+    _apply_failed: true
+    _apply_abort_type: kernel_cleanup_broken
+    _apply_error_msg: "{{ _apply_kernel_cleanup.reason }}"
+    _apply_failed_task: "{{ _apply_kernel_cleanup.failed_task }}"
+  when: _apply_kernel_cleanup.status == 'broken'

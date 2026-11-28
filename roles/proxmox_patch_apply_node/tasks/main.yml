@@ -75,6 +75,16 @@
     _mirror_probe_results: []
     _mirror_selected_address: ""
     _mirror_selected_rtt_ms: ""
+    _apply_kernel_cleanup:
+      status: "unevaluated"
+      reason: "削除結果は未評価です"
+      running_kernel: ""
+      latest_kernel: ""
+      keep_kernels: []
+      installed_kernels: []
+      targets: []
+      removed: []
+      validation: {}
 
 - name: Set patch report filename
   ansible.builtin.set_fact:
@@ -207,6 +217,24 @@
       ansible.builtin.copy:
         src: proxmox-patch-apply-collect.sh
         dest: /usr/local/sbin/proxmox-patch-apply-collect.sh
+        mode: "0750"
+        owner: root
+        group: root
+      check_mode: false
+
+    - name: Copy old-kernel cleanup collector
+      ansible.builtin.copy:
+        src: proxmox-kernel-cleanup-collect.sh
+        dest: /usr/local/sbin/proxmox-kernel-cleanup-collect.sh
+        mode: "0750"
+        owner: root
+        group: root
+      check_mode: false
+
+    - name: Copy old-kernel cleanup evaluator
+      ansible.builtin.copy:
+        src: proxmox-kernel-cleanup-evaluate.py
+        dest: /usr/local/sbin/proxmox-kernel-cleanup-evaluate.py
         mode: "0750"
         owner: root
         group: root
@@ -1031,6 +1059,9 @@
         _post_hc_status: "{{ _post_hc_retry_status }}"
       when: _post_hc_status in ['CRITICAL', 'UNKNOWN'] and (_apply_reboot_done | bool)
 
+    - name: Clean old kernels after a successful reboot and healthcheck
+      ansible.builtin.include_tasks: kernel_cleanup.yml
+
     - name: Build and save final report
       ansible.builtin.copy:
         content: "{{ {
@@ -1059,7 +1090,8 @@
             'reboot_done': _apply_reboot_done,
             'reboot_trigger': _apply_collect.reboot_trigger | default(''),
             'running_kernel': _apply_collect.running_kernel | default(''),
-            'post_healthcheck_status': _post_hc_status
+            'post_healthcheck_status': _post_hc_status,
+            'kernel_cleanup': _apply_kernel_cleanup
           } | to_nice_json }}"
         dest: "{{ proxmox_patch_apply_report_dir }}/{{ _apply_report_filename }}"
       delegate_to: localhost
@@ -1085,6 +1117,10 @@
           [FAILED] {{ inventory_hostname }}: apt-get dist-upgrade 失敗
           {%- elif _apply_abort_type == 'reboot_timeout' -%}
           [FAILED] {{ inventory_hostname }}: reboot 後の応答タイムアウト
+          {%- elif _apply_kernel_cleanup.status == 'broken' -%}
+          [FAILED] {{ inventory_hostname }}: kernel削除後の検証または削除処理に失敗
+          {%- elif _apply_kernel_cleanup.status == 'aborted' -%}
+          [WARNING] {{ inventory_hostname }}: パッチ適用完了 - kernel cleanup 中止
           {%- elif _apply_failed | bool -%}
           [FAILED] {{ inventory_hostname }}: パッチ適用失敗
           {%- elif _post_hc_status != 'OK' -%}
@@ -1187,12 +1223,24 @@
           =========================================
           post-healthcheck: {{ _post_hc_status }}
 
+          =========================================
+          Phase 6: old kernel cleanup
+          =========================================
+          kernel cleanup: {{ _apply_kernel_cleanup.status }}
+          {% if _apply_kernel_cleanup.status == 'removed' %}
+          削除件数: {{ _apply_kernel_cleanup.removed | length }}
+          削除範囲: {{ (_apply_kernel_cleanup.target_kernels | first | default('')) }} ～ {{ (_apply_kernel_cleanup.target_kernels | last | default('')) }}
+          残したkernel: {{ _apply_kernel_cleanup.keep_kernels | join(', ') }}
+          {% else %}
+          理由: {{ _apply_kernel_cleanup.reason }}
+          {% endif %}
+
           report: {{ _apply_report_filename if (_apply_report_saved | bool) else 'report保存失敗' }}
-        _notify_channel: "{{ 'alerts' if (_apply_abort_type != 'none' or _apply_failed | bool or _post_hc_status != 'OK') else 'patches' }}"
+        _notify_channel: "{{ 'alerts' if (_apply_abort_type != 'none' or _apply_failed | bool or _post_hc_status != 'OK' or _apply_kernel_cleanup.status == 'aborted') else 'patches' }}"
         _notify_status: >-
           {%- if _apply_abort_type != 'none' or _apply_failed | bool -%}
           error
-          {%- elif _post_hc_status != 'OK' -%}
+          {%- elif _apply_kernel_cleanup.status == 'aborted' or _post_hc_status != 'OK' -%}
           warning
           {%- else -%}
           ok
